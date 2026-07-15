@@ -38,6 +38,19 @@ def createComment(string key, string author, string content, string parentId) ob
     return {ok: true, comment: comment}
 )
 
+def notifyMentions(string content, string actor, string skip, object extra) (
+    array tokens = regex.findAll("(^|[^A-Za-z0-9_])@[A-Za-z0-9_]+", content)
+    array notified = [normalizeUsername(skip)]
+    for i tokens.len (
+        array parts = tokens[i].toStr().split("@")
+        string name = normalizeUsername(parts[2].toStr())
+        if !notified.contains(name) and isSafePathPart(name) and fs.exists(usersDir ++ name ++ ".json") (
+            addNotification(name, actor, "mention", extra)
+            notified.append(name)
+        )
+    )
+)
+
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
     array comments = loadComments(key)
     object target = {}
@@ -114,6 +127,7 @@ def handleCreateProjectComment(*serve.Context c) (
         return
     )
     addNotification(project.owner.toStr(), c.getString("username"), "comment", {projectId: project.id, projectTitle: project.title})
+    notifyMentions(created.comment.content.toStr(), c.getString("username"), project.owner.toStr(), {projectId: project.id, projectTitle: project.title})
     c.json(201, created)
 )
 
@@ -175,6 +189,7 @@ def handleCreateProfileComment(*serve.Context c) (
         return
     )
     addNotification(name, c.getString("username"), "profile_comment", {})
+    notifyMentions(created.comment.content.toStr(), c.getString("username"), name, {profile: name})
     c.json(201, created)
 )
 

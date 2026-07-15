@@ -50,6 +50,26 @@ with credentials, so any frontend origin is accepted.
 
 R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
 
+## Link previews (OpenGraph / oEmbed)
+
+The SPA is static, so crawlers cannot see per-page metadata. This server renders
+crawler-facing HTML with og:/twitter: tags (plus a redirect to the real page)
+at the same paths as the site: `/`, `/explore`, `/news`, `/leaderboard`,
+`/project/:id`, `/users/:name`, `/users/:name/followers`. Shared projects get a
+playable embed (og:video + twitter:player + oEmbed pointing at
+`EDITOR_ORIGIN/embed.html`); unshared or missing projects fall back to generic
+site metadata so nothing private leaks.
+
+`GET /api/oembed?url=<page url>&format=json` serves the oEmbed payload; the
+meta pages advertise it via a discovery `<link>`.
+
+For previews to work on the frontend domain, the proxy in front of it must
+route crawler user agents (Discordbot, Twitterbot, facebookexternalhit,
+Slackbot-LinkExpanding, WhatsApp, TelegramBot, LinkedInBot, Googlebot, bingbot)
+for those paths to this server, keeping the path unchanged. Humans who hit the
+meta pages directly are redirected to the canonical page, so misrouting is
+harmless as long as bot detection only ever sends bots here.
+
 ## Upload pipeline
 
 The editor POSTs the whole sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server unzips it, validates `project.json` (max 20MB) and every asset (max 10MB each), normalizes stale asset filenames to the md5 of their content, then uploads to R2:

@@ -107,6 +107,7 @@ import "./reports.osl"
 import "./notifications.osl"
 import "./news.osl"
 import "./settings.osl"
+import "./meta.osl"
 
 ensureDirectories()
 refreshIndexUrls()
@@ -131,6 +132,14 @@ if r2Local (
     app.static("/blobs", "./data/blobs")
 )
 
+app.GET("/", handleSiteMetaPage)
+app.GET("/explore", handleSiteMetaPage)
+app.GET("/news", handleSiteMetaPage)
+app.GET("/leaderboard", handleSiteMetaPage)
+app.GET("/project/:id", handleProjectMetaPage)
+app.GET("/users/:name", handleUserMetaPage)
+app.GET("/users/:name/followers", handleUserMetaPage)
+
 app.use(authMiddleware)
 
 *serve.Router uploads = app.group("/api")
@@ -142,6 +151,7 @@ uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
 api.use(serve.maxBodySize(262144))
 
 api.GET("/health", handleHealth)
+api.GET("/oembed", handleOembed)
 api.POST("/auth", handleRoturAuth)
 api.GET("/me", handleGetMe)
 api.POST("/logout", handleLogout)
