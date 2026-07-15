@@ -4,9 +4,13 @@ OSL backend for MistWarp community, the MistWarp community platform. Rotur valid
 
 ## Run
 
+Copy `.env.example` to `.env`, fill in the values, then run:
+
 ```
 osl run main.osl
 ```
+
+The server loads `.env` automatically. Real environment variables override `.env`.
 
 ## Environment
 

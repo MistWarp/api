@@ -11,6 +11,42 @@ import "osl/regex"
 
 import "go/time"
 
+def dotenvValue(string name) string (
+    if !fs.exists(".env") (
+        return ""
+    )
+    array lines = fs.readFile(".env").split("\n")
+    for i lines.len (
+        string line = lines[i].toStr().strip()
+        if line != "" and !line.startsWith("#") and line.contains("=") (
+            array parts = line.split("=")
+            string key = parts[1].toStr().strip()
+            if key == name (
+                string value = parts[2].toStr().strip()
+                for p parts.len (
+                    if p > 2 (
+                        value = value ++ "=" ++ parts[p].toStr()
+                    )
+                )
+                return value.replace("\"", "").replace("'", "")
+            )
+        )
+    )
+    return ""
+)
+
+def configValue(string name, string defaultValue) string (
+    string value = env.getDefault(name, "")
+    if value != "" (
+        return value
+    )
+    value = dotenvValue(name)
+    if value != "" (
+        return value
+    )
+    return defaultValue
+)
+
 string projectsDir = "data/projects/"
 string indexFile = "data/projects-index.json"
 string assetsIndexFile = "data/assets-index.json"
@@ -33,18 +69,18 @@ number maxThumbBytes = 1048576
 number maxAssetCount = 2000
 number uploadDebounceMs = 86400000
 
-string appURL = env.getDefault("APP_URL", "https://mwapi.mistium.com")
-string port = env.getDefault("PORT", "5627")
-string roturAppKey = env.getDefault("ROTUR_APP_KEY", "mistwarp")
-string r2Endpoint = env.getDefault("R2_ENDPOINT", "")
-string r2Bucket = env.getDefault("R2_BUCKET", "mistwarp")
-string r2AccessKeyId = env.getDefault("R2_ACCESS_KEY_ID", "")
-string r2SecretAccessKey = env.getDefault("R2_SECRET_ACCESS_KEY", "")
-string r2PublicBase = env.getDefault("R2_PUBLIC_BASE", "")
-string giteaURL = env.getDefault("GITEA_URL", "https://git.rotur.dev")
-string giteaAdminToken = env.getDefault("GITEA_ADMIN_TOKEN", "")
-string editorOrigin = env.getDefault("EDITOR_ORIGIN", "https://warp.mistium.com")
-array adminUsers = env.getDefault("ADMIN_USERS", "mist").toLower().split(",")
+string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
+string port = configValue("PORT", "5627")
+string roturAppKey = configValue("ROTUR_APP_KEY", "mistwarp")
+string r2Endpoint = configValue("R2_ENDPOINT", "")
+string r2Bucket = configValue("R2_BUCKET", "mistwarp")
+string r2AccessKeyId = configValue("R2_ACCESS_KEY_ID", "")
+string r2SecretAccessKey = configValue("R2_SECRET_ACCESS_KEY", "")
+string r2PublicBase = configValue("R2_PUBLIC_BASE", "")
+string giteaURL = configValue("GITEA_URL", "https://git.rotur.dev")
+string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
+string editorOrigin = configValue("EDITOR_ORIGIN", "https://warp.mistium.com")
+array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
 
 boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
 string localBlobsDir = "data/blobs/"
@@ -74,8 +110,8 @@ import "./settings.osl"
 
 ensureDirectories()
 refreshIndexUrls()
+fs.mkdirAll(localBlobsDir)
 if r2Local (
-    fs.mkdirAll(localBlobsDir)
     log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )
 if !r2Local and appURL == "http://localhost:5627" (
@@ -89,6 +125,8 @@ cleanupExpiredSessions()
 app.use(corsMiddleware)
 
 app.static("/thumbnails", "./data/thumbnails")
+app.GET("/blobs/assets/:name", handleGetAssetBlob)
+app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
 if r2Local (
     app.static("/blobs", "./data/blobs")
 )
