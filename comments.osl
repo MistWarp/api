@@ -1,0 +1,185 @@
+def createComment(string key, string author, string content, string parentId) object (
+    string trimmed = content.strip()
+    if trimmed == "" (
+        return {ok: false, error: "comment is empty"}
+    )
+    if trimmed.len > 500 (
+        return {ok: false, error: "comment too long"}
+    )
+
+    array comments = loadComments(key)
+
+    if parentId != "" (
+        boolean parentOk = false
+        for i comments.len (
+            object existing = comments[i]
+            if existing.id.toStr() == parentId and existing.parent.toStr() == "" (
+                parentOk = true
+            )
+        )
+        if !parentOk (
+            return {ok: false, error: "invalid parent comment"}
+        )
+    )
+
+    object comment = {
+        id: generateCommentId(),
+        author: author,
+        content: trimmed,
+        created: timestamp,
+        parent: parentId
+    }
+    comments.append(comment)
+    saveComments(key, comments)
+    return {ok: true, comment: comment}
+)
+
+def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
+    array comments = loadComments(key)
+    object target = {}
+    boolean found = false
+    for i comments.len (
+        object existing = comments[i]
+        if existing.id.toStr() == cid (
+            target = existing
+            found = true
+        )
+    )
+    if !found (
+        return {ok: false, error: "comment not found", status: 404}
+    )
+
+    string requesterKey = normalizeUsername(requester)
+    boolean allowed = isAdmin
+    allowed = allowed or requesterKey == normalizeUsername(target.author.toStr())
+    allowed = allowed or requesterKey == normalizeUsername(moderator)
+    if !allowed (
+        return {ok: false, error: "not allowed", status: 403}
+    )
+
+    array next = []
+    for i comments.len (
+        object existing = comments[i]
+        if existing.id.toStr() != cid and existing.parent.toStr() != cid (
+            next.append(existing)
+        )
+    )
+    saveComments(key, next)
+    return {ok: true}
+)
+
+def handleGetProjectComments(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    c.json(200, {ok: true, comments: loadComments("project-" ++ project.id.toStr())})
+)
+
+def handleCreateProjectComment(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    if project.contains("commentsOff") and project.commentsOff == true (
+        c.json(403, {ok: false, error: "comments are disabled on this project"})
+        return
+    )
+
+    object body = c.bodyJSON()
+    string parentId = ""
+    if body.contains("parent") and body.parent != null (
+        parentId = body.parent.toStr()
+    )
+
+    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), body.content.toStr(), parentId)
+    if !created.ok (
+        c.badRequest(created.error.toStr())
+        return
+    )
+    addNotification(project.owner.toStr(), c.getString("username"), "comment", {projectId: project.id, projectTitle: project.title})
+    c.json(201, created)
+)
+
+def handleDeleteProjectComment(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+
+    boolean requesterIsAdmin = c.getBool("isAdmin") == true
+    object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), requesterIsAdmin)
+    if !deleted.ok (
+        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def profileCommentKey(string name) string (
+    return "profile-" ++ normalizeUsername(name)
+)
+
+def profileCommentsOff(string name) boolean (
+    object profile = loadProfile(name)
+    if profile.contains("commentsOff") and profile.commentsOff == true (
+        return true
+    )
+    return false
+)
+
+def handleGetProfileComments(*serve.Context c) (
+    string name = c.param("name")
+    c.json(200, {ok: true, comments: loadComments(profileCommentKey(name)), commentsOff: profileCommentsOff(name)})
+)
+
+def handleCreateProfileComment(*serve.Context c) (
+    string name = c.param("name")
+    string nameKey = normalizeUsername(name)
+    if !isSafePathPart(nameKey) or !fs.exists(usersDir ++ nameKey ++ ".json") (
+        c.notFound("this user is not on MistWarp")
+        return
+    )
+    if profileCommentsOff(name) (
+        c.json(403, {ok: false, error: "comments are disabled on this profile"})
+        return
+    )
+
+    object body = c.bodyJSON()
+    string parentId = ""
+    if body.contains("parent") and body.parent != null (
+        parentId = body.parent.toStr()
+    )
+
+    object created = createComment(profileCommentKey(name), c.getString("username"), body.content.toStr(), parentId)
+    if !created.ok (
+        c.badRequest(created.error.toStr())
+        return
+    )
+    addNotification(name, c.getString("username"), "profile_comment", {})
+    c.json(201, created)
+)
+
+def handleDeleteProfileComment(*serve.Context c) (
+    boolean requesterIsAdmin = c.getBool("isAdmin") == true
+    object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), c.getString("username"), c.param("name"), requesterIsAdmin)
+    if !deleted.ok (
+        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+        return
+    )
+    c.json(200, {ok: true})
+)

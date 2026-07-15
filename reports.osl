@@ -1,0 +1,66 @@
+def loadReports() array (
+    auto result = readFile(reportsFile)
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.reports.assert(array)
+)
+
+def saveReports(array reports) boolean (
+    return writeFile(reportsFile, {reports: reports})
+)
+
+def handleCreateReport(*serve.Context c) (
+    object body = c.bodyJSON()
+    string reportType = body.type.toStr()
+    string target = body.target.toStr()
+    string reason = body.reason.toStr().strip()
+
+    if reportType != "project" and reportType != "user" and reportType != "comment" (
+        c.badRequest("invalid report type")
+        return
+    )
+    if target == "" or reason == "" or reason.len > 1000 (
+        c.badRequest("invalid report")
+        return
+    )
+
+    object report = {
+        id: "r" ++ randomString(12),
+        reporter: c.getString("username"),
+        type: reportType,
+        target: target,
+        reason: reason,
+        created: timestamp,
+        resolved: false
+    }
+    array reports = loadReports()
+    reports.append(report)
+    saveReports(reports)
+    c.json(201, {ok: true})
+)
+
+def handleGetReports(*serve.Context c) (
+    c.json(200, {ok: true, reports: loadReports()})
+)
+
+def handleResolveReport(*serve.Context c) (
+    object body = c.bodyJSON()
+    string id = body.id.toStr()
+    array reports = loadReports()
+    boolean found = false
+    for i reports.len (
+        object report = reports[i]
+        if report.id.toStr() == id (
+            report.resolved = true
+            found = true
+        )
+    )
+    if !found (
+        c.notFound("report not found")
+        return
+    )
+    saveReports(reports)
+    c.json(200, {ok: true})
+)

@@ -1,0 +1,201 @@
+def ensureDirectories() boolean (
+    boolean result = fs.mkdirAll(projectsDir)
+    result = result and fs.mkdirAll(usersDir)
+    result = result and fs.mkdirAll(sessionsDir)
+    result = result and fs.mkdirAll(commentsDir)
+    result = result and fs.mkdirAll(reportsDir)
+    result = result and fs.mkdirAll(notificationsDir)
+    result = result and fs.mkdirAll(activityDir)
+    result = result and fs.mkdirAll(userSettingsDir)
+    result = result and fs.mkdirAll(tmpDir)
+    return result
+)
+
+def loadAssetsIndex() object (
+    auto result = readFile(assetsIndexFile)
+    if !result.ok (
+        return {assets: {}}
+    )
+    return result.data.assert(object)
+)
+
+def saveAssetsIndex(object index) boolean (
+    return writeFile(assetsIndexFile, index)
+)
+
+def readFile(string path) object (
+    if !fs.exists(path) (
+        return {ok: false, error: "file not found"}
+    )
+    string content = fs.readFile(path)
+    auto parsed = json.parse(content, {type: "object"})
+    if parsed.isErr() (
+        return {ok: false, error: "invalid json"}
+    )
+    return {ok: true, data: parsed.unwrap()}
+)
+
+def writeFile(string path, object data) boolean (
+    return fs.writeFile(path, json.stringify(data))
+)
+
+def loadIndex() object (
+    auto result = readFile(indexFile)
+    if !result.ok (
+        return {projects: {}}
+    )
+    return result.data.assert(object)
+)
+
+def saveIndex(object index) boolean (
+    return writeFile(indexFile, index)
+)
+
+def indexEntryFromProject(object project) object (
+    array loves = project.loves.assert(array)
+    array favorites = project.favorites.assert(array)
+    return {
+        id: project.id,
+        owner: project.owner,
+        title: project.title,
+        thumbUrl: publicUrl(project.thumbKey.toStr()),
+        views: project.views,
+        loveCount: loves.len,
+        favoriteCount: favorites.len,
+        remixParent: project.remixParent,
+        shared: project.shared,
+        created: project.created,
+        edited: project.edited,
+        sharedAt: project.sharedAt
+    }
+)
+
+def upsertIndexEntry(object project) boolean (
+    object index = loadIndex()
+    object projects = index.projects
+    projects[project.id.toStr()] = indexEntryFromProject(project)
+    return saveIndex(index)
+)
+
+def removeFromIndex(string id) boolean (
+    object index = loadIndex()
+    object projects = index.projects
+    if projects.contains(id) (
+        projects.delete(id)
+        return saveIndex(index)
+    )
+    return true
+)
+
+def loadProject(string id) object (
+    if !isSafePathPart(id) (
+        return {ok: false, error: "invalid project id"}
+    )
+    auto result = readFile(projectsDir ++ id ++ ".json")
+    if !result.ok (
+        return {ok: false, error: "project not found"}
+    )
+    return {ok: true, project: result.data.assert(object)}
+)
+
+def saveProject(object project) boolean (
+    string id = project.id.toStr()
+    if !isSafePathPart(id) (
+        return false
+    )
+    return writeFile(projectsDir ++ id ++ ".json", project)
+)
+
+def deleteProjectFile(string id) boolean (
+    if !isSafePathPart(id) (
+        return false
+    )
+    return fs.remove(projectsDir ++ id ++ ".json")
+)
+
+def defaultProfile(string username) object (
+    return {
+        username: username,
+        bio: "",
+        featuredProject: "",
+        followers: [],
+        following: [],
+        favorites: [],
+        loves: [],
+        created: timestamp
+    }
+)
+
+def loadProfile(string username) object (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return defaultProfile(username)
+    )
+    auto result = readFile(usersDir ++ key ++ ".json")
+    if !result.ok (
+        return defaultProfile(username)
+    )
+    return result.data.assert(object)
+)
+
+def saveProfile(object profile) boolean (
+    string key = normalizeUsername(profile.username.toStr())
+    if !isSafePathPart(key) (
+        return false
+    )
+    return writeFile(usersDir ++ key ++ ".json", profile)
+)
+
+def loadActivity(string username) array (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return []
+    )
+    auto result = readFile(activityDir ++ key ++ ".json")
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.items.assert(array)
+)
+
+def addActivity(string username, string activityType, object extra) (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return
+    )
+    object item = {type: activityType, actor: key, created: timestamp}
+    array extraKeys = extra.getKeys().toArray()
+    for i extraKeys.len (
+        string k = extraKeys[i].toStr()
+        item[k] = extra[k]
+    )
+    array items = [item]
+    array existing = loadActivity(key)
+    for i existing.len (
+        if items.len < 50 (
+            items.append(existing[i])
+        )
+    )
+    writeFile(activityDir ++ key ++ ".json", {items: items})
+)
+
+def loadComments(string key) array (
+    if !isSafePathPart(key) (
+        return []
+    )
+    string path = commentsDir ++ key ++ ".json"
+    auto result = readFile(path)
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.comments.assert(array)
+)
+
+def saveComments(string key, array comments) boolean (
+    if !isSafePathPart(key) (
+        return false
+    )
+    return writeFile(commentsDir ++ key ++ ".json", {comments: comments})
+)

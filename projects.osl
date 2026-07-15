@@ -1,0 +1,721 @@
+def removeString(array items, string value) array (
+    array next = []
+    for i items.len (
+        if items[i].toStr() != value (
+            next.append(items[i])
+        )
+    )
+    return next
+)
+
+def canEditProject(object project, *serve.Context c) boolean (
+    if !c.getBool("authenticated") (
+        return false
+    )
+    if c.getBool("isAdmin") (
+        return true
+    )
+    return normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+)
+
+def canViewProject(object project, *serve.Context c) boolean (
+    if project.shared == true (
+        return true
+    )
+    return canEditProject(project, c)
+)
+
+def projectResponse(object project, *serve.Context c) object (
+    array loves = project.loves.assert(array)
+    array favorites = project.favorites.assert(array)
+    string viewer = normalizeUsername(c.getString("username"))
+    string notes = ""
+    if project.contains("notes") and project.notes != null (
+        notes = project.notes.toStr()
+    )
+    array credits = []
+    if project.contains("credits") and project.credits != null (
+        credits = project.credits.assert(array)
+    )
+    boolean commentsOff = false
+    if project.contains("commentsOff") and project.commentsOff == true (
+        commentsOff = true
+    )
+    return {
+        id: project.id,
+        owner: project.owner,
+        title: project.title,
+        description: project.description,
+        instructions: project.instructions,
+        notes: notes,
+        credits: credits,
+        repo: project.repo,
+        projectJsonUrl: publicUrl(project.jsonKey.toStr()),
+        assetsBase: assetsBaseUrl(),
+        thumbUrl: publicUrl(project.thumbKey.toStr()),
+        created: project.created,
+        edited: project.edited,
+        sharedAt: project.sharedAt,
+        shared: project.shared,
+        lastUploadAt: project.lastUploadAt,
+        remixParent: project.remixParent,
+        scratchOrigin: project.scratchOrigin,
+        views: project.views,
+        loveCount: loves.len,
+        favoriteCount: favorites.len,
+        loved: loves.contains(viewer),
+        favorited: favorites.contains(viewer),
+        commentsOff: commentsOff,
+        isOwner: canEditProject(project, c)
+    }
+)
+
+def handleCreateProject(*serve.Context c) (
+    object body = c.bodyJSON()
+    string username = c.getString("username")
+
+    string title = body.title.toStr().strip()
+    if title == "" (
+        c.badRequest("title is required")
+        return
+    )
+    if title.len > 100 (
+        c.badRequest("title too long")
+        return
+    )
+
+    string remixParent = ""
+    if body.contains("remixParent") and body.remixParent != null (
+        remixParent = body.remixParent.toStr()
+        auto parentResult = loadProject(remixParent)
+        if !parentResult.ok (
+            c.badRequest("remix parent not found")
+            return
+        )
+    )
+
+    string scratchOrigin = ""
+    if body.contains("scratchOrigin") and body.scratchOrigin != null (
+        scratchOrigin = body.scratchOrigin.toStr()
+    )
+
+    string id = generateId()
+    object project = {
+        id: id,
+        owner: username,
+        title: title,
+        description: "",
+        instructions: "",
+        repo: null,
+        jsonKey: projectJsonKey(id),
+        thumbKey: projectThumbKey(id),
+        created: timestamp,
+        edited: timestamp,
+        sharedAt: 0,
+        shared: false,
+        lastUploadAt: 0,
+        remixParent: remixParent,
+        scratchOrigin: scratchOrigin,
+        views: 0,
+        loves: [],
+        favorites: [],
+        assets: []
+    }
+
+    if !saveProject(project) (
+        c.internalError("failed to save project")
+        return
+    )
+    upsertIndexEntry(project)
+
+    c.json(201, {ok: true, id: id})
+)
+
+def uploadProjectFiles(object project, string extractDir) object (
+    array names = fs.readDir(extractDir).toArray()
+    string jsonPath = extractDir ++ "/project.json"
+    if !fs.exists(jsonPath) (
+        return {ok: false, error: "sb3 has no project.json", status: 400}
+    )
+
+    object assetsIndex = loadAssetsIndex()
+    object knownAssets = assetsIndex.assets
+    array projectAssets = []
+    array pendingUploads = []
+    number assetCount = 0
+
+    for i names.len (
+        string name = names[i].toStr()
+        if name != "project.json" (
+            if isValidMd5Ext(name) (
+                assetCount = assetCount + 1
+                if assetCount > maxAssetCount (
+                    return {ok: false, error: "too many assets", status: 400}
+                )
+                string content = fs.readFile(extractDir ++ "/" ++ name)
+                if content.len > maxAssetBytes (
+                    return {ok: false, error: "asset too large: " ++ name, status: 400}
+                )
+                if content.hashMD5() != md5PartOf(name) (
+                    return {ok: false, error: "asset hash mismatch: " ++ name, status: 400}
+                )
+                projectAssets.append(name)
+                if !knownAssets.contains(name) (
+                    pendingUploads.append(name)
+                )
+            )
+        )
+    )
+
+    string projectJson = fs.readFile(jsonPath)
+    if projectJson.len > maxProjectJsonBytes (
+        return {ok: false, error: "project.json too large", status: 400}
+    )
+
+    number uploaded = 0
+    for i pendingUploads.len (
+        string name = pendingUploads[i].toStr()
+        string content = fs.readFile(extractDir ++ "/" ++ name)
+        if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
+            return {ok: false, error: "asset upload failed", status: 502}
+        )
+        knownAssets[name] = content.len
+        uploaded = uploaded + 1
+    )
+    if uploaded > 0 (
+        saveAssetsIndex(assetsIndex)
+    )
+
+    if !r2Put(project.jsonKey.toStr(), projectJson, "application/json") (
+        return {ok: false, error: "project upload failed", status: 502}
+    )
+
+    return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded}
+)
+
+def handleUploadProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    number lastUploadAt = project.lastUploadAt.toNum()
+    if lastUploadAt > 0 and timestamp - lastUploadAt < uploadDebounceMs (
+        c.json(429, {
+            ok: false,
+            error: "upload debounced",
+            code: "debounced",
+            retryAfterMs: uploadDebounceMs - (timestamp - lastUploadAt)
+        })
+        return
+    )
+
+    auto fileResult = c.formFile("project")
+    if fileResult.isErr() (
+        c.badRequest("missing project file")
+        return
+    )
+    object file = fileResult.unwrap().assert(object)
+
+    string id = project.id.toStr()
+    string zipPath = tmpDir ++ id ++ ".sb3"
+    string extractDir = tmpDir ++ id
+    fs.writeFileBytes(zipPath, file.data)
+
+    if !zip.decompress(zipPath, extractDir) (
+        fs.remove(zipPath)
+        c.badRequest("invalid sb3 file")
+        return
+    )
+
+    object uploadResult = uploadProjectFiles(project, extractDir)
+    fs.remove(zipPath)
+    fs.remove(extractDir)
+
+    if !uploadResult.ok (
+        c.json(uploadResult.status.toInt(), {ok: false, error: uploadResult.error})
+        return
+    )
+
+    auto thumbResult = c.formFile("thumbnail")
+    if !thumbResult.isErr() (
+        object thumb = thumbResult.unwrap().assert(object)
+        if thumb.size.toNum() <= maxThumbBytes (
+            r2Put(project.thumbKey.toStr(), thumb.data, "image/png")
+        )
+    )
+
+    project.assets = uploadResult.assets
+    project.lastUploadAt = timestamp
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+
+    c.json(200, {
+        ok: true,
+        uploaded: uploadResult.uploaded,
+        skipped: uploadResult.skipped,
+        projectJsonUrl: publicUrl(project.jsonKey.toStr()),
+        thumbUrl: publicUrl(project.thumbKey.toStr())
+    })
+)
+
+def handleSetThumbnail(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    auto thumbResult = c.formFile("thumbnail")
+    if thumbResult.isErr() (
+        c.badRequest("missing thumbnail file")
+        return
+    )
+    object thumb = thumbResult.unwrap().assert(object)
+    if thumb.size.toNum() > maxThumbBytes (
+        c.badRequest("thumbnail too large")
+        return
+    )
+    if !r2Put(project.thumbKey.toStr(), thumb.data, "image/png") (
+        c.internalError("thumbnail upload failed")
+        return
+    )
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+    c.json(200, {ok: true, thumbUrl: publicUrl(project.thumbKey.toStr())})
+)
+
+def handleGetProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleUpdateProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    object body = c.bodyJSON()
+    if body.contains("title") (
+        string title = body.title.toStr().strip()
+        if title == "" or title.len > 100 (
+            c.badRequest("invalid title")
+            return
+        )
+        project.title = title
+    )
+    if body.contains("description") (
+        string description = body.description.toStr()
+        if description.len > 5000 (
+            c.badRequest("description too long")
+            return
+        )
+        project.description = description
+    )
+    if body.contains("instructions") (
+        string instructions = body.instructions.toStr()
+        if instructions.len > 5000 (
+            c.badRequest("instructions too long")
+            return
+        )
+        project.instructions = instructions
+    )
+    if body.contains("notes") (
+        string notes = body.notes.toStr()
+        if notes.len > 5000 (
+            c.badRequest("notes too long")
+            return
+        )
+        project.notes = notes
+    )
+    if body.contains("credits") (
+        array incoming = body.credits.assert(array)
+        if incoming.len > 50 (
+            c.badRequest("too many credits")
+            return
+        )
+        array credits = []
+        for i incoming.len (
+            object entry = incoming[i]
+            string who = entry.who.toStr().strip()
+            string role = entry.role.toStr().strip()
+            if who != "" and who.len <= 60 and role.len <= 120 (
+                credits.append({who: who, role: role})
+            )
+        )
+        project.credits = credits
+    )
+    if body.contains("commentsOff") (
+        project.commentsOff = body.commentsOff == true
+    )
+
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleDeleteProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    string id = project.id.toStr()
+    deleteProjectFile(id)
+    removeFromIndex(id)
+    fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
+    r2Remove(project.jsonKey.toStr())
+    r2Remove(project.thumbKey.toStr())
+    c.json(200, {ok: true})
+)
+
+def handlePublishProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    if project.lastUploadAt.toNum() == 0 (
+        c.badRequest("upload the project before publishing")
+        return
+    )
+
+    boolean firstShare = project.sharedAt.toNum() == 0
+    project.shared = true
+    if firstShare (
+        project.sharedAt = timestamp
+    )
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+    if firstShare (
+        addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+    )
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleUnpublishProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+
+    project.shared = false
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleViewProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if project.shared != true (
+        c.json(200, {ok: true})
+        return
+    )
+    if normalizeUsername(c.getString("username")) == normalizeUsername(project.owner.toStr()) (
+        c.json(200, {ok: true})
+        return
+    )
+    project.views = project.views.toNum() + 1
+    saveProject(project)
+    upsertIndexEntry(project)
+    c.json(200, {ok: true})
+)
+
+def toggleProjectList(*serve.Context c, string field, boolean add) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if project.shared != true (
+        c.notFound("project not found")
+        return
+    )
+
+    string viewer = normalizeUsername(c.getString("username"))
+    array entries = project[field].assert(array)
+    entries = removeString(entries, viewer)
+    if add (
+        entries.append(viewer)
+    )
+    project[field] = entries
+    saveProject(project)
+    upsertIndexEntry(project)
+
+    object profile = loadProfile(viewer)
+    array mine = []
+    if profile.contains(field) (
+        mine = profile[field].assert(array)
+    )
+    mine = removeString(mine, project.id.toStr())
+    if add (
+        mine.append(project.id.toStr())
+    )
+    profile[field] = mine
+    saveProfile(profile)
+
+    if add and field == "loves" (
+        addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
+        addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+    )
+    if add and field == "favorites" (
+        addActivity(viewer, "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+    )
+
+    c.json(200, {ok: true, count: entries.len})
+)
+
+def handleLoveProject(*serve.Context c) (
+    toggleProjectList(c, "loves", true)
+)
+
+def handleUnloveProject(*serve.Context c) (
+    toggleProjectList(c, "loves", false)
+)
+
+def handleFavoriteProject(*serve.Context c) (
+    toggleProjectList(c, "favorites", true)
+)
+
+def handleUnfavoriteProject(*serve.Context c) (
+    toggleProjectList(c, "favorites", false)
+)
+
+def sharedIndexEntries() array (
+    object index = loadIndex()
+    object projects = index.projects
+    array keys = projects.getKeys().toArray()
+    array entries = []
+    for i keys.len (
+        object entry = projects[keys[i].toStr()]
+        if entry.shared == true (
+            entries.append(entry)
+        )
+    )
+    return entries
+)
+
+def handleExplore(*serve.Context c) (
+    array entries = sharedIndexEntries()
+
+    string q = c.query("q").toLower().strip()
+    if q != "" (
+        array filtered = []
+        for i entries.len (
+            object entry = entries[i]
+            if entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q) (
+                filtered.append(entry)
+            )
+        )
+        entries = filtered
+    )
+
+    string sort = c.queryDefault("sort", "recent")
+    if sort == "loved" (
+        entries.sortBy("loveCount", "descending")
+    ) else if sort == "trending" (
+        for i entries.len (
+            object entry = entries[i]
+            number ageDays = (timestamp - entry.sharedAt.toNum()) / 86400000
+            entry.score = (entry.loveCount.toNum() + (entry.views.toNum() / 20)) / (1 + (ageDays / 7))
+        )
+        entries.sortBy("score", "descending")
+    ) else (
+        entries.sortBy("sharedAt", "descending")
+    )
+
+    number total = entries.len
+    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+    number limit = clampNumber(c.queryInt("limit", 16), 1, 50)
+
+    c.json(200, {ok: true, total: total, projects: paginate(entries, offset, limit)})
+)
+
+def handleGetRemixes(*serve.Context c) (
+    string id = c.param("id")
+    array entries = sharedIndexEntries()
+    array remixes = []
+    for i entries.len (
+        object entry = entries[i]
+        if entry.remixParent.toStr() == id (
+            remixes.append(entry)
+        )
+    )
+    remixes.sortBy("sharedAt", "descending")
+    c.json(200, {ok: true, remixes: remixes})
+)
+
+def handleGetRemixTree(*serve.Context c) (
+    string id = c.param("id")
+    auto result = loadProject(id)
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+
+    array entries = sharedIndexEntries()
+    object byId = {}
+    for i entries.len (
+        object entry = entries[i]
+        byId[entry.id.toStr()] = entry
+    )
+    if !byId.contains(id) (
+        byId[id] = indexEntryFromProject(project)
+    )
+
+    string rootId = id
+    number hops = 0
+    boolean walking = true
+    while walking and hops < 100 (
+        object current = byId[rootId]
+        string parent = current.remixParent.toStr()
+        if parent != "" and byId.contains(parent) and parent != rootId (
+            rootId = parent
+        ) else (
+            walking = false
+        )
+        hops = hops + 1
+    )
+
+    array nodes = []
+    array order = [rootId]
+    object seen = {}
+    seen[rootId] = true
+    number cursor = 1
+    while cursor <= order.len and nodes.len < 500 (
+        string currentId = order[cursor].toStr()
+        nodes.append(byId[currentId])
+        for i entries.len (
+            object entry = entries[i]
+            string entryId = entry.id.toStr()
+            if entry.remixParent.toStr() == currentId and !seen.contains(entryId) (
+                seen[entryId] = true
+                order.append(entryId)
+            )
+        )
+        cursor = cursor + 1
+    )
+
+    c.json(200, {ok: true, root: rootId, nodes: nodes})
+)
+
+def handleRemixProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object parent = result.project.assert(object)
+    if parent.shared != true (
+        c.notFound("project not found")
+        return
+    )
+
+    string username = c.getString("username")
+    string id = generateId()
+
+    string parentJson = ""
+    auto fetched = requests.get(publicUrl(parent.jsonKey.toStr()), {})
+    if fetched.success (
+        parentJson = fetched.body.toStr()
+    )
+    if parentJson != "" (
+        r2Put(projectJsonKey(id), parentJson, "application/json")
+    )
+
+    object project = {
+        id: id,
+        owner: username,
+        title: parent.title.toStr() ++ " remix",
+        description: "",
+        instructions: "",
+        repo: null,
+        jsonKey: projectJsonKey(id),
+        thumbKey: projectThumbKey(id),
+        created: timestamp,
+        edited: timestamp,
+        sharedAt: 0,
+        shared: false,
+        lastUploadAt: timestamp,
+        remixParent: parent.id,
+        scratchOrigin: "",
+        views: 0,
+        loves: [],
+        favorites: [],
+        assets: parent.assets
+    }
+
+    saveProject(project)
+    upsertIndexEntry(project)
+
+    addNotification(parent.owner.toStr(), username, "remix", {projectId: id, projectTitle: parent.title})
+    addActivity(username, "remix", {projectId: id, projectTitle: parent.title.toStr() ++ " remix", parentId: parent.id.toStr(), parentTitle: parent.title})
+
+    c.json(201, {
+        ok: true,
+        id: id,
+        projectJsonUrl: publicUrl(project.jsonKey.toStr()),
+        assetsBase: assetsBaseUrl()
+    })
+)

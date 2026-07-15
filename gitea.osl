@@ -1,0 +1,48 @@
+def giteaHeaders(string sudoUser) object (
+    object headers = {
+        "Authorization": "token " ++ giteaAdminToken,
+        "Content-Type": "application/json"
+    }
+    if sudoUser != "" (
+        headers["Sudo"] = sudoUser
+    )
+    return headers
+)
+
+def giteaGet(string path, string sudoUser) object (
+    return requests.get(giteaURL ++ "/api/v1" ++ path, {headers: giteaHeaders(sudoUser)})
+)
+
+def giteaPost(string path, object body, string sudoUser) object (
+    return requests.post(giteaURL ++ "/api/v1" ++ path, {
+        headers: giteaHeaders(sudoUser),
+        body: json.stringify(body)
+    })
+)
+
+def parseGiteaObject(object resp) object (
+    if !resp.success (
+        return {ok: false, error: "gitea request failed", status: resp.status}
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        return {ok: false, error: "invalid gitea response"}
+    )
+    return {ok: true, data: parsed.unwrap().assert(object)}
+)
+
+def parseGiteaArray(object resp) object (
+    if !resp.success (
+        return {ok: false, error: "gitea request failed", status: resp.status}
+    )
+    auto parsed = json.parse(resp.body, {type: "array"})
+    if parsed.isErr() (
+        return {ok: false, error: "invalid gitea response"}
+    )
+    return {ok: true, data: parsed.unwrap().assert(array)}
+)
+
+def repoApiPath(object project) string (
+    object repo = project.repo.assert(object)
+    return "/repos/" ++ repo.owner.toStr() ++ "/" ++ repo.name.toStr()
+)

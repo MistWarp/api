@@ -1,0 +1,219 @@
+def loadViewableProject(*serve.Context c) object (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        return {ok: false}
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        return {ok: false}
+    )
+    return {ok: true, project: project}
+)
+
+def projectHasRepo(object project) boolean (
+    return project.contains("repo") and project.repo != null
+)
+
+def commitAuthorName(object commit) string (
+    if commit.contains("commit") and commit.commit != null (
+        object inner = commit.commit.assert(object)
+        if inner.contains("author") and inner.author != null (
+            object author = inner.author.assert(object)
+            return author.name.toStr()
+        )
+    )
+    return ""
+)
+
+def handleGetCommits(*serve.Context c) (
+    object viewable = loadViewableProject(c)
+    if !viewable.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = viewable.project.assert(object)
+    object repo = project.repo.assert(object)
+
+    object resp = giteaGet(repoApiPath(project) ++ "/commits?limit=50&stat=false&verification=false&sha=" ++ url.escape(repo.defaultBranch.toStr()), "")
+    object parsed = parseGiteaArray(resp)
+    if !parsed.ok (
+        c.internalError("failed to load commits")
+        return
+    )
+
+    array commits = parsed.data.assert(array)
+    array slim = []
+    for i commits.len (
+        object commit = commits[i]
+        object inner = commit.commit.assert(object)
+        object author = inner.author.assert(object)
+        slim.append({
+            sha: commit.sha,
+            message: inner.message,
+            author: commitAuthorName(commit),
+            date: author.date
+        })
+    )
+    c.json(200, {ok: true, commits: slim})
+)
+
+def slimPull(object pull) object (
+    object user = pull.user.assert(object)
+    object head = pull.head.assert(object)
+    object base = pull.base.assert(object)
+    string headOwner = ""
+    if head.contains("repo") and head.repo != null (
+        object headRepo = head.repo.assert(object)
+        object headRepoOwner = headRepo.owner.assert(object)
+        headOwner = headRepoOwner.login.toStr()
+    )
+    return {
+        index: pull.number,
+        title: pull.title,
+        body: pull.body,
+        state: pull.state,
+        user: user.login,
+        headOwner: headOwner,
+        headBranch: head.ref,
+        baseBranch: base.ref,
+        created: pull.created_at,
+        merged: pull.merged,
+        mergeable: pull.mergeable
+    }
+)
+
+def handleListPulls(*serve.Context c) (
+    object viewable = loadViewableProject(c)
+    if !viewable.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = viewable.project.assert(object)
+
+    object resp = giteaGet(repoApiPath(project) ++ "/pulls?state=all&limit=50", "")
+    object parsed = parseGiteaArray(resp)
+    if !parsed.ok (
+        c.internalError("failed to load pull requests")
+        return
+    )
+
+    array pulls = parsed.data.assert(array)
+    array slim = []
+    for i pulls.len (
+        slim.append(slimPull(pulls[i].assert(object)))
+    )
+    c.json(200, {ok: true, pulls: slim})
+)
+
+def handleCreatePull(*serve.Context c) (
+    object viewable = loadViewableProject(c)
+    if !viewable.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = viewable.project.assert(object)
+    object repo = project.repo.assert(object)
+    object body = c.bodyJSON()
+
+    string title = body.title.toStr().strip()
+    if title == "" or title.len > 200 (
+        c.badRequest("invalid title")
+        return
+    )
+    string headOwner = body.headOwner.toStr()
+    string headBranch = body.headBranch.toStr()
+    if headOwner == "" or headBranch == "" (
+        c.badRequest("missing head")
+        return
+    )
+
+    string description = ""
+    if body.contains("body") and body.body != null (
+        description = body.body.toStr()
+    )
+
+    string head = headOwner ++ ":" ++ headBranch
+    if normalizeUsername(headOwner) == normalizeUsername(repo.owner.toStr()) (
+        head = headBranch
+    )
+
+    object resp = giteaPost(repoApiPath(project) ++ "/pulls", {
+        title: title,
+        body: description,
+        head: head,
+        base: repo.defaultBranch
+    }, c.getString("username"))
+    object parsed = parseGiteaObject(resp)
+    if !parsed.ok (
+        c.json(502, {ok: false, error: "failed to create pull request"})
+        return
+    )
+
+    c.json(201, {ok: true, pull: slimPull(parsed.data.assert(object))})
+)
+
+def handleGetPull(*serve.Context c) (
+    object viewable = loadViewableProject(c)
+    if !viewable.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = viewable.project.assert(object)
+
+    object resp = giteaGet(repoApiPath(project) ++ "/pulls/" ++ c.param("index"), "")
+    object parsed = parseGiteaObject(resp)
+    if !parsed.ok (
+        c.notFound("pull request not found")
+        return
+    )
+    c.json(200, {ok: true, pull: slimPull(parsed.data.assert(object))})
+)
+
+def handleGetPullDiff(*serve.Context c) (
+    object viewable = loadViewableProject(c)
+    if !viewable.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = viewable.project.assert(object)
+
+    object resp = requests.get(giteaURL ++ "/api/v1" ++ repoApiPath(project) ++ "/pulls/" ++ c.param("index") ++ ".diff", {headers: giteaHeaders("")})
+    if !resp.success (
+        c.notFound("diff not found")
+        return
+    )
+    c.text(200, resp.body.toStr())
+)
+
+def handleMergePull(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("only the project owner can merge")
+        return
+    )
+
+    string index = c.param("index")
+    object pullResp = giteaGet(repoApiPath(project) ++ "/pulls/" ++ index, "")
+    object parsed = parseGiteaObject(pullResp)
+    if !parsed.ok (
+        c.notFound("pull request not found")
+        return
+    )
+    object pull = parsed.data.assert(object)
+    if pull.mergeable != true (
+        c.json(409, {ok: false, error: "merge conflict", code: "conflict"})
+        return
+    )
+
+    object resp = giteaPost(repoApiPath(project) ++ "/pulls/" ++ index ++ "/merge", {Do: "merge"}, c.getString("username"))
+    if !resp.success (
+        c.json(502, {ok: false, error: "merge failed"})
+        return
+    )
+    c.json(200, {ok: true})
+)

@@ -1,0 +1,234 @@
+def ownerIndexEntries(string owner, boolean includeUnshared) array (
+    object index = loadIndex()
+    object projects = index.projects
+    array keys = projects.getKeys().toArray()
+    string ownerKey = normalizeUsername(owner)
+    array entries = []
+    for i keys.len (
+        object entry = projects[keys[i].toStr()]
+        if normalizeUsername(entry.owner.toStr()) == ownerKey (
+            if entry.shared == true or includeUnshared (
+                entries.append(entry)
+            )
+        )
+    )
+    entries.sortBy("edited", "descending")
+    return entries
+)
+
+def isViewerOwner(*serve.Context c, string name) boolean (
+    if !c.getBool("authenticated") (
+        return false
+    )
+    if c.getBool("isAdmin") (
+        return true
+    )
+    return normalizeUsername(c.getString("username")) == normalizeUsername(name)
+)
+
+def handleGetUser(*serve.Context c) (
+    string name = c.param("name")
+    string key = normalizeUsername(name)
+    boolean exists = isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
+    object profile = loadProfile(name)
+    array followers = profile.followers.assert(array)
+    array following = profile.following.assert(array)
+    string viewer = normalizeUsername(c.getString("username"))
+    array projects = ownerIndexEntries(name, false)
+
+    boolean commentsOff = false
+    if profile.contains("commentsOff") and profile.commentsOff == true (
+        commentsOff = true
+    )
+    c.json(200, {
+        ok: true,
+        exists: exists or projects.len > 0,
+        username: profile.username,
+        bio: profile.bio,
+        featuredProject: profile.featuredProject,
+        followerCount: followers.len,
+        followingCount: following.len,
+        isFollowing: followers.contains(viewer),
+        commentsOff: commentsOff,
+        projects: projects
+    })
+)
+
+def handleSearchUsers(*serve.Context c) (
+    string q = normalizeUsername(c.query("q"))
+    if q == "" (
+        c.json(200, {ok: true, users: []})
+        return
+    )
+    array names = fs.readDir(usersDir).toArray()
+    object index = loadIndex()
+    object projects = index.projects
+    array keys = projects.getKeys().toArray()
+    array matches = []
+    for i names.len (
+        string file = names[i].toStr()
+        if file.endsWith(".json") and matches.len < 8 (
+            string username = file.replace(".json", "")
+            if username.contains(q) (
+                object profile = loadProfile(username)
+                array followers = profile.followers.assert(array)
+                number projectCount = 0
+                for j keys.len (
+                    object entry = projects[keys[j].toStr()]
+                    if entry.shared == true and normalizeUsername(entry.owner.toStr()) == username (
+                        projectCount = projectCount + 1
+                    )
+                )
+                matches.append({username: username, followers: followers.len, projects: projectCount})
+            )
+        )
+    )
+    c.json(200, {ok: true, users: matches})
+)
+
+def handleUpdateProfile(*serve.Context c) (
+    string username = c.getString("username")
+    object profile = loadProfile(username)
+    object body = c.bodyJSON()
+
+    if body.contains("bio") (
+        string bio = body.bio.toStr()
+        if bio.len > 300 (
+            c.badRequest("bio too long")
+            return
+        )
+        profile.bio = bio
+    )
+
+    if body.contains("featuredProject") (
+        string featured = body.featuredProject.toStr()
+        if featured != "" (
+            auto result = loadProject(featured)
+            if !result.ok (
+                c.badRequest("project not found")
+                return
+            )
+            object project = result.project.assert(object)
+            if normalizeUsername(project.owner.toStr()) != normalizeUsername(username) (
+                c.forbidden("not your project")
+                return
+            )
+        )
+        profile.featuredProject = featured
+    )
+
+    if body.contains("commentsOff") (
+        profile.commentsOff = body.commentsOff == true
+    )
+
+    saveProfile(profile)
+    c.json(200, {ok: true})
+)
+
+def handleFollowUser(*serve.Context c) (
+    string actor = c.getString("username")
+    string target = c.param("name")
+    if normalizeUsername(actor) == normalizeUsername(target) (
+        c.badRequest("cannot follow yourself")
+        return
+    )
+
+    object targetProfile = loadProfile(target)
+    array followers = targetProfile.followers.assert(array)
+    followers = removeString(followers, normalizeUsername(actor))
+    followers.append(normalizeUsername(actor))
+    targetProfile.followers = followers
+    saveProfile(targetProfile)
+
+    object actorProfile = loadProfile(actor)
+    array following = actorProfile.following.assert(array)
+    following = removeString(following, normalizeUsername(target))
+    following.append(normalizeUsername(target))
+    actorProfile.following = following
+    saveProfile(actorProfile)
+
+    addNotification(target, actor, "follow", {})
+
+    c.json(200, {ok: true})
+)
+
+def handleUnfollowUser(*serve.Context c) (
+    string actor = c.getString("username")
+    string target = c.param("name")
+
+    object targetProfile = loadProfile(target)
+    targetProfile.followers = removeString(targetProfile.followers.assert(array), normalizeUsername(actor))
+    saveProfile(targetProfile)
+
+    object actorProfile = loadProfile(actor)
+    actorProfile.following = removeString(actorProfile.following.assert(array), normalizeUsername(target))
+    saveProfile(actorProfile)
+
+    c.json(200, {ok: true})
+)
+
+def handleGetUserProjects(*serve.Context c) (
+    string name = c.param("name")
+    boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
+    c.json(200, {ok: true, projects: ownerIndexEntries(name, includeUnshared)})
+)
+
+def userProjectList(*serve.Context c, string field) (
+    object profile = loadProfile(c.param("name"))
+    array ids = []
+    if profile.contains(field) (
+        ids = profile[field].assert(array)
+    )
+    object index = loadIndex()
+    object projects = index.projects
+    array entries = []
+    for i ids.len (
+        string id = ids[i].toStr()
+        if projects.contains(id) (
+            object entry = projects[id]
+            if entry.shared == true (
+                entries.append(entry)
+            )
+        )
+    )
+    entries.reverse()
+    c.json(200, {ok: true, projects: entries})
+)
+
+def handleGetUserFavorites(*serve.Context c) (
+    userProjectList(c, "favorites")
+)
+
+def handleGetUserLoves(*serve.Context c) (
+    userProjectList(c, "loves")
+)
+
+def handleGetActivity(*serve.Context c) (
+    array users = c.query("users").split(",")
+    array items = []
+    number count = 0
+    for i users.len (
+        if count < 50 (
+            array userItems = loadActivity(users[i].toStr())
+            for j userItems.len (
+                items.append(userItems[j])
+            )
+            count = count + 1
+        )
+    )
+    items.sortBy("created", "descending")
+    if items.len > 40 (
+        items = items.trim(1, 40)
+    )
+    c.json(200, {ok: true, activity: items})
+)
+
+def handleGetUserFollowers(*serve.Context c) (
+    object profile = loadProfile(c.param("name"))
+    c.json(200, {ok: true, users: profile.followers.assert(array)})
+)
+
+def handleGetUserFollowing(*serve.Context c) (
+    object profile = loadProfile(c.param("name"))
+    c.json(200, {ok: true, users: profile.following.assert(array)})
+)

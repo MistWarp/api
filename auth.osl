@@ -1,0 +1,130 @@
+def setAuthCookie(*serve.Context c, string sessionId) (
+    c.setCookie("auth_token", sessionId, 604800, "/", "", appURL.startsWith("https://"), true)
+)
+
+def clearAuthCookie(*serve.Context c) (
+    c.clearCookie("auth_token")
+)
+
+def createSession(string username, string userId) string (
+    string sessionId = randomString(32)
+    object session = {
+        username: username,
+        userId: userId,
+        createdAt: timestamp
+    }
+    writeFile(sessionsDir ++ sessionId ++ ".json", session)
+    return sessionId
+)
+
+def getSession(string token) object (
+    if !isSafePathPart(token) (
+        return {ok: false, error: "invalid token"}
+    )
+    string path = sessionsDir ++ token ++ ".json"
+    auto result = readFile(path)
+    if !result.ok (
+        return {ok: false, error: "session not found"}
+    )
+    object session = result.data.assert(object)
+    if timestamp - session.createdAt.toNum() > 604800000 (
+        fs.remove(path)
+        return {ok: false, error: "session expired"}
+    )
+    return {ok: true, username: session.username.toStr(), userId: session.userId.toStr()}
+)
+
+def deleteSession(string token) boolean (
+    if !isSafePathPart(token) (
+        return false
+    )
+    return fs.remove(sessionsDir ++ token ++ ".json")
+)
+
+def requestToken(*serve.Context c) string (
+    string token = c.bearer()
+    if token != "" (
+        return token
+    )
+    return c.cookie("auth_token")
+)
+
+def isAdminUser(string username) boolean (
+    return adminUsers.contains(normalizeUsername(username))
+)
+
+def handleRoturAuth(*serve.Context c) (
+    string validator = c.query("v")
+    if validator == "" (
+        c.json(401, {ok: false, error: "missing validator"})
+        return
+    )
+
+    object resp = requests.get("https://api.rotur.dev/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
+    if !resp.success (
+        c.json(401, {ok: false, error: "failed to validate token"})
+        return
+    )
+
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        c.json(401, {ok: false, error: "invalid response from rotur"})
+        return
+    )
+    object data = parsed.unwrap().assert(object)
+
+    if data.contains("error") and data.error != null (
+        c.json(401, {ok: false, error: "rotur: " ++ data.error.toStr()})
+        return
+    )
+
+    if !data.contains("valid") or data.valid == false (
+        c.json(401, {ok: false, error: "rotur rejected the login validator"})
+        return
+    )
+
+    string userId = data.id.toStr()
+    string username = data.username.toStr()
+
+    object profile = loadProfile(username)
+    saveProfile(profile)
+
+    string sessionId = createSession(username, userId)
+    setAuthCookie(c, sessionId)
+
+    c.json(200, {
+        ok: true,
+        token: sessionId,
+        username: username,
+        isAdmin: isAdminUser(username)
+    })
+)
+
+def handleLogout(*serve.Context c) (
+    string token = requestToken(c)
+    if token != "" (
+        deleteSession(token)
+    )
+    clearAuthCookie(c)
+    c.json(200, {ok: true})
+)
+
+def handleGetMe(*serve.Context c) (
+    if !c.getBool("authenticated") (
+        c.json(401, {ok: false, error: "not authenticated"})
+        return
+    )
+    string username = c.getString("username")
+    object profile = loadProfile(username)
+    c.json(200, {
+        ok: true,
+        username: username,
+        bio: profile.bio,
+        featuredProject: profile.featuredProject,
+        isAdmin: c.getBool("isAdmin")
+    })
+)
+
+def handleHealth(*serve.Context c) (
+    c.json(200, {ok: true})
+)

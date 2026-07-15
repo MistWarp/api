@@ -1,0 +1,154 @@
+import "osl/fs"
+import "osl/crypto"
+import "osl/env"
+import "osl/json"
+import "osl/requests"
+import "osl/serve"
+import "osl/url"
+import "osl/s3"
+import "osl/zip"
+import "osl/regex"
+
+import "go/time"
+
+string projectsDir = "data/projects/"
+string indexFile = "data/projects-index.json"
+string assetsIndexFile = "data/assets-index.json"
+string usersDir = "data/users/"
+string sessionsDir = "data/sessions/"
+string commentsDir = "data/comments/"
+string reportsDir = "data/reports/"
+string reportsFile = reportsDir ++ "reports.json"
+string notificationsDir = "data/notifications/"
+string activityDir = "data/activity/"
+string userSettingsDir = "data/usersettings/"
+string tmpDir = "data/tmp/"
+
+number maxProjectJsonBytes = 20971520
+number maxAssetBytes = 10485760
+number maxThumbBytes = 1048576
+number maxAssetCount = 2000
+number uploadDebounceMs = 86400000
+
+string appURL = env.getDefault("APP_URL", "http://localhost:5610")
+string port = env.getDefault("PORT", "5610")
+string roturAppKey = env.getDefault("ROTUR_APP_KEY", "mistwarp")
+string r2Endpoint = env.getDefault("R2_ENDPOINT", "")
+string r2Bucket = env.getDefault("R2_BUCKET", "mistwarp")
+string r2AccessKeyId = env.getDefault("R2_ACCESS_KEY_ID", "")
+string r2SecretAccessKey = env.getDefault("R2_SECRET_ACCESS_KEY", "")
+string r2PublicBase = env.getDefault("R2_PUBLIC_BASE", "")
+string giteaURL = env.getDefault("GITEA_URL", "https://git.rotur.dev")
+string giteaAdminToken = env.getDefault("GITEA_ADMIN_TOKEN", "")
+string editorOrigin = env.getDefault("EDITOR_ORIGIN", "https://warp.mistium.com")
+array adminUsers = env.getDefault("ADMIN_USERS", "mist").toLower().split(",")
+
+boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
+string localBlobsDir = "data/blobs/"
+
+auto r2Client = s3.new({
+    "endpoint": r2Endpoint,
+    "bucket": r2Bucket,
+    "access_key_id": r2AccessKeyId,
+    "secret_access_key": r2SecretAccessKey,
+    "region": "auto"
+})
+
+import "./utils.osl"
+import "./storage.osl"
+import "./r2.osl"
+import "./gitea.osl"
+import "./auth.osl"
+import "./middleware.osl"
+import "./projects.osl"
+import "./comments.osl"
+import "./social.osl"
+import "./pulls.osl"
+import "./reports.osl"
+import "./notifications.osl"
+import "./settings.osl"
+
+ensureDirectories()
+if r2Local (
+    fs.mkdirAll(localBlobsDir)
+    log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
+)
+
+*serve.Router app = serve.new()
+
+app.use(corsMiddleware)
+
+if r2Local (
+    app.static("/blobs", "./data/blobs")
+)
+
+app.use(authMiddleware)
+
+*serve.Router uploads = app.group("/api")
+uploads.use(serve.maxBodySize(268435456))
+uploads.POST("/projects/:id/upload", requireAuth, handleUploadProject)
+uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
+
+*serve.Router api = app.group("/api")
+api.use(serve.maxBodySize(262144))
+
+api.GET("/health", handleHealth)
+api.POST("/auth", handleRoturAuth)
+api.GET("/me", handleGetMe)
+api.POST("/logout", handleLogout)
+
+api.GET("/notifications", requireAuth, handleGetNotifications)
+api.POST("/notifications/read", requireAuth, handleReadNotifications)
+
+api.GET("/me/settings", requireAuth, handleGetMySettings)
+api.PUT("/me/settings", requireAuth, handlePutMySettings)
+
+api.GET("/explore", handleExplore)
+
+api.POST("/projects", requireAuth, handleCreateProject)
+api.GET("/projects/:id", handleGetProject)
+api.PUT("/projects/:id", requireAuth, handleUpdateProject)
+api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
+api.POST("/projects/:id/publish", requireAuth, handlePublishProject)
+api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
+api.POST("/projects/:id/view", handleViewProject)
+api.POST("/projects/:id/love", requireAuth, handleLoveProject)
+api.DELETE("/projects/:id/love", requireAuth, handleUnloveProject)
+api.POST("/projects/:id/favorite", requireAuth, handleFavoriteProject)
+api.DELETE("/projects/:id/favorite", requireAuth, handleUnfavoriteProject)
+api.GET("/projects/:id/remixes", handleGetRemixes)
+api.GET("/projects/:id/remixtree", handleGetRemixTree)
+api.POST("/projects/:id/remix", requireAuth, handleRemixProject)
+
+api.GET("/projects/:id/comments", handleGetProjectComments)
+api.POST("/projects/:id/comments", requireAuth, handleCreateProjectComment)
+api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
+
+api.GET("/projects/:id/commits", handleGetCommits)
+api.GET("/projects/:id/pulls", handleListPulls)
+api.POST("/projects/:id/pulls", requireAuth, handleCreatePull)
+api.GET("/projects/:id/pulls/:index", handleGetPull)
+api.GET("/projects/:id/pulls/:index/diff", handleGetPullDiff)
+api.POST("/projects/:id/pulls/:index/merge", requireAuth, handleMergePull)
+
+api.GET("/search/users", handleSearchUsers)
+api.GET("/users/:name", handleGetUser)
+api.PUT("/me/profile", requireAuth, handleUpdateProfile)
+api.POST("/users/:name/follow", requireAuth, handleFollowUser)
+api.DELETE("/users/:name/follow", requireAuth, handleUnfollowUser)
+api.GET("/users/:name/projects", handleGetUserProjects)
+api.GET("/users/:name/favorites", handleGetUserFavorites)
+api.GET("/users/:name/loves", handleGetUserLoves)
+api.GET("/activity", handleGetActivity)
+api.GET("/users/:name/followers", handleGetUserFollowers)
+api.GET("/users/:name/following", handleGetUserFollowing)
+api.GET("/users/:name/comments", handleGetProfileComments)
+api.POST("/users/:name/comments", requireAuth, handleCreateProfileComment)
+api.DELETE("/users/:name/comments/:cid", requireAuth, handleDeleteProfileComment)
+
+api.POST("/report", requireAuth, handleCreateReport)
+api.GET("/admin/reports", requireAdmin, handleGetReports)
+api.POST("/admin/reports/resolve", requireAdmin, handleResolveReport)
+
+log "MistWarp API listening on " ++ appURL
+app.serve(":" ++ port)

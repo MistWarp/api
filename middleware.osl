@@ -1,0 +1,63 @@
+def corsMiddleware(*serve.Context c) (
+    string origin = c.header("Origin")
+    if origin != "" (
+        c.setHeader("Access-Control-Allow-Origin", origin)
+        c.setHeader("Access-Control-Allow-Credentials", "true")
+        c.setHeader("Vary", "Origin")
+    )
+    c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    c.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    c.setHeader("Access-Control-Max-Age", "86400")
+
+    if c.method() == "OPTIONS" (
+        c.noContent()
+        return
+    )
+
+    c.next()
+)
+
+def authMiddleware(*serve.Context c) (
+    boolean authenticated = false
+    string username = ""
+    boolean isAdmin = false
+
+    string token = requestToken(c)
+    if token != "" (
+        object session = getSession(token)
+        if session.ok == true (
+            authenticated = true
+            username = session.username.toStr()
+            isAdmin = isAdminUser(username)
+        )
+    )
+
+    c.set("authenticated", authenticated)
+    c.set("username", username)
+    c.set("isAdmin", isAdmin)
+
+    c.next()
+)
+
+def requireAuth(*serve.Context c) (
+    if !c.getBool("authenticated") (
+        c.json(401, {ok: false, error: "not authenticated"})
+        c.abort()
+        return
+    )
+    c.next()
+)
+
+def requireAdmin(*serve.Context c) (
+    if !c.getBool("authenticated") (
+        c.json(401, {ok: false, error: "not authenticated"})
+        c.abort()
+        return
+    )
+    if !c.getBool("isAdmin") (
+        c.json(403, {ok: false, error: "admin access required"})
+        c.abort()
+        return
+    )
+    c.next()
+)

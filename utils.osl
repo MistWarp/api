@@ -1,0 +1,56 @@
+def randomString(number length) string (
+    return crypto.randomString(length).toStr()
+)
+
+def generateId() string (
+    string ts = raw("fmt.Sprintf(\"%d\", time.Now().UnixNano())")
+    return "p" ++ ts ++ randomString(6)
+)
+
+def generateCommentId() string (
+    return "c" ++ randomString(16)
+)
+
+def isSafePathPart(string value) boolean (
+    return value != "" and !value.contains("/") and !value.contains(".") and !value.contains("\\")
+)
+
+def normalizeUsername(string username) string (
+    return username.toLower().strip()
+)
+
+def isValidMd5Ext(string name) boolean (
+    return regex.match("^[0-9a-f]{32}\\.[0-9a-zA-Z]{1,5}$", name)
+)
+
+def md5PartOf(string name) string (
+    array parts = name.split(".")
+    return parts[1].toStr()
+)
+
+def extPartOf(string name) string (
+    array parts = name.split(".")
+    return parts[parts.len].toStr()
+)
+
+def clampNumber(number value, number min, number max) number (
+    if value < min (
+        return min
+    )
+    if value > max (
+        return max
+    )
+    return value
+)
+
+def paginate(array items, number offset, number limit) array (
+    array page = []
+    number count = 0
+    for i items.len (
+        if i > offset and count < limit (
+            page.append(items[i])
+            count = count + 1
+        )
+    )
+    return page
+)

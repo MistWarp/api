@@ -1,0 +1,43 @@
+def settingsPath(string username) string (
+    return userSettingsDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def handleGetMySettings(*serve.Context c) (
+    string username = c.getString("username")
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        c.badRequest("invalid username")
+        return
+    )
+    auto result = readFile(settingsPath(username))
+    if !result.ok (
+        c.json(200, {ok: true, settings: {}})
+        return
+    )
+    c.json(200, {ok: true, settings: result.data})
+)
+
+def handlePutMySettings(*serve.Context c) (
+    string username = c.getString("username")
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        c.badRequest("invalid username")
+        return
+    )
+    string body = c.body()
+    if body.len > 131072 (
+        c.badRequest("settings too large")
+        return
+    )
+    auto parsed = json.parse(body, {type: "object"})
+    if parsed.isErr() (
+        c.badRequest("settings must be a JSON object")
+        return
+    )
+    object settings = parsed.unwrap().assert(object)
+    if !writeFile(settingsPath(username), settings) (
+        c.internalError("failed to save settings")
+        return
+    )
+    c.json(200, {ok: true})
+)

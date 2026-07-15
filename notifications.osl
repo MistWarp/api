@@ -1,0 +1,74 @@
+def loadNotifications(string username) array (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return []
+    )
+    auto result = readFile(notificationsDir ++ key ++ ".json")
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.items.assert(array)
+)
+
+def saveNotifications(string username, array items) boolean (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return false
+    )
+    return writeFile(notificationsDir ++ key ++ ".json", {items: items})
+)
+
+def addNotification(string target, string actor, string notifType, object extra) (
+    string targetKey = normalizeUsername(target)
+    if targetKey == "" or targetKey == normalizeUsername(actor) (
+        return
+    )
+
+    object item = {
+        id: "n" ++ randomString(12),
+        type: notifType,
+        actor: actor,
+        created: timestamp,
+        read: false
+    }
+    array extraKeys = extra.getKeys().toArray()
+    for i extraKeys.len (
+        string k = extraKeys[i].toStr()
+        item[k] = extra[k]
+    )
+
+    array items = loadNotifications(targetKey)
+    array next = [item]
+    number kept = 1
+    for i items.len (
+        if kept < 50 (
+            next.append(items[i])
+            kept = kept + 1
+        )
+    )
+    saveNotifications(targetKey, next)
+)
+
+def handleGetNotifications(*serve.Context c) (
+    string username = c.getString("username")
+    array items = loadNotifications(username)
+    array page = []
+    for i items.len (
+        if i <= 30 (
+            page.append(items[i])
+        )
+    )
+    c.json(200, {ok: true, notifications: page})
+)
+
+def handleReadNotifications(*serve.Context c) (
+    string username = c.getString("username")
+    array items = loadNotifications(username)
+    for i items.len (
+        object item = items[i]
+        item.read = true
+    )
+    saveNotifications(username, items)
+    c.json(200, {ok: true})
+)

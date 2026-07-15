@@ -1,0 +1,88 @@
+def projectJsonKey(string id) string (
+    return "projects/" ++ id ++ "/project.json"
+)
+
+def projectThumbKey(string id) string (
+    return "projects/" ++ id ++ "/thumb.png"
+)
+
+def assetObjectKey(string md5ext) string (
+    return "assets/" ++ md5ext
+)
+
+def blobBase() string (
+    if r2Local (
+        return appURL ++ "/blobs"
+    )
+    return r2PublicBase
+)
+
+def publicUrl(string key) string (
+    if key == "" (
+        return ""
+    )
+    return blobBase() ++ "/" ++ key
+)
+
+def assetsBaseUrl() string (
+    return blobBase() ++ "/assets"
+)
+
+def contentTypeForExt(string ext) string (
+    object types = {
+        "json": "application/json",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "svg": "image/svg+xml",
+        "wav": "audio/wav",
+        "mp3": "audio/mpeg",
+        "ogg": "audio/ogg",
+        "ttf": "font/ttf",
+        "otf": "font/otf",
+        "woff": "font/woff",
+        "woff2": "font/woff2"
+    }
+    string lower = ext.toLower()
+    if types.contains(lower) (
+        return types[lower].toStr()
+    )
+    return "application/octet-stream"
+)
+
+def localBlobPath(string key) string (
+    return localBlobsDir ++ key
+)
+
+def parentDirOf(string path) string (
+    array parts = path.split("/")
+    string dir = ""
+    for i parts.len - 1 (
+        if i == 1 (
+            dir = parts[1].toStr()
+        ) else (
+            dir = dir ++ "/" ++ parts[i].toStr()
+        )
+    )
+    return dir
+)
+
+def r2Put(string key, any body, string contentType) boolean (
+    if r2Local (
+        string path = localBlobPath(key)
+        fs.mkdirAll(parentDirOf(path))
+        return fs.writeFileBytes(path, body)
+    )
+    auto result = r2Client.put({"key": key, "body": body, "content_type": contentType})
+    return result.ok == true
+)
+
+def r2Remove(string key) boolean (
+    if r2Local (
+        return fs.remove(localBlobPath(key))
+    )
+    auto result = r2Client.remove({"key": key})
+    return result.ok == true
+)
