@@ -203,7 +203,7 @@ def reactToComment(*serve.Context c, string key) (
         object comment = comments[i]
         if comment.id.toStr() == cid (
             object reactions = {}
-            if comment.contains("reactions") (
+            if comment.contains("reactions") and comment.reactions != null (
                 reactions = comment.reactions.assert(object)
             )
             comment.reactions = toggleReactionMap(reactions, username, reactionType)

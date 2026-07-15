@@ -13,7 +13,7 @@ osl run main.osl
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | PORT | 5627 | Listen port |
-| APP_URL | http://localhost:5627 | Public URL of this API |
+| APP_URL | https://mwapi.mistium.com | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |

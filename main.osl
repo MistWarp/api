@@ -33,7 +33,7 @@ number maxThumbBytes = 1048576
 number maxAssetCount = 2000
 number uploadDebounceMs = 86400000
 
-string appURL = env.getDefault("APP_URL", "http://localhost:5627")
+string appURL = env.getDefault("APP_URL", "https://mwapi.mistium.com")
 string port = env.getDefault("PORT", "5627")
 string roturAppKey = env.getDefault("ROTUR_APP_KEY", "mistwarp")
 string r2Endpoint = env.getDefault("R2_ENDPOINT", "")
@@ -78,7 +78,7 @@ if r2Local (
     log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )
 if !r2Local and appURL == "http://localhost:5627" (
-    log "WARNING: APP_URL is the localhost default but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
+    log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
 )
 sweepStagedProjects()
 cleanupExpiredSessions()

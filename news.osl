@@ -13,19 +13,23 @@ def saveNews(array items) boolean (
 
 def toggleReactionMap(object reactions, string username, string reactionType) object (
     array chosen = []
-    if reactions.contains(reactionType) (
+    if reactions.contains(reactionType) and reactions[reactionType] != null (
         chosen = reactions[reactionType].assert(array)
     )
     boolean had = chosen.contains(username)
     array keys = reactions.getKeys().toArray()
     for i keys.len (
         string k = keys[i].toStr()
-        reactions[k] = removeString(reactions[k].assert(array), username)
+        array users = []
+        if reactions[k] != null (
+            users = reactions[k].assert(array)
+        )
+        reactions[k] = removeString(users, username)
     )
     if !had (
-        array updated = reactions[reactionType].assert(array)
-        if !reactions.contains(reactionType) (
-            updated = []
+        array updated = []
+        if reactions.contains(reactionType) and reactions[reactionType] != null (
+            updated = reactions[reactionType].assert(array)
         )
         updated.append(username)
         reactions[reactionType] = updated
@@ -92,7 +96,7 @@ def handleReactNews(*serve.Context c) (
         object item = items[i]
         if item.id.toStr() == id (
             object reactions = {}
-            if item.contains("reactions") (
+            if item.contains("reactions") and item.reactions != null (
                 reactions = item.reactions.assert(object)
             )
             item.reactions = toggleReactionMap(reactions, username, reactionType)
