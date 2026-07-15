@@ -145,11 +145,16 @@ def uploadProjectFiles(object project, string extractDir) object (
     if !fs.exists(jsonPath) (
         return {ok: false, error: "sb3 has no project.json", status: 400}
     )
+    string projectJson = fs.readFile(jsonPath)
+    if projectJson.len > maxProjectJsonBytes (
+        return {ok: false, error: "project.json too large", status: 400}
+    )
 
     object assetsIndex = loadAssetsIndex()
     object knownAssets = assetsIndex.assets
     array projectAssets = []
     array pendingUploads = []
+    object pendingNames = {}
     number assetCount = 0
 
     for i names.len (
@@ -164,26 +169,27 @@ def uploadProjectFiles(object project, string extractDir) object (
                 if content.len > maxAssetBytes (
                     return {ok: false, error: "asset too large: " ++ name, status: 400}
                 )
-                if content.hashMD5() != md5PartOf(name) (
-                    return {ok: false, error: "asset hash mismatch: " ++ name, status: 400}
+                string actualHash = content.hashMD5()
+                string canonicalName = name
+                if actualHash != md5PartOf(name) (
+                    canonicalName = actualHash ++ "." ++ extPartOf(name)
+                    projectJson = projectJson.replace(md5PartOf(name), actualHash)
                 )
-                projectAssets.append(name)
-                if !knownAssets.contains(name) (
-                    pendingUploads.append(name)
+                projectAssets.append(canonicalName)
+                if !knownAssets.contains(canonicalName) and !pendingNames.contains(canonicalName) (
+                    pendingUploads.append({source: name, name: canonicalName})
+                    pendingNames[canonicalName] = true
                 )
             )
         )
     )
 
-    string projectJson = fs.readFile(jsonPath)
-    if projectJson.len > maxProjectJsonBytes (
-        return {ok: false, error: "project.json too large", status: 400}
-    )
-
     number uploaded = 0
     for i pendingUploads.len (
-        string name = pendingUploads[i].toStr()
-        string content = fs.readFile(extractDir ++ "/" ++ name)
+        object upload = pendingUploads[i].assert(object)
+        string source = upload.source.toStr()
+        string name = upload.name.toStr()
+        string content = fs.readFile(extractDir ++ "/" ++ source)
         if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
             return {ok: false, error: "asset upload failed", status: 502}
         )

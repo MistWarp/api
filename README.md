@@ -12,8 +12,8 @@ osl run main.osl
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| PORT | 5610 | Listen port |
-| APP_URL | http://localhost:5610 | Public URL of this API |
+| PORT | 5627 | Listen port |
+| APP_URL | http://localhost:5627 | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
@@ -40,7 +40,7 @@ The site and editor are one scratch-gui build (community pages live in
 This API runs on a SEPARATE domain, `mwapi.mistium.com`. The frontend calls it
 via an absolute base set at build time: `MISTWARP_API_BASE=https://mwapi.mistium.com pnpm build`
 in scratch-gui. In dev, leave it unset and webpack-dev-server proxies `/api` to
-`http://localhost:5610`. Auth is Bearer-token based (the session token returned
+`http://localhost:5627`. Auth is Bearer-token based (the session token returned
 by `/api/auth`), so a cross-domain API works without shared cookies. CORS echoes
 the request Origin with credentials, so any frontend origin is accepted.
 
@@ -48,7 +48,7 @@ R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through 
 
 ## Upload pipeline
 
-The editor POSTs the whole sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server unzips it, validates `project.json` (max 20MB) and every asset (max 10MB each, filename must match the md5 of its content), then uploads to R2:
+The editor POSTs the whole sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server unzips it, validates `project.json` (max 20MB) and every asset (max 10MB each), normalizes stale asset filenames to the md5 of their content, then uploads to R2:
 
 - `assets/<md5ext>`: content addressed, shared across all projects and remixes, uploaded once ever
 - `projects/<id>/project.json`: the playable snapshot
