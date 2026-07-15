@@ -242,13 +242,20 @@ def sweepStagedProjects() (
 )
 
 def currentProjectJson(object project) string (
-    if project.contains("pendingJson") and project.pendingJson == true (
-        string path = stagingJsonPath(project.id.toStr())
-        if fs.exists(path) (
-            return fs.readFile(path)
-        )
+    string localPath = localProjectJsonPathFor(project, 0)
+    if localPath != "" (
+        return fs.readFile(localPath)
     )
-    auto fetched = requests.get(publicUrl(project.jsonKey.toStr()), {})
+
+    if r2Local (
+        return ""
+    )
+
+    string direct = r2DirectUrl(project.jsonKey.toStr())
+    if direct == "" (
+        return ""
+    )
+    auto fetched = requests.get(direct, {})
     if fetched.success (
         return fetched.body.toStr()
     )
@@ -385,13 +392,13 @@ def handleGetProjectJson(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
+    string projectJson = currentProjectJson(project)
+    if projectJson == "" (
+        c.notFound("project file not found")
         return
     )
-    c.setHeader("Content-Type", "application/json")
     c.setHeader("Cache-Control", "no-store")
-    c.text(200, currentProjectJson(project))
+    c.data(200, "application/json", raw("[]byte(projectJson)"))
 )
 
 def handleUpdateProject(*serve.Context c) (

@@ -22,18 +22,59 @@ def thumbUrlFor(object project) string (
     return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
 )
 
+def isUntouchedRemix(object project) boolean (
+    if !project.contains("remixParent") or project.remixParent.toStr() == "" (
+        return false
+    )
+    if project.contains("inheritedJson") and project.inheritedJson == true (
+        return true
+    )
+    return project.created.toNum() == project.edited.toNum()
+)
+
+def localProjectJsonPathFor(object project, number hops) string (
+    string id = project.id.toStr()
+    string stagedPath = stagingJsonPath(id)
+    if fs.exists(stagedPath) (
+        return stagedPath
+    )
+
+    string blobPath = localBlobPath(project.jsonKey.toStr())
+    if fs.exists(blobPath) (
+        return blobPath
+    )
+
+    if hops >= 100 or !isUntouchedRemix(project) (
+        return ""
+    )
+
+    string parentId = project.remixParent.toStr()
+    if parentId == id (
+        return ""
+    )
+    auto parentResult = loadProject(parentId)
+    if !parentResult.ok (
+        return ""
+    )
+    return localProjectJsonPathFor(parentResult.project.assert(object), hops + 1)
+)
+
 def projectJsonUrlFor(object project) string (
-    if project.contains("pendingJson") and project.pendingJson == true (
+    if localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
         return appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
     )
     return publicUrl(project.jsonKey.toStr())
 )
 
 def blobBase() string (
-    if r2Local (
-        return appURL ++ "/blobs"
+    return appURL ++ "/blobs"
+)
+
+def r2DirectUrl(string key) string (
+    if key == "" or r2PublicBase == "" (
+        return ""
     )
-    return r2PublicBase
+    return r2PublicBase ++ "/" ++ key
 )
 
 def publicUrl(string key) string (
@@ -75,6 +116,22 @@ def localBlobPath(string key) string (
     return localBlobsDir ++ key
 )
 
+def isSafeBlobKey(string key) boolean (
+    if key.contains("..") or key.contains("\\") or key.startsWith("/") (
+        return false
+    )
+    if key.startsWith("assets/") (
+        string name = key.replace("assets/", "")
+        return isValidMd5Ext(name)
+    )
+    return regex.match("^projects/[A-Za-z0-9]+/project\\.json$", key)
+)
+
+def contentTypeForKey(string key) string (
+    array parts = key.split(".")
+    return contentTypeForExt(parts[parts.len].toStr())
+)
+
 def parentDirOf(string path) string (
     array parts = path.split("/")
     string dir = ""
@@ -104,4 +161,65 @@ def r2Remove(string key) boolean (
     )
     auto result = r2Client.remove({"key": key})
     return result.ok == true
+)
+
+def serveBlobKey(*serve.Context c, string key) (
+    if !isSafeBlobKey(key) (
+        c.notFound("blob not found")
+        return
+    )
+
+    string path = localBlobPath(key)
+    if fs.exists(path) (
+        c.setHeader("Content-Type", contentTypeForKey(key))
+        c.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+        c.file(path)
+        return
+    )
+
+    if r2Local (
+        c.notFound("blob not found")
+        return
+    )
+
+    string direct = r2DirectUrl(key)
+    if direct == "" (
+        c.notFound("blob not found")
+        return
+    )
+
+    auto fetched = requests.get(direct, {})
+    if !fetched.success or fetched.status.toInt() != 200 (
+        c.notFound("blob not found")
+        return
+    )
+
+    string body = fetched.body.toStr()
+    c.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+    c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
+)
+
+def handleGetAssetBlob(*serve.Context c) (
+    serveBlobKey(c, assetObjectKey(c.param("name")))
+)
+
+def handleGetProjectBlob(*serve.Context c) (
+    string id = c.param("id")
+    if !isSafePathPart(id) (
+        c.notFound("blob not found")
+        return
+    )
+
+    auto projectResult = loadProject(id)
+    if projectResult.ok (
+        string localPath = localProjectJsonPathFor(projectResult.project.assert(object), 0)
+        if localPath != "" (
+            c.setHeader("Content-Type", "application/json")
+            c.setHeader("Cache-Control", "no-store")
+            c.file(localPath)
+            return
+        )
+    )
+
+    serveBlobKey(c, projectJsonKey(id))
 )
