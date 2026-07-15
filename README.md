@@ -37,12 +37,11 @@ The site and editor are one scratch-gui build (community pages live in
 | /embed.html | scratch-gui embed player (project pages iframe this) |
 | /project/*, /explore, /users/*, /settings | community app (client routing) |
 
-This API runs on a SEPARATE domain, `mwapi.mistium.com`. The frontend calls it
-via an absolute base set at build time: `MISTWARP_API_BASE=https://mwapi.mistium.com pnpm build`
-in scratch-gui. In dev, leave it unset and webpack-dev-server proxies `/api` to
-`http://localhost:5610`. Auth is Bearer-token based (the session token returned
-by `/api/auth`), so a cross-domain API works without shared cookies. CORS echoes
-the request Origin with credentials, so any frontend origin is accepted.
+This API runs on a SEPARATE domain, `mwapi.mistium.com`. The frontend calls
+`https://mwapi.mistium.com/api` directly. Auth is Bearer-token based (the session
+token returned by `/api/auth`), so a cross-domain API works without shared
+cookies. CORS echoes the request Origin with credentials, so any frontend origin
+is accepted.
 
 R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
 
