@@ -19,10 +19,13 @@ string sessionsDir = "data/sessions/"
 string commentsDir = "data/comments/"
 string reportsDir = "data/reports/"
 string reportsFile = reportsDir ++ "reports.json"
+string newsFile = "data/news.json"
 string notificationsDir = "data/notifications/"
 string activityDir = "data/activity/"
 string userSettingsDir = "data/usersettings/"
 string tmpDir = "data/tmp/"
+string stagingDir = "data/staging/"
+string thumbnailsDir = "data/thumbnails/"
 
 number maxProjectJsonBytes = 20971520
 number maxAssetBytes = 10485760
@@ -66,6 +69,7 @@ import "./social.osl"
 import "./pulls.osl"
 import "./reports.osl"
 import "./notifications.osl"
+import "./news.osl"
 import "./settings.osl"
 
 ensureDirectories()
@@ -73,11 +77,17 @@ if r2Local (
     fs.mkdirAll(localBlobsDir)
     log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )
+if !r2Local and appURL == "http://localhost:5610" (
+    log "WARNING: APP_URL is the localhost default but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
+)
+sweepStagedProjects()
+cleanupExpiredSessions()
 
 *serve.Router app = serve.new()
 
 app.use(corsMiddleware)
 
+app.static("/thumbnails", "./data/thumbnails")
 if r2Local (
     app.static("/blobs", "./data/blobs")
 )
@@ -106,16 +116,14 @@ api.PUT("/me/settings", requireAuth, handlePutMySettings)
 api.GET("/explore", handleExplore)
 
 api.POST("/projects", requireAuth, handleCreateProject)
+api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id", handleGetProject)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
 api.POST("/projects/:id/publish", requireAuth, handlePublishProject)
 api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
 api.POST("/projects/:id/view", handleViewProject)
-api.POST("/projects/:id/love", requireAuth, handleLoveProject)
-api.DELETE("/projects/:id/love", requireAuth, handleUnloveProject)
-api.POST("/projects/:id/favorite", requireAuth, handleFavoriteProject)
-api.DELETE("/projects/:id/favorite", requireAuth, handleUnfavoriteProject)
+api.POST("/projects/:id/react", requireAuth, handleReactProject)
 api.GET("/projects/:id/remixes", handleGetRemixes)
 api.GET("/projects/:id/remixtree", handleGetRemixTree)
 api.POST("/projects/:id/remix", requireAuth, handleRemixProject)
@@ -123,6 +131,7 @@ api.POST("/projects/:id/remix", requireAuth, handleRemixProject)
 api.GET("/projects/:id/comments", handleGetProjectComments)
 api.POST("/projects/:id/comments", requireAuth, handleCreateProjectComment)
 api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
+api.POST("/projects/:id/comments/:cid/react", requireAuth, handleReactProjectComment)
 
 api.GET("/projects/:id/commits", handleGetCommits)
 api.GET("/projects/:id/pulls", handleListPulls)
@@ -137,7 +146,6 @@ api.PUT("/me/profile", requireAuth, handleUpdateProfile)
 api.POST("/users/:name/follow", requireAuth, handleFollowUser)
 api.DELETE("/users/:name/follow", requireAuth, handleUnfollowUser)
 api.GET("/users/:name/projects", handleGetUserProjects)
-api.GET("/users/:name/favorites", handleGetUserFavorites)
 api.GET("/users/:name/loves", handleGetUserLoves)
 api.GET("/activity", handleGetActivity)
 api.GET("/users/:name/followers", handleGetUserFollowers)
@@ -145,6 +153,12 @@ api.GET("/users/:name/following", handleGetUserFollowing)
 api.GET("/users/:name/comments", handleGetProfileComments)
 api.POST("/users/:name/comments", requireAuth, handleCreateProfileComment)
 api.DELETE("/users/:name/comments/:cid", requireAuth, handleDeleteProfileComment)
+api.POST("/users/:name/comments/:cid/react", requireAuth, handleReactProfileComment)
+
+api.GET("/news", handleGetNews)
+api.POST("/news", requireAdmin, handleCreateNews)
+api.DELETE("/news/:id", requireAdmin, handleDeleteNews)
+api.POST("/news/:id/react", requireAuth, handleReactNews)
 
 api.POST("/report", requireAuth, handleCreateReport)
 api.GET("/admin/reports", requireAdmin, handleGetReports)

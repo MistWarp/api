@@ -1,0 +1,108 @@
+def loadNews() array (
+    auto result = readFile(newsFile)
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.items.assert(array)
+)
+
+def saveNews(array items) boolean (
+    return writeFile(newsFile, {items: items})
+)
+
+def toggleReactionMap(object reactions, string username, string reactionType) object (
+    array chosen = []
+    if reactions.contains(reactionType) (
+        chosen = reactions[reactionType].assert(array)
+    )
+    boolean had = chosen.contains(username)
+    array keys = reactions.getKeys().toArray()
+    for i keys.len (
+        string k = keys[i].toStr()
+        reactions[k] = removeString(reactions[k].assert(array), username)
+    )
+    if !had (
+        array updated = reactions[reactionType].assert(array)
+        if !reactions.contains(reactionType) (
+            updated = []
+        )
+        updated.append(username)
+        reactions[reactionType] = updated
+    )
+    return reactions
+)
+
+def isValidReaction(string reactionType) boolean (
+    return reactionType == "heart" or reactionType == "brokenheart"
+)
+
+def handleGetNews(*serve.Context c) (
+    c.json(200, {ok: true, news: loadNews()})
+)
+
+def handleCreateNews(*serve.Context c) (
+    object body = c.bodyJSON()
+    string title = body.title.toStr().strip()
+    string content = body.body.toStr().strip()
+    if title == "" or title.len > 120 (
+        c.badRequest("invalid title")
+        return
+    )
+    if content == "" or content.len > 5000 (
+        c.badRequest("invalid body")
+        return
+    )
+    object item = {id: "nw" ++ randomString(12), title: title, body: content, author: c.getString("username"), created: timestamp, reactions: {}}
+    array items = loadNews()
+    array next = [item]
+    for i items.len (
+        next.append(items[i])
+    )
+    saveNews(next)
+    c.json(201, {ok: true, item: item})
+)
+
+def handleDeleteNews(*serve.Context c) (
+    string id = c.param("id")
+    array items = loadNews()
+    array next = []
+    for i items.len (
+        object item = items[i]
+        if item.id.toStr() != id (
+            next.append(item)
+        )
+    )
+    saveNews(next)
+    c.json(200, {ok: true})
+)
+
+def handleReactNews(*serve.Context c) (
+    object body = c.bodyJSON()
+    string reactionType = body.type.toStr()
+    if !isValidReaction(reactionType) (
+        c.badRequest("invalid reaction")
+        return
+    )
+    string id = c.param("id")
+    string username = normalizeUsername(c.getString("username"))
+    array items = loadNews()
+    boolean found = false
+    for i items.len (
+        object item = items[i]
+        if item.id.toStr() == id (
+            object reactions = {}
+            if item.contains("reactions") (
+                reactions = item.reactions.assert(object)
+            )
+            item.reactions = toggleReactionMap(reactions, username, reactionType)
+            found = true
+        )
+    )
+    if !found (
+        c.notFound("news item not found")
+        return
+    )
+    saveNews(items)
+    c.json(200, {ok: true})
+)

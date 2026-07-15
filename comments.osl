@@ -29,8 +29,12 @@ def createComment(string key, string author, string content, string parentId) ob
         created: timestamp,
         parent: parentId
     }
-    comments.append(comment)
-    saveComments(key, comments)
+    if fs.exists(commentsDir ++ key ++ ".jsonl") (
+        appendComment(key, comment)
+    ) else (
+        comments.append(comment)
+        saveComments(key, comments)
+    )
     return {ok: true, comment: comment}
 )
 
@@ -182,4 +186,53 @@ def handleDeleteProfileComment(*serve.Context c) (
         return
     )
     c.json(200, {ok: true})
+)
+
+def reactToComment(*serve.Context c, string key) (
+    object body = c.bodyJSON()
+    string reactionType = body.type.toStr()
+    if !isValidReaction(reactionType) (
+        c.badRequest("invalid reaction")
+        return
+    )
+    string username = normalizeUsername(c.getString("username"))
+    string cid = c.param("cid")
+    array comments = loadComments(key)
+    boolean found = false
+    for i comments.len (
+        object comment = comments[i]
+        if comment.id.toStr() == cid (
+            object reactions = {}
+            if comment.contains("reactions") (
+                reactions = comment.reactions.assert(object)
+            )
+            comment.reactions = toggleReactionMap(reactions, username, reactionType)
+            comments[i] = comment
+            found = true
+        )
+    )
+    if !found (
+        c.notFound("comment not found")
+        return
+    )
+    saveComments(key, comments)
+    c.json(200, {ok: true})
+)
+
+def handleReactProjectComment(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    reactToComment(c, "project-" ++ project.id.toStr())
+)
+
+def handleReactProfileComment(*serve.Context c) (
+    reactToComment(c, profileCommentKey(c.param("name")))
 )

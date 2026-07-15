@@ -8,6 +8,8 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(activityDir)
     result = result and fs.mkdirAll(userSettingsDir)
     result = result and fs.mkdirAll(tmpDir)
+    result = result and fs.mkdirAll(stagingDir)
+    result = result and fs.mkdirAll(thumbnailsDir)
     return result
 )
 
@@ -53,15 +55,18 @@ def saveIndex(object index) boolean (
 
 def indexEntryFromProject(object project) object (
     array loves = project.loves.assert(array)
-    array favorites = project.favorites.assert(array)
+    array broken = []
+    if project.contains("brokenhearts") (
+        broken = project.brokenhearts.assert(array)
+    )
     return {
         id: project.id,
         owner: project.owner,
         title: project.title,
-        thumbUrl: publicUrl(project.thumbKey.toStr()),
+        thumbUrl: thumbUrlFor(project),
         views: project.views,
         loveCount: loves.len,
-        favoriteCount: favorites.len,
+        brokenHeartCount: broken.len,
         remixParent: project.remixParent,
         shared: project.shared,
         created: project.created,
@@ -120,7 +125,6 @@ def defaultProfile(string username) object (
         featuredProject: "",
         followers: [],
         following: [],
-        favorites: [],
         loves: [],
         created: timestamp
     }
@@ -180,12 +184,8 @@ def addActivity(string username, string activityType, object extra) (
     writeFile(activityDir ++ key ++ ".json", {items: items})
 )
 
-def loadComments(string key) array (
-    if !isSafePathPart(key) (
-        return []
-    )
-    string path = commentsDir ++ key ++ ".json"
-    auto result = readFile(path)
+def loadCommentsLegacy(string key) array (
+    auto result = readFile(commentsDir ++ key ++ ".json")
     if !result.ok (
         return []
     )
@@ -193,9 +193,44 @@ def loadComments(string key) array (
     return data.comments.assert(array)
 )
 
+def loadComments(string key) array (
+    if !isSafePathPart(key) (
+        return []
+    )
+    string path = commentsDir ++ key ++ ".jsonl"
+    if !fs.exists(path) (
+        return loadCommentsLegacy(key)
+    )
+    array lines = fs.readFile(path).split("\n")
+    array out = []
+    for i lines.len (
+        string line = lines[i].toStr().strip()
+        if line != "" (
+            auto parsed = json.parse(line, {type: "object"})
+            if !parsed.isErr() (
+                out.append(parsed.unwrap())
+            )
+        )
+    )
+    return out
+)
+
 def saveComments(string key, array comments) boolean (
     if !isSafePathPart(key) (
         return false
     )
-    return writeFile(commentsDir ++ key ++ ".json", {comments: comments})
+    string out = ""
+    for i comments.len (
+        out = out ++ json.stringify(comments[i]) ++ "\n"
+    )
+    boolean ok = fs.writeFile(commentsDir ++ key ++ ".jsonl", out)
+    fs.remove(commentsDir ++ key ++ ".json")
+    return ok
+)
+
+def appendComment(string key, object comment) boolean (
+    if !isSafePathPart(key) (
+        return false
+    )
+    return fs.appendToFile(commentsDir ++ key ++ ".jsonl", json.stringify(comment) ++ "\n")
 )

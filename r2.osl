@@ -2,12 +2,31 @@ def projectJsonKey(string id) string (
     return "projects/" ++ id ++ "/project.json"
 )
 
-def projectThumbKey(string id) string (
-    return "projects/" ++ id ++ "/thumb.png"
-)
-
 def assetObjectKey(string md5ext) string (
     return "assets/" ++ md5ext
+)
+
+def stagingJsonPath(string id) string (
+    return stagingDir ++ id ++ ".json"
+)
+
+def thumbnailPath(string id) string (
+    return thumbnailsDir ++ id ++ ".png"
+)
+
+def thumbUrlFor(object project) string (
+    string id = project.id.toStr()
+    if !fs.exists(thumbnailPath(id)) (
+        return ""
+    )
+    return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
+)
+
+def projectJsonUrlFor(object project) string (
+    if project.contains("pendingJson") and project.pendingJson == true (
+        return appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
+    )
+    return publicUrl(project.jsonKey.toStr())
 )
 
 def blobBase() string (

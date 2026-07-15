@@ -195,10 +195,6 @@ def userProjectList(*serve.Context c, string field) (
     c.json(200, {ok: true, projects: entries})
 )
 
-def handleGetUserFavorites(*serve.Context c) (
-    userProjectList(c, "favorites")
-)
-
 def handleGetUserLoves(*serve.Context c) (
     userProjectList(c, "loves")
 )

@@ -41,6 +41,20 @@ def deleteSession(string token) boolean (
     return fs.remove(sessionsDir ++ token ++ ".json")
 )
 
+def cleanupExpiredSessions() (
+    array files = fs.readDir(sessionsDir).toArray()
+    for i files.len (
+        string path = sessionsDir ++ files[i].toStr()
+        auto res = readFile(path)
+        if res.ok (
+            object session = res.data.assert(object)
+            if timestamp - session.createdAt.toNum() > 604800000 (
+                fs.remove(path)
+            )
+        )
+    )
+)
+
 def requestToken(*serve.Context c) string (
     string token = c.bearer()
     if token != "" (
