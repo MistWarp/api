@@ -113,6 +113,10 @@ def handleUpdateProfile(*serve.Context c) (
                 c.forbidden("not your project")
                 return
             )
+            if project.shared != true (
+                c.badRequest("share the project before featuring it")
+                return
+            )
         )
         profile.featuredProject = featured
     )

@@ -522,6 +522,10 @@ def handleDeleteProject(*serve.Context c) (
         c.forbidden("not your project")
         return
     )
+    if project.shared == true (
+        c.badRequest("unshare the project before deleting it")
+        return
+    )
 
     string id = project.id.toStr()
     deleteProjectFile(id)
@@ -584,6 +588,11 @@ def handleUnpublishProject(*serve.Context c) (
     project.edited = timestamp
     saveProject(project)
     upsertIndexEntry(project)
+    object profile = loadProfile(project.owner.toStr())
+    if profile.featuredProject.toStr() == project.id.toStr() (
+        profile.featuredProject = ""
+        saveProfile(profile)
+    )
     c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
