@@ -677,7 +677,7 @@ def sharedIndexEntries() array (
     for i keys.len (
         object entry = projects[keys[i].toStr()]
         if entry.shared == true (
-            entries.append(entry)
+            entries.append(hydrateIndexEntry(entry))
         )
     )
     return entries

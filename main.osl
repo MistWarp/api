@@ -73,6 +73,7 @@ import "./news.osl"
 import "./settings.osl"
 
 ensureDirectories()
+refreshIndexUrls()
 if r2Local (
     fs.mkdirAll(localBlobsDir)
     log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir

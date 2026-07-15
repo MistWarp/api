@@ -8,7 +8,7 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
         object entry = projects[keys[i].toStr()]
         if normalizeUsername(entry.owner.toStr()) == ownerKey (
             if entry.shared == true or includeUnshared (
-                entries.append(entry)
+                entries.append(hydrateIndexEntry(entry))
             )
         )
     )
@@ -187,7 +187,7 @@ def userProjectList(*serve.Context c, string field) (
         if projects.contains(id) (
             object entry = projects[id]
             if entry.shared == true (
-                entries.append(entry)
+                entries.append(hydrateIndexEntry(entry))
             )
         )
     )
