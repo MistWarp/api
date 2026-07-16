@@ -35,9 +35,14 @@ def handlePutMySettings(*serve.Context c) (
         return
     )
     object settings = parsed.unwrap().assert(object)
+    if !settings.contains("settings") or settings.settings == null (
+        settings.settings = {}
+    )
+    object inner = settings.settings
+    inner.updatedAt = timestamp
     if !writeFile(settingsPath(username), settings) (
         c.internalError("failed to save settings")
         return
     )
-    c.json(200, {ok: true})
+    c.json(200, {ok: true, updatedAt: inner.updatedAt})
 )

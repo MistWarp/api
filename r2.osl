@@ -59,11 +59,25 @@ def localProjectJsonPathFor(object project, number hops) string (
     return localProjectJsonPathFor(parentResult.project.assert(object), hops + 1)
 )
 
-def projectJsonUrlFor(object project) string (
-    if localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
-        return appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
+def projectViewKey(object project) string (
+    if project.contains("viewKey") and project.viewKey != null (
+        return project.viewKey.toStr()
     )
-    return publicUrl(project.jsonKey.toStr())
+    return ""
+)
+
+def projectJsonUrlFor(object project) string (
+    string base = publicUrl(project.jsonKey.toStr())
+    if localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
+        base = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
+    )
+    if project.shared != true (
+        string k = projectViewKey(project)
+        if k != "" (
+            return base ++ "?k=" ++ k
+        )
+    )
+    return base
 )
 
 def blobBase() string (
@@ -163,6 +177,13 @@ def r2Remove(string key) boolean (
     return result.ok == true
 )
 
+def blobCacheHeader(string key) string (
+    if key.startsWith("assets/") (
+        return "public, max-age=31536000, immutable"
+    )
+    return "no-store"
+)
+
 def serveBlobKey(*serve.Context c, string key) (
     if !isSafeBlobKey(key) (
         c.notFound("blob not found")
@@ -172,7 +193,7 @@ def serveBlobKey(*serve.Context c, string key) (
     string path = localBlobPath(key)
     if fs.exists(path) (
         c.setHeader("Content-Type", contentTypeForKey(key))
-        c.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+        c.setHeader("Cache-Control", blobCacheHeader(key))
         c.file(path)
         return
     )
@@ -195,7 +216,7 @@ def serveBlobKey(*serve.Context c, string key) (
     )
 
     string body = fetched.body.toStr()
-    c.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+    c.setHeader("Cache-Control", blobCacheHeader(key))
     c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
 )
 
@@ -211,14 +232,25 @@ def handleGetProjectBlob(*serve.Context c) (
     )
 
     auto projectResult = loadProject(id)
-    if projectResult.ok (
-        string localPath = localProjectJsonPathFor(projectResult.project.assert(object), 0)
-        if localPath != "" (
-            c.setHeader("Content-Type", "application/json")
-            c.setHeader("Cache-Control", "no-store")
-            c.file(localPath)
+    if !projectResult.ok (
+        c.notFound("blob not found")
+        return
+    )
+    object project = projectResult.project.assert(object)
+    if project.shared != true (
+        string k = projectViewKey(project)
+        if k == "" or c.query("k") != k (
+            c.notFound("blob not found")
             return
         )
+    )
+
+    string localPath = localProjectJsonPathFor(project, 0)
+    if localPath != "" (
+        c.setHeader("Content-Type", "application/json")
+        c.setHeader("Cache-Control", "no-store")
+        c.file(localPath)
+        return
     )
 
     serveBlobKey(c, projectJsonKey(id))

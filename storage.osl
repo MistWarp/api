@@ -10,7 +10,32 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(tmpDir)
     result = result and fs.mkdirAll(stagingDir)
     result = result and fs.mkdirAll(thumbnailsDir)
+    result = result and fs.mkdirAll(quotaDir)
     return result
+)
+
+def projectSizeBytes(object project) number (
+    if project.contains("sizeBytes") and project.sizeBytes != null (
+        return project.sizeBytes.toNum()
+    )
+    return 0
+)
+
+def weekViewsOf(object project) number (
+    if !project.contains("viewHistory") or project.viewHistory == null (
+        return 0
+    )
+    object history = project.viewHistory.assert(object)
+    array keys = history.getKeys().toArray()
+    number today = (timestamp / 86400000).toInt()
+    number total = 0
+    for i keys.len (
+        string k = keys[i].toStr()
+        if today - k.toNum() < 7 (
+            total = total + history[k].toNum()
+        )
+    )
+    return total
 )
 
 def loadAssetsIndex() object (
@@ -38,7 +63,15 @@ def readFile(string path) object (
 )
 
 def writeFile(string path, object data) boolean (
-    return fs.writeFile(path, json.stringify(data))
+    string tmpPath = path ++ ".tmp." ++ randomString(8)
+    if !fs.writeFile(tmpPath, json.stringify(data)) (
+        return false
+    )
+    if !fs.rename(tmpPath, path) (
+        fs.remove(tmpPath)
+        return false
+    )
+    return true
 )
 
 def loadIndex() object (
@@ -71,7 +104,9 @@ def indexEntryFromProject(object project) object (
         shared: project.shared,
         created: project.created,
         edited: project.edited,
-        sharedAt: project.sharedAt
+        sharedAt: project.sharedAt,
+        sizeBytes: projectSizeBytes(project),
+        weekViews: weekViewsOf(project)
     }
 )
 

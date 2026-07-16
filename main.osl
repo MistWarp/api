@@ -4,6 +4,7 @@ import "osl/env"
 import "osl/json"
 import "osl/requests"
 import "osl/serve"
+import "osl/cache"
 import "osl/url"
 import "osl/s3"
 import "osl/zip"
@@ -62,11 +63,18 @@ string userSettingsDir = "data/usersettings/"
 string tmpDir = "data/tmp/"
 string stagingDir = "data/staging/"
 string thumbnailsDir = "data/thumbnails/"
+string quotaDir = "data/quota/"
+string userIdsFile = "data/userids.json"
+string adminsFile = "data/admins.json"
+string bansFile = "data/bans.json"
 
-number maxProjectJsonBytes = 20971520
+number maxProjectJsonBytes = 5242880
 number maxAssetBytes = 10485760
 number maxThumbBytes = 1048576
 number maxAssetCount = 2000
+number maxProjectAssetsBytes = 104857600
+number weeklyUploadQuotaBytes = 209715200
+number quotaWindowMs = 604800000
 number uploadDebounceMs = 86400000
 
 string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
@@ -80,6 +88,7 @@ string r2PublicBase = configValue("R2_PUBLIC_BASE", "")
 string giteaURL = configValue("GITEA_URL", "https://git.rotur.dev")
 string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
 string editorOrigin = configValue("EDITOR_ORIGIN", "https://warp.mistium.com")
+array corsAllowedOrigins = configValue("CORS_ORIGINS", editorOrigin ++ ",http://localhost:8601,http://localhost:8602").split(",")
 array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
 
 boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
@@ -95,6 +104,7 @@ auto r2Client = s3.new({
 
 import "./utils.osl"
 import "./storage.osl"
+import "./user-identity.osl"
 import "./r2.osl"
 import "./gitea.osl"
 import "./auth.osl"
@@ -104,10 +114,10 @@ import "./comments.osl"
 import "./social.osl"
 import "./pulls.osl"
 import "./reports.osl"
+import "./admin.osl"
 import "./notifications.osl"
 import "./news.osl"
 import "./settings.osl"
-import "./meta.osl"
 
 ensureDirectories()
 refreshIndexUrls()
@@ -121,6 +131,9 @@ if !r2Local and appURL == "http://localhost:5627" (
 sweepStagedProjects()
 cleanupExpiredSessions()
 
+auto viewDedup = cache.create(100000, 86400)
+auto userIdsCache = cache.create(10000, 300)
+
 *serve.Router app = serve.new()
 
 app.use(corsMiddleware)
@@ -131,14 +144,6 @@ app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
 if r2Local (
     app.static("/blobs", "./data/blobs")
 )
-
-app.GET("/", handleSiteMetaPage)
-app.GET("/explore", handleSiteMetaPage)
-app.GET("/news", handleSiteMetaPage)
-app.GET("/leaderboard", handleSiteMetaPage)
-app.GET("/project/:id", handleProjectMetaPage)
-app.GET("/users/:name", handleUserMetaPage)
-app.GET("/users/:name/followers", handleUserMetaPage)
 
 app.use(authMiddleware)
 
@@ -151,7 +156,6 @@ uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
 api.use(serve.maxBodySize(262144))
 
 api.GET("/health", handleHealth)
-api.GET("/oembed", handleOembed)
 api.POST("/auth", handleRoturAuth)
 api.GET("/me", handleGetMe)
 api.POST("/logout", handleLogout)
@@ -159,12 +163,14 @@ api.POST("/logout", handleLogout)
 api.GET("/notifications", requireAuth, handleGetNotifications)
 api.POST("/notifications/read", requireAuth, handleReadNotifications)
 
+api.GET("/me/quota", requireAuth, handleGetMyQuota)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
 
 api.GET("/explore", handleExplore)
 
 api.POST("/projects", requireAuth, handleCreateProject)
+api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
 api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id", handleGetProject)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
@@ -210,8 +216,17 @@ api.DELETE("/news/:id", requireAdmin, handleDeleteNews)
 api.POST("/news/:id/react", requireAuth, handleReactNews)
 
 api.POST("/report", requireAuth, handleCreateReport)
+api.POST("/reports", requireAuth, handleCreateReport)
+
 api.GET("/admin/reports", requireAdmin, handleGetReports)
 api.POST("/admin/reports/resolve", requireAdmin, handleResolveReport)
+api.POST("/admin/reports/action", requireAdmin, handleReportAction)
+api.GET("/admin/admins", requireAdmin, handleListAdmins)
+api.POST("/admin/admins", requireAdmin, handleAddAdmin)
+api.POST("/admin/admins/remove", requireAdmin, handleRemoveAdmin)
+api.GET("/admin/bans", requireAdmin, handleListBans)
+api.POST("/admin/ban", requireAdmin, handleBanUser)
+api.POST("/admin/unban", requireAdmin, handleUnbanUser)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

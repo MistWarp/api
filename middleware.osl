@@ -2,7 +2,9 @@ def corsMiddleware(*serve.Context c) (
     string origin = c.header("Origin")
     if origin != "" (
         c.setHeader("Access-Control-Allow-Origin", origin)
-        c.setHeader("Access-Control-Allow-Credentials", "true")
+        if corsAllowedOrigins.contains(origin) (
+            c.setHeader("Access-Control-Allow-Credentials", "true")
+        )
         c.setHeader("Vary", "Origin")
     )
     c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -25,7 +27,7 @@ def authMiddleware(*serve.Context c) (
     string token = requestToken(c)
     if token != "" (
         object session = getSession(token)
-        if session.ok == true (
+        if session.ok == true and !isBannedUser(session.username.toStr()) (
             authenticated = true
             username = session.username.toStr()
             isAdmin = isAdminUser(username)

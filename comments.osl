@@ -116,6 +116,10 @@ def handleCreateProjectComment(*serve.Context c) (
     )
 
     object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
     string parentId = ""
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
@@ -178,6 +182,10 @@ def handleCreateProfileComment(*serve.Context c) (
     )
 
     object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
     string parentId = ""
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()

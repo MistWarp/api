@@ -1,0 +1,217 @@
+def loadAdmins() array (
+    auto result = readFile(adminsFile)
+    if !result.ok (
+        return []
+    )
+    object data = result.data.assert(object)
+    return data.admins.assert(array)
+)
+
+def saveAdmins(array admins) boolean (
+    return writeFile(adminsFile, {admins: admins})
+)
+
+def loadBans() object (
+    auto result = readFile(bansFile)
+    if !result.ok (
+        return {bans: {}}
+    )
+    return result.data.assert(object)
+)
+
+def saveBans(object data) boolean (
+    return writeFile(bansFile, data)
+)
+
+def isBannedUser(string username) boolean (
+    string key = normalizeUsername(username)
+    if key == "" (
+        return false
+    )
+    object data = loadBans()
+    object bans = data.bans
+    return bans.contains(key)
+)
+
+def banUser(string username, string reason, string actor) boolean (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return false
+    )
+    object data = loadBans()
+    object bans = data.bans
+    bans[key] = {reason: reason, by: actor, created: timestamp}
+    return saveBans(data)
+)
+
+def unbanUser(string username) boolean (
+    string key = normalizeUsername(username)
+    object data = loadBans()
+    object bans = data.bans
+    if !bans.contains(key) (
+        return false
+    )
+    bans.delete(key)
+    return saveBans(data)
+)
+
+def isSuperAdmin(string username) boolean (
+    return adminUsers.contains(normalizeUsername(username))
+)
+
+def handleListAdmins(*serve.Context c) (
+    array stored = loadAdmins()
+    array all = []
+    for i adminUsers.len (
+        all.append({username: adminUsers[i], super: true})
+    )
+    for i stored.len (
+        string name = stored[i].toStr()
+        if !adminUsers.contains(normalizeUsername(name)) (
+            all.append({username: name, super: false})
+        )
+    )
+    c.json(200, {ok: true, admins: all})
+)
+
+def handleAddAdmin(*serve.Context c) (
+    if !isSuperAdmin(c.getString("username")) (
+        c.forbidden("only super admins can manage admins")
+        return
+    )
+    object body = c.bodyJSON()
+    string name = normalizeUsername(body.username.toStr())
+    if !isSafePathPart(name) (
+        c.badRequest("invalid username")
+        return
+    )
+    array admins = loadAdmins()
+    if admins.contains(name) (
+        c.json(200, {ok: true})
+        return
+    )
+    admins.append(name)
+    saveAdmins(admins)
+    c.json(200, {ok: true})
+)
+
+def handleRemoveAdmin(*serve.Context c) (
+    if !isSuperAdmin(c.getString("username")) (
+        c.forbidden("only super admins can manage admins")
+        return
+    )
+    object body = c.bodyJSON()
+    string name = normalizeUsername(body.username.toStr())
+    array admins = loadAdmins()
+    if !admins.contains(name) (
+        c.notFound("not an admin")
+        return
+    )
+    saveAdmins(removeString(admins, name))
+    c.json(200, {ok: true})
+)
+
+def handleBanUser(*serve.Context c) (
+    object body = c.bodyJSON()
+    string name = body.username.toStr()
+    string reason = ""
+    if body.contains("reason") and body.reason != null (
+        reason = body.reason.toStr().strip()
+    )
+    if normalizeUsername(name) == "" (
+        c.badRequest("username is required")
+        return
+    )
+    if isAdminUser(name) (
+        c.badRequest("cannot ban an admin")
+        return
+    )
+    if !banUser(name, reason, c.getString("username")) (
+        c.badRequest("could not ban that user")
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleUnbanUser(*serve.Context c) (
+    object body = c.bodyJSON()
+    if !unbanUser(body.username.toStr()) (
+        c.notFound("that user is not banned")
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleListBans(*serve.Context c) (
+    object data = loadBans()
+    object bans = data.bans
+    array keys = bans.getKeys().toArray()
+    array out = []
+    for i keys.len (
+        string key = keys[i].toStr()
+        object ban = bans[key]
+        out.append({username: key, reason: ban.reason, by: ban.by, created: ban.created})
+    )
+    c.json(200, {ok: true, bans: out})
+)
+
+def handleReportAction(*serve.Context c) (
+    object body = c.bodyJSON()
+    string id = body.id.toStr()
+    string action = body.action.toStr()
+    if action != "dismiss" and action != "unshare_project" and action != "ban_user" (
+        c.badRequest("invalid action")
+        return
+    )
+
+    array reports = loadReports()
+    object found = {}
+    boolean hasReport = false
+    for i reports.len (
+        object report = reports[i]
+        if report.id.toStr() == id (
+            found = report
+            hasReport = true
+        )
+    )
+    if !hasReport (
+        c.notFound("report not found")
+        return
+    )
+
+    if action == "unshare_project" (
+        auto result = loadProject(found.target.toStr())
+        if !result.ok (
+            c.notFound("project not found")
+            return
+        )
+        object project = result.project.assert(object)
+        project.shared = false
+        project.viewKey = randomString(16)
+        project.edited = timestamp
+        saveProject(project)
+        upsertIndexEntry(project)
+    )
+    if action == "ban_user" (
+        string name = found.target.toStr()
+        if found.type.toStr() == "project" (
+            auto result = loadProject(found.target.toStr())
+            if result.ok (
+                object project = result.project.assert(object)
+                name = project.owner.toStr()
+            )
+        )
+        if isAdminUser(name) (
+            c.badRequest("cannot ban an admin")
+            return
+        )
+        banUser(name, "report " ++ id, c.getString("username"))
+    )
+
+    found.resolved = true
+    found.resolvedBy = c.getString("username")
+    found.action = action
+    found.resolvedAt = timestamp
+    saveReports(reports)
+    c.json(200, {ok: true})
+)

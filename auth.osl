@@ -31,7 +31,13 @@ def getSession(string token) object (
         fs.remove(path)
         return {ok: false, error: "session expired"}
     )
-    return {ok: true, username: session.username.toStr(), userId: session.userId.toStr()}
+    string username = session.username.toStr()
+    string userId = session.userId.toStr()
+    string mapped = usernameForId(userId)
+    if mapped != "" (
+        username = mapped
+    )
+    return {ok: true, username: username, userId: userId}
 )
 
 def deleteSession(string token) boolean (
@@ -64,7 +70,11 @@ def requestToken(*serve.Context c) string (
 )
 
 def isAdminUser(string username) boolean (
-    return adminUsers.contains(normalizeUsername(username))
+    string key = normalizeUsername(username)
+    if adminUsers.contains(key) (
+        return true
+    )
+    return loadAdmins().contains(key)
 )
 
 def handleRoturAuth(*serve.Context c) (
@@ -100,7 +110,15 @@ def handleRoturAuth(*serve.Context c) (
     string userId = data.id.toStr()
     string username = data.username.toStr()
 
+    ensureUserIdentity(userId, username)
+
+    if isBannedUser(username) (
+        c.json(403, {ok: false, error: "This account is banned from MistWarp."})
+        return
+    )
+
     object profile = loadProfile(username)
+    profile.username = username
     saveProfile(profile)
 
     string sessionId = createSession(username, userId)

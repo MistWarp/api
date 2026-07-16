@@ -25,6 +25,24 @@ def canViewProject(object project, *serve.Context c) boolean (
     return canEditProject(project, c)
 )
 
+def canViewProjectJson(object project, *serve.Context c) boolean (
+    if project.shared == true (
+        return true
+    )
+    string k = projectViewKey(project)
+    if k != "" and c.query("k") == k (
+        return true
+    )
+    return canEditProject(project, c)
+)
+
+def ensureViewKey(object project) (
+    if project.shared != true and projectViewKey(project) == "" (
+        project.viewKey = randomString(16)
+        saveProject(project)
+    )
+)
+
 def projectResponse(object project, *serve.Context c) object (
     array loves = project.loves.assert(array)
     array broken = []
@@ -75,8 +93,14 @@ def projectResponse(object project, *serve.Context c) object (
         brokenHeartCount: broken.len,
         myReaction: myReaction,
         commentsOff: commentsOff,
+        sizeBytes: projectSizeBytes(project),
         isOwner: canEditProject(project, c)
     }
+)
+
+def handleGetMyQuota(*serve.Context c) (
+    string username = c.getString("username")
+    c.json(200, {ok: true, used: weeklyUploadedBytes(username), limit: weeklyUploadQuotaBytes, windowMs: quotaWindowMs})
 )
 
 def handleCreateProject(*serve.Context c) (
@@ -117,6 +141,7 @@ def handleCreateProject(*serve.Context c) (
         instructions: "",
         repo: null,
         jsonKey: projectJsonKey(id),
+        viewKey: randomString(16),
         created: timestamp,
         edited: timestamp,
         sharedAt: 0,
@@ -137,6 +162,95 @@ def handleCreateProject(*serve.Context c) (
     upsertIndexEntry(project)
 
     c.json(201, {ok: true, id: id})
+)
+
+def quotaPath(string username) string (
+    return quotaDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def weeklyUploadedBytes(string username) number (
+    auto result = readFile(quotaPath(username))
+    if !result.ok (
+        return 0
+    )
+    object data = result.data.assert(object)
+    array events = data.events.assert(array)
+    number total = 0
+    for i events.len (
+        object event = events[i]
+        if timestamp - event.t.toNum() < quotaWindowMs (
+            total = total + event.bytes.toNum()
+        )
+    )
+    return total
+)
+
+def recordUploadBytes(string username, number bytes) (
+    array events = []
+    auto result = readFile(quotaPath(username))
+    if result.ok (
+        object data = result.data.assert(object)
+        array old = data.events.assert(array)
+        for i old.len (
+            object event = old[i]
+            if timestamp - event.t.toNum() < quotaWindowMs (
+                events.append(event)
+            )
+        )
+    )
+    events.append({t: timestamp, bytes: bytes})
+    writeFile(quotaPath(username), {events: events})
+)
+
+def assetNameOf(object item) string (
+    if item.contains("md5ext") and item.md5ext != null (
+        string name = item.md5ext.toStr()
+        if isValidMd5Ext(name) (
+            return name
+        )
+    )
+    if item.contains("assetId") and item.assetId != null and item.contains("dataFormat") and item.dataFormat != null (
+        string name = item.assetId.toStr() ++ "." ++ item.dataFormat.toStr()
+        if isValidMd5Ext(name) (
+            return name
+        )
+    )
+    return ""
+)
+
+def referencedAssetNames(string projectJson) object (
+    auto parsed = json.parse(projectJson, {type: "object"})
+    if parsed.isErr() (
+        return {ok: false}
+    )
+    object data = parsed.unwrap().assert(object)
+    if !data.contains("targets") or data.targets == null (
+        return {ok: false}
+    )
+    object names = {}
+    array targets = data.targets.assert(array)
+    for t targets.len (
+        object target = targets[t]
+        if target.contains("costumes") and target.costumes != null (
+            array costumes = target.costumes.assert(array)
+            for i costumes.len (
+                string name = assetNameOf(costumes[i].assert(object))
+                if name != "" (
+                    names[name] = true
+                )
+            )
+        )
+        if target.contains("sounds") and target.sounds != null (
+            array sounds = target.sounds.assert(array)
+            for i sounds.len (
+                string name = assetNameOf(sounds[i].assert(object))
+                if name != "" (
+                    names[name] = true
+                )
+            )
+        )
+    )
+    return {ok: true, names: names}
 )
 
 def uploadProjectFiles(object project, string extractDir) object (
@@ -200,7 +314,41 @@ def uploadProjectFiles(object project, string extractDir) object (
         saveAssetsIndex(assetsIndex)
     )
 
-    return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, projectJson: projectJson}
+    object referenced = referencedAssetNames(projectJson)
+    if !referenced.ok (
+        return {ok: false, error: "invalid project.json", status: 400}
+    )
+    object providedSet = {}
+    for i projectAssets.len (
+        providedSet[projectAssets[i].toStr()] = true
+    )
+    object referencedNames = referenced.names.assert(object)
+    array referencedList = referencedNames.getKeys().toArray()
+    for i referencedList.len (
+        string name = referencedList[i].toStr()
+        if !providedSet.contains(name) (
+            if !knownAssets.contains(name) (
+                return {ok: false, error: "missing asset: " ++ name, status: 400}
+            )
+            projectAssets.append(name)
+        )
+    )
+    if projectAssets.len > maxAssetCount (
+        return {ok: false, error: "too many assets", status: 400}
+    )
+
+    number assetBytes = 0
+    for i projectAssets.len (
+        string name = projectAssets[i].toStr()
+        if knownAssets.contains(name) (
+            assetBytes = assetBytes + knownAssets[name].toNum()
+        )
+    )
+    if assetBytes > maxProjectAssetsBytes (
+        return {ok: false, error: "project assets exceed the 100 MB limit", status: 413}
+    )
+
+    return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, projectJson: projectJson, assetBytes: assetBytes}
 )
 
 def pushProjectJsonToR2(object project, string projectJson) boolean (
@@ -212,7 +360,16 @@ def pushProjectJsonToR2(object project, string projectJson) boolean (
 )
 
 def stageProjectJson(object project, string projectJson) boolean (
-    return fs.writeFile(stagingJsonPath(project.id.toStr()), projectJson)
+    string path = stagingJsonPath(project.id.toStr())
+    string tmpPath = path ++ ".tmp." ++ randomString(8)
+    if !fs.writeFile(tmpPath, projectJson) (
+        return false
+    )
+    if !fs.rename(tmpPath, path) (
+        fs.remove(tmpPath)
+        return false
+    )
+    return true
 )
 
 def maybeFlushProject(object project) (
@@ -262,6 +419,43 @@ def currentProjectJson(object project) string (
     return ""
 )
 
+def handleCheckProjectAssets(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("assets") or body.assets == null (
+        c.badRequest("assets list is required")
+        return
+    )
+    array requested = body.assets.assert(array)
+    if requested.len > maxAssetCount (
+        c.badRequest("too many assets")
+        return
+    )
+    object assetsIndex = loadAssetsIndex()
+    object knownAssets = assetsIndex.assets
+    array missing = []
+    for i requested.len (
+        string name = requested[i].toStr()
+        if !isValidMd5Ext(name) (
+            c.badRequest("invalid asset name: " ++ name)
+            return
+        )
+        if !knownAssets.contains(name) (
+            missing.append(name)
+        )
+    )
+    c.json(200, {ok: true, missing: missing})
+)
+
 def handleUploadProject(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok (
@@ -280,6 +474,17 @@ def handleUploadProject(*serve.Context c) (
         return
     )
     object file = fileResult.unwrap().assert(object)
+
+    string uploader = normalizeUsername(c.getString("username"))
+    number incomingBytes = file.size.toNum()
+    if !c.getBool("isAdmin") (
+        number usedBytes = weeklyUploadedBytes(uploader)
+        if usedBytes + incomingBytes > weeklyUploadQuotaBytes (
+            number usedMb = (usedBytes / 1048576).toInt()
+            c.json(413, {ok: false, error: "Weekly upload limit reached (" ++ usedMb.toStr() ++ " of 200 MB used). It frees up as uploads from the past 7 days age out."})
+            return
+        )
+    )
 
     string id = project.id.toStr()
     string zipPath = tmpDir ++ id ++ ".sb3"
@@ -313,6 +518,8 @@ def handleUploadProject(*serve.Context c) (
     project.edited = timestamp
 
     string projectJson = uploadResult.projectJson.toStr()
+    project.sizeBytes = uploadResult.assetBytes.toNum() + projectJson.len
+    recordUploadBytes(uploader, incomingBytes)
     number lastUploadAt = project.lastUploadAt.toNum()
     boolean flushed = false
     if lastUploadAt == 0 or timestamp - lastUploadAt >= uploadDebounceMs (
@@ -381,6 +588,7 @@ def handleGetProject(*serve.Context c) (
         c.notFound("project not found")
         return
     )
+    ensureViewKey(project)
     maybeFlushProject(project)
     c.json(200, {ok: true, project: projectResponse(project, c)})
 )
@@ -392,6 +600,10 @@ def handleGetProjectJson(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
+    if !canViewProjectJson(project, c) (
+        c.notFound("project not found")
+        return
+    )
     string projectJson = currentProjectJson(project)
     if projectJson == "" (
         c.notFound("project file not found")
@@ -593,6 +805,7 @@ def handleUnpublishProject(*serve.Context c) (
 
     project.shared = false
     project.edited = timestamp
+    project.viewKey = randomString(16)
     saveProject(project)
     upsertIndexEntry(project)
     object profile = loadProfile(project.owner.toStr())
@@ -614,11 +827,41 @@ def handleViewProject(*serve.Context c) (
         c.json(200, {ok: true})
         return
     )
-    if normalizeUsername(c.getString("username")) == normalizeUsername(project.owner.toStr()) (
+    string viewer = normalizeUsername(c.getString("username"))
+    if viewer != "" and viewer == normalizeUsername(project.owner.toStr()) (
         c.json(200, {ok: true})
         return
     )
+    string dedupKey = project.id.toStr() ++ "|" ++ viewer
+    if viewer == "" (
+        dedupKey = project.id.toStr() ++ "|ip:" ++ c.ip()
+    )
+    if viewDedup.has(dedupKey) (
+        c.json(200, {ok: true})
+        return
+    )
+    viewDedup.set(dedupKey, true)
     project.views = project.views.toNum() + 1
+    object history = {}
+    if project.contains("viewHistory") and project.viewHistory != null (
+        history = project.viewHistory.assert(object)
+    )
+    number today = (timestamp / 86400000).toInt()
+    string dayKey = today.toStr()
+    number dayCount = 0
+    if history.contains(dayKey) (
+        dayCount = history[dayKey].toNum()
+    )
+    object pruned = {}
+    array dayKeys = history.getKeys().toArray()
+    for i dayKeys.len (
+        string k = dayKeys[i].toStr()
+        if today - k.toNum() < 14 (
+            pruned[k] = history[k]
+        )
+    )
+    pruned[dayKey] = dayCount + 1
+    project.viewHistory = pruned
     saveProject(project)
     upsertIndexEntry(project)
     c.json(200, {ok: true})
@@ -689,10 +932,12 @@ def sharedIndexEntries() array (
     object index = loadIndex()
     object projects = index.projects
     array keys = projects.getKeys().toArray()
+    object banData = loadBans()
+    object bans = banData.bans
     array entries = []
     for i keys.len (
         object entry = projects[keys[i].toStr()]
-        if entry.shared == true (
+        if entry.shared == true and !bans.contains(normalizeUsername(entry.owner.toStr())) (
             entries.append(hydrateIndexEntry(entry))
         )
     )
@@ -720,8 +965,11 @@ def handleExplore(*serve.Context c) (
     ) else if sort == "trending" (
         for i entries.len (
             object entry = entries[i]
-            number ageDays = (timestamp - entry.sharedAt.toNum()) / 86400000
-            entry.score = (entry.loveCount.toNum() + (entry.views.toNum() / 20)) / (1 + (ageDays / 7))
+            number weekViews = 0
+            if entry.contains("weekViews") and entry.weekViews != null (
+                weekViews = entry.weekViews.toNum()
+            )
+            entry.score = weekViews
         )
         entries.sortBy("score", "descending")
     ) else (
@@ -824,8 +1072,13 @@ def handleRemixProject(*serve.Context c) (
     string id = generateId()
 
     string parentJson = currentProjectJson(parent)
-    if parentJson != "" (
-        r2Put(projectJsonKey(id), parentJson, "application/json")
+    if parentJson == "" (
+        c.internalError("could not copy the original project, try again")
+        return
+    )
+    if !r2Put(projectJsonKey(id), parentJson, "application/json") (
+        c.internalError("could not copy the original project, try again")
+        return
     )
 
     object project = {
@@ -836,6 +1089,7 @@ def handleRemixProject(*serve.Context c) (
         instructions: "",
         repo: null,
         jsonKey: projectJsonKey(id),
+        viewKey: randomString(16),
         created: timestamp,
         edited: timestamp,
         sharedAt: 0,

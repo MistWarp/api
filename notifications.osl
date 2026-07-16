@@ -52,14 +52,7 @@ def addNotification(string target, string actor, string notifType, object extra)
 
 def handleGetNotifications(*serve.Context c) (
     string username = c.getString("username")
-    array items = loadNotifications(username)
-    array page = []
-    for i items.len (
-        if i <= 30 (
-            page.append(items[i])
-        )
-    )
-    c.json(200, {ok: true, notifications: page})
+    c.json(200, {ok: true, notifications: loadNotifications(username)})
 )
 
 def handleReadNotifications(*serve.Context c) (

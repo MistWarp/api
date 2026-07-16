@@ -1,0 +1,224 @@
+def loadUserIds() object (
+    auto result = readFile(userIdsFile)
+    if !result.ok (
+        return {users: {}}
+    )
+    return result.data.assert(object)
+)
+
+def saveUserIds(object data) boolean (
+    return writeFile(userIdsFile, data)
+)
+
+def replaceUserInArray(array items, string oldKey, string newKey) array (
+    array next = []
+    for i items.len (
+        string value = items[i].toStr()
+        if normalizeUsername(value) == oldKey (
+            next.append(newKey)
+        ) else (
+            next.append(value)
+        )
+    )
+    return next
+)
+
+def renameUserFile(string dir, string oldKey, string newKey) (
+    if oldKey != newKey and fs.exists(dir ++ oldKey ++ ".json") (
+        fs.rename(dir ++ oldKey ++ ".json", dir ++ newKey ++ ".json")
+    )
+)
+
+def renameUserInProfiles(string oldKey, string newKey, string newName) (
+    renameUserFile(usersDir, oldKey, newKey)
+    object profile = loadProfile(newName)
+    profile.username = newName
+    saveProfile(profile)
+    array files = fs.readDir(usersDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") and name != newKey ++ ".json" (
+            auto result = readFile(usersDir ++ name)
+            if result.ok (
+                object other = result.data.assert(object)
+                boolean changed = false
+                array followers = other.followers.assert(array)
+                if followers.contains(oldKey) (
+                    other.followers = replaceUserInArray(followers, oldKey, newKey)
+                    changed = true
+                )
+                array following = other.following.assert(array)
+                if following.contains(oldKey) (
+                    other.following = replaceUserInArray(following, oldKey, newKey)
+                    changed = true
+                )
+                if changed (
+                    writeFile(usersDir ++ name, other)
+                )
+            )
+        )
+    )
+)
+
+def renameUserInProjects(string oldKey, string newKey, string newName) (
+    array files = fs.readDir(projectsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = loadProject(name.replace(".json", ""))
+            if result.ok (
+                object project = result.project.assert(object)
+                boolean changed = false
+                if normalizeUsername(project.owner.toStr()) == oldKey (
+                    project.owner = newName
+                    changed = true
+                )
+                array loves = project.loves.assert(array)
+                if loves.contains(oldKey) (
+                    project.loves = replaceUserInArray(loves, oldKey, newKey)
+                    changed = true
+                )
+                if project.contains("brokenhearts") and project.brokenhearts != null (
+                    array broken = project.brokenhearts.assert(array)
+                    if broken.contains(oldKey) (
+                        project.brokenhearts = replaceUserInArray(broken, oldKey, newKey)
+                        changed = true
+                    )
+                )
+                if changed (
+                    saveProject(project)
+                    upsertIndexEntry(project)
+                )
+            )
+        )
+    )
+)
+
+def renameUserInComments(string oldKey, string newKey, string newName) (
+    if oldKey != newKey (
+        renameUserFile(commentsDir, "profile-" ++ oldKey, "profile-" ++ newKey)
+        if fs.exists(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl") (
+            fs.rename(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl", commentsDir ++ "profile-" ++ newKey ++ ".jsonl")
+        )
+    )
+    array files = fs.readDir(commentsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        string key = name.replace(".jsonl", "").replace(".json", "")
+        array comments = loadComments(key)
+        boolean changed = false
+        for j comments.len (
+            object comment = comments[j]
+            if normalizeUsername(comment.author.toStr()) == oldKey (
+                comment.author = newName
+                changed = true
+            )
+        )
+        if changed (
+            saveComments(key, comments)
+        )
+    )
+)
+
+def renameUserInNotifications(string oldKey, string newKey, string newName) (
+    renameUserFile(notificationsDir, oldKey, newKey)
+    array files = fs.readDir(notificationsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = readFile(notificationsDir ++ name)
+            if result.ok (
+                object data = result.data.assert(object)
+                array items = data.items.assert(array)
+                boolean changed = false
+                for j items.len (
+                    object item = items[j]
+                    if item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == oldKey (
+                        item.actor = newName
+                        changed = true
+                    )
+                )
+                if changed (
+                    writeFile(notificationsDir ++ name, data)
+                )
+            )
+        )
+    )
+)
+
+def renameUserInActivity(string oldKey, string newKey) (
+    renameUserFile(activityDir, oldKey, newKey)
+    string path = activityDir ++ newKey ++ ".json"
+    auto result = readFile(path)
+    if result.ok (
+        object data = result.data.assert(object)
+        array items = data.items.assert(array)
+        for i items.len (
+            object item = items[i]
+            if normalizeUsername(item.actor.toStr()) == oldKey (
+                item.actor = newKey
+            )
+        )
+        writeFile(path, data)
+    )
+)
+
+def renameUser(string oldName, string newName) (
+    string oldKey = normalizeUsername(oldName)
+    string newKey = normalizeUsername(newName)
+    if !isSafePathPart(oldKey) or !isSafePathPart(newKey) (
+        return
+    )
+    renameUserInProfiles(oldKey, newKey, newName)
+    renameUserInProjects(oldKey, newKey, newName)
+    renameUserInComments(oldKey, newKey, newName)
+    renameUserInNotifications(oldKey, newKey, newName)
+    renameUserInActivity(oldKey, newKey)
+    renameUserFile(userSettingsDir, oldKey, newKey)
+    renameUserFile(quotaDir, oldKey, newKey)
+    array admins = loadAdmins()
+    if admins.contains(oldKey) (
+        saveAdmins(replaceUserInArray(admins, oldKey, newKey))
+    )
+    object banData = loadBans()
+    object bans = banData.bans
+    if bans.contains(oldKey) (
+        bans[newKey] = bans[oldKey]
+        bans.delete(oldKey)
+        saveBans(banData)
+    )
+)
+
+def ensureUserIdentity(string userId, string username) (
+    if userId == "" or username == "" (
+        return
+    )
+    object data = loadUserIds()
+    object users = data.users
+    string current = ""
+    if users.contains(userId) (
+        current = users[userId].toStr()
+    )
+    if current != "" and current != username (
+        renameUser(current, username)
+    )
+    if current != username (
+        users[userId] = username
+        saveUserIds(data)
+        userIdsCache.set(userId, username)
+    )
+)
+
+def usernameForId(string userId) string (
+    if userIdsCache.has(userId) (
+        return userIdsCache.get(userId).toStr()
+    )
+    object data = loadUserIds()
+    object users = data.users
+    if users.contains(userId) (
+        string name = users[userId].toStr()
+        userIdsCache.set(userId, name)
+        return name
+    )
+    return ""
+)
