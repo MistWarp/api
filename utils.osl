@@ -19,6 +19,17 @@ def normalizeUsername(string username) string (
     return username.toLower().strip()
 )
 
+def normalizeTag(string raw) string (
+    string t = raw.toLower().strip().replace("#", "").replace(" ", "-")
+    if t == "" or t.len > 30 (
+        return ""
+    )
+    if !regex.match("^[a-z0-9-]+$", t) (
+        return ""
+    )
+    return t
+)
+
 def isValidMd5Ext(string name) boolean (
     return regex.match("^[0-9a-f]{32}\\.[0-9a-zA-Z]{1,5}$", name)
 )

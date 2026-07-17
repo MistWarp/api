@@ -69,10 +69,15 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("commentsOff") and project.commentsOff == true (
         commentsOff = true
     )
+    array tags = []
+    if project.contains("tags") and project.tags != null (
+        tags = project.tags.assert(array)
+    )
     return {
         id: project.id,
         owner: project.owner,
         title: project.title,
+        tags: tags,
         description: project.description,
         instructions: project.instructions,
         notes: notes,
@@ -152,7 +157,8 @@ def handleCreateProject(*serve.Context c) (
         views: 0,
         loves: [],
         brokenhearts: [],
-        assets: []
+        assets: [],
+        tags: []
     }
 
     if !saveProject(project) (
@@ -678,6 +684,19 @@ def handleUpdateProject(*serve.Context c) (
     if body.contains("commentsOff") (
         project.commentsOff = body.commentsOff == true
     )
+    if body.contains("tags") (
+        array incoming = body.tags.assert(array)
+        array tags = []
+        for i incoming.len (
+            if tags.len < 10 (
+                string t = normalizeTag(incoming[i].toStr())
+                if t != "" and !tags.contains(t) (
+                    tags.append(t)
+                )
+            )
+        )
+        project.tags = tags
+    )
 
     project.edited = timestamp
     saveProject(project)
@@ -730,6 +749,18 @@ def deleteOrphanedAssets(object project) (
     )
 )
 
+def purgeProject(object project) (
+    string id = project.id.toStr()
+    deleteProjectFile(id)
+    removeFromIndex(id)
+    fs.remove(stagingJsonPath(id))
+    fs.remove(thumbnailPath(id))
+    fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
+    fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
+    r2Remove(project.jsonKey.toStr())
+    deleteOrphanedAssets(project)
+)
+
 def handleDeleteProject(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok (
@@ -746,15 +777,7 @@ def handleDeleteProject(*serve.Context c) (
         return
     )
 
-    string id = project.id.toStr()
-    deleteProjectFile(id)
-    removeFromIndex(id)
-    fs.remove(stagingJsonPath(id))
-    fs.remove(thumbnailPath(id))
-    fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
-    fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
-    r2Remove(project.jsonKey.toStr())
-    deleteOrphanedAssets(project)
+    purgeProject(project)
     c.json(200, {ok: true})
 )
 
@@ -948,11 +971,38 @@ def handleExplore(*serve.Context c) (
     array entries = sharedIndexEntries()
 
     string q = c.query("q").toLower().strip()
-    if q != "" (
+    string tag = c.query("tag").toLower().strip()
+    if q.startsWith("#") (
+        tag = normalizeTag(q)
+        q = ""
+    )
+    if tag != "" (
         array filtered = []
         for i entries.len (
             object entry = entries[i]
-            if entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q) (
+            array tags = []
+            if entry.contains("tags") and entry.tags != null (
+                tags = entry.tags.assert(array)
+            )
+            if tags.contains(tag) (
+                filtered.append(entry)
+            )
+        )
+        entries = filtered
+    ) else if q != "" (
+        array filtered = []
+        for i entries.len (
+            object entry = entries[i]
+            boolean match = entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q)
+            if !match and entry.contains("tags") and entry.tags != null (
+                array tags = entry.tags.assert(array)
+                for j tags.len (
+                    if tags[j].toStr().contains(q) (
+                        match = true
+                    )
+                )
+            )
+            if match (
                 filtered.append(entry)
             )
         )

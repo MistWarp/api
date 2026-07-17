@@ -92,6 +92,10 @@ def indexEntryFromProject(object project) object (
     if project.contains("brokenhearts") (
         broken = project.brokenhearts.assert(array)
     )
+    array tags = []
+    if project.contains("tags") and project.tags != null (
+        tags = project.tags.assert(array)
+    )
     return {
         id: project.id,
         owner: project.owner,
@@ -106,7 +110,8 @@ def indexEntryFromProject(object project) object (
         edited: project.edited,
         sharedAt: project.sharedAt,
         sizeBytes: projectSizeBytes(project),
-        weekViews: weekViewsOf(project)
+        weekViews: weekViewsOf(project),
+        tags: tags
     }
 )
 

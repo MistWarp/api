@@ -23,7 +23,7 @@ def standingRecoverMs(string level) number (
 
 def nextRecoveryLevel(string level) string (
     if level == "suspended" (
-        return "warning"
+        return "good"
     )
     if level == "warning" (
         return "good"

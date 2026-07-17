@@ -155,6 +155,114 @@ def handleListBans(*serve.Context c) (
     c.json(200, {ok: true, bans: out})
 )
 
+def handleAdminStats(*serve.Context c) (
+    object index = loadIndex()
+    object projects = index.projects
+    array keys = projects.getKeys().toArray()
+    number totalProjects = keys.len
+    number sharedProjects = 0
+    number totalBytes = 0
+    number totalViews = 0
+    number totalLoves = 0
+    object projectsByDay = {}
+    for i keys.len (
+        object entry = projects[keys[i].toStr()]
+        if entry.shared == true (
+            sharedProjects = sharedProjects + 1
+        )
+        if entry.contains("sizeBytes") and entry.sizeBytes != null (
+            totalBytes = totalBytes + entry.sizeBytes.toNum()
+        )
+        if entry.contains("views") and entry.views != null (
+            totalViews = totalViews + entry.views.toNum()
+        )
+        if entry.contains("loveCount") and entry.loveCount != null (
+            totalLoves = totalLoves + entry.loveCount.toNum()
+        )
+        string dk = (entry.created.toNum() / 86400000).toInt().toStr()
+        number prev = 0
+        if projectsByDay.contains(dk) (
+            prev = projectsByDay[dk].toNum()
+        )
+        projectsByDay[dk] = prev + 1
+    )
+    array userFiles = fs.readDir(usersDir).toArray()
+    number totalUsers = 0
+    for i userFiles.len (
+        if userFiles[i].toStr().endsWith(".json") (
+            totalUsers = totalUsers + 1
+        )
+    )
+    array sessionFiles = fs.readDir(sessionsDir).toArray()
+    object loginsByDay = {}
+    number activeSessions = 0
+    for i sessionFiles.len (
+        string sf = sessionFiles[i].toStr()
+        if sf.endsWith(".json") (
+            auto res = readFile(sessionsDir ++ sf)
+            if res.ok (
+                object s = res.data.assert(object)
+                activeSessions = activeSessions + 1
+                string dk = (s.createdAt.toNum() / 86400000).toInt().toStr()
+                number prev = 0
+                if loginsByDay.contains(dk) (
+                    prev = loginsByDay[dk].toNum()
+                )
+                loginsByDay[dk] = prev + 1
+            )
+        )
+    )
+    array reports = loadReports()
+    number openReports = 0
+    for i reports.len (
+        object r = reports[i]
+        boolean isResolved = r.contains("resolved") and r.resolved == true
+        if !isResolved (
+            openReports = openReports + 1
+        )
+    )
+    object banData = loadBans()
+    object bans = banData.bans
+    number bannedUsers = bans.getKeys().toArray().len
+    array news = loadNews()
+    c.json(200, {
+        ok: true,
+        totalProjects: totalProjects,
+        sharedProjects: sharedProjects,
+        unsharedProjects: totalProjects - sharedProjects,
+        totalUsers: totalUsers,
+        totalBytes: totalBytes,
+        totalViews: totalViews,
+        totalLoves: totalLoves,
+        activeSessions: activeSessions,
+        openReports: openReports,
+        bannedUsers: bannedUsers,
+        newsPosts: news.len,
+        projectsByDay: projectsByDay,
+        loginsByDay: loginsByDay
+    })
+)
+
+def handleAdminSearchProjects(*serve.Context c) (
+    string q = c.query("q").toLower().strip()
+    object index = loadIndex()
+    object projects = index.projects
+    array keys = projects.getKeys().toArray()
+    array matches = []
+    for i keys.len (
+        object entry = projects[keys[i].toStr()]
+        string hay = (entry.title.toStr() ++ " " ++ entry.owner.toStr() ++ " " ++ entry.id.toStr()).toLower()
+        if q == "" or hay.contains(q) (
+            matches.append(hydrateIndexEntry(entry))
+        )
+    )
+    matches.sortBy("edited", "descending")
+    if matches.len > 60 (
+        matches = matches.trim(1, 60)
+    )
+    c.json(200, {ok: true, projects: matches})
+)
+
 def reportTargetUser(object found) string (
     string name = found.target.toStr()
     if found.type.toStr() == "project" (
@@ -220,6 +328,12 @@ def handleReportAction(*serve.Context c) (
             return
         )
         setStanding(name, "warning", "report " ++ id, c.getString("username"))
+        if found.type.toStr() == "project" (
+            auto pr = loadProject(found.target.toStr())
+            if pr.ok (
+                purgeProject(pr.project.assert(object))
+            )
+        )
     )
 
     found.resolved = true
@@ -227,5 +341,6 @@ def handleReportAction(*serve.Context c) (
     found.action = action
     found.resolvedAt = timestamp
     saveReports(reports)
+    addNotification(found.reporter.toStr(), c.getString("username"), "report_update", {action: action, reportType: found.type})
     c.json(200, {ok: true})
 )
