@@ -64,6 +64,13 @@ def handleCreateNews(*serve.Context c) (
         next.append(items[i])
     )
     saveNews(next)
+    array userFiles = fs.readDir(usersDir).toArray()
+    for i userFiles.len (
+        string f = userFiles[i].toStr()
+        if f.endsWith(".json") (
+            addNotification(f.replace(".json", ""), item.author.toStr(), "news", {newsId: item.id, title: item.title})
+        )
+    )
     c.json(201, {ok: true, item: item})
 )
 

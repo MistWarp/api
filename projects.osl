@@ -741,7 +741,7 @@ def handleDeleteProject(*serve.Context c) (
         c.forbidden("not your project")
         return
     )
-    if project.shared == true (
+    if project.shared == true and !c.getBool("isAdmin") (
         c.badRequest("unshare the project before deleting it")
         return
     )

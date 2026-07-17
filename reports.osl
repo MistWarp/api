@@ -35,6 +35,9 @@ def handleCreateReport(*serve.Context c) (
         created: timestamp,
         resolved: false
     }
+    if body.contains("context") and body.context != null (
+        report.context = body.context.toStr()
+    )
     array reports = loadReports()
     reports.append(report)
     saveReports(reports)

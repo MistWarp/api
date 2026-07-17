@@ -117,6 +117,7 @@ import "./reports.osl"
 import "./admin.osl"
 import "./notifications.osl"
 import "./news.osl"
+import "./standing.osl"
 import "./settings.osl"
 
 ensureDirectories()
@@ -175,7 +176,7 @@ api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id", handleGetProject)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
-api.POST("/projects/:id/publish", requireAuth, handlePublishProject)
+api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
 api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
 api.POST("/projects/:id/view", handleViewProject)
 api.POST("/projects/:id/react", requireAuth, handleReactProject)
@@ -184,7 +185,7 @@ api.GET("/projects/:id/remixtree", handleGetRemixTree)
 api.POST("/projects/:id/remix", requireAuth, handleRemixProject)
 
 api.GET("/projects/:id/comments", handleGetProjectComments)
-api.POST("/projects/:id/comments", requireAuth, handleCreateProjectComment)
+api.POST("/projects/:id/comments", requireAuth, requireGoodStanding, handleCreateProjectComment)
 api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
 api.POST("/projects/:id/comments/:cid/react", requireAuth, handleReactProjectComment)
 
@@ -206,7 +207,7 @@ api.GET("/activity", handleGetActivity)
 api.GET("/users/:name/followers", handleGetUserFollowers)
 api.GET("/users/:name/following", handleGetUserFollowing)
 api.GET("/users/:name/comments", handleGetProfileComments)
-api.POST("/users/:name/comments", requireAuth, handleCreateProfileComment)
+api.POST("/users/:name/comments", requireAuth, requireGoodStanding, handleCreateProfileComment)
 api.DELETE("/users/:name/comments/:cid", requireAuth, handleDeleteProfileComment)
 api.POST("/users/:name/comments/:cid/react", requireAuth, handleReactProfileComment)
 
@@ -227,6 +228,10 @@ api.POST("/admin/admins/remove", requireAdmin, handleRemoveAdmin)
 api.GET("/admin/bans", requireAdmin, handleListBans)
 api.POST("/admin/ban", requireAdmin, handleBanUser)
 api.POST("/admin/unban", requireAdmin, handleUnbanUser)
+api.POST("/admin/standing", requireAdmin, handleSetStanding)
+api.GET("/admin/user", requireAdmin, handleGetUserAdmin)
+api.POST("/admin/user/message", requireAdmin, handleMessageUser)
+api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

@@ -1,0 +1,236 @@
+def standingRank(string level) number (
+    if level == "warning" (
+        return 1
+    )
+    if level == "suspended" (
+        return 2
+    )
+    if level == "banned" (
+        return 3
+    )
+    return 0
+)
+
+def standingRecoverMs(string level) number (
+    if level == "warning" (
+        return 604800000
+    )
+    if level == "suspended" (
+        return 2592000000
+    )
+    return 0
+)
+
+def nextRecoveryLevel(string level) string (
+    if level == "suspended" (
+        return "warning"
+    )
+    if level == "warning" (
+        return "good"
+    )
+    return level
+)
+
+def applyStandingRecovery(object profile) boolean (
+    if !profile.contains("standing") or profile.standing == null (
+        return false
+    )
+    string level = profile.standing.toStr()
+    number recoverAt = 0
+    if profile.contains("standingRecoverAt") and profile.standingRecoverAt != null (
+        recoverAt = profile.standingRecoverAt.toNum()
+    )
+    boolean changed = false
+    while recoverAt > 0 and timestamp > recoverAt and level != "good" and level != "banned" (
+        level = nextRecoveryLevel(level)
+        number ms = standingRecoverMs(level)
+        if ms > 0 (
+            recoverAt = timestamp + ms
+        ) else (
+            recoverAt = 0
+        )
+        changed = true
+    )
+    if changed (
+        profile.standing = level
+        profile.standingRecoverAt = recoverAt
+    )
+    return changed
+)
+
+def standingLevel(string username) string (
+    if isBannedUser(username) (
+        return "banned"
+    )
+    object profile = loadProfile(username)
+    if applyStandingRecovery(profile) (
+        saveProfile(profile)
+    )
+    if !profile.contains("standing") or profile.standing == null (
+        return "good"
+    )
+    return profile.standing.toStr()
+)
+
+def standingInfo(string username) object (
+    object profile = loadProfile(username)
+    if applyStandingRecovery(profile) (
+        saveProfile(profile)
+    )
+    string level = "good"
+    if profile.contains("standing") and profile.standing != null (
+        level = profile.standing.toStr()
+    )
+    if level != "banned" and isBannedUser(username) (
+        level = "banned"
+    )
+    number recoverAt = 0
+    if profile.contains("standingRecoverAt") and profile.standingRecoverAt != null (
+        recoverAt = profile.standingRecoverAt.toNum()
+    )
+    array history = []
+    if profile.contains("standingHistory") and profile.standingHistory != null (
+        history = profile.standingHistory.assert(array)
+    )
+    return {level: level, recoverAt: recoverAt, history: history}
+)
+
+def setStanding(string username, string level, string reason, string actor) boolean (
+    boolean valid = level == "good" or level == "warning" or level == "suspended" or level == "banned"
+    if !valid (
+        return false
+    )
+    object profile = loadProfile(username)
+    string prev = "good"
+    if profile.contains("standing") and profile.standing != null (
+        prev = profile.standing.toStr()
+    )
+    profile.standing = level
+    number ms = standingRecoverMs(level)
+    if ms > 0 (
+        profile.standingRecoverAt = timestamp + ms
+    ) else (
+        profile.standingRecoverAt = 0
+    )
+    array history = []
+    if profile.contains("standingHistory") and profile.standingHistory != null (
+        history = profile.standingHistory.assert(array)
+    )
+    object entry = {level: level, previous: prev, reason: reason, by: actor, created: timestamp}
+    array nextHistory = [entry]
+    number kept = 1
+    for i history.len (
+        if kept < 20 (
+            nextHistory.append(history[i])
+            kept = kept + 1
+        )
+    )
+    profile.standingHistory = nextHistory
+    saveProfile(profile)
+    if level == "banned" (
+        banUser(username, reason, actor)
+    ) else (
+        if isBannedUser(username) (
+            unbanUser(username)
+        )
+    )
+    addNotification(username, actor, "standing", {level: level, reason: reason})
+    return true
+)
+
+def requireGoodStanding(*serve.Context c) (
+    string level = standingLevel(c.getString("username"))
+    if standingRank(level) >= 2 (
+        c.json(403, {ok: false, error: "Your account is " ++ level ++ " and cannot do this right now.", standing: level})
+        c.abort()
+        return
+    )
+    c.next()
+)
+
+def handleSetStanding(*serve.Context c) (
+    object body = c.bodyJSON()
+    string name = body.username.toStr()
+    string level = body.level.toStr()
+    string reason = ""
+    if body.contains("reason") and body.reason != null (
+        reason = body.reason.toStr().strip()
+    )
+    if normalizeUsername(name) == "" (
+        c.badRequest("username is required")
+        return
+    )
+    if isAdminUser(name) and level != "good" (
+        c.badRequest("cannot moderate an admin")
+        return
+    )
+    if !setStanding(name, level, reason, c.getString("username")) (
+        c.badRequest("invalid standing level")
+        return
+    )
+    c.json(200, {ok: true, standing: standingInfo(name)})
+)
+
+def handleMessageUser(*serve.Context c) (
+    object body = c.bodyJSON()
+    string name = body.username.toStr()
+    string message = body.message.toStr().strip()
+    if normalizeUsername(name) == "" or message == "" or message.len > 1000 (
+        c.badRequest("username and message are required")
+        return
+    )
+    addNotification(name, c.getString("username"), "moderation", {message: message})
+    c.json(200, {ok: true})
+)
+
+def handleGetUserAdmin(*serve.Context c) (
+    string name = c.query("username")
+    if normalizeUsername(name) == "" (
+        c.badRequest("username is required")
+        return
+    )
+    object profile = loadProfile(name)
+    boolean commentsOff = profile.contains("commentsOff") and profile.commentsOff == true
+    array followers = profile.followers.assert(array)
+    array following = profile.following.assert(array)
+    c.json(200, {
+        ok: true,
+        username: profile.username,
+        bio: profile.bio,
+        featuredProject: profile.featuredProject,
+        commentsOff: commentsOff,
+        followerCount: followers.len,
+        followingCount: following.len,
+        created: profile.created,
+        standing: standingInfo(name),
+        banned: isBannedUser(name),
+        admin: isAdminUser(name),
+        projects: ownerIndexEntries(name, true)
+    })
+)
+
+def handleAdminUpdateProfile(*serve.Context c) (
+    object body = c.bodyJSON()
+    string name = body.username.toStr()
+    if normalizeUsername(name) == "" (
+        c.badRequest("username is required")
+        return
+    )
+    object profile = loadProfile(name)
+    if body.contains("bio") (
+        string bio = body.bio.toStr()
+        if bio.len > 300 (
+            c.badRequest("bio too long")
+            return
+        )
+        profile.bio = bio
+    )
+    if body.contains("featuredProject") (
+        profile.featuredProject = body.featuredProject.toStr()
+    )
+    if body.contains("commentsOff") (
+        profile.commentsOff = body.commentsOff == true
+    )
+    saveProfile(profile)
+    c.json(200, {ok: true})
+)

@@ -155,11 +155,24 @@ def handleListBans(*serve.Context c) (
     c.json(200, {ok: true, bans: out})
 )
 
+def reportTargetUser(object found) string (
+    string name = found.target.toStr()
+    if found.type.toStr() == "project" (
+        auto result = loadProject(found.target.toStr())
+        if result.ok (
+            object project = result.project.assert(object)
+            name = project.owner.toStr()
+        )
+    )
+    return name
+)
+
 def handleReportAction(*serve.Context c) (
     object body = c.bodyJSON()
     string id = body.id.toStr()
     string action = body.action.toStr()
-    if action != "dismiss" and action != "unshare_project" and action != "ban_user" (
+    boolean validAction = action == "dismiss" or action == "unshare_project" or action == "ban_user" or action == "warn_user"
+    if !validAction (
         c.badRequest("invalid action")
         return
     )
@@ -193,19 +206,20 @@ def handleReportAction(*serve.Context c) (
         upsertIndexEntry(project)
     )
     if action == "ban_user" (
-        string name = found.target.toStr()
-        if found.type.toStr() == "project" (
-            auto result = loadProject(found.target.toStr())
-            if result.ok (
-                object project = result.project.assert(object)
-                name = project.owner.toStr()
-            )
-        )
+        string name = reportTargetUser(found)
         if isAdminUser(name) (
             c.badRequest("cannot ban an admin")
             return
         )
         banUser(name, "report " ++ id, c.getString("username"))
+    )
+    if action == "warn_user" (
+        string name = reportTargetUser(found)
+        if isAdminUser(name) (
+            c.badRequest("cannot warn an admin")
+            return
+        )
+        setStanding(name, "warning", "report " ++ id, c.getString("username"))
     )
 
     found.resolved = true
