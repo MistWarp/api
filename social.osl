@@ -139,6 +139,7 @@ def handleFollowUser(*serve.Context c) (
 
     object targetProfile = loadProfile(target)
     array followers = targetProfile.followers.assert(array)
+    boolean wasFollowing = followers.contains(normalizeUsername(actor))
     followers = removeString(followers, normalizeUsername(actor))
     followers.append(normalizeUsername(actor))
     targetProfile.followers = followers
@@ -151,7 +152,9 @@ def handleFollowUser(*serve.Context c) (
     actorProfile.following = following
     saveProfile(actorProfile)
 
-    addNotification(target, actor, "follow", {})
+    if !wasFollowing (
+        addNotification(target, actor, "follow", {})
+    )
 
     c.json(200, {ok: true})
 )

@@ -42,8 +42,19 @@ def addNotification(string target, string actor, string notifType, object extra)
     array next = [item]
     number kept = 1
     for i items.len (
-        if kept < 50 (
-            next.append(items[i])
+        object existing = items[i]
+        boolean same = existing.type.toStr() == notifType and normalizeUsername(existing.actor.toStr()) == normalizeUsername(actor)
+        for j extraKeys.len (
+            string k = extraKeys[j].toStr()
+            if !existing.contains(k) or existing[k] != extra[k] (
+                same = false
+            )
+        )
+        if same and existing.read != true (
+            return
+        )
+        if !same and kept < 50 (
+            next.append(existing)
             kept = kept + 1
         )
     )
