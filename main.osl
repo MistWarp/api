@@ -169,6 +169,7 @@ api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
 
 api.GET("/explore", handleExplore)
+api.GET("/leaderboard", handleLeaderboard)
 
 api.POST("/projects", requireAuth, handleCreateProject)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)

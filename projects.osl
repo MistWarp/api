@@ -1033,6 +1033,36 @@ def handleExplore(*serve.Context c) (
     c.json(200, {ok: true, total: total, projects: paginate(entries, offset, limit)})
 )
 
+def handleLeaderboard(*serve.Context c) (
+    array entries = sharedIndexEntries()
+    object totals = {}
+    for i entries.len (
+        object entry = entries[i]
+        string owner = normalizeUsername(entry.owner.toStr())
+        if owner != "" (
+            if !totals.contains(owner) (
+                totals[owner] = {username: entry.owner, loves: 0, views: 0, projects: 0}
+            )
+            object row = totals[owner]
+            row.loves = row.loves.toNum() + entry.loveCount.toNum()
+            row.views = row.views.toNum() + entry.views.toNum()
+            row.projects = row.projects.toNum() + 1
+        )
+    )
+    array rows = []
+    array keys = totals.getKeys().toArray()
+    for i keys.len (
+        rows.append(totals[keys[i].toStr()])
+    )
+    string by = c.queryDefault("by", "loves")
+    if by != "views" (
+        by = "loves"
+    )
+    rows.sortBy(by, "descending")
+    number limit = clampNumber(c.queryInt("limit", 15), 1, 50)
+    c.json(200, {ok: true, by: by, users: paginate(rows, 0, limit)})
+)
+
 def handleGetRemixes(*serve.Context c) (
     string id = c.param("id")
     array entries = sharedIndexEntries()
