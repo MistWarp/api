@@ -206,6 +206,76 @@ def handleGetUserLoves(*serve.Context c) (
     userProjectList(c, "loves")
 )
 
+def userLibrary(string userLower) array (
+    object profile = loadProfile(userLower)
+    if profile.contains("library") and profile.library != null (
+        return profile.library.assert(array)
+    )
+    return []
+)
+
+def isInLibrary(string userLower, string projectId) boolean (
+    if userLower == "" (
+        return false
+    )
+    return userLibrary(userLower).contains(projectId)
+)
+
+def addToLibrary(string userLower, string projectId) (
+    object profile = loadProfile(userLower)
+    array lib = []
+    if profile.contains("library") and profile.library != null (
+        lib = profile.library.assert(array)
+    )
+    if !lib.contains(projectId) (
+        lib.append(projectId)
+        profile.library = lib
+        saveProfile(profile)
+    )
+)
+
+def handleSaveProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
+    c.json(200, {ok: true, saved: true})
+)
+
+def handleUnsaveProject(*serve.Context c) (
+    string me = normalizeUsername(c.getString("username"))
+    object profile = loadProfile(me)
+    array lib = []
+    if profile.contains("library") and profile.library != null (
+        lib = profile.library.assert(array)
+    )
+    profile.library = removeString(lib, c.param("id"))
+    saveProfile(profile)
+    c.json(200, {ok: true, saved: false})
+)
+
+def handleGetMyLibrary(*serve.Context c) (
+    array ids = userLibrary(normalizeUsername(c.getString("username")))
+    object index = loadIndex()
+    object projects = index.projects
+    array entries = []
+    for i ids.len (
+        string id = ids[i].toStr()
+        if projects.contains(id) (
+            entries.append(hydrateIndexEntry(projects[id]))
+        )
+    )
+    entries.reverse()
+    c.json(200, {ok: true, projects: entries})
+)
+
 def handleGetActivity(*serve.Context c) (
     array users = c.query("users").split(",")
     array items = []

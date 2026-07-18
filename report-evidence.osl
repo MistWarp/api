@@ -1,0 +1,168 @@
+def evidenceDirFor(string id) string (
+    return reportEvidenceDir ++ id ++ "/"
+)
+
+def loadEvidenceMeta(string id) object (
+    auto res = readFile(evidenceDirFor(id) ++ "meta.json")
+    if !res.ok (
+        return {}
+    )
+    return res.data.assert(object)
+)
+
+def readAssetBytes(string name) string (
+    string local = localBlobPath(assetObjectKey(name))
+    if fs.exists(local) (
+        return fs.readFile(local)
+    )
+    if r2Local (
+        return ""
+    )
+    string direct = r2DirectUrl(assetObjectKey(name))
+    if direct == "" (
+        return ""
+    )
+    auto fetched = requests.get(direct, {})
+    if fetched.success and fetched.status.toInt() == 200 (
+        return fetched.body.toStr()
+    )
+    return ""
+)
+
+def snapshotProjectEvidence(string projectId) (
+    if !isSafePathPart(projectId) (
+        return
+    )
+    string dir = evidenceDirFor(projectId)
+    if fs.exists(dir ++ "meta.json") (
+        return
+    )
+    auto res = loadProject(projectId)
+    if !res.ok (
+        return
+    )
+    object project = res.project.assert(object)
+    fs.mkdirAll(dir ++ "assets/")
+    project.evidenceKey = randomString(16)
+    project.snapshotAt = timestamp
+    writeFile(dir ++ "meta.json", project)
+
+    string pj = currentProjectJson(project)
+    if pj != "" (
+        fs.writeFile(dir ++ "project.json", pj)
+        object referenced = referencedAssetNames(pj)
+        if referenced.ok (
+            object names = referenced.names.assert(object)
+            array list = names.getKeys().toArray()
+            for i list.len (
+                string name = list[i].toStr()
+                string bytes = readAssetBytes(name)
+                if bytes != "" (
+                    fs.writeFileBytes(dir ++ "assets/" ++ name, bytes)
+                )
+            )
+        )
+    )
+
+    string thumb = thumbnailPath(projectId)
+    if fs.exists(thumb) (
+        fs.writeFileBytes(dir ++ "thumbnail.png", fs.readFile(thumb))
+    )
+)
+
+def projectHasOpenReports(string projectId) boolean (
+    array reports = loadReports()
+    for i reports.len (
+        object r = reports[i]
+        if r.type.toStr() == "project" and r.target.toStr() == projectId and r.resolved != true (
+            return true
+        )
+    )
+    return false
+)
+
+def removeEvidenceDir(string id) (
+    string dir = evidenceDirFor(id)
+    string assetsDir = dir ++ "assets/"
+    if fs.exists(assetsDir) (
+        array files = fs.readDir(assetsDir).toArray()
+        for i files.len (
+            fs.remove(assetsDir ++ files[i].toStr())
+        )
+        fs.remove(assetsDir)
+    )
+    fs.remove(dir ++ "project.json")
+    fs.remove(dir ++ "meta.json")
+    fs.remove(dir ++ "thumbnail.png")
+    fs.remove(dir)
+)
+
+def maybeClearProjectEvidence(string projectId) (
+    if !isSafePathPart(projectId) (
+        return
+    )
+    if !fs.exists(evidenceDirFor(projectId) ++ "meta.json") (
+        return
+    )
+    if !projectHasOpenReports(projectId) (
+        removeEvidenceDir(projectId)
+    )
+)
+
+def handleGetEvidenceJson(*serve.Context c) (
+    string id = c.param("id")
+    if !isSafePathPart(id) (
+        c.notFound("not found")
+        return
+    )
+    object meta = loadEvidenceMeta(id)
+    string k = ""
+    if meta.contains("evidenceKey") and meta.evidenceKey != null (
+        k = meta.evidenceKey.toStr()
+    )
+    if k == "" or c.query("k") != k (
+        c.notFound("not found")
+        return
+    )
+    string path = evidenceDirFor(id) ++ "project.json"
+    if !fs.exists(path) (
+        c.notFound("not found")
+        return
+    )
+    c.setHeader("Content-Type", "application/json")
+    c.setHeader("Cache-Control", "no-store")
+    c.file(path)
+)
+
+def handleGetEvidenceAsset(*serve.Context c) (
+    string id = c.param("id")
+    string name = c.param("name")
+    if !isSafePathPart(id) or !isValidMd5Ext(name) (
+        c.notFound("not found")
+        return
+    )
+    string path = evidenceDirFor(id) ++ "assets/" ++ name
+    if !fs.exists(path) (
+        c.notFound("not found")
+        return
+    )
+    c.setHeader("Content-Type", contentTypeForKey(name))
+    c.setHeader("Cache-Control", "no-store")
+    c.file(path)
+)
+
+def handleGetReportEvidence(*serve.Context c) (
+    string id = c.param("id")
+    if !isSafePathPart(id) (
+        c.notFound("not found")
+        return
+    )
+    object meta = loadEvidenceMeta(id)
+    if !meta.contains("evidenceKey") or meta.evidenceKey == null (
+        c.json(200, {ok: true, exists: false})
+        return
+    )
+    string key = meta.evidenceKey.toStr()
+    string base = appURL ++ "/blobs/evidence/" ++ id
+    c.json(200, {ok: true, exists: true, config: meta, projectJsonUrl: base ++ "/project.json?k=" ++ key, assetsBase: base ++ "/assets"})
+)

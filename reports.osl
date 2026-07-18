@@ -41,6 +41,9 @@ def handleCreateReport(*serve.Context c) (
     array reports = loadReports()
     reports.append(report)
     saveReports(reports)
+    if reportType == "project" (
+        snapshotProjectEvidence(target)
+    )
     c.json(201, {ok: true})
 )
 
@@ -53,11 +56,15 @@ def handleResolveReport(*serve.Context c) (
     string id = body.id.toStr()
     array reports = loadReports()
     boolean found = false
+    string projectTarget = ""
     for i reports.len (
         object report = reports[i]
         if report.id.toStr() == id (
             report.resolved = true
             found = true
+            if report.type.toStr() == "project" (
+                projectTarget = report.target.toStr()
+            )
         )
     )
     if !found (
@@ -65,5 +72,8 @@ def handleResolveReport(*serve.Context c) (
         return
     )
     saveReports(reports)
+    if projectTarget != "" (
+        maybeClearProjectEvidence(projectTarget)
+    )
     c.json(200, {ok: true})
 )

@@ -443,6 +443,7 @@ def handlePurchaseConfirm(*serve.Context c) (
     recordSale(project, buyer, owed, sellerAmount)
     saveProject(project)
     upsertIndexEntry(project)
+    addToLibrary(buyerLower, project.id.toStr())
     addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
 
     c.json(200, {ok: true, paidOut: paidOut, project: projectResponse(project, c)})

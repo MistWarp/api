@@ -87,6 +87,8 @@ def projectResponse(object project, *serve.Context c) object (
     number price = projectPrice(project)
     string viewerKey = normalizeUsername(c.getString("username"))
     boolean bought = hasBought(project, viewerKey)
+    boolean hasContent = project.lastUploadAt.toNum() > 0
+    hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
     string jsonUrl = projectJsonUrlFor(project)
     boolean locked = false
     if price > 0 (
@@ -96,6 +98,9 @@ def projectResponse(object project, *serve.Context c) object (
             jsonUrl = ""
             locked = true
         )
+    )
+    if !hasContent (
+        jsonUrl = ""
     )
     object response = {
         id: project.id,
@@ -118,6 +123,8 @@ def projectResponse(object project, *serve.Context c) object (
         price: price,
         locked: locked,
         bought: bought,
+        saved: isInLibrary(viewerKey, project.id.toStr()),
+        hasContent: hasContent,
         remixable: projectRemixable(project),
         canRemix: canRemixProject(project, c),
         lastUploadAt: project.lastUploadAt,
