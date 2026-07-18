@@ -150,6 +150,7 @@ def projectResponse(object project, *serve.Context c) object (
         response.analytics = {
             revenue: projectRevenue(project),
             buyers: projectBuyers(project),
+            saves: projectSaves(project),
             viewHistory: viewHistory,
             saleHistory: saleHistory
         }

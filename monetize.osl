@@ -32,6 +32,13 @@ def projectRevenue(object project) number (
     return 0
 )
 
+def projectSaves(object project) number (
+    if project.contains("saves") and project.saves != null (
+        return project.saves.toNum()
+    )
+    return 0
+)
+
 def projectBuyers(object project) array (
     if project.contains("buyers") and project.buyers != null (
         return project.buyers.assert(array)
@@ -441,9 +448,12 @@ def handlePurchaseConfirm(*serve.Context c) (
     )
 
     recordSale(project, buyer, owed, sellerAmount)
+    if addToLibrary(buyerLower, project.id.toStr()) (
+        number savesNow = projectSaves(project)
+        project.saves = savesNow + 1
+    )
     saveProject(project)
     upsertIndexEntry(project)
-    addToLibrary(buyerLower, project.id.toStr())
     addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
 
     c.json(200, {ok: true, paidOut: paidOut, project: projectResponse(project, c)})
