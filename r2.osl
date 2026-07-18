@@ -66,11 +66,16 @@ def projectViewKey(object project) string (
     return ""
 )
 
-def projectJsonUrlFor(object project) string (
+def projectJsonBaseUrl(object project) string (
     string base = publicUrl(project.jsonKey.toStr())
     if localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
         base = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
     )
+    return base
+)
+
+def projectJsonUrlFor(object project) string (
+    string base = projectJsonBaseUrl(project)
     if project.shared != true (
         string k = projectViewKey(project)
         if k != "" (
@@ -237,7 +242,13 @@ def handleGetProjectBlob(*serve.Context c) (
         return
     )
     object project = projectResult.project.assert(object)
-    if project.shared != true (
+    if projectPrice(project) > 0 (
+        string pk = projectViewKey(project)
+        if pk == "" or c.query("k") != pk (
+            c.notFound("blob not found")
+            return
+        )
+    ) else if project.shared != true and projectVisibility(project) != "unlisted" (
         string k = projectViewKey(project)
         if k == "" or c.query("k") != k (
             c.notFound("blob not found")

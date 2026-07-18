@@ -19,14 +19,24 @@ def canEditProject(object project, *serve.Context c) boolean (
 )
 
 def canViewProject(object project, *serve.Context c) boolean (
-    if project.shared == true (
+    if projectIsViewable(project) (
         return true
     )
     return canEditProject(project, c)
 )
 
 def canViewProjectJson(object project, *serve.Context c) boolean (
-    if project.shared == true (
+    if projectPrice(project) > 0 (
+        if canAccessPaidJson(project, c) (
+            return true
+        )
+        string pk = projectViewKey(project)
+        if pk != "" and c.query("k") == pk (
+            return true
+        )
+        return false
+    )
+    if project.shared == true or projectVisibility(project) == "unlisted" (
         return true
     )
     string k = projectViewKey(project)
@@ -37,7 +47,7 @@ def canViewProjectJson(object project, *serve.Context c) boolean (
 )
 
 def ensureViewKey(object project) (
-    if project.shared != true and projectViewKey(project) == "" (
+    if (project.shared != true or projectPrice(project) > 0) and projectViewKey(project) == "" (
         project.viewKey = randomString(16)
         saveProject(project)
     )
@@ -73,7 +83,21 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("tags") and project.tags != null (
         tags = project.tags.assert(array)
     )
-    return {
+    boolean isOwner = canEditProject(project, c)
+    number price = projectPrice(project)
+    string viewerKey = normalizeUsername(c.getString("username"))
+    boolean bought = hasBought(project, viewerKey)
+    string jsonUrl = projectJsonUrlFor(project)
+    boolean locked = false
+    if price > 0 (
+        if isOwner or bought (
+            jsonUrl = projectJsonBaseUrl(project) ++ "?k=" ++ projectViewKey(project)
+        ) else (
+            jsonUrl = ""
+            locked = true
+        )
+    )
+    object response = {
         id: project.id,
         owner: project.owner,
         title: project.title,
@@ -83,13 +107,19 @@ def projectResponse(object project, *serve.Context c) object (
         notes: notes,
         credits: credits,
         repo: project.repo,
-        projectJsonUrl: projectJsonUrlFor(project),
+        projectJsonUrl: jsonUrl,
         assetsBase: assetsBaseUrl(),
         thumbUrl: thumbUrlFor(project),
         created: project.created,
         edited: project.edited,
         sharedAt: project.sharedAt,
         shared: project.shared,
+        visibility: projectVisibility(project),
+        price: price,
+        locked: locked,
+        bought: bought,
+        remixable: projectRemixable(project),
+        canRemix: canRemixProject(project, c),
         lastUploadAt: project.lastUploadAt,
         remixParent: project.remixParent,
         scratchOrigin: project.scratchOrigin,
@@ -99,8 +129,25 @@ def projectResponse(object project, *serve.Context c) object (
         myReaction: myReaction,
         commentsOff: commentsOff,
         sizeBytes: projectSizeBytes(project),
-        isOwner: canEditProject(project, c)
+        isOwner: isOwner
     }
+    if isOwner (
+        object viewHistory = {}
+        if project.contains("viewHistory") and project.viewHistory != null (
+            viewHistory = project.viewHistory.assert(object)
+        )
+        object saleHistory = {}
+        if project.contains("saleHistory") and project.saleHistory != null (
+            saleHistory = project.saleHistory.assert(object)
+        )
+        response.analytics = {
+            revenue: projectRevenue(project),
+            buyers: projectBuyers(project),
+            viewHistory: viewHistory,
+            saleHistory: saleHistory
+        }
+    )
+    return response
 )
 
 def handleGetMyQuota(*serve.Context c) (
@@ -684,6 +731,21 @@ def handleUpdateProject(*serve.Context c) (
     if body.contains("commentsOff") (
         project.commentsOff = body.commentsOff == true
     )
+    if body.contains("remixable") (
+        project.remixable = body.remixable != false
+    )
+    if body.contains("price") (
+        number price = body.price.toNum()
+        if price < 0 or price > 1000000 (
+            c.badRequest("invalid price")
+            return
+        )
+        number oldPrice = projectPrice(project)
+        project.price = price
+        if price > 0 and oldPrice <= 0 (
+            project.viewKey = randomString(16)
+        )
+    )
     if body.contains("tags") (
         array incoming = body.tags.assert(array)
         array tags = []
@@ -802,6 +864,7 @@ def handlePublishProject(*serve.Context c) (
 
     boolean firstShare = project.sharedAt.toNum() == 0
     project.shared = true
+    project.visibility = "public"
     if firstShare (
         project.sharedAt = timestamp
     )
@@ -827,6 +890,7 @@ def handleUnpublishProject(*serve.Context c) (
     )
 
     project.shared = false
+    project.visibility = "private"
     project.edited = timestamp
     project.viewKey = randomString(16)
     saveProject(project)
@@ -846,7 +910,7 @@ def handleViewProject(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    if project.shared != true (
+    if !projectIsViewable(project) (
         c.json(200, {ok: true})
         return
     )
@@ -879,7 +943,7 @@ def handleViewProject(*serve.Context c) (
     array dayKeys = history.getKeys().toArray()
     for i dayKeys.len (
         string k = dayKeys[i].toStr()
-        if today - k.toNum() < 14 (
+        if today - k.toNum() < 31 (
             pruned[k] = history[k]
         )
     )
@@ -905,6 +969,10 @@ def handleReactProject(*serve.Context c) (
     object project = result.project.assert(object)
     if project.shared != true (
         c.notFound("project not found")
+        return
+    )
+    if !canInteractProject(project, c) (
+        c.forbidden("buy this project to react to it")
         return
     )
 
@@ -1145,6 +1213,10 @@ def handleRemixProject(*serve.Context c) (
     object parent = result.project.assert(object)
     if parent.shared != true (
         c.notFound("project not found")
+        return
+    )
+    if !canRemixProject(parent, c) (
+        c.forbidden("this project cannot be remixed")
         return
     )
 

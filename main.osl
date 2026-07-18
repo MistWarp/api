@@ -90,6 +90,11 @@ string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
 string editorOrigin = configValue("EDITOR_ORIGIN", "https://warp.mistium.com")
 array corsAllowedOrigins = configValue("CORS_ORIGINS", editorOrigin ++ ",http://localhost:8601,http://localhost:8602").split(",")
 array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
+string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
+string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
+string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
+number paywallFeePercent = configValue("PAYWALL_FEE_PERCENT", "10").toNum()
+string purchaseKeysFile = "data/purchase-keys.json"
 
 boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
 string localBlobsDir = "data/blobs/"
@@ -110,6 +115,7 @@ import "./gitea.osl"
 import "./auth.osl"
 import "./middleware.osl"
 import "./projects.osl"
+import "./monetize.osl"
 import "./comments.osl"
 import "./social.osl"
 import "./pulls.osl"
@@ -165,6 +171,7 @@ api.GET("/notifications", requireAuth, handleGetNotifications)
 api.POST("/notifications/read", requireAuth, handleReadNotifications)
 
 api.GET("/me/quota", requireAuth, handleGetMyQuota)
+api.GET("/me/stats", requireAuth, handleGetMyStats)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
 
@@ -179,6 +186,9 @@ api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
 api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
 api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
+api.POST("/projects/:id/visibility", requireAuth, requireGoodStanding, handleSetVisibility)
+api.POST("/projects/:id/purchase/intent", requireAuth, handlePurchaseIntent)
+api.POST("/projects/:id/purchase/confirm", requireAuth, handlePurchaseConfirm)
 api.POST("/projects/:id/view", handleViewProject)
 api.POST("/projects/:id/react", requireAuth, handleReactProject)
 api.GET("/projects/:id/remixes", handleGetRemixes)

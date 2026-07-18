@@ -9,12 +9,14 @@ def createComment(string key, string author, string content, string parentId) ob
 
     array comments = loadComments(key)
 
+    string parentAuthor = ""
     if parentId != "" (
         boolean parentOk = false
         for i comments.len (
             object existing = comments[i]
             if existing.id.toStr() == parentId and existing.parent.toStr() == "" (
                 parentOk = true
+                parentAuthor = existing.author.toStr()
             )
         )
         if !parentOk (
@@ -35,7 +37,7 @@ def createComment(string key, string author, string content, string parentId) ob
         comments.append(comment)
         saveComments(key, comments)
     )
-    return {ok: true, comment: comment}
+    return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 
 def notifyMentions(string content, string actor, string skip, object extra) (
@@ -110,6 +112,10 @@ def handleCreateProjectComment(*serve.Context c) (
         c.notFound("project not found")
         return
     )
+    if !canInteractProject(project, c) (
+        c.json(403, {ok: false, error: "buy this project to comment on it"})
+        return
+    )
     if project.contains("commentsOff") and project.commentsOff == true (
         c.json(403, {ok: false, error: "comments are disabled on this project"})
         return
@@ -130,8 +136,15 @@ def handleCreateProjectComment(*serve.Context c) (
         c.badRequest(created.error.toStr())
         return
     )
-    addNotification(project.owner.toStr(), c.getString("username"), "comment", {projectId: project.id, projectTitle: project.title})
-    notifyMentions(created.comment.content.toStr(), c.getString("username"), project.owner.toStr(), {projectId: project.id, projectTitle: project.title})
+    string commenter = c.getString("username")
+    string parentAuthor = created.parentAuthor.toStr()
+    if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+        addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title})
+    )
+    if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
+        addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title})
+    )
+    notifyMentions(created.comment.content.toStr(), commenter, project.owner.toStr(), {projectId: project.id, projectTitle: project.title})
     c.json(201, created)
 )
 
@@ -196,8 +209,15 @@ def handleCreateProfileComment(*serve.Context c) (
         c.badRequest(created.error.toStr())
         return
     )
-    addNotification(name, c.getString("username"), "profile_comment", {})
-    notifyMentions(created.comment.content.toStr(), c.getString("username"), name, {profile: name})
+    string commenter = c.getString("username")
+    string parentAuthor = created.parentAuthor.toStr()
+    if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+        addNotification(parentAuthor, commenter, "reply", {profile: name})
+    )
+    if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
+        addNotification(name, commenter, "profile_comment", {profile: name})
+    )
+    notifyMentions(created.comment.content.toStr(), commenter, name, {profile: name})
     c.json(201, created)
 )
 
