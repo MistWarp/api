@@ -289,6 +289,31 @@ def handleUnsaveProject(*serve.Context c) (
     c.json(200, {ok: true, saved: false})
 )
 
+def addPurchaseRecord(string userLower, object entry) (
+    object profile = loadProfile(userLower)
+    array list = []
+    if profile.contains("purchases") and profile.purchases != null (
+        list = profile.purchases.assert(array)
+    )
+    array next = [entry]
+    for i list.len (
+        if next.len < 200 (
+            next.append(list[i])
+        )
+    )
+    profile.purchases = next
+    saveProfile(profile)
+)
+
+def handleGetMyPurchases(*serve.Context c) (
+    object profile = loadProfile(normalizeUsername(c.getString("username")))
+    array list = []
+    if profile.contains("purchases") and profile.purchases != null (
+        list = profile.purchases.assert(array)
+    )
+    c.json(200, {ok: true, purchases: list})
+)
+
 def handleGetMyLibrary(*serve.Context c) (
     array ids = userLibrary(normalizeUsername(c.getString("username")))
     object index = loadIndex()
