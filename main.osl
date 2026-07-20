@@ -146,6 +146,7 @@ auto userIdsCache = cache.create(10000, 300)
 *serve.Router app = serve.new()
 
 app.use(corsMiddleware)
+app.use(serve.logger())
 
 app.static("/thumbnails", "./data/thumbnails")
 app.GET("/blobs/assets/:name", handleGetAssetBlob)

@@ -56,7 +56,11 @@ def localProjectJsonPathFor(object project, number hops) string (
     if !parentResult.ok (
         return ""
     )
-    return localProjectJsonPathFor(parentResult.project.assert(object), hops + 1)
+    object parentProject = parentResult.project.assert(object)
+    if projectPrice(parentProject) > 0 (
+        return ""
+    )
+    return localProjectJsonPathFor(parentProject, hops + 1)
 )
 
 def projectViewKey(object project) string (

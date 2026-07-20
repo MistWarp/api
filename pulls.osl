@@ -7,6 +7,9 @@ def loadViewableProject(*serve.Context c) object (
     if !canViewProject(project, c) (
         return {ok: false}
     )
+    if projectPrice(project) > 0 and !canAccessPaidJson(project, c) (
+        return {ok: false}
+    )
     return {ok: true, project: project}
 )
 

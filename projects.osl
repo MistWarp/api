@@ -185,6 +185,10 @@ def handleCreateProject(*serve.Context c) (
             c.badRequest("remix parent not found")
             return
         )
+        if !canRemixProject(parentResult.project.assert(object), c) (
+            c.forbidden("this project cannot be remixed")
+            return
+        )
     )
 
     string scratchOrigin = ""
