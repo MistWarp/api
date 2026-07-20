@@ -73,8 +73,8 @@ number maxProjectJsonBytes = 5242880
 number maxAssetBytes = 10485760
 number maxThumbBytes = 1048576
 number maxAssetCount = 2000
-number maxProjectAssetsBytes = 104857600
-number weeklyUploadQuotaBytes = 209715200
+number maxProjectAssetsBytes = 52428800
+number weeklyUploadQuotaBytes = 104857600
 number quotaWindowMs = 604800000
 number uploadDebounceMs = 86400000
 
