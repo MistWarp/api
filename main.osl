@@ -176,6 +176,8 @@ api.GET("/notifications", requireAuth, handleGetNotifications)
 api.POST("/notifications/read", requireAuth, handleReadNotifications)
 
 api.GET("/me/quota", requireAuth, handleGetMyQuota)
+api.POST("/me/quota/reset", requireAuth, handleQuotaReset)
+api.POST("/me/quota/reset/confirm", requireAuth, handleQuotaResetConfirm)
 api.GET("/me/stats", requireAuth, handleGetMyStats)
 api.GET("/me/library", requireAuth, handleGetMyLibrary)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)

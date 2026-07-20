@@ -160,10 +160,128 @@ def projectResponse(object project, *serve.Context c) object (
 
 def handleGetMyQuota(*serve.Context c) (
     string username = c.getString("username")
-    c.json(200, {ok: true, used: weeklyUploadedBytes(username), limit: weeklyUploadQuotaBytes, windowMs: quotaWindowMs})
+    object details = quotaDetails(username)
+
+    array rawEvents = []
+    auto result = readFile(quotaPath(username))
+    if result.ok (
+        object data = result.data.assert(object)
+        rawEvents = data.events.assert(array)
+    )
+
+    object dailyMap = {}
+    number now = timestamp
+    for i rawEvents.len (
+        object event = rawEvents[i]
+        number t = event.t.toNum()
+        if now - t < quotaWindowMs (
+            number dayNum = (t / 86400000).toInt()
+            string dayKey = dayNum.toStr()
+            number cur = 0
+            if dailyMap.contains(dayKey) (
+                cur = dailyMap[dayKey].toNum()
+            )
+            dailyMap[dayKey] = cur + event.bytes.toNum()
+        )
+    )
+
+    array daily = []
+    array keys = dailyMap.getKeys().toArray()
+    keys.sort()
+    for i keys.len (
+        string dayKey = keys[i].toStr()
+        daily.append({day: dayKey.toNum(), bytes: dailyMap[dayKey].toNum()})
+    )
+
+    c.json(200, {
+        ok: true,
+        used: details.used,
+        limit: details.limit,
+        windowMs: quotaWindowMs,
+        oldestEventMs: details.oldestEventMs,
+        eventCount: details.eventCount,
+        daily: daily
+    })
 )
 
-def handleCreateProject(*serve.Context c) (
+def resetQuota(string username) boolean (
+    return writeFile(quotaPath(username), {events: []})
+)
+
+def handleQuotaReset(*serve.Context c) (
+    if mistwarpRoturToken == "" (
+        c.json(503, {ok: false, error: "credit resets are not available right now"})
+        return
+    )
+
+    string userLower = normalizeUsername(c.getString("username"))
+    string payTo = mistwarpAccountUser()
+    if payTo == "" (
+        c.internalError("could not start the reset, try again")
+        return
+    )
+
+    string key = "mqreset_" ++ randomString(16)
+    object store = prunePurchaseKeys(loadPurchaseKeys())
+    object keys = store.keys
+    keys[key] = {type: "quota_reset", user: userLower, at: timestamp}
+    store.keys = keys
+    savePurchaseKeys(store)
+
+    c.json(200, {ok: true, key: key, payTo: payTo, amount: 20})
+)
+
+def handleQuotaResetConfirm(*serve.Context c) (
+    if mistwarpRoturToken == "" (
+        c.json(503, {ok: false, error: "credit resets are not available right now"})
+        return
+    )
+
+    string user = c.getString("username")
+    string userLower = normalizeUsername(user)
+
+    object body = c.bodyJSON()
+    string key = ""
+    if body.contains("key") and body.key != null (
+        key = body.key.toStr().strip()
+    )
+    if key == "" (
+        c.badRequest("missing reset key")
+        return
+    )
+    if !key.startsWith("mqreset_") (
+        c.badRequest("invalid reset key")
+        return
+    )
+
+    object store = loadPurchaseKeys()
+    object keys = store.keys
+    if !keys.contains(key) (
+        c.badRequest("this reset request expired, start again")
+        return
+    )
+    object pending = keys[key]
+    if pending.type.toStr() != "quota_reset" or normalizeUsername(pending.user.toStr()) != userLower (
+        c.badRequest("this reset key does not match")
+        return
+    )
+
+    if !verifyIncomingTransfer(userLower, key, 20) (
+        c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
+        return
+    )
+
+    keys.delete(key)
+    store.keys = keys
+    savePurchaseKeys(store)
+
+    if !resetQuota(userLower) (
+        c.internalError("failed to reset quota")
+        return
+    )
+
+    c.json(200, {ok: true, used: 0, limit: weeklyUploadQuotaBytes})
+)
     object body = c.bodyJSON()
     string username = c.getString("username")
 
@@ -578,7 +696,8 @@ def handleUploadProject(*serve.Context c) (
         number usedBytes = weeklyUploadedBytes(uploader)
         if usedBytes + incomingBytes > weeklyUploadQuotaBytes (
             number usedMb = (usedBytes / 1048576).toInt()
-            c.json(413, {ok: false, error: "Weekly upload limit reached (" ++ usedMb.toStr() ++ " of 200 MB used). It frees up as uploads from the past 7 days age out."})
+            number limitMb = (weeklyUploadQuotaBytes / 1048576).toInt()
+            c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
             return
         )
     )
