@@ -282,6 +282,7 @@ def handleQuotaResetConfirm(*serve.Context c) (
 
     c.json(200, {ok: true, used: 0, limit: weeklyUploadQuotaBytes})
 )
+def handleCreateProject(*serve.Context c) (
     object body = c.bodyJSON()
     string username = c.getString("username")
 
