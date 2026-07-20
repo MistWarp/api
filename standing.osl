@@ -196,7 +196,6 @@ def handleGetUserAdmin(*serve.Context c) (
     c.json(200, {
         ok: true,
         username: profile.username,
-        bio: profile.bio,
         featuredProject: profile.featuredProject,
         commentsOff: commentsOff,
         followerCount: followers.len,
@@ -205,7 +204,11 @@ def handleGetUserAdmin(*serve.Context c) (
         standing: standingInfo(name),
         banned: isBannedUser(name),
         admin: isAdminUser(name),
-        projects: ownerIndexEntries(name, true)
+        projects: ownerIndexEntries(name, true),
+        quota: {
+            used: weeklyUploadedBytes(name),
+            limit: weeklyUploadQuotaBytes
+        }
     })
 )
 
@@ -217,14 +220,6 @@ def handleAdminUpdateProfile(*serve.Context c) (
         return
     )
     object profile = loadProfile(name)
-    if body.contains("bio") (
-        string bio = body.bio.toStr()
-        if bio.len > 300 (
-            c.badRequest("bio too long")
-            return
-        )
-        profile.bio = bio
-    )
     if body.contains("featuredProject") (
         profile.featuredProject = body.featuredProject.toStr()
     )
