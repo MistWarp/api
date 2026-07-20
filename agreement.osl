@@ -10,17 +10,18 @@ def agreementAcceptDir string (
 )
 
 def loadAgreement() object (
-    auto metaResult = readFile(agreementMetaPath)
-    object meta
+    object metaResult = readFile(agreementMetaPath())
+    object meta = {
+        text: "",
+        version: 0,
+        updatedAt: 0
+    }
     if metaResult.ok (
         meta = metaResult.data.assert(object)
-    ) else (
-        meta = {text: "", version: 0, updatedAt: 0}
     )
     // Read text from .md file, fall back to the text field in json
-    auto textResult = readFile(agreementTextPath)
-    if textResult.ok (
-        meta.text = textResult.data
+    if fs.exists(agreementTextPath()) (
+        meta.text = fs.readFile(agreementTextPath())
     )
     return meta
 )
@@ -29,10 +30,12 @@ def saveAgreement(object data) boolean (
     // Write metadata to json, text to md
     string text = data.text
     data.text = ""  // don't store the text in json
-    bool ok = writeFile(agreementMetaPath, data)
+    bool ok = writeFile(agreementMetaPath(), data)
     data.text = text // restore
     if text != "" (
-        ok = writeFile(agreementTextPath, text) && ok
+        if !fs.writeFile(agreementTextPath(), text) (
+            ok = false
+        )
     )
     return ok
 )
