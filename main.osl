@@ -127,6 +127,7 @@ import "./notifications.osl"
 import "./news.osl"
 import "./standing.osl"
 import "./settings.osl"
+import "./agreement.osl"
 
 ensureDirectories()
 refreshIndexUrls()
@@ -183,6 +184,9 @@ api.GET("/me/library", requireAuth, handleGetMyLibrary)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
+
+api.GET("/agreement", handleGetAgreement)
+api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
 
 api.GET("/explore", handleExplore)
 api.GET("/leaderboard", handleLeaderboard)
@@ -258,6 +262,8 @@ api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
 api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
 api.GET("/admin/stats", requireAdmin, handleAdminStats)
 api.GET("/admin/users", requireAdmin, handleListUsers)
+api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
+api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

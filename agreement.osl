@@ -1,0 +1,132 @@
+def agreementPath string (
+    return "data/agreement.json"
+)
+
+def agreementAcceptDir string (
+    return "data/agreement-acceptances/"
+)
+
+def loadAgreement() object (
+    auto result = readFile(agreementPath)
+    if !result.ok (
+        return {text: "", version: 0, updatedAt: 0}
+    )
+    return result.data.assert(object)
+)
+
+def saveAgreement(object data) boolean (
+    return writeFile(agreementPath, data)
+)
+
+def acceptancePath(string username) string (
+    return agreementAcceptDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def userHasAcceptedVersion(string username, number version) boolean (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return false
+    )
+    auto result = readFile(acceptancePath(username))
+    if !result.ok (
+        return false
+    )
+    object data = result.data.assert(object)
+    return data.version == version
+)
+
+def handleGetAgreement(*serve.Context c) (
+    object agreement = loadAgreement()
+    object respAgreement = {
+        text: agreement.text,
+        version: agreement.version,
+        updatedAt: agreement.updatedAt
+    }
+    if c.getBool("authenticated") (
+        respAgreement.accepted = userHasAcceptedVersion(c.getString("username"), agreement.version)
+    )
+    c.json(200, {ok: true, agreement: respAgreement})
+)
+
+def handleAcceptAgreement(*serve.Context c) (
+    string username = c.getString("username")
+    object agreement = loadAgreement()
+    number version = agreement.version
+
+    if version == 0 (
+        c.badRequest("no agreement to accept")
+        return
+    )
+
+    if userHasAcceptedVersion(username, version) (
+        c.json(200, {ok: true, already: true})
+        return
+    )
+
+    object acceptance = {
+        version: version,
+        acceptedAt: timestamp,
+        username: username
+    }
+
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        c.badRequest("invalid username")
+        return
+    )
+    fs.mkdirAll(agreementAcceptDir)
+    if !writeFile(acceptancePath(username), acceptance) (
+        c.internalError("failed to save acceptance")
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleAdminGetAgreement(*serve.Context c) (
+    object agreement = loadAgreement()
+    number version = agreement.version
+    number acceptedCount = 0
+    number totalUsers = 0
+
+    fs.mkdirAll(agreementAcceptDir)
+    array files = fs.readDir(agreementAcceptDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            totalUsers = totalUsers + 1
+            auto result = readFile(agreementAcceptDir ++ name)
+            if result.ok (
+                object acc = result.data.assert(object)
+                if acc.version == version (
+                    acceptedCount = acceptedCount + 1
+                )
+            )
+        )
+    )
+
+    c.json(200, {
+        ok: true,
+        agreement: agreement,
+        acceptedCount: acceptedCount,
+        totalAcceptances: totalUsers
+    })
+)
+
+def handleAdminUpdateAgreement(*serve.Context c) (
+    object body = c.bodyJSON()
+    string text = body.text.toStr().strip()
+    if text == "" (
+        c.badRequest("agreement text cannot be empty")
+        return
+    )
+    object agreement = loadAgreement()
+    agreement.text = text
+    agreement.version = agreement.version + 1
+    agreement.updatedAt = timestamp
+
+    if !saveAgreement(agreement) (
+        c.internalError("failed to save agreement")
+        return
+    )
+    c.json(200, {ok: true, version: agreement.version})
+)

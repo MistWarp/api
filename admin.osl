@@ -363,7 +363,14 @@ def handleReportAction(*serve.Context c) (
             c.badRequest("cannot warn an admin")
             return
         )
-        setStanding(name, "warning", "report " ++ id, c.getString("username"))
+        string reason = ""
+        if body.contains("reason") and body.reason != null (
+            reason = body.reason.toStr().strip()
+        )
+        if reason == "" (
+            reason = "report " ++ id
+        )
+        setStanding(name, "warning", reason, c.getString("username"))
         if found.type.toStr() == "project" (
             auto pr = loadProject(found.target.toStr())
             if pr.ok (
