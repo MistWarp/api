@@ -267,6 +267,38 @@ def recordUploadBytes(string username, number bytes) (
     writeFile(quotaPath(username), {events: events})
 )
 
+def quotaDetails(string username) object (
+    auto result = readFile(quotaPath(username))
+    if !result.ok (
+        return {used: 0, limit: weeklyUploadQuotaBytes, oldestEventMs: 0, eventCount: 0}
+    )
+    object data = result.data.assert(object)
+    array events = data.events.assert(array)
+    number total = 0
+    number oldest = 0
+    number count = 0
+    boolean hasAny = false
+    for i events.len (
+        object event = events[i]
+        if timestamp - event.t.toNum() < quotaWindowMs (
+            total = total + event.bytes.toNum()
+            count = count + 1
+            if !hasAny or event.t.toNum() < oldest (
+                oldest = event.t.toNum()
+                hasAny = true
+            )
+        )
+    )
+    number msUntilExpiry = 0
+    if hasAny (
+        msUntilExpiry = (oldest + quotaWindowMs) - timestamp
+        if msUntilExpiry < 0 (
+            msUntilExpiry = 0
+        )
+    )
+    return {used: total, limit: weeklyUploadQuotaBytes, oldestEventMs: msUntilExpiry, eventCount: count}
+)
+
 def assetNameOf(object item) string (
     if item.contains("md5ext") and item.md5ext != null (
         string name = item.md5ext.toStr()

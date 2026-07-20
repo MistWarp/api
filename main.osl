@@ -255,6 +255,7 @@ api.POST("/admin/user/message", requireAdmin, handleMessageUser)
 api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
 api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
 api.GET("/admin/stats", requireAdmin, handleAdminStats)
+api.GET("/admin/users", requireAdmin, handleListUsers)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

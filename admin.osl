@@ -155,6 +155,42 @@ def handleListBans(*serve.Context c) (
     c.json(200, {ok: true, bans: out})
 )
 
+def handleListUsers(*serve.Context c) (
+    array userFiles = fs.readDir(usersDir).toArray()
+    array out = []
+    for i userFiles.len (
+        string f = userFiles[i].toStr()
+        if f.endsWith(".json") (
+            string key = f.replace(".json", "")
+            object profile = loadProfile(key)
+            object quota = quotaDetails(key)
+            number projectCount = 0
+            object index = loadIndex()
+            object projects = index.projects
+            array pkeys = projects.getKeys().toArray()
+            for j pkeys.len (
+                object entry = projects[pkeys[j].toStr()]
+                if normalizeUsername(entry.owner.toStr()) == key (
+                    projectCount = projectCount + 1
+                )
+            )
+            out.append({
+                username: profile.username,
+                created: profile.created,
+                followerCount: profile.followers.assert(array).len,
+                projectCount: projectCount,
+                quotaUsed: quota.used,
+                quotaLimit: quota.limit,
+                quotaOldestEventMs: quota.oldestEventMs,
+                quotaEventCount: quota.eventCount,
+                banned: isBannedUser(key)
+            })
+        )
+    )
+    out.sortBy("quotaUsed", "descending")
+    c.json(200, {ok: true, users: out})
+)
+
 def handleAdminStats(*serve.Context c) (
     object index = loadIndex()
     object projects = index.projects
