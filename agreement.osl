@@ -1,5 +1,8 @@
-def agreementPath string (
+def agreementMetaPath string (
     return "data/agreement.json"
+)
+def agreementTextPath string (
+    return "data/agreement.md"
 )
 
 def agreementAcceptDir string (
@@ -7,15 +10,31 @@ def agreementAcceptDir string (
 )
 
 def loadAgreement() object (
-    auto result = readFile(agreementPath)
-    if !result.ok (
-        return {text: "", version: 0, updatedAt: 0}
+    auto metaResult = readFile(agreementMetaPath)
+    object meta
+    if metaResult.ok (
+        meta = metaResult.data.assert(object)
+    ) else (
+        meta = {text: "", version: 0, updatedAt: 0}
     )
-    return result.data.assert(object)
+    // Read text from .md file, fall back to the text field in json
+    auto textResult = readFile(agreementTextPath)
+    if textResult.ok (
+        meta.text = textResult.data
+    )
+    return meta
 )
 
 def saveAgreement(object data) boolean (
-    return writeFile(agreementPath, data)
+    // Write metadata to json, text to md
+    string text = data.text
+    data.text = ""  // don't store the text in json
+    bool ok = writeFile(agreementMetaPath, data)
+    data.text = text // restore
+    if text != "" (
+        ok = writeFile(agreementTextPath, text) && ok
+    )
+    return ok
 )
 
 def acceptancePath(string username) string (
