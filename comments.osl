@@ -138,13 +138,14 @@ def handleCreateProjectComment(*serve.Context c) (
     )
     string commenter = c.getString("username")
     string parentAuthor = created.parentAuthor.toStr()
+    string newCommentId = created.comment.id.toStr()
     if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-        addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title})
+        addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     )
     if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
-        addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title})
+        addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     )
-    notifyMentions(created.comment.content.toStr(), commenter, project.owner.toStr(), {projectId: project.id, projectTitle: project.title})
+    notifyMentions(created.comment.content.toStr(), commenter, project.owner.toStr(), {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     c.json(201, created)
 )
 
@@ -211,13 +212,14 @@ def handleCreateProfileComment(*serve.Context c) (
     )
     string commenter = c.getString("username")
     string parentAuthor = created.parentAuthor.toStr()
+    string newCommentId = created.comment.id.toStr()
     if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-        addNotification(parentAuthor, commenter, "reply", {profile: name})
+        addNotification(parentAuthor, commenter, "reply", {profile: name, commentId: newCommentId})
     )
     if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
-        addNotification(name, commenter, "profile_comment", {profile: name})
+        addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId})
     )
-    notifyMentions(created.comment.content.toStr(), commenter, name, {profile: name})
+    notifyMentions(created.comment.content.toStr(), commenter, name, {profile: name, commentId: newCommentId})
     c.json(201, created)
 )
 

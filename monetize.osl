@@ -166,6 +166,55 @@ def savePurchaseKeys(object store) boolean (
     return writeFile(purchaseKeysFile, store)
 )
 
+def loadPendingPayouts() object (
+    auto result = readFile(pendingPayoutsFile)
+    if !result.ok (
+        return {payouts: []}
+    )
+    return result.data.assert(object)
+)
+
+def recordPendingPayout(string projectId, string seller, string buyer, number amount) (
+    object store = loadPendingPayouts()
+    array payouts = store.payouts.assert(array)
+    payouts.append({projectId: projectId, seller: seller, buyer: buyer, amount: amount, at: timestamp})
+    store.payouts = payouts
+    writeFile(pendingPayoutsFile, store)
+)
+
+def retryPendingPayouts() object (
+    object store = loadPendingPayouts()
+    array payouts = store.payouts.assert(array)
+    array remaining = []
+    number paid = 0
+    for i payouts.len (
+        object p = payouts[i]
+        boolean ok = payoutTo(p.seller.toStr(), p.amount.toNum(), "MistWarp sale (retry)")
+        if ok (
+            paid = paid + 1
+        ) else (
+            remaining.append(p)
+        )
+    )
+    store.payouts = remaining
+    writeFile(pendingPayoutsFile, store)
+    return {paid: paid, remaining: remaining.len}
+)
+
+def handleListPendingPayouts(*serve.Context c) (
+    object store = loadPendingPayouts()
+    c.json(200, {ok: true, payouts: store.payouts.assert(array)})
+)
+
+def handleRetryPendingPayouts(*serve.Context c) (
+    if mistwarpRoturToken == "" (
+        c.json(503, {ok: false, error: "payouts are not available right now"})
+        return
+    )
+    object result = retryPendingPayouts()
+    c.json(200, {ok: true, paid: result.paid, remaining: result.remaining})
+)
+
 def prunePurchaseKeys(object store) object (
     object keys = store.keys
     array names = keys.getKeys().toArray()
@@ -351,6 +400,10 @@ def handlePurchaseIntent(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
+    if !projectIsViewable(project) (
+        c.notFound("project not found")
+        return
+    )
     number price = projectPrice(project)
     if price <= 0 (
         c.badRequest("this project is not for sale")
@@ -433,18 +486,20 @@ def handlePurchaseConfirm(*serve.Context c) (
         return
     )
 
-    keys.delete(key)
-    store.keys = keys
-    savePurchaseKeys(store)
-
     string seller = project.owner.toStr()
     number sellerAmount = owed
     if paywallFeePercent > 0 (
         sellerAmount = owed - (owed * paywallFeePercent / 100)
     )
     boolean paidOut = payoutTo(seller, sellerAmount, "MistWarp sale")
+
+    keys.delete(key)
+    store.keys = keys
+    savePurchaseKeys(store)
+
     if !paidOut (
         log "WARNING: paywall payout failed for project " ++ project.id.toStr() ++ " to " ++ seller ++ " amount " ++ sellerAmount.toStr()
+        recordPendingPayout(project.id.toStr(), seller, buyer, sellerAmount)
     )
 
     recordSale(project, buyer, owed, sellerAmount)

@@ -33,6 +33,23 @@ def isBannedUser(string username) boolean (
     return bans.contains(key)
 )
 
+def banReasonFor(string username) string (
+    string key = normalizeUsername(username)
+    if key == "" (
+        return ""
+    )
+    object data = loadBans()
+    object bans = data.bans
+    if !bans.contains(key) (
+        return ""
+    )
+    object entry = bans[key]
+    if entry.contains("reason") and entry.reason != null (
+        return entry.reason.toStr()
+    )
+    return ""
+)
+
 def banUser(string username, string reason, string actor) boolean (
     string key = normalizeUsername(username)
     if !isSafePathPart(key) (
@@ -261,6 +278,12 @@ def handleAdminStats(*serve.Context c) (
     object bans = banData.bans
     number bannedUsers = bans.getKeys().toArray().len
     array news = loadNews()
+    object payoutStore = loadPendingPayouts()
+    array pendingPayouts = payoutStore.payouts.assert(array)
+    number pendingPayoutAmount = 0
+    for i pendingPayouts.len (
+        pendingPayoutAmount = pendingPayoutAmount + pendingPayouts[i].amount.toNum()
+    )
     c.json(200, {
         ok: true,
         totalProjects: totalProjects,
@@ -274,6 +297,8 @@ def handleAdminStats(*serve.Context c) (
         openReports: openReports,
         bannedUsers: bannedUsers,
         newsPosts: news.len,
+        pendingPayouts: pendingPayouts.len,
+        pendingPayoutAmount: pendingPayoutAmount,
         projectsByDay: projectsByDay,
         loginsByDay: loginsByDay
     })

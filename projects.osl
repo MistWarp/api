@@ -821,12 +821,14 @@ def handleGetProjectJson(*serve.Context c) (
         c.notFound("project not found")
         return
     )
+    if serveNotModified(c, project) (
+        return
+    )
     string projectJson = currentProjectJson(project)
     if projectJson == "" (
         c.notFound("project file not found")
         return
     )
-    c.setHeader("Cache-Control", "no-store")
     c.data(200, "application/json", raw("[]byte(projectJson)"))
 )
 
@@ -1131,7 +1133,7 @@ def handleReactProject(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    if project.shared != true (
+    if !canViewProject(project, c) (
         c.notFound("project not found")
         return
     )
@@ -1375,7 +1377,7 @@ def handleRemixProject(*serve.Context c) (
         return
     )
     object parent = result.project.assert(object)
-    if parent.shared != true (
+    if !canViewProject(parent, c) (
         c.notFound("project not found")
         return
     )

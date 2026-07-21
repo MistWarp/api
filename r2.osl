@@ -190,7 +190,22 @@ def blobCacheHeader(string key) string (
     if key.startsWith("assets/") (
         return "public, max-age=31536000, immutable"
     )
-    return "no-store"
+    return "no-cache"
+)
+
+def projectJsonEtag(object project) string (
+    return "\"" ++ project.id.toStr() ++ "-" ++ project.edited.toStr() ++ "\""
+)
+
+def serveNotModified(*serve.Context c, object project) boolean (
+    string etag = projectJsonEtag(project)
+    c.setHeader("ETag", etag)
+    c.setHeader("Cache-Control", "no-cache")
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
+        return true
+    )
+    return false
 )
 
 def serveBlobKey(*serve.Context c, string key) (
@@ -260,10 +275,13 @@ def handleGetProjectBlob(*serve.Context c) (
         )
     )
 
+    if serveNotModified(c, project) (
+        return
+    )
+
     string localPath = localProjectJsonPathFor(project, 0)
     if localPath != "" (
         c.setHeader("Content-Type", "application/json")
-        c.setHeader("Cache-Control", "no-store")
         c.file(localPath)
         return
     )
