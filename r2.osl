@@ -15,11 +15,32 @@ def thumbnailPath(string id) string (
 )
 
 def thumbUrlFor(object project) string (
+    return thumbUrlForChain(project, 0)
+)
+
+def thumbUrlForChain(object project, number hops) string (
     string id = project.id.toStr()
-    if !fs.exists(thumbnailPath(id)) (
+    if fs.exists(thumbnailPath(id)) (
+        return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
+    )
+
+    if hops >= 100 or !project.contains("remixParent") or project.remixParent.toStr() == "" (
         return ""
     )
-    return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
+
+    string parentId = project.remixParent.toStr()
+    if parentId == id (
+        return ""
+    )
+    auto parentResult = loadProject(parentId)
+    if !parentResult.ok (
+        return ""
+    )
+    object parentProject = parentResult.project.assert(object)
+    if projectPrice(parentProject) > 0 (
+        return ""
+    )
+    return thumbUrlForChain(parentProject, hops + 1)
 )
 
 def isUntouchedRemix(object project) boolean (
