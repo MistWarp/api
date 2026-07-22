@@ -9,6 +9,8 @@ import "osl/url"
 import "osl/s3"
 import "osl/zip"
 import "osl/regex"
+import "osl/thread"
+import "osl/process"
 
 import "go/time"
 
@@ -68,6 +70,7 @@ string quotaDir = "data/quota/"
 string userIdsFile = "data/userids.json"
 string adminsFile = "data/admins.json"
 string bansFile = "data/bans.json"
+string agreementAcceptDir = "data/agreement-acceptances/"
 
 number maxProjectJsonBytes = 5242880
 number maxAssetBytes = 10485760
@@ -141,6 +144,7 @@ if !r2Local and appURL == "http://localhost:5627" (
 )
 sweepStagedProjects()
 cleanupExpiredSessions()
+thread.new(reconcileLoop)
 
 auto viewDedup = cache.create(100000, 86400)
 auto userIdsCache = cache.create(10000, 300)
@@ -267,6 +271,7 @@ api.POST("/admin/payouts/retry", requireAdmin, handleRetryPendingPayouts)
 api.GET("/admin/users", requireAdmin, handleListUsers)
 api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
 api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)
+api.POST("/admin/reconcile-deletions", requireAdmin, handleReconcileDeletions)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

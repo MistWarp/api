@@ -222,3 +222,222 @@ def usernameForId(string userId) string (
     )
     return ""
 )
+
+def removeUserFromArray(array items, string key) array (
+    array next = []
+    for i items.len (
+        string value = items[i].toStr()
+        if normalizeUsername(value) != key (
+            next.append(value)
+        )
+    )
+    return next
+)
+
+def purgeUserFromProfiles(string key) (
+    fs.remove(usersDir ++ key ++ ".json")
+    array files = fs.readDir(usersDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = readFile(usersDir ++ name)
+            if result.ok (
+                object other = result.data.assert(object)
+                boolean changed = false
+                array followers = other.followers.assert(array)
+                if followers.contains(key) (
+                    other.followers = removeUserFromArray(followers, key)
+                    changed = true
+                )
+                array following = other.following.assert(array)
+                if following.contains(key) (
+                    other.following = removeUserFromArray(following, key)
+                    changed = true
+                )
+                if changed (
+                    writeFile(usersDir ++ name, other)
+                )
+            )
+        )
+    )
+)
+
+def purgeUserFromProjects(string key) (
+    array files = fs.readDir(projectsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = loadProject(name.replace(".json", ""))
+            if result.ok (
+                object project = result.project.assert(object)
+                boolean changed = false
+                if normalizeUsername(project.owner.toStr()) == key (
+                    project.owner = "Deleted User"
+                    changed = true
+                )
+                array loves = project.loves.assert(array)
+                if loves.contains(key) (
+                    project.loves = removeUserFromArray(loves, key)
+                    changed = true
+                )
+                if project.contains("brokenhearts") and project.brokenhearts != null (
+                    array broken = project.brokenhearts.assert(array)
+                    if broken.contains(key) (
+                        project.brokenhearts = removeUserFromArray(broken, key)
+                        changed = true
+                    )
+                )
+                if changed (
+                    saveProject(project)
+                    upsertIndexEntry(project)
+                )
+            )
+        )
+    )
+)
+
+def purgeUserFromComments(string key) (
+    fs.remove(commentsDir ++ "profile-" ++ key ++ ".jsonl")
+    fs.remove(commentsDir ++ "profile-" ++ key ++ ".json")
+    array files = fs.readDir(commentsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        string ckey = name.replace(".jsonl", "").replace(".json", "")
+        array comments = loadComments(ckey)
+        boolean changed = false
+        for j comments.len (
+            object comment = comments[j]
+            if normalizeUsername(comment.author.toStr()) == key (
+                comment.author = "Deleted User"
+                changed = true
+            )
+        )
+        if changed (
+            saveComments(ckey, comments)
+        )
+    )
+)
+
+def purgeUserFromNotifications(string key) (
+    fs.remove(notificationsDir ++ key ++ ".json")
+    array files = fs.readDir(notificationsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = readFile(notificationsDir ++ name)
+            if result.ok (
+                object data = result.data.assert(object)
+                array items = data.items.assert(array)
+                array kept = []
+                boolean changed = false
+                for j items.len (
+                    object item = items[j]
+                    if item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == key (
+                        changed = true
+                    ) else (
+                        kept.append(item)
+                    )
+                )
+                if changed (
+                    data.items = kept
+                    writeFile(notificationsDir ++ name, data)
+                )
+            )
+        )
+    )
+)
+
+def purgeUserSessions(string userId) (
+    array files = fs.readDir(sessionsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto res = readFile(sessionsDir ++ name)
+            if res.ok (
+                object session = res.data.assert(object)
+                if session.userId.toStr() == userId (
+                    fs.remove(sessionsDir ++ name)
+                )
+            )
+        )
+    )
+)
+
+def purgeUser(string userId, string username) (
+    string key = normalizeUsername(username)
+    if !isSafePathPart(key) (
+        return
+    )
+    purgeUserFromProfiles(key)
+    purgeUserFromProjects(key)
+    purgeUserFromComments(key)
+    purgeUserFromNotifications(key)
+    fs.remove(activityDir ++ key ++ ".json")
+    fs.remove(userSettingsDir ++ key ++ ".json")
+    fs.remove(quotaDir ++ key ++ ".json")
+    fs.remove(agreementAcceptDir ++ key ++ ".json")
+    array admins = loadAdmins()
+    if admins.contains(key) (
+        saveAdmins(removeUserFromArray(admins, key))
+    )
+    object banData = loadBans()
+    object bans = banData.bans
+    if bans.contains(key) (
+        bans.delete(key)
+        saveBans(banData)
+    )
+    purgeUserSessions(userId)
+    object idData = loadUserIds()
+    object idUsers = idData.users
+    if idUsers.contains(userId) (
+        idUsers.delete(userId)
+        saveUserIds(idData)
+    )
+    userIdsCache.set(userId, "")
+)
+
+def reconcileDeletedUsers() (
+    object idData = loadUserIds()
+    object idUsers = idData.users
+    array ids = idUsers.getKeys().toArray()
+    if ids.len == 0 (
+        return
+    )
+    object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})})
+    if !resp.success (
+        log "reconcileDeletedUsers: rotur request failed"
+        return
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        log "reconcileDeletedUsers: invalid response from rotur"
+        return
+    )
+    object data = parsed.unwrap().assert(object)
+    if !data.contains("deleted") or data.deleted == null (
+        return
+    )
+    array deleted = data.deleted.assert(array)
+    for i deleted.len (
+        string uid = deleted[i].toStr()
+        if idUsers.contains(uid) (
+            string uname = idUsers[uid].toStr()
+            if uname != "" (
+                log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
+                purgeUser(uid, uname)
+            )
+        )
+    )
+)
+
+def reconcileLoop() (
+    while true (
+        reconcileDeletedUsers()
+        process.sleep(300)
+    )
+)
+
+def handleReconcileDeletions(*serve.Context c) (
+    reconcileDeletedUsers()
+    c.json(200, {ok: true})
+)

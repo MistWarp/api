@@ -11,6 +11,7 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(stagingDir)
     result = result and fs.mkdirAll(thumbnailsDir)
     result = result and fs.mkdirAll(quotaDir)
+    result = result and fs.mkdirAll(agreementAcceptDir)
     return result
 )
 

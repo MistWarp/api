@@ -5,10 +5,6 @@ def agreementTextPath string (
     return "data/agreement.md"
 )
 
-def agreementAcceptDir string (
-    return "data/agreement-acceptances/"
-)
-
 def loadAgreement() object (
     object metaResult = readFile(agreementMetaPath())
     object meta = {
