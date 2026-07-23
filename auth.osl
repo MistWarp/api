@@ -14,6 +14,7 @@ def createSession(string username, string userId) string (
         createdAt: timestamp
     }
     writeFile(sessionsDir ++ sessionId ++ ".json", session)
+    sessionCache.set(sessionId, session)
     return sessionId
 )
 
@@ -22,13 +23,20 @@ def getSession(string token) object (
         return {ok: false, error: "invalid token"}
     )
     string path = sessionsDir ++ token ++ ".json"
-    auto result = readFile(path)
-    if !result.ok (
-        return {ok: false, error: "session not found"}
+    object session = {}
+    if sessionCache.has(token) (
+        session = sessionCache.get(token).assert(object)
+    ) else (
+        auto result = readFile(path)
+        if !result.ok (
+            return {ok: false, error: "session not found"}
+        )
+        session = result.data.assert(object)
+        sessionCache.set(token, session)
     )
-    object session = result.data.assert(object)
     if timestamp - session.createdAt.toNum() > 604800000 (
         fs.remove(path)
+        sessionCache.delete(token)
         return {ok: false, error: "session expired"}
     )
     string username = session.username.toStr()
@@ -44,6 +52,7 @@ def deleteSession(string token) boolean (
     if !isSafePathPart(token) (
         return false
     )
+    sessionCache.delete(token)
     return fs.remove(sessionsDir ++ token ++ ".json")
 )
 
@@ -74,7 +83,7 @@ def isAdminUser(string username) boolean (
     if adminUsers.contains(key) (
         return true
     )
-    return loadAdmins().contains(key)
+    return cachedAdmins().contains(key)
 )
 
 def handleRoturAuth(*serve.Context c) (

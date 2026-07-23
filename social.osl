@@ -8,7 +8,7 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
         object entry = projects[keys[i].toStr()]
         if normalizeUsername(entry.owner.toStr()) == ownerKey (
             if entry.shared == true or includeUnshared (
-                entries.append(hydrateIndexEntry(entry))
+                entries.append(entry)
             )
         )
     )
@@ -64,6 +64,18 @@ def handleSearchUsers(*serve.Context c) (
     object index = loadIndex()
     object projects = index.projects
     array keys = projects.getKeys().toArray()
+    object sharedCounts = {}
+    for i keys.len (
+        object entry = projects[keys[i].toStr()]
+        if entry.shared == true (
+            string owner = normalizeUsername(entry.owner.toStr())
+            number prev = 0
+            if sharedCounts.contains(owner) (
+                prev = sharedCounts[owner].toNum()
+            )
+            sharedCounts[owner] = prev + 1
+        )
+    )
     array matches = []
     for i names.len (
         string file = names[i].toStr()
@@ -73,11 +85,8 @@ def handleSearchUsers(*serve.Context c) (
                 object profile = loadProfile(username)
                 array followers = profile.followers.assert(array)
                 number projectCount = 0
-                for j keys.len (
-                    object entry = projects[keys[j].toStr()]
-                    if entry.shared == true and normalizeUsername(entry.owner.toStr()) == username (
-                        projectCount = projectCount + 1
-                    )
+                if sharedCounts.contains(username) (
+                    projectCount = sharedCounts[username].toNum()
                 )
                 matches.append({username: username, followers: followers.len, projects: projectCount})
             )
@@ -194,7 +203,7 @@ def userProjectList(*serve.Context c, string field) (
         if projects.contains(id) (
             object entry = projects[id]
             if entry.shared == true (
-                entries.append(hydrateIndexEntry(entry))
+                entries.append(entry)
             )
         )
     )
@@ -322,7 +331,7 @@ def handleGetMyLibrary(*serve.Context c) (
     for i ids.len (
         string id = ids[i].toStr()
         if projects.contains(id) (
-            entries.append(hydrateIndexEntry(projects[id]))
+            entries.append(projects[id])
         )
     )
     entries.reverse()

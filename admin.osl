@@ -8,7 +8,17 @@ def loadAdmins() array (
 )
 
 def saveAdmins(array admins) boolean (
+    adminsCache.delete("admins")
     return writeFile(adminsFile, {admins: admins})
+)
+
+def cachedAdmins() array (
+    if adminsCache.has("admins") (
+        return adminsCache.get("admins").assert(array)
+    )
+    array admins = loadAdmins()
+    adminsCache.set("admins", admins)
+    return admins
 )
 
 def loadBans() object (
@@ -20,7 +30,17 @@ def loadBans() object (
 )
 
 def saveBans(object data) boolean (
+    bansCache.delete("bans")
     return writeFile(bansFile, data)
+)
+
+def cachedBans() object (
+    if bansCache.has("bans") (
+        return bansCache.get("bans").assert(object)
+    )
+    object data = loadBans()
+    bansCache.set("bans", data)
+    return data
 )
 
 def isBannedUser(string username) boolean (
@@ -28,7 +48,7 @@ def isBannedUser(string username) boolean (
     if key == "" (
         return false
     )
-    object data = loadBans()
+    object data = cachedBans()
     object bans = data.bans
     return bans.contains(key)
 )
@@ -38,7 +58,7 @@ def banReasonFor(string username) string (
     if key == "" (
         return ""
     )
-    object data = loadBans()
+    object data = cachedBans()
     object bans = data.bans
     if !bans.contains(key) (
         return ""
@@ -174,6 +194,19 @@ def handleListBans(*serve.Context c) (
 
 def handleListUsers(*serve.Context c) (
     array userFiles = fs.readDir(usersDir).toArray()
+    object index = loadIndex()
+    object projects = index.projects
+    array pkeys = projects.getKeys().toArray()
+    object ownerCounts = {}
+    for i pkeys.len (
+        object entry = projects[pkeys[i].toStr()]
+        string owner = normalizeUsername(entry.owner.toStr())
+        number prev = 0
+        if ownerCounts.contains(owner) (
+            prev = ownerCounts[owner].toNum()
+        )
+        ownerCounts[owner] = prev + 1
+    )
     array out = []
     for i userFiles.len (
         string f = userFiles[i].toStr()
@@ -182,14 +215,8 @@ def handleListUsers(*serve.Context c) (
             object profile = loadProfile(key)
             object quota = quotaDetails(key)
             number projectCount = 0
-            object index = loadIndex()
-            object projects = index.projects
-            array pkeys = projects.getKeys().toArray()
-            for j pkeys.len (
-                object entry = projects[pkeys[j].toStr()]
-                if normalizeUsername(entry.owner.toStr()) == key (
-                    projectCount = projectCount + 1
-                )
+            if ownerCounts.contains(key) (
+                projectCount = ownerCounts[key].toNum()
             )
             out.append({
                 username: profile.username,
@@ -314,7 +341,7 @@ def handleAdminSearchProjects(*serve.Context c) (
         object entry = projects[keys[i].toStr()]
         string hay = (entry.title.toStr() ++ " " ++ entry.owner.toStr() ++ " " ++ entry.id.toStr()).toLower()
         if q == "" or hay.contains(q) (
-            matches.append(hydrateIndexEntry(entry))
+            matches.append(entry)
         )
     )
     matches.sortBy("edited", "descending")

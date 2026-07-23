@@ -119,18 +119,13 @@ def indexEntryFromProject(object project) object (
     }
 )
 
-def hydrateIndexEntry(object entry) object (
-    entry.thumbUrl = thumbUrlFor(entry)
-    return entry
-)
-
 def refreshIndexUrls() boolean (
     object index = loadIndex()
     object projects = index.projects
     array keys = projects.getKeys().toArray()
     for i keys.len (
         object entry = projects[keys[i].toStr()]
-        hydrateIndexEntry(entry)
+        entry.thumbUrl = thumbUrlFor(entry)
     )
     return saveIndex(index)
 )

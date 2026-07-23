@@ -85,15 +85,18 @@ def projectResponse(object project, *serve.Context c) object (
     )
     boolean isOwner = canEditProject(project, c)
     number price = projectPrice(project)
-    string viewerKey = normalizeUsername(c.getString("username"))
-    boolean bought = hasBought(project, viewerKey)
+    boolean bought = hasBought(project, viewer)
     boolean hasContent = project.lastUploadAt.toNum() > 0
     hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
-    string jsonUrl = projectJsonUrlFor(project)
+    string jsonBase = projectJsonBaseUrl(project)
+    string jsonUrl = jsonBase
+    if project.shared != true and projectViewKey(project) != "" (
+        jsonUrl = jsonBase ++ "?k=" ++ projectViewKey(project)
+    )
     boolean locked = false
     if price > 0 (
         if isOwner or bought (
-            jsonUrl = projectJsonBaseUrl(project) ++ "?k=" ++ projectViewKey(project)
+            jsonUrl = jsonBase ++ "?k=" ++ projectViewKey(project)
         ) else (
             jsonUrl = ""
             locked = true
@@ -123,7 +126,7 @@ def projectResponse(object project, *serve.Context c) object (
         price: price,
         locked: locked,
         bought: bought,
-        saved: isInLibrary(viewerKey, project.id.toStr()),
+        saved: isInLibrary(viewer, project.id.toStr()),
         hasContent: hasContent,
         remixable: projectRemixable(project),
         canRemix: canRemixProject(project, c),
@@ -1116,7 +1119,11 @@ def handleViewProject(*serve.Context c) (
     pruned[dayKey] = dayCount + 1
     project.viewHistory = pruned
     saveProject(project)
-    upsertIndexEntry(project)
+    string flushKey = project.id.toStr()
+    if !viewIndexFlush.has(flushKey) (
+        viewIndexFlush.set(flushKey, true)
+        upsertIndexEntry(project)
+    )
     c.json(200, {ok: true})
 )
 
@@ -1189,13 +1196,13 @@ def sharedIndexEntries() array (
     object index = loadIndex()
     object projects = index.projects
     array keys = projects.getKeys().toArray()
-    object banData = loadBans()
+    object banData = cachedBans()
     object bans = banData.bans
     array entries = []
     for i keys.len (
         object entry = projects[keys[i].toStr()]
         if entry.shared == true and !bans.contains(normalizeUsername(entry.owner.toStr())) (
-            entries.append(hydrateIndexEntry(entry))
+            entries.append(entry)
         )
     )
     return entries
@@ -1326,9 +1333,19 @@ def handleGetRemixTree(*serve.Context c) (
 
     array entries = sharedIndexEntries()
     object byId = {}
+    object childrenByParent = {}
     for i entries.len (
         object entry = entries[i]
         byId[entry.id.toStr()] = entry
+        string parentKey = entry.remixParent.toStr()
+        if parentKey != "" (
+            array kids = []
+            if childrenByParent.contains(parentKey) (
+                kids = childrenByParent[parentKey].assert(array)
+            )
+            kids.append(entry.id.toStr())
+            childrenByParent[parentKey] = kids
+        )
     )
     if !byId.contains(id) (
         byId[id] = indexEntryFromProject(project)
@@ -1356,12 +1373,14 @@ def handleGetRemixTree(*serve.Context c) (
     while cursor <= order.len and nodes.len < 500 (
         string currentId = order[cursor].toStr()
         nodes.append(byId[currentId])
-        for i entries.len (
-            object entry = entries[i]
-            string entryId = entry.id.toStr()
-            if entry.remixParent.toStr() == currentId and !seen.contains(entryId) (
-                seen[entryId] = true
-                order.append(entryId)
+        if childrenByParent.contains(currentId) (
+            array kids = childrenByParent[currentId].assert(array)
+            for i kids.len (
+                string entryId = kids[i].toStr()
+                if !seen.contains(entryId) (
+                    seen[entryId] = true
+                    order.append(entryId)
+                )
             )
         )
         cursor = cursor + 1
