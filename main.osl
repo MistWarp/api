@@ -142,9 +142,17 @@ if r2Local (
 if !r2Local and appURL == "http://localhost:5627" (
     log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
 )
+def stagedFlushLoop() (
+    while true (
+        process.sleep(300)
+        sweepStagedProjects()
+    )
+)
+
 sweepStagedProjects()
 cleanupExpiredSessions()
 thread.new(reconcileLoop)
+thread.new(stagedFlushLoop)
 
 auto viewDedup = cache.create(100000, 86400)
 auto viewIndexFlush = cache.create(100000, 600)

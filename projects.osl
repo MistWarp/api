@@ -749,8 +749,18 @@ def handleUploadProject(*serve.Context c) (
         project.lastUploadAt = timestamp
         project.pendingJson = false
     ) else (
-        stageProjectJson(project, projectJson)
-        project.pendingJson = true
+        if stageProjectJson(project, projectJson) (
+            project.pendingJson = true
+        ) else (
+            flushed = pushProjectJsonToR2(project, projectJson)
+            if flushed (
+                project.lastUploadAt = timestamp
+                project.pendingJson = false
+            ) else (
+                c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+                return
+            )
+        )
     )
 
     saveProject(project)
