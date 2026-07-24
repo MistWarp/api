@@ -51,10 +51,10 @@ with credentials, so any frontend origin is accepted.
 R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
 ## Upload pipeline
 
-The editor POSTs the whole sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server unzips it, validates `project.json` (max 20MB) and every asset (max 10MB each), normalizes stale asset filenames to the md5 of their content, then uploads to R2:
+The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 1 GiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
 
 - `assets/<md5ext>`: content addressed, shared across all projects and remixes, uploaded once ever
-- `projects/<id>/project.json`: the playable snapshot
+- `projects/<id>/project.json`: the gzip-encoded playable snapshot
 - `projects/<id>/thumb.png`
 
 Uploads per project are debounced to one per 24 hours (429 with `retryAfterMs` otherwise); git carries every save, R2 holds a daily snapshot. `data/assets-index.json` tracks which assets R2 already has so duplicates are never re-uploaded.

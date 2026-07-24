@@ -47,19 +47,13 @@ def snapshotProjectEvidence(string projectId) (
     project.snapshotAt = timestamp
     writeFile(dir ++ "meta.json", project)
 
-    string pj = currentProjectJson(project)
-    if pj != "" (
-        fs.writeFile(dir ++ "project.json", pj)
-        object referenced = referencedAssetNames(pj)
-        if referenced.ok (
-            object names = referenced.names.assert(object)
-            array list = names.getKeys().toArray()
-            for i list.len (
-                string name = list[i].toStr()
-                string bytes = readAssetBytes(name)
-                if bytes != "" (
-                    fs.writeFileBytes(dir ++ "assets/" ++ name, bytes)
-                )
+    if copyStoredProjectJsonToPath(project, dir ++ "project.json.gz") (
+        array list = project.assets.assert(array)
+        for i list.len (
+            string name = list[i].toStr()
+            string bytes = readAssetBytes(name)
+            if bytes != "" (
+                fs.writeFileBytes(dir ++ "assets/" ++ name, bytes)
             )
         )
     )
@@ -92,6 +86,7 @@ def removeEvidenceDir(string id) (
         fs.remove(assetsDir)
     )
     fs.remove(dir ++ "project.json")
+    fs.remove(dir ++ "project.json.gz")
     fs.remove(dir ++ "meta.json")
     fs.remove(dir ++ "thumbnail.png")
     fs.remove(dir)
@@ -124,13 +119,21 @@ def handleGetEvidenceJson(*serve.Context c) (
         c.notFound("not found")
         return
     )
-    string path = evidenceDirFor(id) ++ "project.json"
+    string path = evidenceDirFor(id) ++ "project.json.gz"
+    boolean compressed = true
+    if !fs.exists(path) (
+        path = evidenceDirFor(id) ++ "project.json"
+        compressed = false
+    )
     if !fs.exists(path) (
         c.notFound("not found")
         return
     )
     c.setHeader("Content-Type", "application/json")
     c.setHeader("Cache-Control", "no-store")
+    if compressed (
+        c.setHeader("Content-Encoding", "gzip")
+    )
     c.file(path)
 )
 
