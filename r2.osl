@@ -10,6 +10,10 @@ def stagingJsonPath(string id) string (
     return stagingDir ++ id ++ ".json"
 )
 
+def projectJsonIsGzip(object project) boolean (
+    return project.contains("jsonGzip") and project.jsonGzip == true
+)
+
 def thumbnailPath(string id) string (
     return thumbnailsDir ++ id ++ ".png"
 )
@@ -189,14 +193,22 @@ def parentDirOf(string path) string (
     return dir
 )
 
-def r2Put(string key, any body, string contentType) boolean (
+def r2PutEncoded(string key, any body, string contentType, string contentEncoding) boolean (
     if r2Local (
         string path = localBlobPath(key)
         fs.mkdirAll(parentDirOf(path))
         return fs.writeFileBytes(path, body)
     )
-    auto result = r2Client.put({"key": key, "body": body, "content_type": contentType})
+    object input = {"key": key, "body": body, "content_type": contentType}
+    if contentEncoding != "" (
+        input.content_encoding = contentEncoding
+    )
+    auto result = r2Client.put(input)
     return result.ok == true
+)
+
+def r2Put(string key, any body, string contentType) boolean (
+    return r2PutEncoded(key, body, contentType, "")
 )
 
 def r2Remove(string key) boolean (
@@ -205,6 +217,43 @@ def r2Remove(string key) boolean (
     )
     auto result = r2Client.remove({"key": key})
     return result.ok == true
+)
+
+def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
+    string localPath = localProjectJsonPathFor(project, 0)
+    if localPath != "" (
+        if projectJsonIsGzip(project) (
+            if fs.getSize(localPath) > maxStoredProjectJsonBytes (
+                return false
+            )
+            return zip.copyFile(localPath, outputPath)
+        )
+        return zip.gzipLimited(localPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+    )
+    if r2Local (
+        return false
+    )
+    string direct = r2DirectUrl(project.jsonKey.toStr())
+    if direct == "" (
+        return false
+    )
+    auto fetched = requests.get(direct, {headers: {"Accept-Encoding": "identity"}})
+    if !fetched.success or fetched.status.toInt() != 200 (
+        return false
+    )
+    if projectJsonIsGzip(project) (
+        if fetched.body.toStr().len > maxStoredProjectJsonBytes (
+            return false
+        )
+        return fs.writeFileBytes(outputPath, fetched.body)
+    )
+    string plainPath = outputPath ++ ".plain"
+    if !fs.writeFileBytes(plainPath, fetched.body) (
+        return false
+    )
+    boolean compressed = zip.gzipLimited(plainPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+    fs.remove(plainPath)
+    return compressed
 )
 
 def blobCacheHeader(string key) string (
@@ -265,6 +314,20 @@ def serveBlobKey(*serve.Context c, string key) (
     c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
 )
 
+def serveProjectJson(*serve.Context c, object project) (
+    string localPath = localProjectJsonPathFor(project, 0)
+    if localPath != "" (
+        c.setHeader("Content-Type", "application/json")
+        c.setHeader("Cache-Control", "no-cache")
+        if projectJsonIsGzip(project) (
+            c.setHeader("Content-Encoding", "gzip")
+        )
+        c.file(localPath)
+        return
+    )
+    serveBlobKey(c, project.jsonKey.toStr())
+)
+
 def handleGetAssetBlob(*serve.Context c) (
     serveBlobKey(c, assetObjectKey(c.param("name")))
 )
@@ -300,12 +363,5 @@ def handleGetProjectBlob(*serve.Context c) (
         return
     )
 
-    string localPath = localProjectJsonPathFor(project, 0)
-    if localPath != "" (
-        c.setHeader("Content-Type", "application/json")
-        c.file(localPath)
-        return
-    )
-
-    serveBlobKey(c, projectJsonKey(id))
+    serveProjectJson(c, project)
 )

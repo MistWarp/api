@@ -141,6 +141,15 @@ def projectResponse(object project, *serve.Context c) object (
         sizeBytes: projectSizeBytes(project),
         isOwner: isOwner
     }
+    if project.contains("jsonBytes") (
+        response.jsonBytes = project.jsonBytes
+    )
+    if project.contains("storedJsonBytes") (
+        response.storedJsonBytes = project.storedJsonBytes
+    )
+    if project.contains("assetBytes") (
+        response.assetBytes = project.assetBytes
+    )
     if isOwner (
         object viewHistory = {}
         if project.contains("viewHistory") and project.viewHistory != null (
@@ -421,66 +430,27 @@ def quotaDetails(string username) object (
     return {used: total, limit: weeklyUploadQuotaBytes, oldestEventMs: msUntilExpiry, eventCount: count}
 )
 
-def assetNameOf(object item) string (
-    if item.contains("md5ext") and item.md5ext != null (
-        string name = item.md5ext.toStr()
-        if isValidMd5Ext(name) (
-            return name
-        )
-    )
-    if item.contains("assetId") and item.assetId != null and item.contains("dataFormat") and item.dataFormat != null (
-        string name = item.assetId.toStr() ++ "." ++ item.dataFormat.toStr()
-        if isValidMd5Ext(name) (
-            return name
-        )
-    )
-    return ""
-)
-
-def referencedAssetNames(string projectJson) object (
-    auto parsed = json.parse(projectJson, {type: "object"})
-    if parsed.isErr() (
-        return {ok: false}
-    )
-    object data = parsed.unwrap().assert(object)
-    if !data.contains("targets") or data.targets == null (
-        return {ok: false}
-    )
-    object names = {}
-    array targets = data.targets.assert(array)
-    for t targets.len (
-        object target = targets[t]
-        if target.contains("costumes") and target.costumes != null (
-            array costumes = target.costumes.assert(array)
-            for i costumes.len (
-                string name = assetNameOf(costumes[i].assert(object))
-                if name != "" (
-                    names[name] = true
-                )
-            )
-        )
-        if target.contains("sounds") and target.sounds != null (
-            array sounds = target.sounds.assert(array)
-            for i sounds.len (
-                string name = assetNameOf(sounds[i].assert(object))
-                if name != "" (
-                    names[name] = true
-                )
-            )
-        )
-    )
-    return {ok: true, names: names}
-)
-
 def uploadProjectFiles(object project, string extractDir) object (
     array names = fs.readDir(extractDir).toArray()
     string jsonPath = extractDir ++ "/project.json"
     if !fs.exists(jsonPath) (
         return {ok: false, error: "sb3 has no project.json", status: 400}
     )
-    string projectJson = fs.readFile(jsonPath)
-    if projectJson.len > maxProjectJsonBytes (
-        return {ok: false, error: "project.json too large", status: 400}
+    number projectJsonBytes = fs.getSize(jsonPath)
+    if projectJsonBytes > maxProjectJsonBytes (
+        return {ok: false, error: "project.json exceeds the 1 GB expanded limit", code: "project_too_large", status: 413}
+    )
+    auto inspection = json.inspectFile(jsonPath, ["md5ext", "targets"], maxProjectJsonBytes, maxAssetCount * 50)
+    if inspection.isErr() (
+        return {ok: false, error: "invalid project.json", status: 400}
+    )
+    object inspected = inspection.unwrap().assert(object)
+    if inspected.root.toStr() != "object" or inspected.counts.assert(object).targets.toNum() == 0 (
+        return {ok: false, error: "invalid project.json", status: 400}
+    )
+    string gzipPath = jsonPath ++ ".gz"
+    if !zip.gzipLimited(jsonPath, gzipPath, maxProjectJsonBytes, maxStoredProjectJsonBytes) (
+        return {ok: false, error: "compressed project data exceeds the 20 MB limit", code: "project_too_large", status: 413}
     )
 
     object assetsIndex = loadAssetsIndex()
@@ -498,53 +468,41 @@ def uploadProjectFiles(object project, string extractDir) object (
                 if assetCount > maxAssetCount (
                     return {ok: false, error: "too many assets", status: 400}
                 )
-                string content = fs.readFile(extractDir ++ "/" ++ name)
-                if content.len > maxAssetBytes (
-                    return {ok: false, error: "asset too large: " ++ name, status: 400}
+                string assetPath = extractDir ++ "/" ++ name
+                if fs.getSize(assetPath) > maxAssetBytes (
+                    return {ok: false, error: "an asset exceeds the 10 MB limit: " ++ name, code: "project_too_large", status: 413}
                 )
+                string content = fs.readFile(assetPath)
                 string actualHash = content.hashMD5()
-                string canonicalName = name
                 if actualHash != md5PartOf(name) (
-                    canonicalName = actualHash ++ "." ++ extPartOf(name)
-                    projectJson = projectJson.replace(md5PartOf(name), actualHash)
+                    return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
                 )
-                projectAssets.append(canonicalName)
-                if !knownAssets.contains(canonicalName) and !pendingNames.contains(canonicalName) (
-                    pendingUploads.append({source: name, name: canonicalName})
-                    pendingNames[canonicalName] = true
+                projectAssets.append(name)
+                if !knownAssets.contains(name) and !pendingNames.contains(name) (
+                    pendingUploads.append({source: name, name: name})
+                    pendingNames[name] = true
+                    knownAssets[name] = content.len
                 )
             )
         )
     )
 
-    number uploaded = 0
-    for i pendingUploads.len (
-        object upload = pendingUploads[i].assert(object)
-        string source = upload.source.toStr()
-        string name = upload.name.toStr()
-        string content = fs.readFile(extractDir ++ "/" ++ source)
-        if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
-            return {ok: false, error: "asset upload failed", status: 502}
-        )
-        knownAssets[name] = content.len
-        uploaded = uploaded + 1
-    )
-    if uploaded > 0 (
-        saveAssetsIndex(assetsIndex)
-    )
-
-    object referenced = referencedAssetNames(projectJson)
-    if !referenced.ok (
-        return {ok: false, error: "invalid project.json", status: 400}
-    )
     object providedSet = {}
     for i projectAssets.len (
         providedSet[projectAssets[i].toStr()] = true
     )
-    object referencedNames = referenced.names.assert(object)
-    array referencedList = referencedNames.getKeys().toArray()
+    object inspectedValues = inspected.values.assert(object)
+    array referencedList = inspectedValues.md5ext.assert(array)
+    object referencedNames = {}
     for i referencedList.len (
         string name = referencedList[i].toStr()
+        if isValidMd5Ext(name) (
+            referencedNames[name] = true
+        )
+    )
+    array referencedUnique = referencedNames.getKeys().toArray()
+    for i referencedUnique.len (
+        string name = referencedUnique[i].toStr()
         if !providedSet.contains(name) (
             if !knownAssets.contains(name) (
                 return {ok: false, error: "missing asset: " ++ name, status: 400}
@@ -564,24 +522,40 @@ def uploadProjectFiles(object project, string extractDir) object (
         )
     )
     if assetBytes > maxProjectAssetsBytes (
-        return {ok: false, error: "project assets exceed the 100 MB limit", status: 413}
+        return {ok: false, error: "project assets exceed the 50 MB limit", code: "project_too_large", status: 413}
     )
 
-    return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, projectJson: projectJson, assetBytes: assetBytes}
+    number uploaded = 0
+    for i pendingUploads.len (
+        object upload = pendingUploads[i].assert(object)
+        string source = upload.source.toStr()
+        string name = upload.name.toStr()
+        string content = fs.readFile(extractDir ++ "/" ++ source)
+        if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
+            return {ok: false, error: "asset upload failed", status: 502}
+        )
+        knownAssets[name] = content.len
+        uploaded = uploaded + 1
+    )
+    if uploaded > 0 (
+        saveAssetsIndex(assetsIndex)
+    )
+
+    return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.getSize(gzipPath), assetBytes: assetBytes}
 )
 
-def pushProjectJsonToR2(object project, string projectJson) boolean (
-    if !r2Put(project.jsonKey.toStr(), projectJson, "application/json") (
+def pushProjectJsonToR2(object project, string gzipPath) boolean (
+    if !r2PutEncoded(project.jsonKey.toStr(), fs.readFileBytes(gzipPath), "application/json", "gzip") (
         return false
     )
     fs.remove(stagingJsonPath(project.id.toStr()))
     return true
 )
 
-def stageProjectJson(object project, string projectJson) boolean (
+def stageProjectJson(object project, string gzipPath) boolean (
     string path = stagingJsonPath(project.id.toStr())
     string tmpPath = path ++ ".tmp." ++ randomString(8)
-    if !fs.writeFile(tmpPath, projectJson) (
+    if !zip.copyFile(gzipPath, tmpPath) (
         return false
     )
     if !fs.rename(tmpPath, path) (
@@ -596,10 +570,23 @@ def maybeFlushProject(object project) (
         number lastUploadAt = project.lastUploadAt.toNum()
         if timestamp - lastUploadAt >= uploadDebounceMs (
             string path = stagingJsonPath(project.id.toStr())
-            if fs.exists(path) and pushProjectJsonToR2(project, fs.readFile(path)) (
-                project.lastUploadAt = timestamp
-                project.pendingJson = false
-                saveProject(project)
+            if fs.exists(path) (
+                string gzipPath = path
+                if !projectJsonIsGzip(project) (
+                    gzipPath = path ++ ".gz"
+                    if !zip.gzipLimited(path, gzipPath, maxProjectJsonBytes, maxStoredProjectJsonBytes) (
+                        return
+                    )
+                )
+                if pushProjectJsonToR2(project, gzipPath) (
+                    project.lastUploadAt = timestamp
+                    project.pendingJson = false
+                    project.jsonGzip = true
+                    saveProject(project)
+                )
+                if gzipPath != path (
+                    fs.remove(gzipPath)
+                )
             )
         )
     )
@@ -615,27 +602,6 @@ def sweepStagedProjects() (
             maybeFlushProject(res.project.assert(object))
         )
     )
-)
-
-def currentProjectJson(object project) string (
-    string localPath = localProjectJsonPathFor(project, 0)
-    if localPath != "" (
-        return fs.readFile(localPath)
-    )
-
-    if r2Local (
-        return ""
-    )
-
-    string direct = r2DirectUrl(project.jsonKey.toStr())
-    if direct == "" (
-        return ""
-    )
-    auto fetched = requests.get(direct, {})
-    if fetched.success (
-        return fetched.body.toStr()
-    )
-    return ""
 )
 
 def handleCheckProjectAssets(*serve.Context c) (
@@ -707,22 +673,31 @@ def handleUploadProject(*serve.Context c) (
     )
 
     string id = project.id.toStr()
-    string zipPath = tmpDir ++ id ++ ".sb3"
-    string extractDir = tmpDir ++ id
-    fs.writeFileBytes(zipPath, file.data)
+    string workId = id ++ "." ++ randomString(8)
+    string zipPath = tmpDir ++ workId ++ ".sb3"
+    string extractDir = tmpDir ++ workId
+    if !fs.writeFileBytes(zipPath, file.data) (
+        c.internalError("failed to stage project upload")
+        return
+    )
 
-    if !zip.decompress(zipPath, extractDir) (
+    if !zip.decompressLimited(zipPath, extractDir, maxExtractedProjectBytes, maxAssetCount + 1) (
         fs.remove(zipPath)
+        fs.remove(extractDir)
         c.badRequest("invalid sb3 file")
         return
     )
 
     object uploadResult = uploadProjectFiles(project, extractDir)
-    fs.remove(zipPath)
-    fs.remove(extractDir)
 
     if !uploadResult.ok (
-        c.json(uploadResult.status.toInt(), {ok: false, error: uploadResult.error})
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        object errorBody = {ok: false, error: uploadResult.error}
+        if uploadResult.contains("code") (
+            errorBody.code = uploadResult.code
+        )
+        c.json(uploadResult.status.toInt(), errorBody)
         return
     )
 
@@ -737,27 +712,33 @@ def handleUploadProject(*serve.Context c) (
     project.assets = uploadResult.assets
     project.edited = timestamp
 
-    string projectJson = uploadResult.projectJson.toStr()
-    project.sizeBytes = uploadResult.assetBytes.toNum() + projectJson.len
+    string gzipPath = uploadResult.gzipPath.toStr()
+    project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
+    project.jsonBytes = uploadResult.jsonBytes
+    project.storedJsonBytes = uploadResult.storedJsonBytes
+    project.assetBytes = uploadResult.assetBytes
+    project.jsonGzip = true
     recordUploadBytes(uploader, incomingBytes)
     number lastUploadAt = project.lastUploadAt.toNum()
     boolean flushed = false
     if lastUploadAt == 0 or timestamp - lastUploadAt >= uploadDebounceMs (
-        flushed = pushProjectJsonToR2(project, projectJson)
+        flushed = pushProjectJsonToR2(project, gzipPath)
     )
     if flushed (
         project.lastUploadAt = timestamp
         project.pendingJson = false
     ) else (
-        if stageProjectJson(project, projectJson) (
+        if stageProjectJson(project, gzipPath) (
             project.pendingJson = true
         ) else (
-            flushed = pushProjectJsonToR2(project, projectJson)
+            flushed = pushProjectJsonToR2(project, gzipPath)
             if flushed (
                 project.lastUploadAt = timestamp
                 project.pendingJson = false
             ) else (
                 c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+                fs.remove(zipPath)
+                fs.remove(extractDir)
                 return
             )
         )
@@ -765,6 +746,8 @@ def handleUploadProject(*serve.Context c) (
 
     saveProject(project)
     upsertIndexEntry(project)
+    fs.remove(zipPath)
+    fs.remove(extractDir)
 
     c.json(200, {
         ok: true,
@@ -837,12 +820,7 @@ def handleGetProjectJson(*serve.Context c) (
     if serveNotModified(c, project) (
         return
     )
-    string projectJson = currentProjectJson(project)
-    if projectJson == "" (
-        c.notFound("project file not found")
-        return
-    )
-    c.data(200, "application/json", raw("[]byte(projectJson)"))
+    serveProjectJson(c, project)
 )
 
 def handleUpdateProject(*serve.Context c) (
@@ -1418,15 +1396,18 @@ def handleRemixProject(*serve.Context c) (
     string username = c.getString("username")
     string id = generateId()
 
-    string parentJson = currentProjectJson(parent)
-    if parentJson == "" (
+    string copiedJsonPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".json.gz"
+    if !copyStoredProjectJsonToPath(parent, copiedJsonPath) (
         c.internalError("could not copy the original project, try again")
         return
     )
-    if !r2Put(projectJsonKey(id), parentJson, "application/json") (
+    if !r2PutEncoded(projectJsonKey(id), fs.readFileBytes(copiedJsonPath), "application/json", "gzip") (
+        fs.remove(copiedJsonPath)
         c.internalError("could not copy the original project, try again")
         return
     )
+    number copiedJsonBytes = fs.getSize(copiedJsonPath)
+    fs.remove(copiedJsonPath)
 
     object project = {
         id: id,
@@ -1442,13 +1423,22 @@ def handleRemixProject(*serve.Context c) (
         sharedAt: 0,
         shared: false,
         lastUploadAt: timestamp,
+        jsonGzip: true,
+        storedJsonBytes: copiedJsonBytes,
         remixParent: parent.id,
         scratchOrigin: "",
         views: 0,
         loves: [],
         brokenhearts: [],
-        assets: parent.assets
+        assets: parent.assets,
+        sizeBytes: projectSizeBytes(parent)
     }
+    if parent.contains("jsonBytes") (
+        project.jsonBytes = parent.jsonBytes
+    )
+    if parent.contains("assetBytes") (
+        project.assetBytes = parent.assetBytes
+    )
 
     saveProject(project)
     upsertIndexEntry(project)
