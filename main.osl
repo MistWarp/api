@@ -143,6 +143,7 @@ import "./settings.osl"
 import "./agreement.osl"
 
 ensureDirectories()
+migrateExtensionUsage()
 refreshIndexUrls()
 fs.mkdirAll(localBlobsDir)
 if r2Local (
