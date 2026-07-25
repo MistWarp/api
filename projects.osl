@@ -150,6 +150,12 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("assetBytes") (
         response.assetBytes = project.assetBytes
     )
+    if !locked and hasContent (
+        array trustedExtensions = projectTrustedExtensions(project)
+        if trustedExtensions.len > 0 (
+            response.trustedExtensions = trustedExtensions
+        )
+    )
     if isOwner (
         object viewHistory = {}
         if project.contains("viewHistory") and project.viewHistory != null (
@@ -430,6 +436,43 @@ def quotaDetails(string username) object (
     return {used: total, limit: weeklyUploadQuotaBytes, oldestEventMs: msUntilExpiry, eventCount: count}
 )
 
+def inspectProjectJson(string path) object (
+    *json.Stream stream = json.open(path, maxProjectJsonBytes)
+    if !stream.ok() or !stream.more() (
+        stream.close()
+        return {ok: false}
+    )
+    object root = stream.next()
+    if root.type.toStr() != "object-start" (
+        stream.close()
+        return {ok: false}
+    )
+    number targets = 0
+    array md5ext = []
+    while stream.more() (
+        object event = stream.next()
+        if event.type.toStr() == "key" (
+            string key = event.value.toStr()
+            if key == "targets" (
+                targets = targets + 1
+            )
+            if key == "md5ext" and stream.more() (
+                object value = stream.next()
+                if value.type.toStr() == "string" (
+                    md5ext.append(value.value)
+                    if md5ext.len > maxAssetCount * 50 (
+                        stream.close()
+                        return {ok: false}
+                    )
+                )
+            )
+        )
+    )
+    boolean valid = stream.ok()
+    stream.close()
+    return {ok: valid, targets: targets, md5ext: md5ext}
+)
+
 def uploadProjectFiles(object project, string extractDir) object (
     array names = fs.readDir(extractDir).toArray()
     string jsonPath = extractDir ++ "/project.json"
@@ -440,12 +483,11 @@ def uploadProjectFiles(object project, string extractDir) object (
     if projectJsonBytes > maxProjectJsonBytes (
         return {ok: false, error: "project.json exceeds the 1 GB expanded limit", code: "project_too_large", status: 413}
     )
-    auto inspection = json.inspectFile(jsonPath, ["md5ext", "targets"], maxProjectJsonBytes, maxAssetCount * 50)
-    if inspection.isErr() (
+    object inspected = inspectProjectJson(jsonPath)
+    if !inspected.ok (
         return {ok: false, error: "invalid project.json", status: 400}
     )
-    object inspected = inspection.unwrap().assert(object)
-    if inspected.root.toStr() != "object" or inspected.counts.assert(object).targets.toNum() == 0 (
+    if inspected.targets.toNum() == 0 (
         return {ok: false, error: "invalid project.json", status: 400}
     )
     string gzipPath = jsonPath ++ ".gz"
@@ -491,8 +533,7 @@ def uploadProjectFiles(object project, string extractDir) object (
     for i projectAssets.len (
         providedSet[projectAssets[i].toStr()] = true
     )
-    object inspectedValues = inspected.values.assert(object)
-    array referencedList = inspectedValues.md5ext.assert(array)
+    array referencedList = inspected.md5ext.assert(array)
     object referencedNames = {}
     for i referencedList.len (
         string name = referencedList[i].toStr()
@@ -688,6 +729,18 @@ def handleUploadProject(*serve.Context c) (
         return
     )
 
+    object extensionResult = collectProjectExtensions(extractDir ++ "/project.json", c.formValue("extensions"))
+    if !extensionResult.ok (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        object extensionError = {ok: false, error: extensionResult.error}
+        if extensionResult.contains("code") (
+            extensionError.code = extensionResult.code
+        )
+        c.json(400, extensionError)
+        return
+    )
+
     object uploadResult = uploadProjectFiles(project, extractDir)
 
     if !uploadResult.ok (
@@ -698,6 +751,14 @@ def handleUploadProject(*serve.Context c) (
             errorBody.code = uploadResult.code
         )
         c.json(uploadResult.status.toInt(), errorBody)
+        return
+    )
+
+    array projectExtensions = extensionResult.extensions.assert(array)
+    if !storeProjectExtensions(projectExtensions, extensionResult.sources.assert(object)) (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.internalError("failed to store extension sources")
         return
     )
 
@@ -718,6 +779,8 @@ def handleUploadProject(*serve.Context c) (
     project.storedJsonBytes = uploadResult.storedJsonBytes
     project.assetBytes = uploadResult.assetBytes
     project.jsonGzip = true
+    project.extensions = projectExtensions
+    project.extensionsIndexed = true
     recordUploadBytes(uploader, incomingBytes)
     number lastUploadAt = project.lastUploadAt.toNum()
     boolean flushed = false
@@ -1438,6 +1501,12 @@ def handleRemixProject(*serve.Context c) (
     )
     if parent.contains("assetBytes") (
         project.assetBytes = parent.assetBytes
+    )
+    if parent.contains("extensions") (
+        project.extensions = parent.extensions
+    )
+    if parent.contains("extensionsIndexed") (
+        project.extensionsIndexed = parent.extensionsIndexed
     )
 
     saveProject(project)
