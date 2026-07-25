@@ -189,7 +189,7 @@ app.use(authMiddleware)
 uploads.use(serve.maxBodySize(268435456))
 uploads.POST("/projects/:id/upload", requireAuth, handleUploadProject)
 uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
-uploads.POST("/admin/extensions/index/:id", requireAdmin, handleAdminIndexProjectExtensions)
+uploads.POST("/admin/projects/:id/extensions/index", requireAdmin, handleAdminIndexProjectExtensions)
 
 *serve.Router api = app.group("/api")
 api.use(serve.maxBodySize(262144))
