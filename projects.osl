@@ -755,7 +755,7 @@ def handleUploadProject(*serve.Context c) (
     )
 
     array projectExtensions = extensionResult.extensions.assert(array)
-    if !storeProjectExtensions(projectExtensions, extensionResult.sources.assert(object)) (
+    if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
         fs.remove(zipPath)
         fs.remove(extractDir)
         c.internalError("failed to store extension sources")
@@ -1034,6 +1034,7 @@ def deleteOrphanedAssets(object project) (
 
 def purgeProject(object project) (
     string id = project.id.toStr()
+    removeProjectExtensionUsage(id, storedProjectExtensions(project))
     deleteProjectFile(id)
     removeFromIndex(id)
     fs.remove(stagingJsonPath(id))
@@ -1510,6 +1511,11 @@ def handleRemixProject(*serve.Context c) (
         project.extensionsIndexed = parent.extensionsIndexed
     )
 
+    if !storeProjectExtensions(id, [], storedProjectExtensions(project), {}) (
+        r2Remove(project.jsonKey.toStr())
+        c.internalError("could not index project extensions")
+        return
+    )
     saveProject(project)
     upsertIndexEntry(project)
 

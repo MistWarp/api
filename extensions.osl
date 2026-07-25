@@ -25,6 +25,10 @@ def extensionSourcePath(string hash) string (
     return extensionsDir ++ hash ++ ".js"
 )
 
+def extensionRecordPath(string hash) string (
+    return extensionsDir ++ hash ++ ".json"
+)
+
 def extensionReviewUrl(string extensionUrl) string (
     if extensionUrl.startsWith("data:") (
         return "data:"
@@ -40,11 +44,9 @@ def extensionReviewUrls(array urls) array (
     array reviewUrls = []
     for i urls.len (
         string extensionUrl = urls[i].toStr()
-        if !isGalleryExtensionUrl(extensionUrl) (
-            string reviewUrl = extensionReviewUrl(extensionUrl)
-            if !reviewUrls.contains(reviewUrl) (
-                reviewUrls.append(reviewUrl)
-            )
+        string reviewUrl = extensionReviewUrl(extensionUrl)
+        if !reviewUrls.contains(reviewUrl) (
+            reviewUrls.append(reviewUrl)
         )
     )
     return reviewUrls
@@ -88,59 +90,24 @@ def extensionMetadata(string hash) object (
     return metadata
 )
 
-def galleryManifest(string manifestUrl) array (
-    object response = requests.get(manifestUrl, {timeout: 5})
-    if !response.success or response.status.toInt() != 200 (
-        return []
+def readExtensionRecord(string hash) object (
+    auto result = readFile(extensionRecordPath(hash))
+    if result.ok (
+        return result.data.assert(object)
     )
-    auto parsed = json.parse(response.body.toStr(), {type: "object"})
-    if parsed.isErr() (
-        return []
-    )
-    object manifest = parsed.unwrap().assert(object)
-    if !manifest.contains("extensions") or manifest.extensions == null (
-        return []
-    )
-    return manifest.extensions.assert(array)
+    return {}
 )
 
-def galleryExtensionRow(object extension, string extensionUrl) object (
-    object metadata = {}
-    if extension.contains("name") (
-        metadata.name = extension.name
+def extensionRecord(object policy, string hash) object (
+    object record = readExtensionRecord(hash)
+    if record.getKeys().toArray().len > 0 (
+        return record
     )
-    if extension.contains("id") (
-        metadata.id = extension.id
+    object hashes = policy.hashes.assert(object)
+    if hashes.contains(hash) (
+        return hashes[hash].assert(object)
     )
-    if extension.contains("description") (
-        metadata.description = extension.description
-    )
-    return {hash: extensionUrl.hashSHA256(), status: "trusted", urls: [extensionUrl], projects: [], projectCount: 0, firstSeen: 0, sourceAvailable: false, metadata: metadata, gallery: true}
-)
-
-def galleryExtensionRows() array (
-    if galleryExtensionsCache.has("extensions") (
-        return galleryExtensionsCache.get("extensions").assert(array)
-    )
-    array rows = []
-    array turbowarp = galleryManifest("https://extensions.turbowarp.org/generated-metadata/extensions-v0.json")
-    for i turbowarp.len (
-        object extension = turbowarp[i].assert(object)
-        if extension.contains("slug") (
-            string extensionUrl = "https://extensions.turbowarp.org/" ++ extension.slug.toStr() ++ ".js"
-            rows.append(galleryExtensionRow(extension, extensionUrl))
-        )
-    )
-    array mistium = galleryManifest("https://extensions.mistium.com/generated-metadata/extensions-v0.json")
-    for i mistium.len (
-        object extension = mistium[i].assert(object)
-        if extension.contains("name") and extension.contains("featured") and extension.featured == true (
-            string extensionUrl = "https://extensions.mistium.com/featured/" ++ extension.name.toStr() ++ ".js"
-            rows.append(galleryExtensionRow(extension, extensionUrl))
-        )
-    )
-    galleryExtensionsCache.set("extensions", rows)
-    return rows
+    return {}
 )
 
 def extensionStatus(object policy, string hash, string sourceUrl) string (
@@ -148,12 +115,9 @@ def extensionStatus(object policy, string hash, string sourceUrl) string (
     if blockedUrls.contains(sourceUrl) (
         return "blocked"
     )
-    object hashes = policy.hashes.assert(object)
-    if hashes.contains(hash) (
-        object entry = hashes[hash]
-        if entry.contains("status") (
-            return entry.status.toStr()
-        )
+    object record = extensionRecord(policy, hash)
+    if record.contains("status") (
+        return record.status.toStr()
     )
     return "untrusted"
 )
@@ -178,9 +142,7 @@ def inspectProjectExtensionUrls(string jsonPath) object (
             found = found + ids.len
             for i ids.len (
                 string extensionUrl = entries[ids[i].toStr()].toStr()
-                if !isGalleryExtensionUrl(extensionUrl) (
-                    unique[extensionUrl] = true
-                )
+                unique[extensionUrl] = true
             )
         )
     )
@@ -226,6 +188,10 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
         if !extensionUrl.startsWith("https://") and !extensionUrl.startsWith("http://") and !extensionUrl.startsWith("data:") (
             return {ok: false, error: "custom extension URL cannot be saved: " ++ extensionUrl}
         )
+        if isGalleryExtensionUrl(extensionUrl) (
+            extensions.append({url: extensionUrl, hash: extensionUrl.hashSHA256(), gallery: true})
+            continue
+        )
         if !sources.contains(extensionUrl) (
             return {ok: false, error: "could not read custom extension source: " ++ extensionUrl}
         )
@@ -251,32 +217,91 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     return {ok: true, extensions: extensions, sources: sources}
 )
 
-def storeProjectExtensions(array extensions, object sources) boolean (
+def removeProjectExtensionUsage(string projectId, array extensions) boolean (
     object policy = loadExtensionPolicy()
-    object hashes = policy.hashes.assert(object)
+    object seen = {}
     for i extensions.len (
         object extension = extensions[i].assert(object)
         string hash = extension.hash.toStr()
-        string extensionUrl = extension.url.toStr()
-        string reviewUrl = extensionReviewUrl(extensionUrl)
-        string source = sources[extensionUrl].toStr()
-        if !fs.exists(extensionSourcePath(hash)) and !fs.writeFile(extensionSourcePath(hash), source) (
+        if !isExtensionHash(hash) (
             return false
         )
-        if !hashes.contains(hash) (
-            hashes[hash] = {status: "untrusted", urls: [reviewUrl], firstSeen: timestamp}
-        ) else (
-            object entry = hashes[hash]
-            if !entry.contains("urls") (
-                entry.urls = []
+        if !seen.contains(hash) (
+            string lockName = "extension-" ++ hash
+            sync.lock(lockName)
+            object record = extensionRecord(policy, hash)
+            if record.contains("projects") (
+                record.projects = removeString(record.projects.assert(array), projectId)
+                if !writeFile(extensionRecordPath(hash), record) (
+                    sync.unlock(lockName)
+                    return false
+                )
             )
-            array urls = entry.urls.assert(array)
-            if !urls.contains(reviewUrl) (
-                urls.append(reviewUrl)
-            )
+            sync.unlock(lockName)
+            seen[hash] = true
         )
     )
-    return saveExtensionPolicy(policy)
+    return true
+)
+
+def storeProjectExtensions(string projectId, array previousExtensions, array extensions, object sources) boolean (
+    if !removeProjectExtensionUsage(projectId, previousExtensions) (
+        return false
+    )
+    object policy = loadExtensionPolicy()
+    for i extensions.len (
+        object extension = extensions[i].assert(object)
+        string hash = extension.hash.toStr()
+        if !isExtensionHash(hash) (
+            return false
+        )
+        string extensionUrl = extension.url.toStr()
+        string reviewUrl = extensionReviewUrl(extensionUrl)
+        boolean gallery = isGalleryExtensionUrl(extensionUrl)
+        string lockName = "extension-" ++ hash
+        sync.lock(lockName)
+        if !gallery and !fs.exists(extensionSourcePath(hash)) (
+            if !sources.contains(extensionUrl) or !fs.writeFile(extensionSourcePath(hash), sources[extensionUrl].toStr()) (
+                sync.unlock(lockName)
+                return false
+            )
+        )
+        object record = extensionRecord(policy, hash)
+        if record.getKeys().toArray().len == 0 (
+            record = {status: "untrusted", urls: [], projects: [], firstSeen: timestamp}
+        )
+        if !record.contains("urls") (
+            record.urls = []
+        )
+        if !record.contains("projects") (
+            record.projects = []
+        )
+        if gallery (
+            record.status = "trusted"
+            record.gallery = true
+        )
+        array recordUrls = record.urls.assert(array)
+        array projects = record.projects.assert(array)
+        if !recordUrls.contains(reviewUrl) (
+            recordUrls.append(reviewUrl)
+        )
+        if !projects.contains(projectId) (
+            projects.append(projectId)
+        )
+        if !writeFile(extensionRecordPath(hash), record) (
+            sync.unlock(lockName)
+            return false
+        )
+        sync.unlock(lockName)
+    )
+    return true
+)
+
+def storedProjectExtensions(object project) array (
+    if project.contains("extensions") and project.extensions != null (
+        return project.extensions.assert(array)
+    )
+    return []
 )
 
 def projectTrustedExtensions(object project) array (
@@ -407,113 +432,94 @@ def handleGetProjectExtensionSource(*serve.Context c) (
     c.file(path)
 )
 
-def handleAdminGetExtensions(*serve.Context c) (
-    object usage = {}
-    array unindexedProjects = []
-    array files = fs.readDir(projectsDir).toArray()
+def ensureExtensionRecords(object policy) boolean (
+    object hashes = policy.hashes.assert(object)
+    array hashKeys = hashes.getKeys().toArray()
+    for i hashKeys.len (
+        string hash = hashKeys[i].toStr()
+        if isExtensionHash(hash) and !fs.exists(extensionRecordPath(hash)) (
+            object record = hashes[hash].assert(object)
+            if !record.contains("urls") (
+                record.urls = []
+            )
+            if !record.contains("projects") (
+                record.projects = []
+            )
+            string lockName = "extension-" ++ hash
+            sync.lock(lockName)
+            boolean saved = fs.exists(extensionRecordPath(hash)) or writeFile(extensionRecordPath(hash), record)
+            sync.unlock(lockName)
+            if !saved (
+                return false
+            )
+        )
+    )
+    array files = fs.readDir(extensionsDir).toArray()
     for i files.len (
-        auto result = readFile(projectsDir ++ files[i].toStr())
-        if result.ok (
-            object project = result.data.assert(object)
-            if (!project.contains("extensions") or project.extensions == null) and (!project.contains("extensionsIndexed") or project.extensionsIndexed != true) (
-                object inspected = {ok: true, urls: []}
-                if project.contains("pendingExtensionUrls") and project.pendingExtensionUrls != null (
-                    inspected.urls = project.pendingExtensionUrls
-                ) else (
-                    inspected = inspectStoredProjectExtensionUrls(project)
-                    if inspected.ok (
-                        array pendingUrls = inspected.urls.assert(array)
-                        project.pendingExtensionUrls = pendingUrls
-                        if pendingUrls.len == 0 (
-                            project.extensions = []
-                            project.extensionsIndexed = true
-                        )
-                        saveProject(project)
-                    )
-                )
-                if inspected.ok (
-                    array pendingUrls = inspected.urls.assert(array)
-                    if pendingUrls.len > 0 (
-                        unindexedProjects.append({id: project.id, urls: pendingUrls})
-                    )
-                )
-            ) else if project.contains("extensions") and project.extensions != null (
-                array extensions = project.extensions.assert(array)
-                for j extensions.len (
-                    object extension = extensions[j].assert(object)
-                    if !isGalleryExtensionUrl(extension.url.toStr()) (
-                        string hash = extension.hash.toStr()
-                        if !usage.contains(hash) (
-                            usage[hash] = {projects: [], urls: []}
-                        )
-                        object entry = usage[hash]
-                        array projects = entry.projects.assert(array)
-                        array urls = entry.urls.assert(array)
-                        if !projects.contains(project.id) (
-                            projects.append(project.id)
-                        )
-                        string reviewUrl = extensionReviewUrl(extension.url.toStr())
-                        if !urls.contains(reviewUrl) (
-                            urls.append(reviewUrl)
-                        )
-                    )
+        string fileName = files[i].toStr()
+        if fileName.endsWith(".js") (
+            string hash = fileName.split(".")[1].toStr()
+            if isExtensionHash(hash) and !fs.exists(extensionRecordPath(hash)) (
+                string lockName = "extension-" ++ hash
+                sync.lock(lockName)
+                boolean saved = fs.exists(extensionRecordPath(hash)) or writeFile(extensionRecordPath(hash), {status: "untrusted", urls: [], projects: [], firstSeen: timestamp})
+                sync.unlock(lockName)
+                if !saved (
+                    return false
                 )
             )
         )
     )
+    return true
+)
+
+def handleAdminGetExtensions(*serve.Context c) (
     object policy = loadExtensionPolicy()
-    object hashes = policy.hashes.assert(object)
-    array usageKeys = usage.getKeys().toArray()
-    boolean policyChanged = false
-    for i usageKeys.len (
-        string hash = usageKeys[i].toStr()
-        if !hashes.contains(hash) (
-            object used = usage[hash]
-            hashes[hash] = {status: "untrusted", urls: used.urls, firstSeen: timestamp}
-            policyChanged = true
-        )
+    if !ensureExtensionRecords(policy) (
+        c.internalError("could not prepare extension index")
+        return
     )
-    array hashKeys = hashes.getKeys().toArray()
     array extensions = []
-    for i hashKeys.len (
-        string hash = hashKeys[i].toStr()
-        object stored = hashes[hash]
-        array projects = []
-        array storedUrls = []
-        if stored.contains("urls") (
-            storedUrls = stored.urls.assert(array)
+    array files = fs.readDir(extensionsDir).toArray()
+    for i files.len (
+        string fileName = files[i].toStr()
+        if fileName.endsWith(".json") (
+            string hash = fileName.split(".")[1].toStr()
+            if isExtensionHash(hash) (
+                object record = readExtensionRecord(hash)
+                array urls = []
+                array projects = []
+                if record.contains("urls") (
+                    urls = extensionReviewUrls(record.urls.assert(array))
+                )
+                if record.contains("projects") (
+                    projects = record.projects.assert(array)
+                )
+                string status = "untrusted"
+                if record.contains("status") (
+                    status = record.status.toStr()
+                )
+                number firstSeen = 0
+                if record.contains("firstSeen") (
+                    firstSeen = record.firstSeen.toNum()
+                )
+                boolean gallery = record.contains("gallery") and record.gallery == true
+                if gallery (
+                    status = "trusted"
+                )
+                extensions.append({
+                    hash: hash,
+                    status: status,
+                    urls: urls,
+                    projects: projects,
+                    projectCount: projects.len,
+                    firstSeen: firstSeen,
+                    sourceAvailable: fs.exists(extensionSourcePath(hash)),
+                    metadata: extensionMetadata(hash),
+                    gallery: gallery
+                })
+            )
         )
-        array urls = storedUrls
-        if usage.contains(hash) (
-            object used = usage[hash]
-            projects = used.projects.assert(array)
-            urls = used.urls.assert(array)
-        )
-        array reviewUrls = extensionReviewUrls(urls)
-        array storedReviewUrls = extensionReviewUrls(storedUrls)
-        if json.stringify(storedUrls) != json.stringify(storedReviewUrls) (
-            stored.urls = storedReviewUrls
-            policyChanged = true
-        )
-        if reviewUrls.len > 0 (
-            extensions.append({
-                hash: hash,
-                status: stored.status,
-                urls: reviewUrls,
-                projects: projects,
-                projectCount: projects.len,
-                firstSeen: stored.firstSeen,
-                sourceAvailable: fs.exists(extensionSourcePath(hash)),
-                metadata: extensionMetadata(hash)
-            })
-        )
-    )
-    array galleryExtensions = galleryExtensionRows()
-    for i galleryExtensions.len (
-        extensions.append(galleryExtensions[i])
-    )
-    if policyChanged (
-        saveExtensionPolicy(policy)
     )
     array blockedUrls = []
     array storedBlockedUrls = policy.blockedUrls.assert(array)
@@ -522,7 +528,7 @@ def handleAdminGetExtensions(*serve.Context c) (
             blockedUrls.append(storedBlockedUrls[i])
         )
     )
-    c.json(200, {ok: true, extensions: extensions, blockedUrls: blockedUrls, unindexedProjects: unindexedProjects})
+    c.json(200, {ok: true, extensions: extensions, blockedUrls: blockedUrls, unindexedProjects: []})
 )
 
 def handleAdminGetExtensionSource(*serve.Context c) (
@@ -548,17 +554,25 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
         c.badRequest("invalid extension policy")
         return
     )
-    object policy = loadExtensionPolicy()
-    object hashes = policy.hashes.assert(object)
-    if !hashes.contains(hash) (
+    object record = readExtensionRecord(hash)
+    if record.getKeys().toArray().len == 0 (
         c.notFound("extension not found")
         return
     )
-    hashes[hash].assert(object).status = status
-    if !saveExtensionPolicy(policy) (
+    if record.contains("gallery") and record.gallery == true and status != "trusted" (
+        c.badRequest("gallery extensions are always trusted")
+        return
+    )
+    string lockName = "extension-" ++ hash
+    sync.lock(lockName)
+    record = readExtensionRecord(hash)
+    record.status = status
+    if !writeFile(extensionRecordPath(hash), record) (
+        sync.unlock(lockName)
         c.internalError("could not save extension policy")
         return
     )
+    sync.unlock(lockName)
     number deleted = 0
     if status == "blocked" (
         deleted = purgeProjectsUsingHash(hash)
@@ -636,7 +650,7 @@ def handleAdminIndexProjectExtensions(*serve.Context c) (
     )
     array extensions = collected.extensions.assert(array)
     object sources = collected.sources.assert(object)
-    if !storeProjectExtensions(extensions, sources) (
+    if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), extensions, sources) (
         c.internalError("could not store extension sources")
         return
     )
