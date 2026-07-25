@@ -110,12 +110,30 @@ def extensionRecord(object policy, string hash) object (
     return {}
 )
 
+def extensionRecordIsGallery(object record) boolean (
+    if record.contains("gallery") and record.gallery == true (
+        return true
+    )
+    if record.contains("urls") (
+        array urls = record.urls.assert(array)
+        for i urls.len (
+            if isGalleryExtensionUrl(urls[i].toStr()) (
+                return true
+            )
+        )
+    )
+    return false
+)
+
 def extensionStatus(object policy, string hash, string sourceUrl) string (
     array blockedUrls = policy.blockedUrls.assert(array)
     if blockedUrls.contains(sourceUrl) (
         return "blocked"
     )
     object record = extensionRecord(policy, hash)
+    if extensionRecordIsGallery(record) (
+        return "trusted"
+    )
     if record.contains("status") (
         return record.status.toStr()
     )
@@ -260,8 +278,8 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
         boolean gallery = isGalleryExtensionUrl(extensionUrl)
         string lockName = "extension-" ++ hash
         sync.lock(lockName)
-        if !gallery and !fs.exists(extensionSourcePath(hash)) (
-            if !sources.contains(extensionUrl) or !fs.writeFile(extensionSourcePath(hash), sources[extensionUrl].toStr()) (
+        if !gallery and !fs.exists(extensionSourcePath(hash)) and sources.contains(extensionUrl) (
+            if !fs.writeFile(extensionSourcePath(hash), sources[extensionUrl].toStr()) (
                 sync.unlock(lockName)
                 return false
             )
@@ -302,6 +320,35 @@ def storedProjectExtensions(object project) array (
         return project.extensions.assert(array)
     )
     return []
+)
+
+def migrateExtensionUsage() boolean (
+    string statePath = extensionsDir ++ "index.json"
+    auto state = readFile(statePath)
+    if state.ok and state.data.assert(object).contains("version") and state.data.assert(object).version.toNum() >= 1 (
+        return true
+    )
+    sync.lock("extension-index-migration")
+    state = readFile(statePath)
+    if state.ok and state.data.assert(object).contains("version") and state.data.assert(object).version.toNum() >= 1 (
+        sync.unlock("extension-index-migration")
+        return true
+    )
+    array files = fs.readDir(projectsDir).toArray()
+    for i files.len (
+        auto result = readFile(projectsDir ++ files[i].toStr())
+        if result.ok (
+            object project = result.data.assert(object)
+            array extensions = storedProjectExtensions(project)
+            if extensions.len > 0 and !storeProjectExtensions(project.id.toStr(), [], extensions, {}) (
+                sync.unlock("extension-index-migration")
+                return false
+            )
+        )
+    )
+    boolean saved = writeFile(statePath, {version: 1})
+    sync.unlock("extension-index-migration")
+    return saved
 )
 
 def projectTrustedExtensions(object project) array (
@@ -367,32 +414,32 @@ def projectContainsExtensionUrl(object project, string extensionUrl) boolean (
     return inspected.urls.assert(array).contains(extensionUrl)
 )
 
-def purgeProjectsUsingHash(string hash) number (
+def purgeProjectsUsingHash(string hash) array (
     array files = fs.readDir(projectsDir).toArray()
-    number deleted = 0
+    array deleted = []
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
             object project = result.data.assert(object)
             if projectContainsExtensionHash(project, hash) (
                 purgeProject(project)
-                deleted = deleted + 1
+                deleted.append(project.id)
             )
         )
     )
     return deleted
 )
 
-def purgeProjectsUsingUrl(string extensionUrl) number (
+def purgeProjectsUsingUrl(string extensionUrl) array (
     array files = fs.readDir(projectsDir).toArray()
-    number deleted = 0
+    array deleted = []
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
             object project = result.data.assert(object)
             if projectContainsExtensionUrl(project, extensionUrl) (
                 purgeProject(project)
-                deleted = deleted + 1
+                deleted.append(project.id)
             )
         )
     )
@@ -503,7 +550,7 @@ def handleAdminGetExtensions(*serve.Context c) (
                 if record.contains("firstSeen") (
                     firstSeen = record.firstSeen.toNum()
                 )
-                boolean gallery = record.contains("gallery") and record.gallery == true
+                boolean gallery = extensionRecordIsGallery(record)
                 if gallery (
                     status = "trusted"
                 )
@@ -559,7 +606,7 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
         c.notFound("extension not found")
         return
     )
-    if record.contains("gallery") and record.gallery == true and status != "trusted" (
+    if extensionRecordIsGallery(record) and status != "trusted" (
         c.badRequest("gallery extensions are always trusted")
         return
     )
@@ -573,11 +620,11 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
         return
     )
     sync.unlock(lockName)
-    number deleted = 0
+    array deletedProjects = []
     if status == "blocked" (
-        deleted = purgeProjectsUsingHash(hash)
+        deletedProjects = purgeProjectsUsingHash(hash)
     )
-    c.json(200, {ok: true, deleted: deleted})
+    c.json(200, {ok: true, deleted: deletedProjects.len, deletedProjects: deletedProjects})
 )
 
 def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
@@ -608,11 +655,11 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
         c.internalError("could not save URL policy")
         return
     )
-    number deleted = 0
+    array deletedProjects = []
     if blocked (
-        deleted = purgeProjectsUsingUrl(extensionUrl)
+        deletedProjects = purgeProjectsUsingUrl(extensionUrl)
     )
-    c.json(200, {ok: true, deleted: deleted})
+    c.json(200, {ok: true, deleted: deletedProjects.len, deletedProjects: deletedProjects})
 )
 
 def handleAdminIndexProjectExtensions(*serve.Context c) (
