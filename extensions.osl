@@ -360,7 +360,7 @@ def handleAdminGetExtensions(*serve.Context c) (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
             object project = result.data.assert(object)
-            if !project.contains("extensionsIndexed") or project.extensionsIndexed != true (
+            if (!project.contains("extensions") or project.extensions == null) and (!project.contains("extensionsIndexed") or project.extensionsIndexed != true) (
                 object inspected = {ok: true, urls: []}
                 if project.contains("pendingExtensionUrls") and project.pendingExtensionUrls != null (
                     inspected.urls = project.pendingExtensionUrls
