@@ -71,6 +71,8 @@ string userIdsFile = "data/userids.json"
 string adminsFile = "data/admins.json"
 string bansFile = "data/bans.json"
 string agreementAcceptDir = "data/agreement-acceptances/"
+string extensionsDir = "data/extensions/"
+string extensionsFile = "data/extensions.json"
 
 number maxProjectJsonBytes = 1073741824
 number maxStoredProjectJsonBytes = 20971520
@@ -82,6 +84,9 @@ number maxExtractedProjectBytes = maxProjectJsonBytes + maxProjectAssetsBytes
 number weeklyUploadQuotaBytes = 104857600
 number quotaWindowMs = 604800000
 number uploadDebounceMs = 86400000
+number maxProjectExtensions = 100
+number maxExtensionSourceBytes = 2097152
+number maxProjectExtensionBytes = 10485760
 
 string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
 string port = configValue("PORT", "5627")
@@ -122,6 +127,7 @@ import "./gitea.osl"
 import "./auth.osl"
 import "./middleware.osl"
 import "./projects.osl"
+import "./extensions.osl"
 import "./monetize.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
@@ -183,6 +189,7 @@ app.use(authMiddleware)
 uploads.use(serve.maxBodySize(268435456))
 uploads.POST("/projects/:id/upload", requireAuth, handleUploadProject)
 uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
+uploads.POST("/admin/extensions/index/:id", requireAdmin, handleAdminIndexProjectExtensions)
 
 *serve.Router api = app.group("/api")
 api.use(serve.maxBodySize(262144))
@@ -213,6 +220,7 @@ api.GET("/leaderboard", handleLeaderboard)
 api.POST("/projects", requireAuth, handleCreateProject)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
 api.GET("/projects/:id/project.json", handleGetProjectJson)
+api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
 api.GET("/projects/:id", handleGetProject)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
@@ -286,6 +294,10 @@ api.GET("/admin/users", requireAdmin, handleListUsers)
 api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
 api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)
 api.POST("/admin/reconcile-deletions", requireAdmin, handleReconcileDeletions)
+api.GET("/admin/extensions", requireAdmin, handleAdminGetExtensions)
+api.GET("/admin/extensions/:hash/source", requireAdmin, handleAdminGetExtensionSource)
+api.POST("/admin/extensions/policy", requireAdmin, handleAdminSetExtensionPolicy)
+api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)
