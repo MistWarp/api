@@ -781,6 +781,7 @@ def handleUploadProject(*serve.Context c) (
     project.jsonGzip = true
     project.extensions = projectExtensions
     project.extensionsIndexed = true
+    project.delete("pendingExtensionUrls")
     recordUploadBytes(uploader, incomingBytes)
     number lastUploadAt = project.lastUploadAt.toNum()
     boolean flushed = false
