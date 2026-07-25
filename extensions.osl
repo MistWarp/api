@@ -322,15 +322,26 @@ def storedProjectExtensions(object project) array (
     return []
 )
 
+def extensionUsageMigrated(object state) boolean (
+    if !state.ok (
+        return false
+    )
+    object data = state.data.assert(object)
+    if !data.contains("version") (
+        return false
+    )
+    return data.version.toNum() >= 1
+)
+
 def migrateExtensionUsage() boolean (
     string statePath = extensionsDir ++ "index.json"
     auto state = readFile(statePath)
-    if state.ok and state.data.assert(object).contains("version") and state.data.assert(object).version.toNum() >= 1 (
+    if extensionUsageMigrated(state) (
         return true
     )
     sync.lock("extension-index-migration")
     state = readFile(statePath)
-    if state.ok and state.data.assert(object).contains("version") and state.data.assert(object).version.toNum() >= 1 (
+    if extensionUsageMigrated(state) (
         sync.unlock("extension-index-migration")
         return true
     )
