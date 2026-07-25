@@ -11,6 +11,7 @@ import "osl/zip"
 import "osl/regex"
 import "osl/thread"
 import "osl/process"
+import "osl/sync"
 
 import "go/time"
 
@@ -168,7 +169,6 @@ auto userIdsCache = cache.create(10000, 300)
 auto sessionCache = cache.create(10000, 3600)
 auto bansCache = cache.create(2, 300)
 auto adminsCache = cache.create(2, 300)
-auto galleryExtensionsCache = cache.create(1, 3600)
 
 *serve.Router app = serve.new()
 
