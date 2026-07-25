@@ -25,6 +25,45 @@ def extensionSourcePath(string hash) string (
     return extensionsDir ++ hash ++ ".js"
 )
 
+def isGalleryExtensionUrl(string extensionUrl) boolean (
+    return extensionUrl.startsWith("https://extensions.turbowarp.org/") or extensionUrl.startsWith("https://extensions.mistium.com/")
+)
+
+def extensionHeaderValue(string line, string prefix) string (
+    string value = line.trim(prefix.len + 1, line.len).strip()
+    if value.len > 500 (
+        return value.trim(1, 500)
+    )
+    return value
+)
+
+def extensionMetadata(string hash) object (
+    object metadata = {}
+    *fs.File source = fs.open(extensionSourcePath(hash))
+    for i 50 (
+        if !source.eof() (
+            string line = source.readLine().strip()
+            if line.startsWith("// Name:") (
+                metadata.name = extensionHeaderValue(line, "// Name:")
+            )
+            if line.startsWith("// ID:") (
+                metadata.id = extensionHeaderValue(line, "// ID:")
+            )
+            if line.startsWith("// Description:") (
+                metadata.description = extensionHeaderValue(line, "// Description:")
+            )
+            if line.startsWith("// By:") (
+                metadata.author = extensionHeaderValue(line, "// By:")
+            )
+            if line.startsWith("// License:") (
+                metadata.license = extensionHeaderValue(line, "// License:")
+            )
+        )
+    )
+    source.close()
+    return metadata
+)
+
 def extensionStatus(object policy, string hash, string sourceUrl) string (
     array blockedUrls = policy.blockedUrls.assert(array)
     if blockedUrls.contains(sourceUrl) (
@@ -60,7 +99,9 @@ def inspectProjectExtensionUrls(string jsonPath) object (
             found = found + ids.len
             for i ids.len (
                 string extensionUrl = entries[ids[i].toStr()].toStr()
-                unique[extensionUrl] = true
+                if !isGalleryExtensionUrl(extensionUrl) (
+                    unique[extensionUrl] = true
+                )
             )
         )
     )
@@ -303,18 +344,20 @@ def handleAdminGetExtensions(*serve.Context c) (
                 array extensions = project.extensions.assert(array)
                 for j extensions.len (
                     object extension = extensions[j].assert(object)
-                    string hash = extension.hash.toStr()
-                    if !usage.contains(hash) (
-                        usage[hash] = {projects: [], urls: []}
-                    )
-                    object entry = usage[hash]
-                    array projects = entry.projects.assert(array)
-                    array urls = entry.urls.assert(array)
-                    if !projects.contains(project.id) (
-                        projects.append(project.id)
-                    )
-                    if !urls.contains(extension.url) (
-                        urls.append(extension.url)
+                    if !isGalleryExtensionUrl(extension.url.toStr()) (
+                        string hash = extension.hash.toStr()
+                        if !usage.contains(hash) (
+                            usage[hash] = {projects: [], urls: []}
+                        )
+                        object entry = usage[hash]
+                        array projects = entry.projects.assert(array)
+                        array urls = entry.urls.assert(array)
+                        if !projects.contains(project.id) (
+                            projects.append(project.id)
+                        )
+                        if !urls.contains(extension.url) (
+                            urls.append(extension.url)
+                        )
                     )
                 )
             )
@@ -336,15 +379,24 @@ def handleAdminGetExtensions(*serve.Context c) (
         ) else if stored.contains("urls") (
             urls = stored.urls.assert(array)
         )
-        extensions.append({
-            hash: hash,
-            status: stored.status,
-            urls: urls,
-            projects: projects,
-            projectCount: projects.len,
-            firstSeen: stored.firstSeen,
-            sourceAvailable: fs.exists(extensionSourcePath(hash))
-        })
+        array reviewUrls = []
+        for j urls.len (
+            if !isGalleryExtensionUrl(urls[j].toStr()) (
+                reviewUrls.append(urls[j])
+            )
+        )
+        if reviewUrls.len > 0 (
+            extensions.append({
+                hash: hash,
+                status: stored.status,
+                urls: reviewUrls,
+                projects: projects,
+                projectCount: projects.len,
+                firstSeen: stored.firstSeen,
+                sourceAvailable: fs.exists(extensionSourcePath(hash)),
+                metadata: extensionMetadata(hash)
+            })
+        )
     )
     c.json(200, {ok: true, extensions: extensions, blockedUrls: policy.blockedUrls, unindexedProjects: unindexedProjects})
 )
