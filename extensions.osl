@@ -88,6 +88,61 @@ def extensionMetadata(string hash) object (
     return metadata
 )
 
+def galleryManifest(string manifestUrl) array (
+    object response = requests.get(manifestUrl, {timeout: 5})
+    if !response.success or response.status.toInt() != 200 (
+        return []
+    )
+    auto parsed = json.parse(response.body.toStr(), {type: "object"})
+    if parsed.isErr() (
+        return []
+    )
+    object manifest = parsed.unwrap().assert(object)
+    if !manifest.contains("extensions") or manifest.extensions == null (
+        return []
+    )
+    return manifest.extensions.assert(array)
+)
+
+def galleryExtensionRow(object extension, string extensionUrl) object (
+    object metadata = {}
+    if extension.contains("name") (
+        metadata.name = extension.name
+    )
+    if extension.contains("id") (
+        metadata.id = extension.id
+    )
+    if extension.contains("description") (
+        metadata.description = extension.description
+    )
+    return {hash: extensionUrl.hashSHA256(), status: "trusted", urls: [extensionUrl], projects: [], projectCount: 0, firstSeen: 0, sourceAvailable: false, metadata: metadata, gallery: true}
+)
+
+def galleryExtensionRows() array (
+    if galleryExtensionsCache.has("extensions") (
+        return galleryExtensionsCache.get("extensions").assert(array)
+    )
+    array rows = []
+    array turbowarp = galleryManifest("https://extensions.turbowarp.org/generated-metadata/extensions-v0.json")
+    for i turbowarp.len (
+        object extension = turbowarp[i].assert(object)
+        if extension.contains("slug") (
+            string extensionUrl = "https://extensions.turbowarp.org/" ++ extension.slug.toStr() ++ ".js"
+            rows.append(galleryExtensionRow(extension, extensionUrl))
+        )
+    )
+    array mistium = galleryManifest("https://extensions.mistium.com/generated-metadata/extensions-v0.json")
+    for i mistium.len (
+        object extension = mistium[i].assert(object)
+        if extension.contains("name") and extension.contains("featured") and extension.featured == true (
+            string extensionUrl = "https://extensions.mistium.com/featured/" ++ extension.name.toStr() ++ ".js"
+            rows.append(galleryExtensionRow(extension, extensionUrl))
+        )
+    )
+    galleryExtensionsCache.set("extensions", rows)
+    return rows
+)
+
 def extensionStatus(object policy, string hash, string sourceUrl) string (
     array blockedUrls = policy.blockedUrls.assert(array)
     if blockedUrls.contains(sourceUrl) (
@@ -452,6 +507,10 @@ def handleAdminGetExtensions(*serve.Context c) (
                 metadata: extensionMetadata(hash)
             })
         )
+    )
+    array galleryExtensions = galleryExtensionRows()
+    for i galleryExtensions.len (
+        extensions.append(galleryExtensions[i])
     )
     if policyChanged (
         saveExtensionPolicy(policy)
