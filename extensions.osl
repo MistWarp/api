@@ -210,7 +210,7 @@ def projectTrustedExtensions(object project) array (
         object extension = extensions[i].assert(object)
         string hash = extension.hash.toStr()
         string extensionUrl = extension.url.toStr()
-        if extensionStatus(policy, hash, extensionUrl) == "trusted" (
+        if !isGalleryExtensionUrl(extensionUrl) and extensionStatus(policy, hash, extensionUrl) == "trusted" (
             result.append(extensionUrl.hashSHA256())
         )
     )
