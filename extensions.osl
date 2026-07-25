@@ -398,7 +398,14 @@ def handleAdminGetExtensions(*serve.Context c) (
             })
         )
     )
-    c.json(200, {ok: true, extensions: extensions, blockedUrls: policy.blockedUrls, unindexedProjects: unindexedProjects})
+    array blockedUrls = []
+    array storedBlockedUrls = policy.blockedUrls.assert(array)
+    for i storedBlockedUrls.len (
+        if !isGalleryExtensionUrl(storedBlockedUrls[i].toStr()) (
+            blockedUrls.append(storedBlockedUrls[i])
+        )
+    )
+    c.json(200, {ok: true, extensions: extensions, blockedUrls: blockedUrls, unindexedProjects: unindexedProjects})
 )
 
 def handleAdminGetExtensionSource(*serve.Context c) (
@@ -452,6 +459,10 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
     boolean blocked = body.blocked == true
     if !extensionUrl.startsWith("https://") and !extensionUrl.startsWith("http://") (
         c.badRequest("an HTTP extension URL is required")
+        return
+    )
+    if isGalleryExtensionUrl(extensionUrl) (
+        c.badRequest("gallery extensions are always allowed")
         return
     )
     object policy = loadExtensionPolicy()
