@@ -130,6 +130,8 @@ def projectResponse(object project, *serve.Context c) object (
         hasContent: hasContent,
         remixable: projectRemixable(project),
         canRemix: canRemixProject(project, c),
+        seeInside: projectSeeInside(project),
+        canSeeInside: canSeeInsideProject(project, c),
         lastUploadAt: project.lastUploadAt,
         remixParent: project.remixParent,
         scratchOrigin: project.scratchOrigin,
@@ -870,6 +872,22 @@ def handleGetProject(*serve.Context c) (
     c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
+def handleGetEditorProject(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canSeeInsideProject(project, c) (
+        c.forbidden("see inside is disabled for this project")
+        return
+    )
+    ensureViewKey(project)
+    maybeFlushProject(project)
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
 def handleGetProjectJson(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok (
@@ -954,6 +972,9 @@ def handleUpdateProject(*serve.Context c) (
     )
     if body.contains("remixable") (
         project.remixable = body.remixable != false
+    )
+    if body.contains("seeInside") (
+        project.seeInside = body.seeInside != false
     )
     if body.contains("price") (
         number price = body.price.toNum()

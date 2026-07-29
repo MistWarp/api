@@ -81,11 +81,18 @@ def projectRemixable(object project) boolean (
     return true
 )
 
-def canRemixProject(object project, *serve.Context c) boolean (
+def projectSeeInside(object project) boolean (
+    if project.contains("seeInside") and project.seeInside == false (
+        return false
+    )
+    return true
+)
+
+def canSeeInsideProject(object project, *serve.Context c) boolean (
     if canEditProject(project, c) (
         return true
     )
-    if !projectRemixable(project) (
+    if !projectSeeInside(project) (
         return false
     )
     if !projectIsViewable(project) (
@@ -95,6 +102,13 @@ def canRemixProject(object project, *serve.Context c) boolean (
         return canAccessPaidJson(project, c)
     )
     return true
+)
+
+def canRemixProject(object project, *serve.Context c) boolean (
+    if !projectRemixable(project) (
+        return canEditProject(project, c)
+    )
+    return canSeeInsideProject(project, c)
 )
 
 def roturGet(string path) object (
