@@ -342,6 +342,11 @@ def handleSetVisibility(*serve.Context c) (
 
     boolean firstShare = false
     if target == "public" or target == "unlisted" (
+        string blockedExtension = projectBlockedExtension(project)
+        if blockedExtension != "" (
+            c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
+            return
+        )
         boolean everUploaded = project.lastUploadAt.toNum() > 0
         everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
         if !everUploaded (

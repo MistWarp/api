@@ -425,36 +425,73 @@ def projectContainsExtensionUrl(object project, string extensionUrl) boolean (
     return inspected.urls.assert(array).contains(extensionUrl)
 )
 
-def purgeProjectsUsingHash(string hash) array (
+def projectBlockedExtension(object project) string (
+    if !project.contains("extensions") or project.extensions == null (
+        return ""
+    )
+    object policy = loadExtensionPolicy()
+    array extensions = project.extensions.assert(array)
+    for i extensions.len (
+        object extension = extensions[i].assert(object)
+        string extensionUrl = extension.url.toStr()
+        if extensionStatus(policy, extension.hash.toStr(), extensionUrl) == "blocked" (
+            return extensionReviewUrl(extensionUrl)
+        )
+    )
+    return ""
+)
+
+def unshareProjectForBlockedExtension(object project) boolean (
+    project.shared = false
+    project.visibility = "private"
+    project.edited = timestamp
+    project.viewKey = randomString(16)
+    if !saveProject(project) or !upsertIndexEntry(project) (
+        return false
+    )
+    object profile = loadProfile(project.owner.toStr())
+    if profile.featuredProject.toStr() == project.id.toStr() (
+        profile.featuredProject = ""
+        saveProfile(profile)
+    )
+    addNotification(project.owner.toStr(), "MistWarp", "moderation", {message: "Your project \"" ++ project.title.toStr() ++ "\" uses an extension that has been blocked. Remove the extension before sharing the project again."})
+    return true
+)
+
+def unshareProjectsUsingHash(string hash) object (
     array files = fs.readDir(projectsDir).toArray()
-    array deleted = []
+    number affected = 0
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
             object project = result.data.assert(object)
             if projectContainsExtensionHash(project, hash) (
-                purgeProject(project)
-                deleted.append(project.id)
+                if !unshareProjectForBlockedExtension(project) (
+                    return {ok: false, affected: affected}
+                )
+                affected = affected + 1
             )
         )
     )
-    return deleted
+    return {ok: true, affected: affected}
 )
 
-def purgeProjectsUsingUrl(string extensionUrl) array (
+def unshareProjectsUsingUrl(string extensionUrl) object (
     array files = fs.readDir(projectsDir).toArray()
-    array deleted = []
+    number affected = 0
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
             object project = result.data.assert(object)
             if projectContainsExtensionUrl(project, extensionUrl) (
-                purgeProject(project)
-                deleted.append(project.id)
+                if !unshareProjectForBlockedExtension(project) (
+                    return {ok: false, affected: affected}
+                )
+                affected = affected + 1
             )
         )
     )
-    return deleted
+    return {ok: true, affected: affected}
 )
 
 def handleGetProjectExtensionSource(*serve.Context c) (
@@ -608,7 +645,7 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
     )
     string hash = body.hash.toStr()
     string status = body.status.toStr()
-    if !isExtensionHash(hash) or (status != "untrusted" and status != "trusted" and status != "blocked") (
+    if !isExtensionHash(hash) or (status != "untrusted" and status != "ignored" and status != "trusted" and status != "blocked") (
         c.badRequest("invalid extension policy")
         return
     )
@@ -631,11 +668,16 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
         return
     )
     sync.unlock(lockName)
-    array deletedProjects = []
+    number affectedCount = 0
     if status == "blocked" (
-        deletedProjects = purgeProjectsUsingHash(hash)
+        object affected = unshareProjectsUsingHash(hash)
+        affectedCount = affected.affected.toNum()
+        if !affected.ok (
+            c.internalError("could not unshare every affected project")
+            return
+        )
     )
-    c.json(200, {ok: true, deleted: deletedProjects.len, deletedProjects: deletedProjects})
+    c.json(200, {ok: true, affected: affectedCount})
 )
 
 def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
@@ -666,11 +708,16 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
         c.internalError("could not save URL policy")
         return
     )
-    array deletedProjects = []
+    number affectedCount = 0
     if blocked (
-        deletedProjects = purgeProjectsUsingUrl(extensionUrl)
+        object affected = unshareProjectsUsingUrl(extensionUrl)
+        affectedCount = affected.affected.toNum()
+        if !affected.ok (
+            c.internalError("could not unshare every affected project")
+            return
+        )
     )
-    c.json(200, {ok: true, deleted: deletedProjects.len, deletedProjects: deletedProjects})
+    c.json(200, {ok: true, affected: affectedCount})
 )
 
 def handleAdminIndexProjectExtensions(*serve.Context c) (
@@ -701,7 +748,10 @@ def handleAdminIndexProjectExtensions(*serve.Context c) (
     fs.remove(jsonPath)
     if !collected.ok (
         if collected.contains("code") and collected.code.toStr() == "blocked_extension" (
-            purgeProject(project)
+            if !unshareProjectForBlockedExtension(project) (
+                c.internalError("could not unshare the affected project")
+                return
+            )
         )
         c.json(400, collected)
         return
