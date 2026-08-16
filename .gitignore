@@ -2,6 +2,7 @@ data/*
 mistwarp-api
 .env
 main
+.DS_Store
 
 !data/agreement.json
 !data/agreement.md
