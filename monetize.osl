@@ -508,7 +508,7 @@ def handlePurchaseConfirm(*serve.Context c) (
     string seller = project.owner.toStr()
     number sellerAmount = owed
     if paywallFeePercent > 0 (
-        sellerAmount = owed - (owed * paywallFeePercent / 100)
+        sellerAmount = owed - ((owed * paywallFeePercent) / 100)
     )
     boolean paidOut = payoutTo(seller, sellerAmount, "MistWarp sale")
 

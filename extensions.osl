@@ -213,11 +213,10 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
         if !sources.contains(extensionUrl) (
             return {ok: false, error: "could not read custom extension source: " ++ extensionUrl}
         )
-        auto rawSource = sources[extensionUrl]
-        if typeof(rawSource) != "string" (
+        auto source = sources[extensionUrl]
+        if typeof(source) != "string" (
             return {ok: false, error: "invalid custom extension source: " ++ extensionUrl}
         )
-        string source = rawSource.assert(string)
         if source == "" or source.len > maxExtensionSourceBytes (
             return {ok: false, error: "custom extension source is empty or exceeds 2 MB: " ++ extensionUrl}
         )

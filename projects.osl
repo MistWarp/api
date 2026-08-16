@@ -1314,16 +1314,16 @@ def handleExplore(*serve.Context c) (
         array filtered = []
         for i entries.len (
             object entry = entries[i]
-            boolean match = entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q)
-            if !match and entry.contains("tags") and entry.tags != null (
+            boolean matches = entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q)
+            if !matches and entry.contains("tags") and entry.tags != null (
                 array tags = entry.tags.assert(array)
                 for j tags.len (
                     if tags[j].toStr().contains(q) (
-                        match = true
+                        matches = true
                     )
                 )
             )
-            if match (
+            if matches (
                 filtered.append(entry)
             )
         )
