@@ -104,14 +104,78 @@ def mergeNotificationArrays(array primary, array secondary) array (
 )
 
 
+def notificationBody(string actor, string notifType, object extra) string (
+    string projectTitle = extra.contains("projectTitle") ? extra.projectTitle.toStr() ""
+    if notifType == "love" (
+        if projectTitle != "" (
+            return actor ++ " loved " ++ projectTitle
+        )
+        return actor ++ " loved your project"
+    )
+    if notifType == "comment" (
+        if projectTitle != "" (
+            return actor ++ " commented on " ++ projectTitle
+        )
+        return actor ++ " commented on your project"
+    )
+    if notifType == "profile_comment" (
+        return actor ++ " commented on your profile"
+    )
+    if notifType == "reply" (
+        return actor ++ " replied to your comment"
+    )
+    if notifType == "mention" (
+        if projectTitle != "" (
+            return actor ++ " mentioned you on " ++ projectTitle
+        )
+        return actor ++ " mentioned you in a comment"
+    )
+    if notifType == "follow" (
+        return actor ++ " followed you"
+    )
+    if notifType == "remix" (
+        if projectTitle != "" (
+            return actor ++ " remixed " ++ projectTitle
+        )
+        return actor ++ " remixed your project"
+    )
+    if notifType == "purchase" (
+        if projectTitle != "" (
+            return actor ++ " bought " ++ projectTitle
+        )
+        return actor ++ " bought your project"
+    )
+    if notifType == "donation" (
+        return actor ++ " donated credits to you"
+    )
+    if notifType == "standing" (
+        string level = extra.contains("level") ? extra.level.toStr() "changed"
+        string reason = extra.contains("reason") ? extra.reason.toStr() ""
+        if reason != "" (
+            return "Your account standing is now " ++ level ++ ": " ++ reason
+        )
+        return "Your account standing is now " ++ level
+    )
+    if notifType == "moderation" (
+        return extra.contains("message") ? extra.message.toStr() "A moderator sent you a message"
+    )
+    if notifType == "news" (
+        return extra.contains("title") ? extra.title.toStr() "New announcement"
+    )
+    if notifType == "report_update" (
+        return "Your report was reviewed"
+    )
+    return actor ++ " sent you a notification"
+)
+
+
 def notifyRequestBody(string target, string actor, string notifType, object extra) object (
     return {
-        target: target,
-        actor: actor,
-        type: notifType,
-        platform: "mistwarp",
+        source: "mistwarp",
+        title: actor,
+        body: notificationBody(actor, notifType, extra),
         data: extra,
-        platform_data: extra
+        users: [target]
     }
 )
 
@@ -128,7 +192,7 @@ def postRoturNotification(string target, string actor, string notifType, object 
     if mistwarpRoturToken == "" (
         return false
     )
-    object resp = requests.post(roturBase ++ "/v2/notifications", {
+    object resp = requests.post(roturBase ++ "/v2/notify/", {
         headers: notifyHeaders(),
         body: json.stringify(notifyRequestBody(target, actor, notifType, extra))
     })
