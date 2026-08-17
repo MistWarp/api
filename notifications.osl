@@ -46,7 +46,10 @@ def normalizeNotification(object item) object (
     if !out.contains("platform_data") (
         out.platform_data = {}
     )
-    object pd = out.platform_data.toType() == "object" ? out.platform_data {}
+    object pd = {}
+    if typeof(out.platform_data) == "object" (
+        pd = out.platform_data
+    )
     array pdKeys = pd.getKeys().toArray()
     for i pdKeys.len (
         string pk = pdKeys[i].toStr()
@@ -72,7 +75,7 @@ def normalizeNotification(object item) object (
 
 def sanitizeNotificationPayload(object payload, string notifType, string actor) object (
     object data = {}
-    if payload == null or payload.toType() != "object" (
+    if payload == null or typeof(payload) != "object" (
         return data
     )
     array keys = payload.getKeys().toArray()
@@ -95,7 +98,10 @@ def mergeNotificationArrays(array primary, array secondary) array (
     object seen = {}
     for i primary.len (
         object item = primary[i].assert(object)
-        string id = item.contains("id") and item.id != null ? item.id.toStr() ""
+        string id = ""
+        if item.contains("id") and item.id != null (
+            id = item.id.toStr()
+        )
         if id != "" and seen[id] == true (
             continue
         )
@@ -104,7 +110,10 @@ def mergeNotificationArrays(array primary, array secondary) array (
     )
     for i secondary.len (
         object item = secondary[i].assert(object)
-        string id = item.contains("id") and item.id != null ? item.id.toStr() ""
+        string id = ""
+        if item.contains("id") and item.id != null (
+            id = item.id.toStr()
+        )
         if id != "" and seen[id] == true (
             continue
         )
@@ -116,7 +125,10 @@ def mergeNotificationArrays(array primary, array secondary) array (
 
 
 def notificationBody(string actor, string notifType, object extra) string (
-    string projectTitle = extra.contains("projectTitle") ? extra.projectTitle.toStr() ""
+    string projectTitle = ""
+    if extra.contains("projectTitle") (
+        projectTitle = extra.projectTitle.toStr()
+    )
     if notifType == "love" (
         if projectTitle != "" (
             return actor ++ " loved " ++ projectTitle
@@ -160,18 +172,30 @@ def notificationBody(string actor, string notifType, object extra) string (
         return actor ++ " donated credits to you"
     )
     if notifType == "standing" (
-        string level = extra.contains("level") ? extra.level.toStr() "changed"
-        string reason = extra.contains("reason") ? extra.reason.toStr() ""
+        string level = "changed"
+        if extra.contains("level") (
+            level = extra.level.toStr()
+        )
+        string reason = ""
+        if extra.contains("reason") (
+            reason = extra.reason.toStr()
+        )
         if reason != "" (
             return "Your account standing is now " ++ level ++ ": " ++ reason
         )
         return "Your account standing is now " ++ level
     )
     if notifType == "moderation" (
-        return extra.contains("message") ? extra.message.toStr() "A moderator sent you a message"
+        if extra.contains("message") (
+            return extra.message.toStr()
+        )
+        return "A moderator sent you a message"
     )
     if notifType == "news" (
-        return extra.contains("title") ? extra.title.toStr() "New announcement"
+        if extra.contains("title") (
+            return extra.title.toStr()
+        )
+        return "New announcement"
     )
     if notifType == "report_update" (
         return "Your report was reviewed"
@@ -281,7 +305,7 @@ def addNotification(string target, string actor, string notifType, object extra)
     for i items.len (
         object existing = items[i]
         boolean same = existing.type.toStr() == notifType and normalizeUsername(existing.actor.toStr()) == normalizeUsername(actor)
-        object existingPd = existing.platform_data.toType() == "object" ? existing.platform_data {}
+        object existingPd = typeof(existing.platform_data) == "object" ? existing.platform_data {}
         array payloadKeys = payload.getKeys().toArray()
         for j payloadKeys.len (
             string k = payloadKeys[j].toStr()
