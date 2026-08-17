@@ -305,7 +305,10 @@ def addNotification(string target, string actor, string notifType, object extra)
     for i items.len (
         object existing = items[i]
         boolean same = existing.type.toStr() == notifType and normalizeUsername(existing.actor.toStr()) == normalizeUsername(actor)
-        object existingPd = typeof(existing.platform_data) == "object" ? existing.platform_data {}
+        object existingPd = {}
+        if typeof(existing.platform_data) == "object" (
+            existingPd = existing.platform_data
+        )
         array payloadKeys = payload.getKeys().toArray()
         for j payloadKeys.len (
             string k = payloadKeys[j].toStr()
