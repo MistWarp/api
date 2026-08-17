@@ -217,10 +217,10 @@ def addNotification(string target, string actor, string notifType, object extra)
                 same = false
             )
         )
-        if same and existing.read != true (
-            return
+        if same (
+            continue
         )
-        if !same and kept < 50 (
+        if kept < 50 (
             next.append(existing)
             kept = kept + 1
         )
