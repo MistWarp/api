@@ -46,6 +46,17 @@ def normalizeNotification(object item) object (
     if !out.contains("platform_data") (
         out.platform_data = {}
     )
+    object pd = out.platform_data.toType() == "object" ? out.platform_data {}
+    array pdKeys = pd.getKeys().toArray()
+    for i pdKeys.len (
+        string pk = pdKeys[i].toStr()
+        if !out.contains(pk) (
+            out[pk] = pd[pk]
+        )
+    )
+    if out.platform.toStr() == "mistwarp" and pd.contains("type") and pd.type.toStr() != "" (
+        out.type = pd.type.toStr()
+    )
     if out.created == null (
         out.created = 0
     )
@@ -259,11 +270,6 @@ def addNotification(string target, string actor, string notifType, object extra)
         platform_data: payload,
         read: false
     }
-    array payloadKeys = payload.getKeys().toArray()
-    for i payloadKeys.len (
-        string k = payloadKeys[i].toStr()
-        item[k] = payload[k]
-    )
 
     if postRoturNotification(targetKey, actor, notifType, payload) (
         return
@@ -275,9 +281,11 @@ def addNotification(string target, string actor, string notifType, object extra)
     for i items.len (
         object existing = items[i]
         boolean same = existing.type.toStr() == notifType and normalizeUsername(existing.actor.toStr()) == normalizeUsername(actor)
+        object existingPd = existing.platform_data.toType() == "object" ? existing.platform_data {}
+        array payloadKeys = payload.getKeys().toArray()
         for j payloadKeys.len (
             string k = payloadKeys[j].toStr()
-            if !existing.contains(k) or existing[k] != payload[k] (
+            if !existingPd.contains(k) or existingPd[k] != payload[k] (
                 same = false
             )
         )
