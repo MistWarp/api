@@ -129,15 +129,25 @@ def notificationBody(string actor, string notifType, object extra) string (
     if extra.contains("projectTitle") (
         projectTitle = extra.projectTitle.toStr()
     )
+    string projectLink = ""
+    if extra.contains("projectId") and extra.projectId != null (
+        projectLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr()
+    )
     if notifType == "love" (
         if projectTitle != "" (
-            return actor ++ " loved " ++ projectTitle
+            return actor ++ " loved " ++ projectTitle ++ ": " ++ projectLink
+        )
+        if projectLink != "" (
+            return actor ++ " loved your project: " ++ projectLink
         )
         return actor ++ " loved your project"
     )
     if notifType == "comment" (
         if projectTitle != "" (
-            return actor ++ " commented on " ++ projectTitle
+            return actor ++ " commented on " ++ projectTitle ++ ": " ++ projectLink
+        )
+        if projectLink != "" (
+            return actor ++ " commented on your project: " ++ projectLink
         )
         return actor ++ " commented on your project"
     )
@@ -145,11 +155,17 @@ def notificationBody(string actor, string notifType, object extra) string (
         return actor ++ " commented on your profile"
     )
     if notifType == "reply" (
+        if projectLink != "" (
+            return actor ++ " replied to your comment: " ++ projectLink
+        )
         return actor ++ " replied to your comment"
     )
     if notifType == "mention" (
         if projectTitle != "" (
-            return actor ++ " mentioned you on " ++ projectTitle
+            return actor ++ " mentioned you on " ++ projectTitle ++ ": " ++ projectLink
+        )
+        if projectLink != "" (
+            return actor ++ " mentioned you in a comment: " ++ projectLink
         )
         return actor ++ " mentioned you in a comment"
     )
@@ -158,13 +174,19 @@ def notificationBody(string actor, string notifType, object extra) string (
     )
     if notifType == "remix" (
         if projectTitle != "" (
-            return actor ++ " remixed " ++ projectTitle
+            return actor ++ " remixed " ++ projectTitle ++ ": " ++ projectLink
+        )
+        if projectLink != "" (
+            return actor ++ " remixed your project: " ++ projectLink
         )
         return actor ++ " remixed your project"
     )
     if notifType == "purchase" (
         if projectTitle != "" (
-            return actor ++ " bought " ++ projectTitle
+            return actor ++ " bought " ++ projectTitle ++ ": " ++ projectLink
+        )
+        if projectLink != "" (
+            return actor ++ " bought your project: " ++ projectLink
         )
         return actor ++ " bought your project"
     )
@@ -205,11 +227,20 @@ def notificationBody(string actor, string notifType, object extra) string (
 
 
 def notifyRequestBody(string target, string actor, string notifType, object extra) object (
+    object data = {}
+    if extra != null and typeof(extra) == "object" (
+        array keys = extra.getKeys().toArray()
+        for i keys.len (
+            string key = keys[i].toStr()
+            data[key] = extra[key]
+        )
+    )
+    data.from = actor
     return {
         source: "mistwarp",
         title: actor,
         body: notificationBody(actor, notifType, extra),
-        data: extra,
+        data: data,
         users: [target]
     }
 )
