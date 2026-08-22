@@ -126,7 +126,7 @@ def handleCreateNews(*serve.Context c) (
         poll = {options: options}
     )
     object item = {id: "nw" ++ randomString(12), title: title, body: content, category: category, author: c.getString("username"), created: timestamp, reactions: {}}
-    if !link.isEmpty() (
+    if link.isEmpty() == false (
         item.link = link
     )
     if category == "poll" (
@@ -201,7 +201,7 @@ def handleVoteNewsPoll(*serve.Context c) (
     boolean validOption = false
     for i items.len (
         object item = items[i].assert(object)
-        if item.id.toStr() == id and item.contains("poll") and item.poll != null and !item.poll.assert(object).isEmpty() (
+        if item.id.toStr() == id and item.contains("poll") and item.poll != null and item.poll.assert(object).isEmpty() == false (
             found = true
             object poll = item.poll.assert(object)
             array options = poll.options.assert(array)
@@ -215,10 +215,11 @@ def handleVoteNewsPoll(*serve.Context c) (
             )
             for p options.len (
                 object option = options[p].assert(object)
-                option.voters = removeString(option.voters.assert(array), username)
+                array voters = removeString(option.voters.assert(array), username)
                 if option.id.toStr() == optionId and !alreadyVoted (
-                    option.voters.append(username)
+                    voters.append(username)
                 )
+                option.voters = voters
                 options[p] = option
             )
             poll.options = options

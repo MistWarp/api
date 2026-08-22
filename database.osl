@@ -1,17 +1,17 @@
 auto communityDb = db.open("data/community.db")
-auto projectSearchDocs = communityDb.collection("project_search")
-auto profileSearchDocs = communityDb.collection("profile_search")
-auto spaceDocs = communityDb.collection("spaces")
-auto releaseDocs = communityDb.collection("releases")
-auto previewDocs = communityDb.collection("previews")
-auto diagnosticDocs = communityDb.collection("diagnostics")
-auto feedbackDocs = communityDb.collection("project_feedback")
-auto ideaDocs = communityDb.collection("roadmap_ideas")
-auto playtimeDocs = communityDb.collection("project_playtime")
-auto reviewDocs = communityDb.collection("project_reviews")
+*db.Collection projectSearchDocs = communityDb.collection("project_search")
+*db.Collection profileSearchDocs = communityDb.collection("profile_search")
+*db.Collection spaceDocs = communityDb.collection("spaces")
+*db.Collection releaseDocs = communityDb.collection("releases")
+*db.Collection previewDocs = communityDb.collection("previews")
+*db.Collection diagnosticDocs = communityDb.collection("diagnostics")
+*db.Collection feedbackDocs = communityDb.collection("project_feedback")
+*db.Collection ideaDocs = communityDb.collection("roadmap_ideas")
+*db.Collection playtimeDocs = communityDb.collection("project_playtime")
+*db.Collection reviewDocs = communityDb.collection("project_reviews")
 
-def putDocument(auto collection, string id, object value) boolean (
-    value._id = id
+def putDocument(*db.Collection collection, string id, object value) boolean (
+    value["_id"] = id
     if collection.exists({_id: id}) (
         return collection.replaceOne({_id: id}, value) == 1
     )
@@ -45,7 +45,7 @@ def initCommunityDatabase() boolean (
             auto loaded = loadProject(id)
             if loaded.ok (
                 object entry = indexEntryFromProject(loaded.project.assert(object))
-                entry._id = id
+                entry["_id"] = id
                 projectSearchDocs.insertOne(entry)
             )
         )
@@ -67,7 +67,7 @@ def validPreviewKey(string projectId, string key) boolean (
         return false
     )
     object preview = previewDocs.findOne({projectId: projectId, key: key})
-    if preview.isEmpty() (
+    if preview.isEmpty() == true (
         return false
     )
     return preview.expiresAt.toNum() > timestamp
@@ -78,7 +78,7 @@ def projectPlaytime(string projectId, string username) number (
         return 0
     )
     object entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
-    if entry.isEmpty() (
+    if entry.isEmpty() == true (
         return 0
     )
     return entry.duration.toNum()

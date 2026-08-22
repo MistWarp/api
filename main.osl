@@ -1,17 +1,17 @@
-import "osl/fs"
-import "osl/crypto"
-import "osl/env"
-import "osl/json"
-import "osl/requests"
-import "osl/serve"
-import "osl/cache"
-import "osl/url"
-import "osl/s3"
-import "osl/zip"
-import "osl/regex"
-import "osl/thread"
-import "osl/process"
-import "osl/sync"
+import "std:fs"
+import "std:crypto"
+import "std:env"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:cache"
+import "std:url"
+import "std:s3"
+import "std:zip"
+import "std:regex"
+import "std:thread"
+import "std:process"
+import "std:sync"
 import "std:db"
 
 import "go:time"
@@ -230,6 +230,9 @@ api.GET("/roadmap", handleListIdeas)
 api.POST("/roadmap", requireAuth, requireGoodStanding, handleCreateIdea)
 api.POST("/roadmap/:id/vote", requireAuth, handleVoteIdea)
 api.PUT("/roadmap/:id", requireAdmin, handleUpdateIdea)
+api.GET("/roadmap/:id/comments", handleGetIdeaComments)
+api.POST("/roadmap/:id/comments", requireAuth, requireGoodStanding, handleCreateIdeaComment)
+api.DELETE("/roadmap/:id/comments/:cid", requireAuth, handleDeleteIdeaComment)
 api.GET("/spaces", handleListSpaces)
 api.POST("/spaces", requireAuth, requireGoodStanding, handleCreateSpace)
 api.GET("/spaces/:id", handleGetSpace)
@@ -290,6 +293,7 @@ api.POST("/projects/:id/pulls/:index/merge", requireAuth, handleMergePull)
 
 api.GET("/search/users", handleSearchUsers)
 api.GET("/users/:name", handleGetUser)
+api.GET("/users/:name/reviews", handleListUserReviews)
 api.PUT("/me/profile", requireAuth, handleUpdateProfile)
 api.POST("/users/:name/follow", requireAuth, handleFollowUser)
 api.DELETE("/users/:name/follow", requireAuth, handleUnfollowUser)
