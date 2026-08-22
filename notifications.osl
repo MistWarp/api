@@ -222,6 +222,18 @@ def notificationBody(string actor, string notifType, object extra) string (
     if notifType == "report_update" (
         return "Your report was reviewed"
     )
+    if notifType == "space_project" (
+        return actor ++ " added a project to " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "contribution" (
+        return actor ++ " sent changes for " ++ projectTitle ++ ": " ++ projectLink
+    )
+    if notifType == "project_feedback" (
+        return actor ++ " sent " ++ extra.feedbackType.toStr() ++ " feedback for " ++ projectTitle ++ ": " ++ projectLink
+    )
+    if notifType == "project_review" (
+        return actor ++ " rated " ++ projectTitle ++ " " ++ extra.rating.toStr() ++ " out of 5: " ++ projectLink
+    )
     return actor ++ " sent you a notification"
 )
 

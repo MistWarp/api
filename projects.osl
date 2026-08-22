@@ -8,6 +8,23 @@ def removeString(array items, string value) array (
     return next
 )
 
+def projectRole(object project, string username) string (
+    string key = normalizeUsername(username)
+    if normalizeUsername(project.owner.toStr()) == key (
+        return "owner"
+    )
+    if project.contains("collaborators") and project.collaborators != null (
+        array collaborators = project.collaborators.assert(array)
+        for i collaborators.len (
+            object collaborator = collaborators[i].assert(object)
+            if normalizeUsername(collaborator.username.toStr()) == key (
+                return collaborator.role.toStr()
+            )
+        )
+    )
+    return ""
+)
+
 def canEditProject(object project, *serve.Context c) boolean (
     if !c.getBool("authenticated") (
         return false
@@ -15,17 +32,27 @@ def canEditProject(object project, *serve.Context c) boolean (
     if c.getBool("isAdmin") (
         return true
     )
-    return normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    string role = projectRole(project, c.getString("username"))
+    return role == "owner" or role == "maintainer"
 )
 
 def canViewProject(object project, *serve.Context c) boolean (
     if projectIsViewable(project) (
         return true
     )
+    if validPreviewKey(project.id.toStr(), c.query("k")) (
+        return true
+    )
+    if projectRole(project, c.getString("username")) != "" (
+        return true
+    )
     return canEditProject(project, c)
 )
 
 def canViewProjectJson(object project, *serve.Context c) boolean (
+    if validPreviewKey(project.id.toStr(), c.query("k")) (
+        return true
+    )
     if projectPrice(project) > 0 (
         if canAccessPaidJson(project, c) (
             return true
@@ -83,7 +110,15 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("tags") and project.tags != null (
         tags = project.tags.assert(array)
     )
+    object compatibility = {mobile: false, keyboard: false, controller: false}
+    if project.contains("compatibility") and project.compatibility != null (
+        compatibility = project.compatibility.assert(object)
+    )
     boolean isOwner = canEditProject(project, c)
+    array collaborators = []
+    if project.contains("collaborators") and project.collaborators != null (
+        collaborators = project.collaborators.assert(array)
+    )
     number price = projectPrice(project)
     boolean bought = hasBought(project, viewer)
     boolean hasContent = project.lastUploadAt.toNum() > 0
@@ -91,7 +126,11 @@ def projectResponse(object project, *serve.Context c) object (
     string jsonBase = projectJsonBaseUrl(project)
     string jsonUrl = jsonBase
     if project.shared != true and projectViewKey(project) != "" (
-        jsonUrl = jsonBase ++ "?k=" ++ projectViewKey(project)
+        string accessKey = projectViewKey(project)
+        if validPreviewKey(project.id.toStr(), c.query("k")) (
+            accessKey = c.query("k")
+        )
+        jsonUrl = jsonBase ++ "?k=" ++ accessKey
     )
     boolean locked = false
     if price > 0 (
@@ -110,6 +149,7 @@ def projectResponse(object project, *serve.Context c) object (
         owner: project.owner,
         title: project.title,
         tags: tags,
+        compatibility: compatibility,
         description: project.description,
         instructions: project.instructions,
         notes: notes,
@@ -118,6 +158,7 @@ def projectResponse(object project, *serve.Context c) object (
         projectJsonUrl: jsonUrl,
         assetsBase: assetsBaseUrl(),
         thumbUrl: thumbUrlFor(project),
+        cardUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/card.svg",
         created: project.created,
         edited: project.edited,
         sharedAt: project.sharedAt,
@@ -143,6 +184,10 @@ def projectResponse(object project, *serve.Context c) object (
         sizeBytes: projectSizeBytes(project),
         isOwner: isOwner
     }
+    response.myRole = projectRole(project, viewer)
+    if isOwner (
+        response.collaborators = collaborators
+    )
     if project.contains("jsonBytes") (
         response.jsonBytes = project.jsonBytes
     )
@@ -356,7 +401,8 @@ def handleCreateProject(*serve.Context c) (
         loves: [],
         brokenhearts: [],
         assets: [],
-        tags: []
+        tags: [],
+        collaborators: []
     }
 
     if !saveProject(project) (
@@ -869,7 +915,16 @@ def handleGetProject(*serve.Context c) (
     )
     ensureViewKey(project)
     maybeFlushProject(project)
-    c.json(200, {ok: true, project: projectResponse(project, c)})
+    object response = projectResponse(project, c)
+    if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" (
+        object release = releaseDocs.findById(project.publicRelease.toStr())
+        if !release.isEmpty() and release.contains("jsonUrl") (
+            response.projectJsonUrl = release.jsonUrl
+            response.releaseVersion = release.version
+            response.releaseChannel = release.channel
+        )
+    )
+    c.json(200, {ok: true, project: response})
 )
 
 def handleGetEditorProject(*serve.Context c) (
@@ -1005,6 +1060,34 @@ def handleUpdateProject(*serve.Context c) (
         )
         project.tags = tags
     )
+    if body.contains("compatibility") and body.compatibility != null (
+        object incoming = body.compatibility.assert(object)
+        project.compatibility = {
+            mobile: incoming.contains("mobile") and incoming.mobile == true,
+            keyboard: incoming.contains("keyboard") and incoming.keyboard == true,
+            controller: incoming.contains("controller") and incoming.controller == true
+        }
+    )
+    if body.contains("collaborators") (
+        if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
+            c.forbidden("only the owner can manage the project team")
+            return
+        )
+        array incoming = body.collaborators.assert(array)
+        array collaborators = []
+        for i incoming.len (
+            if collaborators.len < 25 (
+                object entry = incoming[i].assert(object)
+                string username = entry.username.toStr().strip()
+                string role = entry.role.toStr().toLower().strip()
+                boolean validRole = role == "maintainer" or role == "contributor" or role == "tester"
+                if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
+                    collaborators.append({username: username, role: role})
+                )
+            )
+        )
+        project.collaborators = collaborators
+    )
 
     project.edited = timestamp
     saveProject(project)
@@ -1077,7 +1160,7 @@ def handleDeleteProject(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    if !canEditProject(project, c) (
+    if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
         c.forbidden("not your project")
         return
     )
@@ -1277,14 +1360,12 @@ def handleReactProject(*serve.Context c) (
 )
 
 def sharedIndexEntries() array (
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
     object banData = cachedBans()
     object bans = banData.bans
     array entries = []
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
+    array stored = projectSearchDocs.find({shared: true, visibility: "public"})
+    for i stored.len (
+        object entry = stored[i].assert(object)
         if entry.shared == true and !bans.contains(normalizeUsername(entry.owner.toStr())) (
             entries.append(entry)
         )
@@ -1337,6 +1418,8 @@ def handleExplore(*serve.Context c) (
     string sort = c.queryDefault("sort", "recent")
     if sort == "loved" (
         entries.sortBy("loveCount", "descending")
+    ) else if sort == "undiscovered" (
+        entries.sortBy("views", "ascending")
     ) else if sort == "trending" (
         for i entries.len (
             object entry = entries[i]
@@ -1527,7 +1610,8 @@ def handleRemixProject(*serve.Context c) (
         loves: [],
         brokenhearts: [],
         assets: parent.assets,
-        sizeBytes: projectSizeBytes(parent)
+        sizeBytes: projectSizeBytes(parent),
+        collaborators: []
     }
     if parent.contains("jsonBytes") (
         project.jsonBytes = parent.jsonBytes

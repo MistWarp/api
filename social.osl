@@ -1,18 +1,13 @@
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
     string ownerKey = normalizeUsername(owner)
     array entries = []
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
-        if normalizeUsername(entry.owner.toStr()) == ownerKey (
-            if entry.shared == true or includeUnshared (
-                entries.append(entry)
-            )
+    array stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    for i stored.len (
+        object entry = stored[i].assert(object)
+        if entry.shared == true or includeUnshared (
+            entries.append(entry)
         )
     )
-    entries.sortBy("edited", "descending")
     return entries
 )
 
@@ -60,37 +55,12 @@ def handleSearchUsers(*serve.Context c) (
         c.json(200, {ok: true, users: []})
         return
     )
-    array names = fs.readDir(usersDir).toArray()
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
-    object sharedCounts = {}
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
-        if entry.shared == true (
-            string owner = normalizeUsername(entry.owner.toStr())
-            number prev = 0
-            if sharedCounts.contains(owner) (
-                prev = sharedCounts[owner].toNum()
-            )
-            sharedCounts[owner] = prev + 1
-        )
-    )
     array matches = []
-    for i names.len (
-        string file = names[i].toStr()
-        if file.endsWith(".json") and matches.len < 8 (
-            string username = file.replace(".json", "")
-            if username.contains(q) (
-                object profile = loadProfile(username)
-                array followers = profile.followers.assert(array)
-                number projectCount = 0
-                if sharedCounts.contains(username) (
-                    projectCount = sharedCounts[username].toNum()
-                )
-                matches.append({username: username, followers: followers.len, projects: projectCount})
-            )
-        )
+    array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(8).all()
+    for i found.len (
+        object profile = found[i].assert(object)
+        number projectCount = projectSearchDocs.where("ownerKey", db.equal, profile.usernameKey).and("shared", db.equal, true).count()
+        matches.append({username: profile.username, followers: profile.followers, projects: projectCount})
     )
     c.json(200, {ok: true, users: matches})
 )
@@ -195,16 +165,12 @@ def userProjectList(*serve.Context c, string field) (
     if profile.contains(field) (
         ids = profile[field].assert(array)
     )
-    object index = loadIndex()
-    object projects = index.projects
     array entries = []
     for i ids.len (
         string id = ids[i].toStr()
-        if projects.contains(id) (
-            object entry = projects[id]
-            if entry.shared == true (
-                entries.append(entry)
-            )
+        object entry = projectSearchDocs.findById(id)
+        if !entry.isEmpty() and entry.shared == true (
+            entries.append(entry)
         )
     )
     entries.reverse()
@@ -277,6 +243,7 @@ def handleSaveProject(*serve.Context c) (
     boolean added = addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
     if added (
         bumpProjectSaves(project.id.toStr(), 1)
+        addActivity(c.getString("username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
     )
     c.json(200, {ok: true, saved: true})
 )
@@ -325,13 +292,12 @@ def handleGetMyPurchases(*serve.Context c) (
 
 def handleGetMyLibrary(*serve.Context c) (
     array ids = userLibrary(normalizeUsername(c.getString("username")))
-    object index = loadIndex()
-    object projects = index.projects
     array entries = []
     for i ids.len (
         string id = ids[i].toStr()
-        if projects.contains(id) (
-            entries.append(projects[id])
+        object entry = projectSearchDocs.findById(id)
+        if !entry.isEmpty() (
+            entries.append(entry)
         )
     )
     entries.reverse()

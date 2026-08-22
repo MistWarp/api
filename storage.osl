@@ -13,6 +13,7 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(quotaDir)
     result = result and fs.mkdirAll(agreementAcceptDir)
     result = result and fs.mkdirAll(extensionsDir)
+    result = result and fs.mkdirAll(releasesDir)
     return result
 )
 
@@ -101,6 +102,7 @@ def indexEntryFromProject(object project) object (
     return {
         id: project.id,
         owner: project.owner,
+        ownerKey: normalizeUsername(project.owner.toStr()),
         title: project.title,
         thumbUrl: thumbUrlFor(project),
         views: project.views,
@@ -135,7 +137,9 @@ def upsertIndexEntry(object project) boolean (
     object index = loadIndex()
     object projects = index.projects
     projects[project.id.toStr()] = indexEntryFromProject(project)
-    return saveIndex(index)
+    boolean saved = saveIndex(index)
+    syncSearchProject(project)
+    return saved
 )
 
 def removeFromIndex(string id) boolean (
@@ -143,8 +147,11 @@ def removeFromIndex(string id) boolean (
     object projects = index.projects
     if projects.contains(id) (
         projects.delete(id)
-        return saveIndex(index)
+        boolean saved = saveIndex(index)
+        removeSearchProject(id)
+        return saved
     )
+    removeSearchProject(id)
     return true
 )
 
@@ -203,7 +210,9 @@ def saveProfile(object profile) boolean (
     if !isSafePathPart(key) (
         return false
     )
-    return writeFile(usersDir ++ key ++ ".json", profile)
+    boolean saved = writeFile(usersDir ++ key ++ ".json", profile)
+    syncSearchProfile(profile)
+    return saved
 )
 
 def loadActivity(string username) array (
