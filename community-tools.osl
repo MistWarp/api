@@ -30,6 +30,24 @@ def spaceCuratorInvites(object space) array (
     return []
 )
 
+def spaceLikes(object space) array (
+    if space.contains("likes") (
+        return space["likes"].assertElse(array, [])
+    )
+    return []
+)
+
+def spaceBrokenHearts(object space) array (
+    if space.contains("brokenHearts") (
+        return space["brokenHearts"].assertElse(array, [])
+    )
+    return []
+)
+
+def spaceCommentKey(string id) string (
+    return "space-" ++ id
+)
+
 def isSpaceOwner(object space, *serve.Context c) boolean (
     return c.getBool("isAdmin") or normalizeUsername(space.owner.toStr()) == normalizeUsername(c.getString("username"))
 )
@@ -82,6 +100,19 @@ def spaceResponse(object space, *serve.Context c) object (
     response.isOwner = isSpaceOwner(space, c)
     response.following = stringArrayContainsUser(space.followers.assert(array), c.getString("username"))
     response.invited = isSpaceInvitee(space, c)
+    array likes = spaceLikes(space)
+    array brokenHearts = spaceBrokenHearts(space)
+    response.likeCount = likes.len
+    response.brokenHeartCount = brokenHearts.len
+    response.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    response.myReaction = ""
+    if stringArrayContainsUser(likes, c.getString("username")) (
+        response.myReaction = "heart"
+    ) else if stringArrayContainsUser(brokenHearts, c.getString("username")) (
+        response.myReaction = "brokenheart"
+    )
+    response.likes = []
+    response.brokenHearts = []
     response.curatorInvites = []
     return response
 )
@@ -171,6 +202,8 @@ def handleCreateSpace(*serve.Context c) (
         curatorInvites: [],
         projects: [],
         followers: [],
+        likes: [],
+        brokenHearts: [],
         openSubmissions: body.contains("openSubmissions") and body.openSubmissions == true,
         startsAt: startsAt,
         endsAt: endsAt,
@@ -474,6 +507,110 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
     space.edited = timestamp
     putDocument(spaceDocs, space["_id"].toStr(), space)
     c.json(200, {ok: true})
+)
+
+def handleReactSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    string reactionType = c.bodyJSON().type.toStr()
+    if !isValidReaction(reactionType) (
+        c.badRequest("invalid reaction")
+        return
+    )
+    string username = c.getString("username")
+    array likes = spaceLikes(space)
+    array brokenHearts = spaceBrokenHearts(space)
+    boolean hadReaction = false
+    if reactionType == "heart" (
+        hadReaction = stringArrayContainsUser(likes, username)
+    ) else (
+        hadReaction = stringArrayContainsUser(brokenHearts, username)
+    )
+    likes = removeString(likes, username)
+    brokenHearts = removeString(brokenHearts, username)
+    if !hadReaction and reactionType == "heart" (
+        likes.append(username)
+    ) else if !hadReaction and reactionType == "brokenheart" (
+        brokenHearts.append(username)
+    )
+    space.likes = likes
+    space.brokenHearts = brokenHearts
+    space.edited = timestamp
+    putDocument(spaceDocs, space["_id"].toStr(), space)
+    c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: hadReaction ? "" reactionType})
+)
+
+def handleGetSpaceComments(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    c.json(200, {ok: true, comments: loadComments(spaceCommentKey(space["_id"].toStr()))})
+)
+
+def handleCreateSpaceComment(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    string parentId = ""
+    if body.contains("parent") and body.parent != null (
+        parentId = body.parent.toStr()
+    )
+    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), body.content.toStr(), parentId)
+    if !created.ok (
+        c.badRequest(created.error.toStr())
+        return
+    )
+    string commenter = c.getString("username")
+    string parentAuthor = created.parentAuthor.toStr()
+    string newCommentId = created.comment.id.toStr()
+    object notificationData = {spaceId: space["_id"], spaceTitle: space.title, commentId: newCommentId}
+    if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+        addNotification(parentAuthor, commenter, "reply", notificationData)
+    )
+    if normalizeUsername(space.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(space.owner.toStr()) != normalizeUsername(parentAuthor) (
+        addNotification(space.owner.toStr(), commenter, "space_comment", notificationData)
+    )
+    notifyMentions(created.comment.content.toStr(), commenter, space.owner.toStr(), notificationData)
+    c.json(201, created)
+)
+
+def handleDeleteSpaceComment(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    string moderator = space.owner.toStr()
+    if canManageSpace(space, c) (
+        moderator = c.getString("username")
+    )
+    object deleted = deleteComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), c.getString("username"), moderator, c.getBool("isAdmin") == true)
+    if !deleted.ok (
+        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleReactSpaceComment(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    reactToComment(c, spaceCommentKey(space["_id"].toStr()))
 )
 
 def handleCreatePreview(*serve.Context c) (
@@ -888,6 +1025,9 @@ def handleListIdeas(*serve.Context c) (
                 idea.source = "mistwarp"
             )
         )
+        if !idea.contains("interested") (
+            idea.interested = idea.source.toStr() == "mistwarp"
+        )
         idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
         idea.likes = []
         idea.dislikes = []
@@ -915,7 +1055,7 @@ def handleCreateIdea(*serve.Context c) (
     if c.getBool("isAdmin") == true (
         source = "mistwarp"
     )
-    object idea = {_id: ideaId, title: title, description: description, category: category, author: c.getString("username"), source: source, status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
+    object idea = {_id: ideaId, title: title, description: description, category: category, author: c.getString("username"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
     ideaDocs.insertOne(idea)
     idea.myVote = "like"
     idea.likesCount = 1
@@ -1041,6 +1181,9 @@ def handleUpdateIdea(*serve.Context c) (
         if status == "open" or status == "planned" or status == "building" or status == "shipped" or status == "declined" (
             idea.status = status
         )
+    )
+    if body.contains("interested") (
+        idea.interested = body.interested == true
     )
     idea.edited = timestamp
     putDocument(ideaDocs, idea["_id"].toStr(), idea)
