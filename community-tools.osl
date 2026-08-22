@@ -16,6 +16,35 @@ def validSpaceVisibility(string visibility) boolean (
     return (visibility == "public") or (visibility == "unlisted") or (visibility == "private")
 )
 
+def spaceManagers(object space) array (
+    if space.contains("managers") (
+        return space["managers"].assertElse(array, [])
+    )
+    return []
+)
+
+def spaceCuratorInvites(object space) array (
+    if space.contains("curatorInvites") (
+        return space["curatorInvites"].assertElse(array, [])
+    )
+    return []
+)
+
+def isSpaceOwner(object space, *serve.Context c) boolean (
+    return c.getBool("isAdmin") or normalizeUsername(space.owner.toStr()) == normalizeUsername(c.getString("username"))
+)
+
+def isSpaceInvitee(object space, *serve.Context c) boolean (
+    array invites = spaceCuratorInvites(space)
+    for i invites.len (
+        object invite = invites[i].assert(object)
+        if normalizeUsername(invite.username.toStr()) == normalizeUsername(c.getString("username")) (
+            return true
+        )
+    )
+    return false
+)
+
 def canManageSpace(object space, *serve.Context c) boolean (
     if c.getBool("isAdmin") (
         return true
@@ -24,14 +53,14 @@ def canManageSpace(object space, *serve.Context c) boolean (
     if normalizeUsername(space.owner.toStr()) == normalizeUsername(username) (
         return true
     )
-    return stringArrayContainsUser(space.managers.assert(array), username)
+    return stringArrayContainsUser(spaceManagers(space), username)
 )
 
 def canViewSpace(object space, *serve.Context c) boolean (
     if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" (
         return true
     )
-    return canManageSpace(space, c)
+    return canManageSpace(space, c) or isSpaceInvitee(space, c)
 )
 
 def spaceResponse(object space, *serve.Context c) object (
@@ -39,7 +68,7 @@ def spaceResponse(object space, *serve.Context c) object (
     array ids = space.projects.assert(array)
     for i ids.len (
         object entry = projectSearchDocs.findById(ids[i].toStr())
-        if entry.isEmpty() == false and (entry.shared == true or canManageSpace(space, c)) (
+        if entry.isEmpty() == false and (entry.shared == true or entry.visibility.toStr() == "unlisted" or canManageSpace(space, c)) (
             projects.append(entry)
         )
     )
@@ -47,7 +76,17 @@ def spaceResponse(object space, *serve.Context c) object (
     response.projects = projects
     response.projectIds = ids
     response.canManage = canManageSpace(space, c)
+    response.isOwner = isSpaceOwner(space, c)
     response.following = stringArrayContainsUser(space.followers.assert(array), c.getString("username"))
+    response.invited = isSpaceInvitee(space, c)
+    response.curatorInvites = []
+    return response
+)
+
+def spaceManagementResponse(object space, *serve.Context c) object (
+    array invites = spaceCuratorInvites(space)
+    object response = spaceResponse(space, c)
+    response.curatorInvites = invites
     return response
 )
 
@@ -126,6 +165,7 @@ def handleCreateSpace(*serve.Context c) (
         visibility: visibility,
         owner: c.getString("username"),
         managers: [],
+        curatorInvites: [],
         projects: [],
         followers: [],
         openSubmissions: body.contains("openSubmissions") and body.openSubmissions == true,
@@ -177,17 +217,6 @@ def handleUpdateSpace(*serve.Context c) (
     if body.contains("endsAt") (
         space.endsAt = body.endsAt.toNum()
     )
-    if body.contains("managers") (
-        array managers = body.managers.assert(array)
-        array clean = []
-        for i managers.len (
-            string name = managers[i].toStr().strip()
-            if name != "" and clean.len < 25 and !stringArrayContainsUser(clean, name) (
-                clean.append(name)
-            )
-        )
-        space.managers = clean
-    )
     space.edited = timestamp
     putDocument(spaceDocs, space["_id"].toStr(), space)
     c.json(200, {ok: true, space: spaceResponse(space, c)})
@@ -210,13 +239,18 @@ def handleDeleteSpace(*serve.Context c) (
 def handleAddSpaceProject(*serve.Context c) (
     object space = spaceDocs.findById(c.param("id"))
     object project = projectSearchDocs.findById(c.param("project"))
-    if space.isEmpty() == true or project.isEmpty() == true or project.shared != true (
+    if space.isEmpty() == true or project.isEmpty() == true (
         c.notFound("space or project not found")
         return
     )
+    boolean projectVisible = project.shared == true or project.visibility.toStr() == "unlisted"
+    if !projectVisible (
+        c.forbidden("only shared or unlisted projects can be added")
+        return
+    )
     boolean allowed = canManageSpace(space, c)
-    allowed = allowed or space.openSubmissions == true
-    allowed = allowed or normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    boolean ownsProject = normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    allowed = allowed or (space.openSubmissions == true and ownsProject)
     if !allowed (
         c.forbidden("submissions are closed")
         return
@@ -285,11 +319,158 @@ def handleMySpaces(*serve.Context c) (
     array spaces = []
     for i stored.len (
         object space = stored[i].assert(object)
-        if normalizeUsername(space.owner.toStr()) == normalizeUsername(username) or stringArrayContainsUser(space.managers.assert(array), username) or stringArrayContainsUser(space.followers.assert(array), username) (
+        boolean related = normalizeUsername(space.owner.toStr()) == normalizeUsername(username) or stringArrayContainsUser(spaceManagers(space), username) or stringArrayContainsUser(space.followers.assert(array), username)
+        array invites = spaceCuratorInvites(space)
+        for j invites.len (
+            object invite = invites[j].assert(object)
+            if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
+                related = true
+            )
+        )
+        if related (
             spaces.append(spaceResponse(space, c))
         )
     )
     c.json(200, {ok: true, spaces: spaces})
+)
+
+def handleGetSpaceManagement(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    if !canManageSpace(space, c) (
+        c.forbidden("you cannot manage this space")
+        return
+    )
+    c.json(200, {ok: true, space: spaceManagementResponse(space, c)})
+)
+
+def handleInviteSpaceCurator(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    if !isSpaceOwner(space, c) (
+        c.forbidden("only the owner can invite curators")
+        return
+    )
+    string username = c.bodyJSON().username.toStr().strip()
+    string usernameKey = normalizeUsername(username)
+    if usernameKey == "" or username.len > 20 or usernameKey == normalizeUsername(space.owner.toStr()) (
+        c.badRequest("choose another user")
+        return
+    )
+    object profile = profileSearchDocs.findById(usernameKey)
+    if profile.isEmpty() == true (
+        c.notFound("user not found")
+        return
+    )
+    if stringArrayContainsUser(spaceManagers(space), username) (
+        c.badRequest("this user is already a curator")
+        return
+    )
+    array invites = spaceCuratorInvites(space)
+    for i invites.len (
+        object existing = invites[i].assert(object)
+        if normalizeUsername(existing.username.toStr()) == usernameKey (
+            c.badRequest("this user already has an invitation")
+            return
+        )
+    )
+    object invite = {username: profile.username, invitedBy: c.getString("username"), created: timestamp}
+    invites.append(invite)
+    space.curatorInvites = invites
+    space.edited = timestamp
+    putDocument(spaceDocs, space["_id"].toStr(), space)
+    addNotification(profile.username.toStr(), c.getString("username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
+    c.json(201, {ok: true, invitation: invite})
+)
+
+def handleRespondSpaceCuratorInvite(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    string username = c.getString("username")
+    array invites = spaceCuratorInvites(space)
+    array remaining = []
+    boolean found = false
+    for i invites.len (
+        object invite = invites[i].assert(object)
+        if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
+            found = true
+        ) else (
+            remaining.append(invite)
+        )
+    )
+    if !found (
+        c.notFound("invitation not found")
+        return
+    )
+    boolean accepted = c.bodyJSON().accepted == true
+    if accepted (
+        array managers = spaceManagers(space)
+        if !stringArrayContainsUser(managers, username) (
+            managers.append(username)
+        )
+        space.managers = managers
+    )
+    space.curatorInvites = remaining
+    space.edited = timestamp
+    putDocument(spaceDocs, space["_id"].toStr(), space)
+    string notificationType = "space_curator_declined"
+    if accepted (
+        notificationType = "space_curator_accepted"
+    )
+    addNotification(space.owner.toStr(), username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
+    c.json(200, {ok: true, accepted: accepted})
+)
+
+def handleRemoveSpaceCurator(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    if !isSpaceOwner(space, c) (
+        c.forbidden("only the owner can remove curators")
+        return
+    )
+    string username = c.param("username")
+    space.managers = removeString(spaceManagers(space), username)
+    space.edited = timestamp
+    putDocument(spaceDocs, space["_id"].toStr(), space)
+    addNotification(username, c.getString("username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
+    c.json(200, {ok: true})
+)
+
+def handleCancelSpaceCuratorInvite(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true (
+        c.notFound("space not found")
+        return
+    )
+    if !isSpaceOwner(space, c) (
+        c.forbidden("only the owner can cancel invitations")
+        return
+    )
+    string username = c.param("username")
+    array remaining = []
+    array invites = spaceCuratorInvites(space)
+    for i invites.len (
+        object invite = invites[i].assert(object)
+        if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
+            remaining.append(invite)
+        )
+    )
+    space.curatorInvites = remaining
+    space.edited = timestamp
+    putDocument(spaceDocs, space["_id"].toStr(), space)
+    c.json(200, {ok: true})
 )
 
 def handleCreatePreview(*serve.Context c) (

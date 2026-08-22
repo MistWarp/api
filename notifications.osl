@@ -236,6 +236,18 @@ def notificationBody(string actor, string notifType, object extra) string (
     if notifType == "space_project" (
         return actor ++ " added a project to " ++ extra.spaceTitle.toStr()
     )
+    if notifType == "space_curator_invite" (
+        return actor ++ " invited you to curate " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "space_curator_accepted" (
+        return actor ++ " accepted your invitation to curate " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "space_curator_declined" (
+        return actor ++ " declined your invitation to curate " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "space_curator_removed" (
+        return actor ++ " removed you as a curator of " ++ extra.spaceTitle.toStr()
+    )
     if notifType == "contribution" (
         return actor ++ " sent changes for " ++ projectTitle ++ ": " ++ projectLink
     )
