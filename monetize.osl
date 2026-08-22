@@ -19,6 +19,9 @@ def projectPrice(object project) number (
     if project.contains("price") and project.price != null (
         number p = project.price.toNum()
         if p > 0 (
+            if p > maxProjectPrice (
+                return maxProjectPrice
+            )
             return p
         )
     )
@@ -499,6 +502,9 @@ def handlePurchaseConfirm(*serve.Context c) (
         return
     )
     number owed = pending.price.toNum()
+    if owed > maxProjectPrice (
+        owed = maxProjectPrice
+    )
 
     if !verifyIncomingTransfer(buyerLower, key, owed) (
         c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
