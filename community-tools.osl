@@ -1,0 +1,747 @@
+def stringArrayContainsUser(array users, string username) boolean (
+    string wanted = normalizeUsername(username)
+    for i users.len (
+        if normalizeUsername(users[i].toStr()) == wanted (
+            return true
+        )
+    )
+    return false
+)
+
+def validSpaceKind(string kind) boolean (
+    return (kind == "studio") or (kind == "collection") or (kind == "challenge")
+)
+
+def validSpaceVisibility(string visibility) boolean (
+    return (visibility == "public") or (visibility == "unlisted") or (visibility == "private")
+)
+
+def canManageSpace(object space, *serve.Context c) boolean (
+    if c.getBool("isAdmin") (
+        return true
+    )
+    string username = c.getString("username")
+    if normalizeUsername(space.owner.toStr()) == normalizeUsername(username) (
+        return true
+    )
+    return stringArrayContainsUser(space.managers.assert(array), username)
+)
+
+def canViewSpace(object space, *serve.Context c) boolean (
+    if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" (
+        return true
+    )
+    return canManageSpace(space, c)
+)
+
+def spaceResponse(object space, *serve.Context c) object (
+    array projects = []
+    array ids = space.projects.assert(array)
+    for i ids.len (
+        object entry = projectSearchDocs.findById(ids[i].toStr())
+        if !entry.isEmpty() and (entry.shared == true or canManageSpace(space, c)) (
+            projects.append(entry)
+        )
+    )
+    object response = space
+    response.projects = projects
+    response.projectIds = ids
+    response.canManage = canManageSpace(space, c)
+    response.following = stringArrayContainsUser(space.followers.assert(array), c.getString("username"))
+    return response
+)
+
+def handleListSpaces(*serve.Context c) (
+    string kind = c.query("kind").toLower().strip()
+    string q = c.query("q").toLower().strip()
+    array stored = spaceDocs.sort("edited", db.desc).all()
+    array spaces = []
+    for i stored.len (
+        object space = stored[i].assert(object)
+        boolean include = space.visibility.toStr() == "public"
+        if include and kind != "" (
+            include = space.kind.toStr() == kind
+        )
+        if include and q != "" (
+            include = space.title.toStr().toLower().contains(q) or space.description.toStr().toLower().contains(q)
+        )
+        if include (
+            spaces.append(spaceResponse(space, c))
+        )
+    )
+    c.json(200, {ok: true, spaces: spaces})
+)
+
+def handleGetSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleCreateSpace(*serve.Context c) (
+    object body = c.bodyJSON()
+    string title = body.title.toStr().strip()
+    string kind = body.kind.toStr().toLower().strip()
+    if title == "" or title.len > 100 (
+        c.badRequest("title must be between 1 and 100 characters")
+        return
+    )
+    if !validSpaceKind(kind) (
+        c.badRequest("invalid space type")
+        return
+    )
+    string visibility = "public"
+    if body.contains("visibility") (
+        visibility = body.visibility.toStr().toLower()
+    )
+    if !validSpaceVisibility(visibility) (
+        c.badRequest("invalid visibility")
+        return
+    )
+    string description = ""
+    if body.contains("description") (
+        description = body.description.toStr().strip()
+    )
+    if description.len > 5000 (
+        c.badRequest("description is too long")
+        return
+    )
+    number startsAt = 0
+    number endsAt = 0
+    if body.contains("startsAt") (
+        startsAt = body.startsAt.toNum()
+    )
+    if body.contains("endsAt") (
+        endsAt = body.endsAt.toNum()
+    )
+    string id = "s" ++ randomString(12)
+    object space = {
+        _id: id,
+        title: title,
+        description: description,
+        kind: kind,
+        visibility: visibility,
+        owner: c.getString("username"),
+        managers: [],
+        projects: [],
+        followers: [],
+        openSubmissions: body.contains("openSubmissions") and body.openSubmissions == true,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        created: timestamp,
+        edited: timestamp
+    }
+    spaceDocs.insertOne(space)
+    c.json(201, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleUpdateSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() (
+        c.notFound("space not found")
+        return
+    )
+    if !canManageSpace(space, c) (
+        c.forbidden("you cannot manage this space")
+        return
+    )
+    object body = c.bodyJSON()
+    if body.contains("title") (
+        string title = body.title.toStr().strip()
+        if title == "" or title.len > 100 (
+            c.badRequest("invalid title")
+            return
+        )
+        space.title = title
+    )
+    if body.contains("description") (
+        string description = body.description.toStr().strip()
+        if description.len > 5000 (
+            c.badRequest("description is too long")
+            return
+        )
+        space.description = description
+    )
+    if body.contains("visibility") and validSpaceVisibility(body.visibility.toStr()) (
+        space.visibility = body.visibility
+    )
+    if body.contains("openSubmissions") (
+        space.openSubmissions = body.openSubmissions == true
+    )
+    if body.contains("startsAt") (
+        space.startsAt = body.startsAt.toNum()
+    )
+    if body.contains("endsAt") (
+        space.endsAt = body.endsAt.toNum()
+    )
+    if body.contains("managers") (
+        array managers = body.managers.assert(array)
+        array clean = []
+        for i managers.len (
+            string name = managers[i].toStr().strip()
+            if name != "" and clean.len < 25 and !stringArrayContainsUser(clean, name) (
+                clean.append(name)
+            )
+        )
+        space.managers = clean
+    )
+    space.edited = timestamp
+    putDocument(spaceDocs, space._id.toStr(), space)
+    c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleDeleteSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() (
+        c.notFound("space not found")
+        return
+    )
+    if normalizeUsername(space.owner.toStr()) != normalizeUsername(c.getString("username")) and !c.getBool("isAdmin") (
+        c.forbidden("only the owner can delete this space")
+        return
+    )
+    spaceDocs.deleteOne({_id: space._id})
+    c.json(200, {ok: true})
+)
+
+def handleAddSpaceProject(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    object project = projectSearchDocs.findById(c.param("project"))
+    if space.isEmpty() or project.isEmpty() or project.shared != true (
+        c.notFound("space or project not found")
+        return
+    )
+    boolean allowed = canManageSpace(space, c)
+    allowed = allowed or space.openSubmissions == true
+    allowed = allowed or normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    if !allowed (
+        c.forbidden("submissions are closed")
+        return
+    )
+    array ids = space.projects.assert(array)
+    if !ids.contains(project.id.toStr()) (
+        ids.append(project.id.toStr())
+        space.projects = ids
+        space.edited = timestamp
+        putDocument(spaceDocs, space._id.toStr(), space)
+        addNotification(space.owner.toStr(), c.getString("username"), "space_project", {spaceId: space._id, spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
+    )
+    c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleRemoveSpaceProject(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() (
+        c.notFound("space not found")
+        return
+    )
+    object project = projectSearchDocs.findById(c.param("project"))
+    boolean allowed = canManageSpace(space, c)
+    if !project.isEmpty() (
+        allowed = allowed or normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    )
+    if !allowed (
+        c.forbidden("you cannot remove this project")
+        return
+    )
+    space.projects = removeString(space.projects.assert(array), c.param("project"))
+    space.edited = timestamp
+    putDocument(spaceDocs, space._id.toStr(), space)
+    c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleFollowSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    array followers = space.followers.assert(array)
+    if !stringArrayContainsUser(followers, c.getString("username")) (
+        followers.append(c.getString("username"))
+    )
+    space.followers = followers
+    putDocument(spaceDocs, space._id.toStr(), space)
+    c.json(200, {ok: true, following: true, followers: followers.len})
+)
+
+def handleUnfollowSpace(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() (
+        c.notFound("space not found")
+        return
+    )
+    space.followers = removeString(space.followers.assert(array), c.getString("username"))
+    putDocument(spaceDocs, space._id.toStr(), space)
+    c.json(200, {ok: true, following: false, followers: space.followers.len})
+)
+
+def handleMySpaces(*serve.Context c) (
+    string username = c.getString("username")
+    array stored = spaceDocs.sort("edited", db.desc).all()
+    array spaces = []
+    for i stored.len (
+        object space = stored[i].assert(object)
+        if normalizeUsername(space.owner.toStr()) == normalizeUsername(username) or stringArrayContainsUser(space.managers.assert(array), username) or stringArrayContainsUser(space.followers.assert(array), username) (
+            spaces.append(spaceResponse(space, c))
+        )
+    )
+    c.json(200, {ok: true, spaces: spaces})
+)
+
+def handleCreatePreview(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+    object body = c.bodyJSON()
+    number hours = 24
+    if body.contains("hours") (
+        hours = clampNumber(body.hours.toNum(), 1, 168)
+    )
+    string key = randomString(24)
+    string previewId = project.id.toStr() ++ ":" ++ key
+    object preview = {_id: previewId, projectId: project.id, key: key, owner: c.getString("username"), created: timestamp, expiresAt: timestamp + (hours * 3600000)}
+    previewDocs.insertOne(preview)
+    c.json(201, {ok: true, key: key, expiresAt: preview.expiresAt})
+)
+
+def handleListReleases(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    array releases = releaseDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).all()
+    c.json(200, {ok: true, releases: releases})
+)
+
+def handleCreateRelease(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+    object body = c.bodyJSON()
+    string version = body.version.toStr().strip()
+    string channel = body.channel.toStr().toLower().strip()
+    if version == "" or version.len > 50 (
+        c.badRequest("invalid version")
+        return
+    )
+    if channel != "stable" and channel != "beta" and channel != "development" (
+        c.badRequest("invalid release channel")
+        return
+    )
+    string notes = ""
+    if body.contains("notes") (
+        notes = body.notes.toStr().strip()
+    )
+    if notes.len > 10000 (
+        c.badRequest("release notes are too long")
+        return
+    )
+    string releaseId = project.id.toStr() ++ ":" ++ randomString(12)
+    string commit = ""
+    if body.contains("commit") (
+        commit = body.commit.toStr()
+    )
+    string sourceUrl = projectJsonBaseUrl(project)
+    if projectViewKey(project) != "" (
+        sourceUrl = sourceUrl ++ "?k=" ++ projectViewKey(project)
+    )
+    object snapshot = requests.get(sourceUrl)
+    if !snapshot.success (
+        c.internalError("could not snapshot the current project")
+        return
+    )
+    string releasePath = releasesDir ++ releaseId.replace(":", "-") ++ ".json"
+    if !fs.writeFile(releasePath, snapshot.body.toStr()) (
+        c.internalError("could not store the release")
+        return
+    )
+    string jsonUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
+    object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username")}
+    releaseDocs.insertOne(release)
+    if channel == "stable" (
+        project.publicRelease = releaseId
+        saveProject(project)
+    )
+    addActivity(c.getString("username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
+    c.json(201, {ok: true, release: release})
+)
+
+def handleGetReleaseProjectJson(*serve.Context c) (
+    object release = releaseDocs.findById(c.param("release"))
+    if release.isEmpty() or release.projectId.toStr() != c.param("id") (
+        c.notFound("release not found")
+        return
+    )
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("release not found")
+        return
+    )
+    string releasePath = releasesDir ++ release._id.toStr().replace(":", "-") ++ ".json"
+    if !fs.exists(releasePath) (
+        c.notFound("release snapshot not found")
+        return
+    )
+    c.setHeader("Content-Type", "application/json")
+    c.text(200, fs.readFile(releasePath))
+)
+
+def handleCreateContribution(*serve.Context c) (
+    auto parentResult = loadProject(c.param("id"))
+    object body = c.bodyJSON()
+    auto remixResult = loadProject(body.remixProjectId.toStr())
+    if !parentResult.ok or !remixResult.ok (
+        c.notFound("project not found")
+        return
+    )
+    object parent = parentResult.project.assert(object)
+    object remix = remixResult.project.assert(object)
+    if !projectHasRepo(parent) or !projectHasRepo(remix) (
+        c.badRequest("both projects need a repository")
+        return
+    )
+    if normalizeUsername(remix.owner.toStr()) != normalizeUsername(c.getString("username")) or remix.remixParent.toStr() != parent.id.toStr() (
+        c.forbidden("use a remix you own")
+        return
+    )
+    string title = body.title.toStr().strip()
+    if title == "" or title.len > 200 (
+        c.badRequest("invalid title")
+        return
+    )
+    object parentRepo = parent.repo.assert(object)
+    object remixRepo = remix.repo.assert(object)
+    string head = remixRepo.owner.toStr() ++ ":" ++ remixRepo.defaultBranch.toStr()
+    string description = ""
+    if body.contains("body") (
+        description = body.body.toStr()
+    )
+    object resp = giteaPost(repoApiPath(parent) ++ "/pulls", {title: title, body: description, head: head, base: parentRepo.defaultBranch}, c.getString("username"))
+    object parsed = parseGiteaObject(resp)
+    if !parsed.ok (
+        c.json(502, {ok: false, error: "could not send contribution"})
+        return
+    )
+    addNotification(parent.owner.toStr(), c.getString("username"), "contribution", {projectId: parent.id, projectTitle: parent.title})
+    c.json(201, {ok: true, pull: slimPull(parsed.data.assert(object))})
+)
+
+def handleRecordDiagnostic(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !projectIsViewable(result.project.assert(object)) (
+        c.notFound("project not found")
+        return
+    )
+    object body = c.bodyJSON()
+    string eventType = body.type.toStr().toLower().strip()
+    if eventType != "load" and eventType != "start" and eventType != "crash" and eventType != "exit" and eventType != "playtime" (
+        c.badRequest("invalid diagnostic type")
+        return
+    )
+    string diagnosticId = c.param("id") ++ ":" ++ randomString(16)
+    number duration = 0
+    number loadMs = 0
+    string error = ""
+    string device = ""
+    if body.contains("duration") (
+        duration = clampNumber(body.duration.toNum(), 0, 86400000)
+    )
+    if body.contains("loadMs") (
+        loadMs = clampNumber(body.loadMs.toNum(), 0, 600000)
+    )
+    if body.contains("error") (
+        error = body.error.toStr().slice(1, 500)
+    )
+    if body.contains("device") (
+        device = body.device.toStr().slice(1, 40)
+    )
+    if eventType == "playtime" (
+        if !c.getBool("authenticated") or duration <= 0 (
+            c.json(201, {ok: true})
+            return
+        )
+        string playtimeId = c.param("id") ++ ":" ++ normalizeUsername(c.getString("username"))
+        object playtime = playtimeDocs.findById(playtimeId)
+        if playtime.isEmpty() (
+            playtime = {_id: playtimeId, projectId: c.param("id"), username: c.getString("username"), duration: 0, updated: timestamp}
+        )
+        playtime.duration = playtime.duration.toNum() + clampNumber(duration, 0, 21600000)
+        playtime.updated = timestamp
+        putDocument(playtimeDocs, playtimeId, playtime)
+        c.json(201, {ok: true})
+        return
+    )
+    object item = {_id: diagnosticId, projectId: c.param("id"), type: eventType, duration: duration, loadMs: loadMs, error: error, device: device, created: timestamp}
+    diagnosticDocs.insertOne(item)
+    c.json(201, {ok: true})
+)
+
+def handleGetDiagnostics(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canEditProject(result.project.assert(object), c) (
+        c.forbidden("not your project")
+        return
+    )
+    array items = diagnosticDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(500).all()
+    object counts = {load: 0, start: 0, crash: 0, exit: 0}
+    number totalLoadMs = 0
+    number loadSamples = 0
+    for i items.len (
+        object item = items[i].assert(object)
+        string kind = item.type.toStr()
+        counts[kind] = counts[kind].toNum() + 1
+        if item.loadMs.toNum() > 0 (
+            totalLoadMs = totalLoadMs + item.loadMs.toNum()
+            loadSamples = loadSamples + 1
+        )
+    )
+    number averageLoadMs = 0
+    if loadSamples > 0 (
+        averageLoadMs = totalLoadMs / loadSamples
+    )
+    c.json(200, {ok: true, counts: counts, averageLoadMs: averageLoadMs, recent: paginate(items, 0, 50)})
+)
+
+def handleCreateProjectFeedback(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    object body = c.bodyJSON()
+    string feedbackType = body.type.toStr().toLower().strip()
+    if feedbackType != "bug" and feedbackType != "idea" and feedbackType != "confusing" and feedbackType != "other" (
+        c.badRequest("invalid feedback type")
+        return
+    )
+    string message = body.message.toStr().strip()
+    if message == "" or message.len > 2000 (
+        c.badRequest("feedback must be between 1 and 2000 characters")
+        return
+    )
+    string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
+    object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: c.getString("username"), created: timestamp, edited: timestamp}
+    feedbackDocs.insertOne(feedback)
+    addNotification(project.owner.toStr(), c.getString("username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
+    c.json(201, {ok: true})
+)
+
+def handleGetProjectFeedback(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canEditProject(result.project.assert(object), c) (
+        c.forbidden("not your project")
+        return
+    )
+    array feedback = feedbackDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(200).all()
+    c.json(200, {ok: true, feedback: feedback})
+)
+
+def handleUpdateProjectFeedback(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canEditProject(result.project.assert(object), c) (
+        c.forbidden("not your project")
+        return
+    )
+    object feedback = feedbackDocs.findById(c.param("feedback"))
+    if feedback.isEmpty() or feedback.projectId.toStr() != c.param("id") (
+        c.notFound("feedback not found")
+        return
+    )
+    string status = c.bodyJSON().status.toStr().toLower()
+    if status != "open" and status != "working" and status != "done" and status != "dismissed" (
+        c.badRequest("invalid feedback status")
+        return
+    )
+    feedback.status = status
+    feedback.edited = timestamp
+    putDocument(feedbackDocs, feedback._id.toStr(), feedback)
+    c.json(200, {ok: true, feedback: feedback})
+)
+
+def handleListProjectReviews(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    array reviews = reviewDocs.where("projectId", db.equal, c.param("id")).sort("edited", db.desc).limit(200).all()
+    number ratingTotal = 0
+    object myReview = {}
+    for i reviews.len (
+        object review = reviews[i].assert(object)
+        ratingTotal = ratingTotal + review.rating.toNum()
+        review.playtimeMs = projectPlaytime(c.param("id"), review.author.toStr())
+        if normalizeUsername(review.author.toStr()) == normalizeUsername(c.getString("username")) (
+            myReview = review
+        )
+        reviews[i] = review
+    )
+    number average = 0
+    if reviews.len > 0 (
+        average = ratingTotal / reviews.len
+    )
+    c.json(200, {ok: true, reviews: reviews, count: reviews.len, average: average, myReview: myReview})
+)
+
+def handleSaveProjectReview(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username")) (
+        c.badRequest("you cannot review your own project")
+        return
+    )
+    object body = c.bodyJSON()
+    number rating = body.rating.toInt()
+    if rating < 1 or rating > 5 (
+        c.badRequest("rating must be between 1 and 5")
+        return
+    )
+    string message = ""
+    if body.contains("message") (
+        message = body.message.toStr().strip()
+    )
+    if message.len > 2000 (
+        c.badRequest("review is too long")
+        return
+    )
+    string reviewId = project.id.toStr() ++ ":" ++ normalizeUsername(c.getString("username"))
+    object existing = reviewDocs.findById(reviewId)
+    number created = timestamp
+    if !existing.isEmpty() (
+        created = existing.created.toNum()
+    )
+    object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), rating: rating, message: message, created: created, edited: timestamp}
+    putDocument(reviewDocs, reviewId, review)
+    if existing.isEmpty() (
+        addNotification(project.owner.toStr(), c.getString("username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
+    )
+    review.playtimeMs = projectPlaytime(project.id.toStr(), review.author.toStr())
+    c.json(200, {ok: true, review: review})
+)
+
+def handleDeleteProjectReview(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    string reviewId = c.param("id") ++ ":" ++ normalizeUsername(c.getString("username"))
+    reviewDocs.deleteOne({_id: reviewId})
+    c.json(200, {ok: true})
+)
+
+def handleListIdeas(*serve.Context c) (
+    array ideas = ideaDocs.sort("votes", db.desc).sort("created", db.desc).all()
+    string username = c.getString("username")
+    for i ideas.len (
+        object idea = ideas[i].assert(object)
+        idea.voted = stringArrayContainsUser(idea.voters.assert(array), username)
+        idea.voters = []
+        ideas[i] = idea
+    )
+    c.json(200, {ok: true, ideas: ideas})
+)
+
+def handleCreateIdea(*serve.Context c) (
+    object body = c.bodyJSON()
+    string title = body.title.toStr().strip()
+    string description = body.description.toStr().strip()
+    if title == "" or title.len > 120 or description == "" or description.len > 3000 (
+        c.badRequest("add a title and a description")
+        return
+    )
+    string category = "Other"
+    if body.contains("category") (
+        category = body.category.toStr().slice(1, 40)
+    )
+    string ideaId = "i" ++ randomString(14)
+    object idea = {_id: ideaId, title: title, description: description, category: category, author: c.getString("username"), status: "open", voters: [c.getString("username")], votes: 1, created: timestamp, edited: timestamp}
+    ideaDocs.insertOne(idea)
+    idea.voted = true
+    idea.voters = []
+    c.json(201, {ok: true, idea: idea})
+)
+
+def handleVoteIdea(*serve.Context c) (
+    object idea = ideaDocs.findById(c.param("id"))
+    if idea.isEmpty() (
+        c.notFound("idea not found")
+        return
+    )
+    string username = c.getString("username")
+    array voters = idea.voters.assert(array)
+    boolean voted = stringArrayContainsUser(voters, username)
+    if voted (
+        voters = removeString(voters, username)
+    ) else (
+        voters.append(username)
+    )
+    idea.voters = voters
+    idea.votes = voters.len
+    idea.edited = timestamp
+    putDocument(ideaDocs, idea._id.toStr(), idea)
+    c.json(200, {ok: true, voted: !voted, votes: voters.len})
+)
+
+def handleUpdateIdea(*serve.Context c) (
+    object idea = ideaDocs.findById(c.param("id"))
+    if idea.isEmpty() (
+        c.notFound("idea not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if body.contains("status") (
+        string status = body.status.toStr().toLower()
+        if status == "open" or status == "planned" or status == "building" or status == "shipped" or status == "declined" (
+            idea.status = status
+        )
+    )
+    idea.edited = timestamp
+    putDocument(ideaDocs, idea._id.toStr(), idea)
+    c.json(200, {ok: true, idea: idea})
+)
+
+def xmlEscape(string value) string (
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+)
+
+def handleProjectCard(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !projectIsViewable(result.project.assert(object)) (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    string title = xmlEscape(project.title.toStr()).slice(1, 58)
+    string owner = xmlEscape(project.owner.toStr()).slice(1, 30)
+    string thumbnail = xmlEscape(thumbUrlFor(project))
+    number hearts = project.loves.assert(array).len
+    string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"630\" viewBox=\"0 0 1200 630\"><rect width=\"1200\" height=\"630\" fill=\"#17151d\"/><rect x=\"48\" y=\"48\" width=\"650\" height=\"488\" rx=\"24\" fill=\"#24202d\"/><image href=\"" ++ thumbnail ++ "\" x=\"48\" y=\"48\" width=\"650\" height=\"488\" preserveAspectRatio=\"xMidYMid slice\"/><text x=\"750\" y=\"190\" fill=\"#a78bfa\" font-family=\"Arial,sans-serif\" font-size=\"34\" font-weight=\"700\">MistWarp</text><text x=\"750\" y=\"270\" fill=\"#ffffff\" font-family=\"Arial,sans-serif\" font-size=\"48\" font-weight=\"700\">" ++ title ++ "</text><text x=\"750\" y=\"330\" fill=\"#c8c2d2\" font-family=\"Arial,sans-serif\" font-size=\"28\">by " ++ owner ++ "</text><text x=\"750\" y=\"430\" fill=\"#c8c2d2\" font-family=\"Arial,sans-serif\" font-size=\"24\">" ++ project.views.toStr() ++ " plays   " ++ hearts.toStr() ++ " hearts</text></svg>"
+    c.setHeader("Content-Type", "image/svg+xml")
+    c.setHeader("Cache-Control", "public, max-age=300")
+    c.text(200, svg)
+)

@@ -98,7 +98,13 @@ def handleGetProjectComments(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    c.json(200, {ok: true, comments: loadComments("project-" ++ project.id.toStr())})
+    array comments = loadComments("project-" ++ project.id.toStr())
+    for i comments.len (
+        object comment = comments[i].assert(object)
+        comment.playtimeMs = projectPlaytime(project.id.toStr(), comment.author.toStr())
+        comments[i] = comment
+    )
+    c.json(200, {ok: true, comments: comments})
 )
 
 def handleCreateProjectComment(*serve.Context c) (

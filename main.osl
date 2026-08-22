@@ -12,6 +12,7 @@ import "osl/regex"
 import "osl/thread"
 import "osl/process"
 import "osl/sync"
+import "std:db"
 
 import "go:time"
 
@@ -73,6 +74,7 @@ string adminsFile = "data/admins.json"
 string bansFile = "data/bans.json"
 string agreementAcceptDir = "data/agreement-acceptances/"
 string extensionsDir = "data/extensions/"
+string releasesDir = "data/releases/"
 string extensionsFile = "data/extensions.json"
 
 number maxProjectJsonBytes = 1073741824
@@ -121,8 +123,11 @@ auto r2Client = s3.new({
     "region": "auto"
 })
 
+fs.mkdirAll("data/")
+
 import "./utils.osl"
 import "./storage.osl"
+import "./database.osl"
 import "./user-identity.osl"
 import "./r2.osl"
 import "./gitea.osl"
@@ -142,8 +147,10 @@ import "./news.osl"
 import "./standing.osl"
 import "./settings.osl"
 import "./agreement.osl"
+import "./community-tools.osl"
 
 ensureDirectories()
+initCommunityDatabase()
 migrateExtensionUsage()
 refreshIndexUrls()
 fs.mkdirAll(localBlobsDir)
@@ -219,6 +226,20 @@ api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
 
 api.GET("/explore", handleExplore)
 api.GET("/leaderboard", handleLeaderboard)
+api.GET("/roadmap", handleListIdeas)
+api.POST("/roadmap", requireAuth, requireGoodStanding, handleCreateIdea)
+api.POST("/roadmap/:id/vote", requireAuth, handleVoteIdea)
+api.PUT("/roadmap/:id", requireAdmin, handleUpdateIdea)
+api.GET("/spaces", handleListSpaces)
+api.POST("/spaces", requireAuth, requireGoodStanding, handleCreateSpace)
+api.GET("/spaces/:id", handleGetSpace)
+api.PUT("/spaces/:id", requireAuth, handleUpdateSpace)
+api.DELETE("/spaces/:id", requireAuth, handleDeleteSpace)
+api.POST("/spaces/:id/projects/:project", requireAuth, handleAddSpaceProject)
+api.DELETE("/spaces/:id/projects/:project", requireAuth, handleRemoveSpaceProject)
+api.POST("/spaces/:id/follow", requireAuth, handleFollowSpace)
+api.DELETE("/spaces/:id/follow", requireAuth, handleUnfollowSpace)
+api.GET("/me/spaces", requireAuth, handleMySpaces)
 
 api.POST("/projects", requireAuth, handleCreateProject)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
@@ -226,6 +247,7 @@ api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
 api.GET("/projects/:id/editor", handleGetEditorProject)
 api.GET("/projects/:id", handleGetProject)
+api.GET("/projects/:id/card.svg", handleProjectCard)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
 api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
@@ -240,6 +262,19 @@ api.POST("/projects/:id/react", requireAuth, handleReactProject)
 api.GET("/projects/:id/remixes", handleGetRemixes)
 api.GET("/projects/:id/remixtree", handleGetRemixTree)
 api.POST("/projects/:id/remix", requireAuth, handleRemixProject)
+api.POST("/projects/:id/preview", requireAuth, handleCreatePreview)
+api.GET("/projects/:id/releases", handleListReleases)
+api.GET("/projects/:id/releases/:release/project.json", handleGetReleaseProjectJson)
+api.POST("/projects/:id/releases", requireAuth, handleCreateRelease)
+api.POST("/projects/:id/contribute", requireAuth, handleCreateContribution)
+api.POST("/projects/:id/diagnostics", handleRecordDiagnostic)
+api.GET("/projects/:id/diagnostics", requireAuth, handleGetDiagnostics)
+api.POST("/projects/:id/feedback", requireAuth, requireGoodStanding, handleCreateProjectFeedback)
+api.GET("/projects/:id/feedback", requireAuth, handleGetProjectFeedback)
+api.PUT("/projects/:id/feedback/:feedback", requireAuth, handleUpdateProjectFeedback)
+api.GET("/projects/:id/reviews", handleListProjectReviews)
+api.PUT("/projects/:id/reviews/me", requireAuth, requireGoodStanding, handleSaveProjectReview)
+api.DELETE("/projects/:id/reviews/me", requireAuth, handleDeleteProjectReview)
 
 api.GET("/projects/:id/comments", handleGetProjectComments)
 api.POST("/projects/:id/comments", requireAuth, requireGoodStanding, handleCreateProjectComment)
@@ -272,6 +307,7 @@ api.GET("/news", handleGetNews)
 api.POST("/news", requireAdmin, handleCreateNews)
 api.DELETE("/news/:id", requireAdmin, handleDeleteNews)
 api.POST("/news/:id/react", requireAuth, handleReactNews)
+api.POST("/news/:id/poll", requireAuth, handleVoteNewsPoll)
 
 api.POST("/report", requireAuth, handleCreateReport)
 api.POST("/reports", requireAuth, handleCreateReport)

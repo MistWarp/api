@@ -41,8 +41,38 @@ def isValidReaction(string reactionType) boolean (
     return reactionType == "heart" or reactionType == "brokenheart"
 )
 
+def isValidNewsCategory(string category) boolean (
+    return category == "update" or category == "release" or category == "event" or category == "poll" or category == "general"
+)
+
+def newsResponse(object item, string username) object (
+    object response = item
+    if item.contains("poll") and item.poll != null (
+        object poll = item.poll.assert(object)
+        array options = poll.options.assert(array)
+        number total = 0
+        for i options.len (
+            object option = options[i].assert(object)
+            array voters = option.voters.assert(array)
+            option.votes = voters.len
+            option.voted = stringArrayContainsUser(voters, username)
+            option.voters = []
+            total = total + voters.len
+            options[i] = option
+        )
+        poll.options = options
+        poll.total = total
+        response.poll = poll
+    )
+    return response
+)
+
 def handleGetNews(*serve.Context c) (
-    c.json(200, {ok: true, news: loadNews()})
+    array items = loadNews()
+    for i items.len (
+        items[i] = newsResponse(items[i].assert(object), c.getString("username"))
+    )
+    c.json(200, {ok: true, news: items})
 )
 
 def handleCreateNews(*serve.Context c) (
@@ -57,7 +87,51 @@ def handleCreateNews(*serve.Context c) (
         c.badRequest("invalid body")
         return
     )
-    object item = {id: "nw" ++ randomString(12), title: title, body: content, author: c.getString("username"), created: timestamp, reactions: {}}
+    string category = "update"
+    if body.contains("category") (
+        category = body.category.toStr().toLower().strip()
+    )
+    if !isValidNewsCategory(category) (
+        c.badRequest("invalid post type")
+        return
+    )
+    object link = {}
+    if body.contains("linkUrl") and body.linkUrl.toStr().strip() != "" (
+        string linkUrl = body.linkUrl.toStr().strip()
+        string linkLabel = body.linkLabel.toStr().strip()
+        if (!linkUrl.startsWith("https://") and !linkUrl.startsWith("/")) or linkLabel == "" or linkLabel.len > 60 or linkUrl.len > 500 (
+            c.badRequest("invalid post link")
+            return
+        )
+        link = {label: linkLabel, url: linkUrl}
+    )
+    object poll = {}
+    if category == "poll" (
+        if !body.contains("options") or body.options == null (
+            c.badRequest("polls need at least two options")
+            return
+        )
+        array rawOptions = body.options.assert(array)
+        array options = []
+        for i rawOptions.len (
+            string optionText = rawOptions[i].toStr().strip()
+            if optionText != "" and optionText.len <= 120 and options.len < 6 (
+                options.append({id: "po" ++ randomString(8), text: optionText, voters: []})
+            )
+        )
+        if options.len < 2 (
+            c.badRequest("polls need at least two options")
+            return
+        )
+        poll = {options: options}
+    )
+    object item = {id: "nw" ++ randomString(12), title: title, body: content, category: category, author: c.getString("username"), created: timestamp, reactions: {}}
+    if !link.isEmpty() (
+        item.link = link
+    )
+    if category == "poll" (
+        item.poll = poll
+    )
     array items = loadNews()
     array next = [item]
     for i items.len (
@@ -112,6 +186,52 @@ def handleReactNews(*serve.Context c) (
     )
     if !found (
         c.notFound("news item not found")
+        return
+    )
+    saveNews(items)
+    c.json(200, {ok: true})
+)
+
+def handleVoteNewsPoll(*serve.Context c) (
+    string id = c.param("id")
+    string optionId = c.bodyJSON().option.toStr()
+    string username = c.getString("username")
+    array items = loadNews()
+    boolean found = false
+    boolean validOption = false
+    for i items.len (
+        object item = items[i].assert(object)
+        if item.id.toStr() == id and item.contains("poll") and item.poll != null and !item.poll.assert(object).isEmpty() (
+            found = true
+            object poll = item.poll.assert(object)
+            array options = poll.options.assert(array)
+            boolean alreadyVoted = false
+            for p options.len (
+                object option = options[p].assert(object)
+                if option.id.toStr() == optionId (
+                    validOption = true
+                    alreadyVoted = stringArrayContainsUser(option.voters.assert(array), username)
+                )
+            )
+            for p options.len (
+                object option = options[p].assert(object)
+                option.voters = removeString(option.voters.assert(array), username)
+                if option.id.toStr() == optionId and !alreadyVoted (
+                    option.voters.append(username)
+                )
+                options[p] = option
+            )
+            poll.options = options
+            item.poll = poll
+            items[i] = item
+        )
+    )
+    if !found (
+        c.notFound("poll not found")
+        return
+    )
+    if !validOption (
+        c.badRequest("invalid poll option")
         return
     )
     saveNews(items)
