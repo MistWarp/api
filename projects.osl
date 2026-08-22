@@ -978,8 +978,12 @@ def handleUpdateProject(*serve.Context c) (
     )
     if body.contains("price") (
         number price = body.price.toNum()
-        if price < 0 or price > 1000000 (
+        if price < 0 (
             c.badRequest("invalid price")
+            return
+        )
+        if price > maxProjectPrice (
+            c.badRequest("price cannot exceed " ++ maxProjectPrice.toStr() ++ " credits")
             return
         )
         number oldPrice = projectPrice(project)

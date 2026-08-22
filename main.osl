@@ -13,7 +13,7 @@ import "osl/thread"
 import "osl/process"
 import "osl/sync"
 
-import "go/time"
+import "go:time"
 
 def dotenvValue(string name) string (
     if !fs.exists(".env") (
@@ -88,6 +88,7 @@ number uploadDebounceMs = 86400000
 number maxProjectExtensions = 100
 number maxExtensionSourceBytes = 2097152
 number maxProjectExtensionBytes = 10485760
+number maxProjectPrice = 100
 
 string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
 string port = configValue("PORT", "5627")
