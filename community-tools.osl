@@ -67,9 +67,12 @@ def spaceResponse(object space, *serve.Context c) object (
     array projects = []
     array ids = space.projects.assert(array)
     for i ids.len (
-        object entry = projectSearchDocs.findById(ids[i].toStr())
-        if entry.isEmpty() == false and (entry.shared == true or entry.visibility.toStr() == "unlisted" or canManageSpace(space, c)) (
-            projects.append(entry)
+        auto loaded = loadProject(ids[i].toStr())
+        if loaded.ok == true (
+            object project = loaded.project.assert(object)
+            if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
+                projects.append(indexEntryFromProject(project))
+            )
         )
     )
     object response = space
