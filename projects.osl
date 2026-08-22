@@ -396,6 +396,7 @@ def handleCreateProject(*serve.Context c) (
         shared: false,
         lastUploadAt: 0,
         remixParent: remixParent,
+        remixNotified: false,
         scratchOrigin: scratchOrigin,
         views: 0,
         loves: [],
@@ -412,6 +413,21 @@ def handleCreateProject(*serve.Context c) (
     upsertIndexEntry(project)
 
     c.json(201, {ok: true, id: id})
+)
+
+def notifyPublishedRemix(object project) (
+    if !project.contains("remixNotified") or project.remixNotified != false or !project.contains("remixParent") or project.remixParent.toStr() == "" (
+        return
+    )
+    auto parentResult = loadProject(project.remixParent.toStr())
+    if !parentResult.ok (
+        return
+    )
+    object parent = parentResult.project.assert(object)
+    addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+    addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+    project.remixNotified = true
+    saveProject(project)
 )
 
 def quotaPath(string username) string (
@@ -1209,6 +1225,7 @@ def handlePublishProject(*serve.Context c) (
     upsertIndexEntry(project)
     if firstShare (
         addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+        notifyPublishedRemix(project)
     )
     c.json(200, {ok: true, project: projectResponse(project, c)})
 )
@@ -1605,6 +1622,7 @@ def handleRemixProject(*serve.Context c) (
         jsonGzip: true,
         storedJsonBytes: copiedJsonBytes,
         remixParent: parent.id,
+        remixNotified: false,
         scratchOrigin: "",
         views: 0,
         loves: [],
@@ -1633,9 +1651,6 @@ def handleRemixProject(*serve.Context c) (
     )
     saveProject(project)
     upsertIndexEntry(project)
-
-    addNotification(parent.owner.toStr(), username, "remix", {projectId: id, projectTitle: parent.title})
-    addActivity(username, "remix", {projectId: id, projectTitle: parent.title.toStr() ++ " remix", parentId: parent.id.toStr(), parentTitle: parent.title})
 
     c.json(201, {
         ok: true,

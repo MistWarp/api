@@ -387,6 +387,7 @@ def handleSetVisibility(*serve.Context c) (
     )
     if firstShare (
         addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+        notifyPublishedRemix(project)
     )
     c.json(200, {ok: true, project: projectResponse(project, c)})
 )
