@@ -918,7 +918,7 @@ def handleGetProject(*serve.Context c) (
     object response = projectResponse(project, c)
     if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" (
         object release = releaseDocs.findById(project.publicRelease.toStr())
-        if !release.isEmpty() and release.contains("jsonUrl") (
+        if release.isEmpty() == false and release.contains("jsonUrl") (
             response.projectJsonUrl = release.jsonUrl
             response.releaseVersion = release.version
             response.releaseChannel = release.channel
@@ -1061,11 +1061,11 @@ def handleUpdateProject(*serve.Context c) (
         project.tags = tags
     )
     if body.contains("compatibility") and body.compatibility != null (
-        object incoming = body.compatibility.assert(object)
+        object compatibilityInfo = body.compatibility.assert(object)
         project.compatibility = {
-            mobile: incoming.contains("mobile") and incoming.mobile == true,
-            keyboard: incoming.contains("keyboard") and incoming.keyboard == true,
-            controller: incoming.contains("controller") and incoming.controller == true
+            mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
+            keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
+            controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
         }
     )
     if body.contains("collaborators") (

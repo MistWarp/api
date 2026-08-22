@@ -154,6 +154,17 @@ def notificationBody(string actor, string notifType, object extra) string (
     if notifType == "profile_comment" (
         return actor ++ " commented on your profile"
     )
+    if notifType == "roadmap_comment" (
+        string roadmapTitle = "your roadmap suggestion"
+        if extra.contains("roadmapTitle") (
+            roadmapTitle = extra.roadmapTitle.toStr()
+        )
+        string roadmapLink = editorOrigin ++ "/roadmap"
+        if extra.contains("roadmapId") (
+            roadmapLink = roadmapLink ++ "#idea-" ++ extra.roadmapId.toStr()
+        )
+        return actor ++ " commented on " ++ roadmapTitle ++ ": " ++ roadmapLink
+    )
     if notifType == "reply" (
         if projectLink != "" (
             return actor ++ " replied to your comment: " ++ projectLink

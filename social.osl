@@ -169,7 +169,7 @@ def userProjectList(*serve.Context c, string field) (
     for i ids.len (
         string id = ids[i].toStr()
         object entry = projectSearchDocs.findById(id)
-        if !entry.isEmpty() and entry.shared == true (
+        if entry.isEmpty() == false and entry.shared == true (
             entries.append(entry)
         )
     )
@@ -296,7 +296,7 @@ def handleGetMyLibrary(*serve.Context c) (
     for i ids.len (
         string id = ids[i].toStr()
         object entry = projectSearchDocs.findById(id)
-        if !entry.isEmpty() (
+        if entry.isEmpty() == false (
             entries.append(entry)
         )
     )
@@ -307,12 +307,24 @@ def handleGetMyLibrary(*serve.Context c) (
 def handleGetActivity(*serve.Context c) (
     array users = c.query("users").split(",")
     array items = []
+    array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
     number count = 0
     for i users.len (
         if count < 50 (
-            array userItems = loadActivity(users[i].toStr())
+            string username = normalizeUsername(users[i].toStr())
+            array userItems = loadActivity(username)
             for j userItems.len (
                 items.append(userItems[j])
+            )
+            for j recentReviews.len (
+                object review = recentReviews[j].assert(object)
+                if normalizeUsername(review.author.toStr()) == username (
+                    auto result = loadProject(review.projectId.toStr())
+                    if result.ok and projectIsViewable(result.project.assert(object)) (
+                        object project = result.project.assert(object)
+                        items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
+                    )
+                )
             )
             count = count + 1
         )
