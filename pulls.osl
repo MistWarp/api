@@ -108,19 +108,15 @@ def handleGetCommits(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    array commits = []
-    if project.contains("gitCommits") and project.gitCommits != null (
-        commits = project.gitCommits.assert(array)
-    )
-    string branch = "main"
-    if project.contains("gitBranch") and project.gitBranch != null (
-        branch = project.gitBranch.toStr()
-    )
-    object graph = {branches: [], branchLogs: [], nodes: []}
-    if project.contains("gitGraph") and project.gitGraph != null (
-        graph = project.gitGraph.assert(object)
-    )
-    c.json(200, {ok: true, head: projectGitHead(project), branch: branch, commits: commits, graph: graph})
+    object history = projectVersionHistory(project)
+    c.json(200, {
+        ok: true,
+        head: projectGitHead(project),
+        branch: history.branch,
+        commits: history.commits,
+        graph: history.graph,
+        virtual: history.virtual
+    })
 )
 
 def handleListPulls(*serve.Context c) (
