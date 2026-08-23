@@ -105,7 +105,13 @@ def challengeCriteria(object space) array (
     if criteria.len == 0 (
         return [{id: "overall", name: "Overall", description: "How strong is the entry as a whole?", weight: 1}]
     )
-    return criteria
+    array normalized = []
+    for i criteria.len (
+        object criterion = criteria[i].assert(object)
+        criterion.weight = clampNumber(criterion.weight.toNum(), 1, 5)
+        normalized.append(criterion)
+    )
+    return normalized
 )
 
 def challengePhase(object space) string (
@@ -501,6 +507,10 @@ def handleUpdateSpace(*serve.Context c) (
         space.communityVoting = body.communityVoting == true
     )
     if body.contains("criteria") and space.kind.toStr() == "challenge" (
+        if challengeArray(space, "scores").len > 0 (
+            c.badRequest("judging criteria cannot change after scoring begins")
+            return
+        )
         array rawCriteria = body.criteria.assertElse(array, [])
         array criteria = []
         for i rawCriteria.len (
@@ -608,8 +618,8 @@ def handleAddSpaceProject(*serve.Context c) (
             submissions.append({projectId: project.id, owner: project.owner, submittedAt: timestamp})
             space.submissions = submissions
             array participants = challengeArray(space, "participants")
-            if !stringArrayContainsUser(participants, c.getString("username")) (
-                participants.append(c.getString("username"))
+            if !stringArrayContainsUser(participants, project.owner.toStr()) (
+                participants.append(project.owner)
             )
             space.participants = participants
         )
@@ -700,7 +710,9 @@ def handleJoinChallenge(*serve.Context c) (
         space.participants = participants
         space.edited = timestamp
         putDocument(spaceDocs, space["_id"].toStr(), space)
-        addNotification(space.owner.toStr(), c.getString("username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+        if normalizeUsername(space.owner.toStr()) != normalizeUsername(c.getString("username")) (
+            addNotification(space.owner.toStr(), c.getString("username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+        )
     )
     c.json(200, {ok: true, joined: true, participantCount: participants.len})
 )
@@ -809,12 +821,14 @@ def handleScoreChallengeEntry(*serve.Context c) (
     object body = c.bodyJSON()
     array rawRatings = body.ratings.assertElse(array, [])
     array ratings = []
+    array ratedCriteria = []
     for i rawRatings.len (
         object rawRating = rawRatings[i].assert(object)
         string criterionId = rawRating.criterionId.toStr()
         number value = rawRating.value.toNum()
-        if validChallengeCriterion(space, criterionId) and value >= 1 and value <= 10 (
+        if validChallengeCriterion(space, criterionId) and !ratedCriteria.contains(criterionId) and value >= 1 and value <= 10 (
             ratings.append({criterionId: criterionId, value: value})
+            ratedCriteria.append(criterionId)
         )
     )
     if ratings.len != challengeCriteria(space).len (

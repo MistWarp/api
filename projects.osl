@@ -1032,8 +1032,24 @@ def handleUpdateProject(*serve.Context c) (
             object entry = incoming[i]
             string who = entry.who.toStr().strip()
             string role = entry.role.toStr().strip()
+            string creditUrl = ""
+            if entry.contains("url") and entry.url != null (
+                creditUrl = entry.url.toStr().strip()
+            )
+            if creditUrl != "" and (!creditUrl.startsWith("https://") and !creditUrl.startsWith("http://")) (
+                c.badRequest("credit URL must use http or https")
+                return
+            )
+            if creditUrl.len > 500 (
+                c.badRequest("credit URL too long")
+                return
+            )
             if who != "" and who.len <= 60 and role.len <= 120 (
-                credits.append({who: who, role: role})
+                object credit = {who: who, role: role}
+                if creditUrl != "" (
+                    credit.url = creditUrl
+                )
+                credits.append(credit)
             )
         )
         project.credits = credits
