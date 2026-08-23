@@ -57,7 +57,7 @@ The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fie
 - `projects/<id>/project.json`: the gzip-encoded playable snapshot
 - `projects/<id>/thumb.png`
 
-Uploads per project are debounced to one per 24 hours (429 with `retryAfterMs` otherwise); git carries every save, R2 holds a daily snapshot. `data/assets-index.json` tracks which assets R2 already has so duplicates are never re-uploaded.
+Project JSON is staged on local disk before the upload request returns. The API serves that staged copy immediately, then the background flush loop writes at most one R2 snapshot per project every 24 hours. Git carries every save. `data/assets-index.json` tracks which assets R2 already has so duplicates are never re-uploaded.
 
 ## Auth flow
 
