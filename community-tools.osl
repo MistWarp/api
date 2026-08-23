@@ -1169,7 +1169,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), body.content.toStr(), parentId)
+    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
@@ -1772,7 +1772,7 @@ def handleCreateIdeaComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), body.content.toStr(), parentId)
+    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return

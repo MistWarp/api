@@ -1,4 +1,4 @@
-def createComment(string key, string author, string content, string parentId) object (
+def createComment(string key, string author, string content, string parentId, string kind) object (
     string trimmed = content.strip()
     if trimmed == "" (
         return {ok: false, error: "comment is empty"}
@@ -29,7 +29,8 @@ def createComment(string key, string author, string content, string parentId) ob
         author: author,
         content: trimmed,
         created: timestamp,
-        parent: parentId
+        parent: parentId,
+        kind: kind
     }
     if fs.exists(commentsDir ++ key ++ ".jsonl") (
         appendComment(key, comment)
@@ -101,6 +102,9 @@ def handleGetProjectComments(*serve.Context c) (
     array comments = loadComments("project-" ++ project.id.toStr())
     for i comments.len (
         object comment = comments[i].assert(object)
+        if !comment.contains("kind") or comment.kind == null (
+            comment.kind = "comment"
+        )
         comment.playtimeMs = projectPlaytime(project.id.toStr(), comment.author.toStr())
         comments[i] = comment
     )
@@ -140,8 +144,18 @@ def handleCreateProjectComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
+    string kind = "comment"
+    if parentId == "" and body.contains("kind") and body.kind != null (
+        string requestedKind = body.kind.toStr()
+        if ["comment", "bug", "suggestion", "question"].contains(requestedKind) (
+            kind = requestedKind
+        ) else (
+            c.badRequest("invalid comment type")
+            return
+        )
+    )
 
-    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), body.content.toStr(), parentId)
+    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), body.content.toStr(), parentId, kind)
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
@@ -219,7 +233,7 @@ def handleCreateProfileComment(*serve.Context c) (
         parentId = body.parent.toStr()
     )
 
-    object created = createComment(profileCommentKey(name), c.getString("username"), body.content.toStr(), parentId)
+    object created = createComment(profileCommentKey(name), c.getString("username"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
