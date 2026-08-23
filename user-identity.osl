@@ -376,6 +376,7 @@ def purgeUser(string userId, string username) (
     fs.remove(userSettingsDir ++ key ++ ".json")
     fs.remove(quotaDir ++ key ++ ".json")
     fs.remove(agreementAcceptDir ++ key ++ ".json")
+    fs.remove(safetyDir ++ key ++ ".json")
     array admins = loadAdmins()
     if admins.contains(key) (
         saveAdmins(removeUserFromArray(admins, key))
