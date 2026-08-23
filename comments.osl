@@ -114,6 +114,10 @@ def handleCreateProjectComment(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
+    if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+        c.forbidden("you cannot comment on this project")
+        return
+    )
     if !canViewProject(project, c) (
         c.notFound("project not found")
         return
@@ -194,6 +198,10 @@ def handleCreateProfileComment(*serve.Context c) (
     string nameKey = normalizeUsername(name)
     if !isSafePathPart(nameKey) or !fs.exists(usersDir ++ nameKey ++ ".json") (
         c.notFound("this user is not on MistWarp")
+        return
+    )
+    if usersAreBlocked(c.getString("username"), name) (
+        c.forbidden("you cannot comment on this profile")
         return
     )
     if profileCommentsOff(name) (

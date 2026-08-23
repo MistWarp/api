@@ -237,6 +237,9 @@ def addNotification(string target, string actor, string notifType, object extra)
     if targetKey == "" or targetKey == normalizeUsername(actor) (
         return
     )
+    if usersAreBlocked(target, actor) or loadSafety(target).muted.assert(array).contains(normalizeUsername(actor)) (
+        return
+    )
 
     object item = {
         id: "n" ++ randomString(12),

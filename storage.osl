@@ -14,6 +14,7 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(agreementAcceptDir)
     result = result and fs.mkdirAll(extensionsDir)
     result = result and fs.mkdirAll(releasesDir)
+    result = result and fs.mkdirAll(safetyDir)
     return result
 )
 

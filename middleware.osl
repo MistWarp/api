@@ -22,6 +22,7 @@ def corsMiddleware(*serve.Context c) (
 def authMiddleware(*serve.Context c) (
     boolean authenticated = false
     string username = ""
+    string userId = ""
     boolean isAdmin = false
 
     string token = requestToken(c)
@@ -30,12 +31,14 @@ def authMiddleware(*serve.Context c) (
         if session.ok == true and !isBannedUser(session.username.toStr()) (
             authenticated = true
             username = session.username.toStr()
+            userId = session.userId.toStr()
             isAdmin = isAdminUser(username)
         )
     )
 
     c.set("authenticated", authenticated)
     c.set("username", username)
+    c.set("userId", userId)
     c.set("isAdmin", isAdmin)
 
     c.next()

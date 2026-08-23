@@ -76,6 +76,7 @@ string agreementAcceptDir = "data/agreement-acceptances/"
 string extensionsDir = "data/extensions/"
 string releasesDir = "data/releases/"
 string extensionsFile = "data/extensions.json"
+string safetyDir = "data/safety/"
 
 number maxProjectJsonBytes = 1073741824
 number maxStoredProjectJsonBytes = 20971520
@@ -147,6 +148,7 @@ import "./news.osl"
 import "./standing.osl"
 import "./settings.osl"
 import "./agreement.osl"
+import "./account-controls.osl"
 import "./community-tools.osl"
 
 ensureDirectories()
@@ -221,6 +223,13 @@ api.GET("/me/library", requireAuth, handleGetMyLibrary)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
+api.GET("/me/export", requireAuth, handleExportMyData)
+api.DELETE("/me/data", requireAuth, handleDeleteMyData)
+api.GET("/me/safety", requireAuth, handleGetMySafety)
+api.POST("/me/blocks/:name", requireAuth, handleBlockUser)
+api.DELETE("/me/blocks/:name", requireAuth, handleUnblockUser)
+api.POST("/me/mutes/:name", requireAuth, handleMuteUser)
+api.DELETE("/me/mutes/:name", requireAuth, handleUnmuteUser)
 
 api.GET("/agreement", handleGetAgreement)
 api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
@@ -333,6 +342,7 @@ api.POST("/news/:id/poll", requireAuth, handleVoteNewsPoll)
 
 api.POST("/report", requireAuth, handleCreateReport)
 api.POST("/reports", requireAuth, handleCreateReport)
+api.POST("/support", handleCreateSupportRequest)
 
 api.GET("/admin/reports", requireAdmin, handleGetReports)
 api.GET("/admin/reports/evidence/:id", requireAdmin, handleGetReportEvidence)
