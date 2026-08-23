@@ -168,6 +168,15 @@ def notificationBody(string actor, string notifType, object extra) string (
     if notifType == "space_curator_removed" (
         return actor ++ " removed you as a curator of " ++ extra.spaceTitle.toStr()
     )
+    if notifType == "challenge_judge_invite" (
+        return actor ++ " invited you to judge " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "challenge_judge_accepted" (
+        return actor ++ " accepted your invitation to judge " ++ extra.spaceTitle.toStr()
+    )
+    if notifType == "challenge_join" (
+        return actor ++ " joined " ++ extra.spaceTitle.toStr()
+    )
     if notifType == "contribution" (
         return actor ++ " sent changes for " ++ projectTitle ++ ": " ++ projectLink
     )
