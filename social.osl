@@ -29,6 +29,7 @@ def handleGetUser(*serve.Context c) (
     array followers = profile.followers.assert(array)
     array following = profile.following.assert(array)
     string viewer = normalizeUsername(c.getString("username"))
+    object viewerSafety = loadSafety(viewer)
     array projects = ownerIndexEntries(name, false)
 
     boolean commentsOff = false
@@ -44,6 +45,8 @@ def handleGetUser(*serve.Context c) (
         followerCount: followers.len,
         followingCount: following.len,
         isFollowing: followers.contains(viewer),
+        viewerBlocked: viewerSafety.blocked.assert(array).contains(key),
+        viewerMuted: viewerSafety.muted.assert(array).contains(key),
         commentsOff: commentsOff,
         projects: projects
     })
@@ -113,6 +116,10 @@ def handleFollowUser(*serve.Context c) (
     string target = c.param("name")
     if normalizeUsername(actor) == normalizeUsername(target) (
         c.badRequest("cannot follow yourself")
+        return
+    )
+    if usersAreBlocked(actor, target) (
+        c.forbidden("this user cannot be followed")
         return
     )
 

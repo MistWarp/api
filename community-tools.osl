@@ -1668,6 +1668,9 @@ def handleListIdeas(*serve.Context c) (
         if !idea.contains("interested") (
             idea.interested = idea.source.toStr() == "mistwarp"
         )
+        if !idea.contains("kind") (
+            idea.kind = "idea"
+        )
         idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
         idea.likes = []
         idea.dislikes = []
@@ -1690,12 +1693,20 @@ def handleCreateIdea(*serve.Context c) (
     if body.contains("category") (
         category = body.category.toStr().trim(1, 40)
     )
+    string kind = "idea"
+    if body.contains("kind") (
+        kind = body.kind.toStr().toLower()
+    )
+    if kind != "idea" and kind != "bug" (
+        c.badRequest("invalid roadmap entry type")
+        return
+    )
     string ideaId = "i" ++ randomString(14)
     string source = "community"
     if c.getBool("isAdmin") == true (
         source = "mistwarp"
     )
-    object idea = {_id: ideaId, title: title, description: description, category: category, author: c.getString("username"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
+    object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
     ideaDocs.insertOne(idea)
     idea.myVote = "like"
     idea.likesCount = 1

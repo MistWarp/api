@@ -47,6 +47,40 @@ def handleCreateReport(*serve.Context c) (
     c.json(201, {ok: true})
 )
 
+def handleCreateSupportRequest(*serve.Context c) (
+    object body = c.bodyJSON()
+    string requestType = body.type.toStr().toLower().strip()
+    string username = body.username.toStr().trim(1, 80)
+    string subject = body.subject.toStr().strip()
+    string message = body.message.toStr().strip()
+    if c.getBool("authenticated") (
+        username = c.getString("username")
+    )
+    if requestType != "account" and requestType != "safety" and requestType != "legal" and requestType != "appeal" (
+        c.badRequest("choose a support topic")
+        return
+    )
+    if username == "" or subject == "" or subject.len > 120 or message == "" or message.len > 3000 (
+        c.badRequest("add your username, a subject, and a message")
+        return
+    )
+    object report = {
+        id: "s" ++ randomString(12),
+        reporter: username,
+        type: "support",
+        supportType: requestType,
+        target: username,
+        reason: subject,
+        context: message,
+        created: timestamp,
+        resolved: false
+    }
+    array reports = loadReports()
+    reports.append(report)
+    saveReports(reports)
+    c.json(201, {ok: true, id: report.id})
+)
+
 def handleGetReports(*serve.Context c) (
     c.json(200, {ok: true, reports: loadReports()})
 )

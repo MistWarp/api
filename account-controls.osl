@@ -1,0 +1,154 @@
+def safetyPath(string username) string (
+    return safetyDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def loadSafety(string username) object (
+    auto result = readFile(safetyPath(username))
+    if !result.ok (
+        return {blocked: [], muted: []}
+    )
+    object safety = result.data.assert(object)
+    if !safety.contains("blocked") or safety.blocked == null (
+        safety.blocked = []
+    )
+    if !safety.contains("muted") or safety.muted == null (
+        safety.muted = []
+    )
+    return safety
+)
+
+def saveSafety(string username, object safety) boolean (
+    return writeFile(safetyPath(username), safety)
+)
+
+def userHasBlocked(string owner, string other) boolean (
+    string otherKey = normalizeUsername(other)
+    if otherKey == "" (
+        return false
+    )
+    return loadSafety(owner).blocked.assert(array).contains(otherKey)
+)
+
+def usersAreBlocked(string first, string second) boolean (
+    return userHasBlocked(first, second) or userHasBlocked(second, first)
+)
+
+def updateSafetyList(*serve.Context c, string field, boolean add) (
+    string username = c.getString("username")
+    string target = normalizeUsername(c.param("name"))
+    if !isSafePathPart(target) or target == normalizeUsername(username) (
+        c.badRequest("choose another MistWarp user")
+        return
+    )
+    object safety = loadSafety(username)
+    array values = safety[field].assert(array)
+    values = removeString(values, target)
+    if add (
+        values.append(target)
+    )
+    safety[field] = values
+    if !saveSafety(username, safety) (
+        c.internalError("failed to save safety settings")
+        return
+    )
+    if field == "blocked" and add (
+        object mine = loadProfile(username)
+        object theirs = loadProfile(target)
+        mine.following = removeString(mine.following.assert(array), target)
+        mine.followers = removeString(mine.followers.assert(array), target)
+        theirs.following = removeString(theirs.following.assert(array), normalizeUsername(username))
+        theirs.followers = removeString(theirs.followers.assert(array), normalizeUsername(username))
+        saveProfile(mine)
+        saveProfile(theirs)
+    )
+    c.json(200, {ok: true, blocked: safety.blocked, muted: safety.muted})
+)
+
+def handleGetMySafety(*serve.Context c) (
+    object safety = loadSafety(c.getString("username"))
+    c.json(200, {ok: true, blocked: safety.blocked, muted: safety.muted})
+)
+
+def handleBlockUser(*serve.Context c) (
+    updateSafetyList(c, "blocked", true)
+)
+
+def handleUnblockUser(*serve.Context c) (
+    updateSafetyList(c, "blocked", false)
+)
+
+def handleMuteUser(*serve.Context c) (
+    updateSafetyList(c, "muted", true)
+)
+
+def handleUnmuteUser(*serve.Context c) (
+    updateSafetyList(c, "muted", false)
+)
+
+def collectMyComments(string username) array (
+    string key = normalizeUsername(username)
+    array mine = []
+    array files = fs.readDir(commentsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        string source = name.replace(".jsonl", "").replace(".json", "")
+        array comments = loadComments(source)
+        for j comments.len (
+            object comment = comments[j].assert(object)
+            if normalizeUsername(comment.author.toStr()) == key (
+                mine.append({source: source, comment: comment})
+            )
+        )
+    )
+    return mine
+)
+
+def handleExportMyData(*serve.Context c) (
+    string username = c.getString("username")
+    object profile = loadProfile(username)
+    auto storedSettings = readFile(settingsPath(username))
+    object settings = {}
+    if storedSettings.ok (
+        settings = storedSettings.data.assert(object)
+    )
+    auto storedAgreement = readFile(acceptancePath(username))
+    object agreement = {}
+    if storedAgreement.ok (
+        agreement = storedAgreement.data.assert(object)
+    )
+    c.json(200, {
+        ok: true,
+        exportedAt: timestamp,
+        account: {username: username, roturUserId: c.getString("userId")},
+        profile: profile,
+        projects: ownerIndexEntries(username, true),
+        comments: collectMyComments(username),
+        notifications: loadNotifications(username),
+        activity: loadActivity(username),
+        settings: settings,
+        safety: loadSafety(username),
+        agreement: agreement
+    })
+)
+
+def handleDeleteMyData(*serve.Context c) (
+    object body = c.bodyJSON()
+    string username = c.getString("username")
+    if !body.contains("username") or normalizeUsername(body.username.toStr()) != normalizeUsername(username) (
+        c.badRequest("type your username to confirm")
+        return
+    )
+    string userId = c.getString("userId")
+    array ownedProjects = ownerIndexEntries(username, true)
+    for i ownedProjects.len (
+        object projectEntry = ownedProjects[i].assert(object)
+        auto loaded = loadProject(projectEntry.id.toStr())
+        if loaded.ok (
+            purgeProject(loaded.project.assert(object))
+        )
+    )
+    purgeUser(userId, username)
+    fs.remove(safetyPath(username))
+    clearAuthCookie(c)
+    c.json(200, {ok: true})
+)
