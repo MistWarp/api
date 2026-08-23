@@ -953,6 +953,18 @@ def handleMySpaces(*serve.Context c) (
                 related = true
             )
         )
+        if space.kind.toStr() == "challenge" (
+            if stringArrayContainsUser(challengeArray(space, "participants"), username) or stringArrayContainsUser(challengeArray(space, "judges"), username) (
+                related = true
+            )
+            array judgeInvites = challengeArray(space, "judgeInvites")
+            for j judgeInvites.len (
+                object invite = judgeInvites[j].assert(object)
+                if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
+                    related = true
+                )
+            )
+        )
         if related (
             spaces.append(spaceResponse(space, c))
         )

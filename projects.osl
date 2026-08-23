@@ -1372,18 +1372,6 @@ def handleReactProject(*serve.Context c) (
     saveProject(project)
     upsertIndexEntry(project)
 
-    object profile = loadProfile(viewer)
-    array mine = []
-    if profile.contains("loves") (
-        mine = profile.loves.assert(array)
-    )
-    mine = removeString(mine, project.id.toStr())
-    if loves.contains(viewer) (
-        mine.append(project.id.toStr())
-    )
-    profile.loves = mine
-    saveProfile(profile)
-
     if addedHeart (
         addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
         addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})

@@ -188,7 +188,6 @@ def defaultProfile(string username) object (
         featuredProject: "",
         followers: [],
         following: [],
-        loves: [],
         created: timestamp
     }
 )
