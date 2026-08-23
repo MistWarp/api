@@ -80,6 +80,47 @@ def ensureViewKey(object project) (
     )
 )
 
+def projectVersionHistory(object project) object (
+    string branch = "main"
+    if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+        branch = project.gitBranch.toStr()
+    )
+    array commits = []
+    if project.contains("gitCommits") and project.gitCommits != null (
+        commits = project.gitCommits.assert(array)
+    )
+    object graph = {branches: [], branchLogs: [], nodes: []}
+    if project.contains("gitGraph") and project.gitGraph != null (
+        graph = project.gitGraph.assert(object)
+    )
+    boolean virtual = commits.len == 0
+    if virtual (
+        string sha = "virtual-" ++ project.id.toStr()
+        object first = {
+            sha: sha,
+            message: "Initial version",
+            author: project.owner,
+            date: project.created,
+            virtual: true
+        }
+        commits = [first]
+        graph = {
+            branches: [branch],
+            branchLogs: [{branch: branch, oids: [sha]}],
+            nodes: [{
+                sha: sha,
+                message: "Initial version",
+                author: project.owner,
+                date: project.created,
+                parents: [],
+                branches: [branch],
+                virtual: true
+            }]
+        }
+    )
+    return {branch: branch, commits: commits, graph: graph, virtual: virtual}
+)
+
 def projectResponse(object project, *serve.Context c) object (
     array loves = project.loves.assert(array)
     array broken = []
@@ -192,18 +233,11 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("gitHead") and project.gitHead != null (
         response.gitHead = project.gitHead
     )
-    response.gitBranch = "main"
-    if project.contains("gitBranch") and project.gitBranch != null (
-        response.gitBranch = project.gitBranch
-    )
-    response.gitCommits = []
-    if project.contains("gitCommits") and project.gitCommits != null (
-        response.gitCommits = project.gitCommits
-    )
-    response.gitGraph = {branches: [], branchLogs: [], nodes: []}
-    if project.contains("gitGraph") and project.gitGraph != null (
-        response.gitGraph = project.gitGraph
-    )
+    object history = projectVersionHistory(project)
+    response.gitBranch = history.branch
+    response.gitCommits = history.commits
+    response.gitGraph = history.graph
+    response.gitHistoryVirtual = history.virtual
     response.remixBaseCommit = ""
     if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
         response.remixBaseCommit = project.remixBaseCommit
