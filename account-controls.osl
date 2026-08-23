@@ -61,7 +61,35 @@ def updateSafetyList(*serve.Context c, string field, boolean add) (
         saveProfile(mine)
         saveProfile(theirs)
     )
+    if add (
+        array notifications = loadNotifications(username)
+        array kept = []
+        for i notifications.len (
+            object item = notifications[i].assert(object)
+            if !item.contains("actor") or normalizeUsername(item.actor.toStr()) != target (
+                kept.append(item)
+            )
+        )
+        saveNotifications(username, kept)
+    )
     c.json(200, {ok: true, blocked: safety.blocked, muted: safety.muted})
+)
+
+def removeUserFromSafetyLists(string username) (
+    string key = normalizeUsername(username)
+    array files = fs.readDir(safetyDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") and name != key ++ ".json" (
+            auto result = readFile(safetyDir ++ name)
+            if result.ok (
+                object safety = result.data.assert(object)
+                safety.blocked = removeString(safety.blocked.assert(array), key)
+                safety.muted = removeString(safety.muted.assert(array), key)
+                writeFile(safetyDir ++ name, safety)
+            )
+        )
+    )
 )
 
 def handleGetMySafety(*serve.Context c) (
@@ -148,6 +176,7 @@ def handleDeleteMyData(*serve.Context c) (
         )
     )
     purgeUser(userId, username)
+    removeUserFromSafetyLists(username)
     fs.remove(safetyPath(username))
     clearAuthCookie(c)
     c.json(200, {ok: true})
