@@ -78,6 +78,8 @@ string releasesDir = "data/releases/"
 string extensionsFile = "data/extensions.json"
 string safetyDir = "data/safety/"
 
+number maxWorkspaceBytes = 134217728
+
 number maxProjectJsonBytes = 1073741824
 number maxStoredProjectJsonBytes = 20971520
 number maxAssetBytes = 10485760
@@ -208,6 +210,7 @@ uploads.POST("/admin/projects/:id/extensions/index", requireAdmin, handleAdminIn
 api.use(serve.maxBodySize(262144))
 
 api.GET("/health", handleHealth)
+api.GET("/health/dependencies", handleDependencyHealth)
 api.POST("/auth", handleRoturAuth)
 api.GET("/me", handleGetMe)
 api.POST("/logout", handleLogout)
@@ -275,6 +278,7 @@ api.GET("/me/spaces", requireAuth, handleMySpaces)
 api.POST("/projects", requireAuth, handleCreateProject)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
 api.GET("/projects/:id/project.json", handleGetProjectJson)
+api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
 api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
 api.GET("/projects/:id/editor", handleGetEditorProject)
 api.GET("/projects/:id", handleGetProject)
@@ -316,7 +320,7 @@ api.GET("/projects/:id/commits", handleGetCommits)
 api.GET("/projects/:id/pulls", handleListPulls)
 api.POST("/projects/:id/pulls", requireAuth, handleCreatePull)
 api.GET("/projects/:id/pulls/:index", handleGetPull)
-api.GET("/projects/:id/pulls/:index/diff", handleGetPullDiff)
+api.GET("/projects/:id/pulls/:index/diff", requireAuth, handleGetPullDiff)
 api.POST("/projects/:id/pulls/:index/merge", requireAuth, handleMergePull)
 
 api.GET("/search/users", handleSearchUsers)

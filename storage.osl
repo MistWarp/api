@@ -100,6 +100,30 @@ def indexEntryFromProject(object project) object (
     if project.contains("tags") and project.tags != null (
         tags = project.tags.assert(array)
     )
+    array contributors = []
+    if project.contains("collaborators") and project.collaborators != null (
+        array collaborators = project.collaborators.assert(array)
+        for i collaborators.len (
+            object collaborator = collaborators[i].assert(object)
+            string username = collaborator.username.toStr().strip()
+            if username != "" and !contributors.contains(username) (
+                contributors.append(username)
+            )
+        )
+    )
+    if project.contains("mergedContributors") and project.mergedContributors != null (
+        array merged = project.mergedContributors.assert(array)
+        for i merged.len (
+            string username = merged[i].toStr().strip()
+            if username != "" and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) and !contributors.contains(username) (
+                contributors.append(username)
+            )
+        )
+    )
+    number acceptedChanges = 0
+    if project.contains("acceptedChanges") and project.acceptedChanges != null (
+        acceptedChanges = project.acceptedChanges.toNum()
+    )
     return {
         id: project.id,
         owner: project.owner,
@@ -119,6 +143,9 @@ def indexEntryFromProject(object project) object (
         sharedAt: project.sharedAt,
         sizeBytes: projectSizeBytes(project),
         weekViews: weekViewsOf(project),
+        teamSize: contributors.len + 1,
+        contributors: contributors,
+        acceptedChanges: acceptedChanges,
         tags: tags
     }
 )

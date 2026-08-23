@@ -1,6 +1,6 @@
 # mistwarp-api
 
-OSL backend for MistWarp community, the MistWarp community platform. Rotur validator auth, flat JSON storage, Cloudflare R2 for project blobs, git.rotur.dev (Gitea) for repos, forks, and pull requests.
+OSL backend for the MistWarp community platform. It provides Rotur validator auth, project metadata, Cloudflare R2 project storage, and native pull requests between MistWarp forks. Rotur Git can be connected as an optional external Git provider.
 
 ## Run
 
@@ -24,8 +24,8 @@ The server loads `.env` automatically. Real environment variables override `.env
 | R2_ACCESS_KEY_ID | | R2 access key |
 | R2_SECRET_ACCESS_KEY | | R2 secret key |
 | R2_PUBLIC_BASE | | Public custom domain for the bucket |
-| GITEA_URL | https://git.rotur.dev | Gitea instance |
-| GITEA_ADMIN_TOKEN | | Gitea admin token (sudo for forks, PRs, merges) |
+| GITEA_URL | https://git.rotur.dev | Optional Rotur Git instance |
+| GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
 | EDITOR_ORIGIN | https://warp.mistium.com | Editor origin for CORS |
 | ADMIN_USERS | mist | Comma separated admin usernames |
 

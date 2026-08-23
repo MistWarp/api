@@ -184,6 +184,36 @@ def projectResponse(object project, *serve.Context c) object (
         sizeBytes: projectSizeBytes(project),
         isOwner: isOwner
     }
+    response.workspaceUrl = ""
+    if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
+        response.workspaceUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
+    )
+    response.gitHead = ""
+    if project.contains("gitHead") and project.gitHead != null (
+        response.gitHead = project.gitHead
+    )
+    response.gitBranch = "main"
+    if project.contains("gitBranch") and project.gitBranch != null (
+        response.gitBranch = project.gitBranch
+    )
+    response.gitCommits = []
+    if project.contains("gitCommits") and project.gitCommits != null (
+        response.gitCommits = project.gitCommits
+    )
+    response.gitGraph = {branches: [], branchLogs: [], nodes: []}
+    if project.contains("gitGraph") and project.gitGraph != null (
+        response.gitGraph = project.gitGraph
+    )
+    response.remixBaseCommit = ""
+    if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
+        response.remixBaseCommit = project.remixBaseCommit
+    )
+    object searchEntry = indexEntryFromProject(project)
+    response.collaboration = {
+        teamSize: searchEntry.teamSize,
+        contributors: searchEntry.contributors,
+        acceptedChanges: searchEntry.acceptedChanges
+    }
     response.myRole = projectRole(project, viewer)
     if isOwner (
         response.collaborators = collaborators
@@ -389,6 +419,11 @@ def handleCreateProject(*serve.Context c) (
         instructions: "",
         repo: null,
         jsonKey: projectJsonKey(id),
+        workspaceKey: "",
+        gitHead: "",
+        gitBranch: "main",
+        gitCommits: [],
+        gitGraph: {branches: [], branchLogs: [], nodes: []},
         viewKey: randomString(16),
         created: timestamp,
         edited: timestamp,
@@ -758,6 +793,16 @@ def handleUploadProject(*serve.Context c) (
         return
     )
 
+    string expectedHead = c.formValue("expectedHead").strip()
+    string currentHead = ""
+    if project.contains("gitHead") and project.gitHead != null (
+        currentHead = project.gitHead.toStr()
+    )
+    if expectedHead != "" and expectedHead != currentHead (
+        c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
+        return
+    )
+
     auto fileResult = c.formFile("project")
     if fileResult.isErr() (
         c.badRequest("missing project file")
@@ -846,10 +891,48 @@ def handleUploadProject(*serve.Context c) (
     project.extensions = projectExtensions
     project.extensionsIndexed = true
     project.delete("pendingExtensionUrls")
+
+    auto workspaceResult = c.formFile("workspace")
+    if !workspaceResult.isErr() (
+        object workspace = workspaceResult.unwrap().assert(object)
+        if workspace.size.toNum() > maxWorkspaceBytes (
+            fs.remove(zipPath)
+            fs.remove(extractDir)
+            c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
+            return
+        )
+        string workspaceKey = projectWorkspaceKey(id)
+        if !r2Put(workspaceKey, workspace.data, "application/x-mistwarp-project") (
+            fs.remove(zipPath)
+            fs.remove(extractDir)
+            c.internalError("failed to store MistWarp project history")
+            return
+        )
+        project.workspaceKey = workspaceKey
+        string gitMetadata = c.formValue("git")
+        if gitMetadata != "" (
+            auto parsedGit = json.parse(gitMetadata, {type: "object"})
+            if !parsedGit.isErr() (
+                object gitInfo = parsedGit.unwrap().assert(object)
+                project.gitHead = gitInfo.head.toStr()
+                project.gitBranch = gitInfo.branch.toStr()
+                if gitInfo.contains("commits") and gitInfo.commits != null (
+                    project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
+                )
+                if gitInfo.contains("graph") and gitInfo.graph != null (
+                    object graph = gitInfo.graph.assert(object)
+                    if graph.contains("nodes") and graph.nodes != null (
+                        graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
+                    )
+                    project.gitGraph = graph
+                )
+            )
+        )
+    )
     recordUploadBytes(uploader, incomingBytes)
     number lastUploadAt = project.lastUploadAt.toNum()
     boolean flushed = false
-    if lastUploadAt == 0 or timestamp - lastUploadAt >= uploadDebounceMs (
+    if !r2Local or lastUploadAt == 0 or timestamp - lastUploadAt >= uploadDebounceMs (
         flushed = pushProjectJsonToR2(project, gzipPath)
     )
     if flushed (
@@ -876,6 +959,14 @@ def handleUploadProject(*serve.Context c) (
     upsertIndexEntry(project)
     fs.remove(zipPath)
     fs.remove(extractDir)
+
+    string pullId = c.formValue("pullId").strip()
+    if pullId != "" (
+        if !completeNativePull(project, pullId, expectedHead, c.getString("username")) (
+            c.json(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})
+            return
+        )
+    )
 
     c.json(200, {
         ok: true,
@@ -1182,6 +1273,9 @@ def purgeProject(object project) (
     fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
     fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
     r2Remove(project.jsonKey.toStr())
+    if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
+        r2Remove(project.workspaceKey.toStr())
+    )
     deleteOrphanedAssets(project)
 )
 
@@ -1595,6 +1689,22 @@ def handleRemixProject(*serve.Context c) (
 
     string username = c.getString("username")
     string id = generateId()
+    object body = c.bodyJSON()
+    string forkTitle = parent.title.toStr() ++ " fork"
+    if body.contains("title") and body.title != null and body.title.toStr().strip() != "" (
+        forkTitle = body.title.toStr().strip().trim(1, 100)
+    )
+    string forkBranch = "main"
+    if parent.contains("gitBranch") and parent.gitBranch != null and parent.gitBranch.toStr() != "" (
+        forkBranch = parent.gitBranch.toStr()
+    )
+    if body.contains("branch") and body.branch != null and body.branch.toStr().strip() != "" (
+        forkBranch = body.branch.toStr().strip()
+    )
+    if forkBranch.len > 100 or forkBranch.contains(" ") or forkBranch.contains("\\") or forkBranch.contains("..") or forkBranch.startsWith("/") (
+        c.badRequest("invalid branch name")
+        return
+    )
 
     string copiedJsonPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".json.gz"
     if !copyStoredProjectJsonToPath(parent, copiedJsonPath) (
@@ -1612,10 +1722,11 @@ def handleRemixProject(*serve.Context c) (
     object project = {
         id: id,
         owner: username,
-        title: parent.title.toStr() ++ " remix",
+        title: forkTitle,
         description: "",
         instructions: "",
         repo: null,
+        workspaceKey: "",
         jsonKey: projectJsonKey(id),
         viewKey: randomString(16),
         created: timestamp,
@@ -1635,6 +1746,32 @@ def handleRemixProject(*serve.Context c) (
         sizeBytes: projectSizeBytes(parent),
         collaborators: []
     }
+    if parent.contains("workspaceKey") and parent.workspaceKey.toStr() != "" (
+        if r2Local (
+            string sourceWorkspace = localBlobPath(parent.workspaceKey.toStr())
+            string targetWorkspace = localBlobPath(projectWorkspaceKey(id))
+            fs.mkdirAll(parentDirOf(targetWorkspace))
+            if fs.exists(sourceWorkspace) and zip.copyFile(sourceWorkspace, targetWorkspace) (
+                project.workspaceKey = projectWorkspaceKey(id)
+            )
+        ) else (
+            auto workspace = r2Client.get({key: parent.workspaceKey.toStr()})
+            if workspace.ok and workspace.status.toInt() == 200 and r2Put(projectWorkspaceKey(id), workspace.body, "application/x-mistwarp-project") (
+                project.workspaceKey = projectWorkspaceKey(id)
+            )
+        )
+    )
+    if parent.contains("gitHead") (
+        project.gitHead = parent.gitHead
+        project.remixBaseCommit = parent.gitHead
+    )
+    project.gitBranch = forkBranch
+    if parent.contains("gitCommits") (
+        project.gitCommits = parent.gitCommits
+    )
+    if parent.contains("gitGraph") (
+        project.gitGraph = parent.gitGraph
+    )
     if parent.contains("jsonBytes") (
         project.jsonBytes = parent.jsonBytes
     )
