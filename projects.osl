@@ -965,29 +965,30 @@ def handleUploadProject(*serve.Context c) (
         )
     )
     recordUploadBytes(uploader, incomingBytes)
-    number lastUploadAt = project.lastUploadAt.toNum()
-    boolean flushed = false
-    if !r2Local or lastUploadAt == 0 or timestamp - lastUploadAt >= uploadDebounceMs (
-        flushed = pushProjectJsonToR2(project, gzipPath)
-    )
-    if flushed (
-        project.lastUploadAt = timestamp
-        project.pendingJson = false
+    boolean storedJson = false
+    if r2Local (
+        storedJson = pushProjectJsonToR2(project, gzipPath)
+        if storedJson (
+            project.lastUploadAt = timestamp
+            project.pendingJson = false
+        )
     ) else (
         if stageProjectJson(project, gzipPath) (
             project.pendingJson = true
+            storedJson = true
         ) else (
-            flushed = pushProjectJsonToR2(project, gzipPath)
-            if flushed (
+            storedJson = pushProjectJsonToR2(project, gzipPath)
+            if storedJson (
                 project.lastUploadAt = timestamp
                 project.pendingJson = false
-            ) else (
-                c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
-                fs.remove(zipPath)
-                fs.remove(extractDir)
-                return
             )
         )
+    )
+    if !storedJson (
+        c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        return
     )
 
     saveProject(project)
