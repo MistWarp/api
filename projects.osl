@@ -208,6 +208,7 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
         response.remixBaseCommit = project.remixBaseCommit
     )
+    response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
     object searchEntry = indexEntryFromProject(project)
     response.collaboration = {
         teamSize: searchEntry.teamSize,
@@ -974,6 +975,161 @@ def handleUploadProject(*serve.Context c) (
         skipped: uploadResult.skipped,
         projectJsonUrl: projectJsonUrlFor(project),
         thumbUrl: thumbUrlFor(project)
+    })
+)
+
+def handleBootstrapProjectHistory(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+    string configuredBranch = "main"
+    if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+        configuredBranch = project.gitBranch.toStr()
+    )
+    string remixBase = ""
+    if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
+        remixBase = project.remixBaseCommit.toStr()
+    )
+    if projectHasWorkspace(project) (
+        c.json(200, {
+            ok: true,
+            usedExisting: true,
+            workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+            head: projectGitHead(project),
+            branch: configuredBranch,
+            remixBaseCommit: remixBase
+        })
+        return
+    )
+
+    auto workspaceResult = c.formFile("workspace")
+    string gitMetadata = c.formValue("git")
+    if workspaceResult.isErr() or gitMetadata == "" (
+        c.badRequest("missing MistWarp history")
+        return
+    )
+    object workspace = workspaceResult.unwrap().assert(object)
+    if workspace.size.toNum() > maxWorkspaceBytes (
+        c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit"})
+        return
+    )
+    auto parsedGit = json.parse(gitMetadata, {type: "object"})
+    if parsedGit.isErr() (
+        c.badRequest("invalid MistWarp history metadata")
+        return
+    )
+    object gitInfo = parsedGit.unwrap().assert(object)
+    string head = gitInfo.head.toStr()
+    string baseBranch = gitInfo.branch.toStr()
+    if head == "" or baseBranch == "" (
+        c.badRequest("incomplete MistWarp history metadata")
+        return
+    )
+
+    object parent = {}
+    boolean hasParent = project.remixParent.toStr() != ""
+    if hasParent (
+        auto parentResult = loadProject(project.remixParent.toStr())
+        if !parentResult.ok (
+            c.notFound("parent project not found")
+            return
+        )
+        parent = parentResult.project.assert(object)
+    )
+
+    if hasParent and projectHasWorkspace(parent) (
+        boolean copied = false
+        if r2Local (
+            string sourcePath = localBlobPath(parent.workspaceKey.toStr())
+            string targetPath = localBlobPath(projectWorkspaceKey(project.id.toStr()))
+            fs.mkdirAll(parentDirOf(targetPath))
+            copied = fs.exists(sourcePath) and zip.copyFile(sourcePath, targetPath)
+        ) else (
+            auto existing = r2Client.get({key: parent.workspaceKey.toStr()})
+            if existing.ok and existing.status.toInt() == 200 (
+                copied = r2Put(projectWorkspaceKey(project.id.toStr()), existing.body, "application/x-mistwarp-project")
+            )
+        )
+        if !copied (
+            c.internalError("could not copy parent history")
+            return
+        )
+        project.workspaceKey = projectWorkspaceKey(project.id.toStr())
+        project.gitHead = parent.gitHead
+        project.gitCommits = []
+        if parent.contains("gitCommits") and parent.gitCommits != null (
+            project.gitCommits = parent.gitCommits
+        )
+        project.gitGraph = {branches: [], branchLogs: [], nodes: []}
+        if parent.contains("gitGraph") and parent.gitGraph != null (
+            project.gitGraph = parent.gitGraph
+        )
+        project.remixBaseCommit = parent.gitHead
+        remixBase = parent.gitHead.toStr()
+        saveProject(project)
+        upsertIndexEntry(project)
+        c.json(200, {
+            ok: true,
+            usedExisting: true,
+            workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+            head: project.gitHead,
+            branch: configuredBranch,
+            remixBaseCommit: remixBase
+        })
+        return
+    )
+
+    if !r2Put(projectWorkspaceKey(project.id.toStr()), workspace.data, "application/x-mistwarp-project") (
+        c.internalError("could not store MistWarp history")
+        return
+    )
+    project.workspaceKey = projectWorkspaceKey(project.id.toStr())
+    project.gitHead = head
+    if !project.contains("gitBranch") or project.gitBranch.toStr() == "" (
+        project.gitBranch = baseBranch
+        configuredBranch = baseBranch
+    )
+    project.gitCommits = []
+    if gitInfo.contains("commits") and gitInfo.commits != null (
+        project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
+    )
+    project.gitGraph = {branches: [], branchLogs: [], nodes: []}
+    if gitInfo.contains("graph") and gitInfo.graph != null (
+        project.gitGraph = gitInfo.graph
+    )
+
+    if hasParent (
+        if !r2Put(projectWorkspaceKey(parent.id.toStr()), workspace.data, "application/x-mistwarp-project") (
+            r2Remove(project.workspaceKey.toStr())
+            c.internalError("could not store parent history")
+            return
+        )
+        parent.workspaceKey = projectWorkspaceKey(parent.id.toStr())
+        parent.gitHead = head
+        parent.gitBranch = baseBranch
+        parent.gitCommits = project.gitCommits
+        parent.gitGraph = project.gitGraph
+        saveProject(parent)
+        upsertIndexEntry(parent)
+        project.remixBaseCommit = head
+        remixBase = head
+    )
+    saveProject(project)
+    upsertIndexEntry(project)
+    c.json(201, {
+        ok: true,
+        usedExisting: false,
+        workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+        head: head,
+        branch: configuredBranch,
+        remixBaseCommit: remixBase
     })
 )
 
