@@ -233,11 +233,11 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     if r2Local (
         return false
     )
-    string direct = r2DirectUrl(project.jsonKey.toStr())
-    if direct == "" (
+    auto signed = r2Client.presign({key: project.jsonKey.toStr(), expires: 60})
+    if !signed.ok (
         return false
     )
-    auto fetched = requests.get(direct, {headers: {"Accept-Encoding": "identity"}})
+    auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
     if !fetched.success or fetched.status.toInt() != 200 (
         return false
     )
@@ -297,14 +297,8 @@ def serveBlobKey(*serve.Context c, string key) (
         return
     )
 
-    string direct = r2DirectUrl(key)
-    if direct == "" (
-        c.notFound("blob not found")
-        return
-    )
-
-    auto fetched = requests.get(direct, {})
-    if !fetched.success or fetched.status.toInt() != 200 (
+    auto fetched = r2Client.get({key: key})
+    if !fetched.ok or fetched.status.toInt() != 200 (
         c.notFound("blob not found")
         return
     )

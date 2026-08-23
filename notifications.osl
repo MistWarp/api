@@ -213,9 +213,10 @@ def postRoturNotification(string target, string actor, string notifType, object 
     if mistwarpRoturToken == "" (
         return false
     )
-    object resp = requests.post(roturBase ++ "/v2/notify/", {
+    object payload = sanitizeNotificationPayload(extra, notifType, actor)
+    object resp = requests.post(roturBase ++ "/v2/notifications", {
         headers: notifyHeaders(),
-        body: json.stringify(notifyRequestBody(target, actor, notifType, extra))
+        body: json.stringify({target: target, actor: actor, type: notifType, data: payload, platform: "mistwarp", platform_data: payload})
     })
     return resp.success and resp.status.toInt() == 200
 )
