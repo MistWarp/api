@@ -21,58 +21,6 @@ def saveNotifications(string username, array items) boolean (
 )
 
 
-def normalizeNotification(object item) object (
-    object out = {}
-    array keys = item.getKeys().toArray()
-    for i keys.len (
-        string key = keys[i].toStr()
-        out[key] = item[key]
-    )
-    if !out.contains("created") and out.contains("timestamp") and out.timestamp != null (
-        out.created = out.timestamp
-    )
-    if !out.contains("timestamp") and out.contains("created") and out.created != null (
-        out.timestamp = out.created
-    )
-    if !out.contains("read") (
-        out.read = false
-    )
-    if !out.contains("actor") and out.contains("from") (
-        out.actor = out.from
-    )
-    if !out.contains("platform") (
-        out.platform = "mistwarp"
-    )
-    if !out.contains("platform_data") (
-        out.platform_data = {}
-    )
-    object pd = {}
-    if typeof(out.platform_data) == "object" (
-        pd = out.platform_data
-    )
-    array pdKeys = pd.getKeys().toArray()
-    for i pdKeys.len (
-        string pk = pdKeys[i].toStr()
-        if !out.contains(pk) (
-            out[pk] = pd[pk]
-        )
-    )
-    if out.platform.toStr() == "mistwarp" and pd.contains("type") and pd.type.toStr() != "" (
-        out.type = pd.type.toStr()
-    )
-    if out.created == null (
-        out.created = 0
-    )
-    if out.timestamp == null (
-        out.timestamp = 0
-    )
-    if out.read != true (
-        out.read = false
-    )
-    return out
-)
-
-
 def sanitizeNotificationPayload(object payload, string notifType, string actor) object (
     object data = {}
     if payload == null or typeof(payload) != "object" (
@@ -90,37 +38,6 @@ def sanitizeNotificationPayload(object payload, string notifType, string actor) 
         data.actor = actor
     )
     return data
-)
-
-
-def mergeNotificationArrays(array primary, array secondary) array (
-    array merged = []
-    object seen = {}
-    for i primary.len (
-        object item = primary[i].assert(object)
-        string id = ""
-        if item.contains("id") and item.id != null (
-            id = item.id.toStr()
-        )
-        if id != "" and seen[id] == true (
-            continue
-        )
-        seen[id] = true
-        merged.append(normalizeNotification(item))
-    )
-    for i secondary.len (
-        object item = secondary[i].assert(object)
-        string id = ""
-        if item.contains("id") and item.id != null (
-            id = item.id.toStr()
-        )
-        if id != "" and seen[id] == true (
-            continue
-        )
-        seen[id] = true
-        merged.append(normalizeNotification(item))
-    )
-    return merged
 )
 
 
@@ -304,49 +221,6 @@ def postRoturNotification(string target, string actor, string notifType, object 
 )
 
 
-def markRoturNotificationsRead() boolean (
-    if mistwarpRoturToken == "" (
-        return false
-    )
-    object resp = requests.post(roturBase ++ "/v2/notifications/read", {
-        headers: notifyHeaders(),
-        body: "{}"
-    })
-    return resp.success and resp.status.toInt() == 200
-)
-
-
-def fetchRoturNotifications() object (
-    if mistwarpRoturToken == "" (
-        return {
-            ok: false,
-            notifications: []
-        }
-    )
-
-    object resp = requests.get(roturBase ++ "/v2/notifications", {headers: notifyHeaders()})
-    if !resp.success or resp.status.toInt() != 200 (
-        return {ok: false, notifications: []}
-    )
-
-    auto parsed = json.parse(resp.body, {type: "array"})
-    if parsed.isErr() (
-        return {ok: false, notifications: []}
-    )
-
-    array remote = []
-    array list = parsed.unwrap().assert(array)
-    for i list.len (
-        auto item = list[i]
-        if typeof(item) != "object" (
-            continue
-        )
-        remote.append(normalizeNotification(item.assert(object)))
-    )
-    return {ok: true, notifications: remote}
-)
-
-
 def addNotification(string target, string actor, string notifType, object extra) (
     object payload = sanitizeNotificationPayload(extra, notifType, actor)
     string targetKey = normalizeUsername(target)
@@ -399,17 +273,13 @@ def addNotification(string target, string actor, string notifType, object extra)
 
 def handleGetNotifications(*serve.Context c) (
     string username = c.getString("username")
-    object remote = fetchRoturNotifications()
-    array remoteList = remote.notifications.assert(array)
     array local = loadNotifications(username)
-    c.json(200, {ok: true, notifications: mergeNotificationArrays(remoteList, local)})
+    c.json(200, {ok: true, notifications: local})
 )
 
 
 def handleReadNotifications(*serve.Context c) (
     string username = c.getString("username")
-    markRoturNotificationsRead()
-
     array items = loadNotifications(username)
     for i items.len (
         object item = items[i]
