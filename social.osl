@@ -159,28 +159,6 @@ def handleGetUserProjects(*serve.Context c) (
     c.json(200, {ok: true, projects: ownerIndexEntries(name, includeUnshared)})
 )
 
-def userProjectList(*serve.Context c, string field) (
-    object profile = loadProfile(c.param("name"))
-    array ids = []
-    if profile.contains(field) (
-        ids = profile[field].assert(array)
-    )
-    array entries = []
-    for i ids.len (
-        string id = ids[i].toStr()
-        object entry = projectSearchDocs.findById(id)
-        if entry.isEmpty() == false and entry.shared == true (
-            entries.append(entry)
-        )
-    )
-    entries.reverse()
-    c.json(200, {ok: true, projects: entries})
-)
-
-def handleGetUserLoves(*serve.Context c) (
-    userProjectList(c, "loves")
-)
-
 def userLibrary(string userLower) array (
     object profile = loadProfile(userLower)
     if profile.contains("library") and profile.library != null (
