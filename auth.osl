@@ -173,5 +173,60 @@ def handleGetMe(*serve.Context c) (
 )
 
 def handleHealth(*serve.Context c) (
-    c.json(200, {ok: true})
+    c.json(200, {ok: true, status: "operational", checkedAt: timestamp})
+)
+
+def externalDependency(string url) object (
+    number started = timestamp
+    object resp = requests.get(url)
+    string status = "unavailable"
+    if resp.success (
+        status = "operational"
+    )
+    return {
+        status: status,
+        latencyMs: timestamp - started
+    }
+)
+
+def handleDependencyHealth(*serve.Context c) (
+    string probePath = tmpDir ++ "health-" ++ randomString(8)
+    boolean storageOk = fs.writeFile(probePath, "ok")
+    if storageOk (
+        storageOk = fs.readFile(probePath) == "ok"
+        fs.remove(probePath)
+    )
+
+    object roturStatus = externalDependency(roturBase)
+    object giteaStatus = externalDependency(giteaURL ++ "/api/v1/version")
+    string assetMode = "r2"
+    if r2Local (
+        assetMode = "local"
+    )
+    object assetStatus = {status: "operational", mode: assetMode}
+    if !r2Local and (r2PublicBase == "" or r2Bucket == "") (
+        assetStatus.status = "misconfigured"
+    )
+
+    string overall = "operational"
+    if !storageOk or roturStatus.status != "operational" or assetStatus.status != "operational" (
+        overall = "degraded"
+    )
+    string storageStatus = "unavailable"
+    if storageOk (
+        storageStatus = "operational"
+    )
+    giteaStatus.optional = true
+    c.json(200, {
+        ok: true,
+        status: overall,
+        checkedAt: timestamp,
+        dependencies: {
+            api: {status: "operational"},
+            storage: {status: storageStatus},
+            assets: assetStatus,
+            rotur: roturStatus,
+            gitea: giteaStatus
+        }
+    })
 )

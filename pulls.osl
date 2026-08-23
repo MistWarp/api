@@ -1,222 +1,267 @@
-def loadViewableProject(*serve.Context c) object (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        return {ok: false}
-    )
-    object project = result.project.assert(object)
-    if !canViewProject(project, c) (
-        return {ok: false}
-    )
-    if projectPrice(project) > 0 and !canAccessPaidJson(project, c) (
-        return {ok: false}
-    )
-    return {ok: true, project: project}
-)
-
-def projectHasRepo(object project) boolean (
-    return project.contains("repo") and project.repo != null
-)
-
-def commitAuthorName(object commit) string (
-    if commit.contains("commit") and commit.commit != null (
-        object inner = commit.commit.assert(object)
-        if inner.contains("author") and inner.author != null (
-            object author = inner.author.assert(object)
-            return author.name.toStr()
-        )
+def projectGitHead(object project) string (
+    if project.contains("gitHead") and project.gitHead != null (
+        return project.gitHead.toStr()
     )
     return ""
 )
 
-def handleGetCommits(*serve.Context c) (
-    object viewable = loadViewableProject(c)
-    if !viewable.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = viewable.project.assert(object)
-    object repo = project.repo.assert(object)
-
-    object resp = giteaGet(repoApiPath(project) ++ "/commits?limit=50&stat=false&verification=false&sha=" ++ url.escape(repo.defaultBranch.toStr()), "")
-    object parsed = parseGiteaArray(resp)
-    if !parsed.ok (
-        c.internalError("failed to load commits")
-        return
-    )
-
-    array commits = parsed.data.assert(array)
-    array slim = []
-    for i commits.len (
-        object commit = commits[i]
-        object inner = commit.commit.assert(object)
-        object author = inner.author.assert(object)
-        slim.append({
-            sha: commit.sha,
-            message: inner.message,
-            author: commitAuthorName(commit),
-            date: author.date
-        })
-    )
-    c.json(200, {ok: true, commits: slim})
+def projectHasWorkspace(object project) boolean (
+    return project.contains("workspaceKey") and project.workspaceKey != null and project.workspaceKey.toStr() != "" and projectGitHead(project) != ""
 )
 
-def slimPull(object pull) object (
-    object user = pull.user.assert(object)
-    object head = pull.head.assert(object)
-    object base = pull.base.assert(object)
-    string headOwner = ""
-    if head.contains("repo") and head.repo != null (
-        object headRepo = head.repo.assert(object)
-        object headRepoOwner = headRepo.owner.assert(object)
-        headOwner = headRepoOwner.login.toStr()
-    )
+def pullDocument(string targetId, string index) object (
+    return pullDocs.findById(targetId ++ ":" ++ index)
+)
+
+def pullResponse(object pull) object (
     return {
-        index: pull.number,
+        id: pull["_id"],
+        index: pull.index,
         title: pull.title,
         body: pull.body,
         state: pull.state,
-        user: user.login,
-        headOwner: headOwner,
-        headBranch: head.ref,
-        baseBranch: base.ref,
-        created: pull.created_at,
-        merged: pull.merged,
-        mergeable: pull.mergeable
+        user: pull.author,
+        sourceOwner: pull.sourceOwner,
+        sourceProjectId: pull.sourceProjectId,
+        sourceTitle: pull.sourceTitle,
+        targetProjectId: pull.targetProjectId,
+        baseCommit: pull.baseCommit,
+        headCommit: pull.headCommit,
+        targetHead: pull.targetHead,
+        baseBranch: pull.targetBranch,
+        headBranch: pull.sourceBranch,
+        created: pull.created,
+        updated: pull.updated,
+        merged: pull.state.toStr() == "merged",
+        mergedCommit: pull.mergedCommit
     }
 )
 
-def handleListPulls(*serve.Context c) (
-    object viewable = loadViewableProject(c)
-    if !viewable.ok (
-        c.notFound("project not found")
-        return
+def createNativePull(*serve.Context c, object target, object source, string title, string description) object (
+    if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
+        return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
     )
-    object project = viewable.project.assert(object)
-
-    object resp = giteaGet(repoApiPath(project) ++ "/pulls?state=all&limit=50", "")
-    object parsed = parseGiteaArray(resp)
-    if !parsed.ok (
-        c.internalError("failed to load pull requests")
-        return
+    if normalizeUsername(source.owner.toStr()) != normalizeUsername(c.getString("username")) (
+        return {ok: false, status: 403, error: "use a remix you own"}
     )
-
-    array pulls = parsed.data.assert(array)
-    array slim = []
-    for i pulls.len (
-        slim.append(slimPull(pulls[i].assert(object)))
+    if source.remixParent.toStr() != target.id.toStr() (
+        return {ok: false, status: 400, error: "the source project is not a direct remix of this project"}
     )
-    c.json(200, {ok: true, pulls: slim})
-)
-
-def handleCreatePull(*serve.Context c) (
-    object viewable = loadViewableProject(c)
-    if !viewable.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = viewable.project.assert(object)
-    object repo = project.repo.assert(object)
-    object body = c.bodyJSON()
-
-    string title = body.title.toStr().strip()
     if title == "" or title.len > 200 (
-        c.badRequest("invalid title")
-        return
+        return {ok: false, status: 400, error: "invalid title"}
     )
-    string headOwner = body.headOwner.toStr()
-    string headBranch = body.headBranch.toStr()
-    if headOwner == "" or headBranch == "" (
-        c.badRequest("missing head")
-        return
+    string baseCommit = ""
+    if source.contains("remixBaseCommit") and source.remixBaseCommit != null (
+        baseCommit = source.remixBaseCommit.toStr()
     )
+    if baseCommit == "" (
+        return {ok: false, status: 400, error: "the remix does not record where it started"}
+    )
+    number sequence = 0
+    if target.contains("nativePullSeq") and target.nativePullSeq != null (
+        sequence = target.nativePullSeq.toNum()
+    )
+    sequence = sequence + 1
+    target.nativePullSeq = sequence
+    saveProject(target)
 
-    string description = ""
-    if body.contains("body") and body.body != null (
-        description = body.body.toStr()
+    string id = target.id.toStr() ++ ":" ++ sequence.toStr()
+    string sourceBranch = "main"
+    if source.contains("gitBranch") and source.gitBranch != null (
+        sourceBranch = source.gitBranch.toStr()
     )
-
-    string head = headOwner ++ ":" ++ headBranch
-    if normalizeUsername(headOwner) == normalizeUsername(repo.owner.toStr()) (
-        head = headBranch
+    string targetBranch = "main"
+    if target.contains("gitBranch") and target.gitBranch != null (
+        targetBranch = target.gitBranch.toStr()
     )
-
-    object resp = giteaPost(repoApiPath(project) ++ "/pulls", {
+    object pull = {
+        _id: id,
+        index: sequence,
         title: title,
-        body: description,
-        head: head,
-        base: repo.defaultBranch
-    }, c.getString("username"))
-    object parsed = parseGiteaObject(resp)
-    if !parsed.ok (
-        c.json(502, {ok: false, error: "failed to create pull request"})
-        return
+        body: description.trim(1, 5000),
+        state: "open",
+        author: c.getString("username"),
+        sourceOwner: source.owner,
+        sourceProjectId: source.id,
+        sourceTitle: source.title,
+        sourceBranch: sourceBranch,
+        targetProjectId: target.id,
+        targetBranch: targetBranch,
+        baseCommit: baseCommit,
+        headCommit: projectGitHead(source),
+        targetHead: projectGitHead(target),
+        created: timestamp,
+        updated: timestamp,
+        mergedCommit: ""
+    }
+    if !putDocument(pullDocs, id, pull) (
+        return {ok: false, status: 500, error: "could not store the pull request"}
     )
-
-    c.json(201, {ok: true, pull: slimPull(parsed.data.assert(object))})
+    addNotification(target.owner.toStr(), c.getString("username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
+    return {ok: true, pull: pullResponse(pull)}
 )
 
-def handleGetPull(*serve.Context c) (
-    object viewable = loadViewableProject(c)
-    if !viewable.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = viewable.project.assert(object)
-
-    object resp = giteaGet(repoApiPath(project) ++ "/pulls/" ++ c.param("index"), "")
-    object parsed = parseGiteaObject(resp)
-    if !parsed.ok (
-        c.notFound("pull request not found")
-        return
-    )
-    c.json(200, {ok: true, pull: slimPull(parsed.data.assert(object))})
-)
-
-def handleGetPullDiff(*serve.Context c) (
-    object viewable = loadViewableProject(c)
-    if !viewable.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = viewable.project.assert(object)
-
-    object resp = requests.get(giteaURL ++ "/api/v1" ++ repoApiPath(project) ++ "/pulls/" ++ c.param("index") ++ ".diff", {headers: giteaHeaders("")})
-    if !resp.success (
-        c.notFound("diff not found")
-        return
-    )
-    c.text(200, resp.body.toStr())
-)
-
-def handleMergePull(*serve.Context c) (
+def handleGetCommits(*serve.Context c) (
     auto result = loadProject(c.param("id"))
-    if !result.ok (
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
         c.notFound("project not found")
         return
     )
     object project = result.project.assert(object)
-    if !canEditProject(project, c) (
-        c.forbidden("only the project owner can merge")
+    array commits = []
+    if project.contains("gitCommits") and project.gitCommits != null (
+        commits = project.gitCommits.assert(array)
+    )
+    string branch = "main"
+    if project.contains("gitBranch") and project.gitBranch != null (
+        branch = project.gitBranch.toStr()
+    )
+    object graph = {branches: [], branchLogs: [], nodes: []}
+    if project.contains("gitGraph") and project.gitGraph != null (
+        graph = project.gitGraph.assert(object)
+    )
+    c.json(200, {ok: true, head: projectGitHead(project), branch: branch, commits: commits, graph: graph})
+)
+
+def handleListPulls(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
         return
     )
+    array stored = pullDocs.where("targetProjectId", db.equal, c.param("id")).sort("created", db.desc).limit(200).all()
+    array pulls = []
+    for i stored.len (
+        pulls.append(pullResponse(stored[i].assert(object)))
+    )
+    c.json(200, {ok: true, pulls: pulls})
+)
 
-    string index = c.param("index")
-    object pullResp = giteaGet(repoApiPath(project) ++ "/pulls/" ++ index, "")
-    object parsed = parseGiteaObject(pullResp)
-    if !parsed.ok (
+def handleCreatePull(*serve.Context c) (
+    auto targetResult = loadProject(c.param("id"))
+    object body = c.bodyJSON()
+    auto sourceResult = loadProject(body.sourceProjectId.toStr())
+    if !targetResult.ok or !sourceResult.ok (
+        c.notFound("project not found")
+        return
+    )
+    string description = ""
+    if body.contains("body") and body.body != null (
+        description = body.body.toStr()
+    )
+    object created = createNativePull(c, targetResult.project.assert(object), sourceResult.project.assert(object), body.title.toStr().strip(), description)
+    if !created.ok (
+        c.json(created.status.toInt(), {ok: false, error: created.error})
+        return
+    )
+    c.json(201, created)
+)
+
+def handleGetPull(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
         c.notFound("pull request not found")
         return
     )
-    object pull = parsed.data.assert(object)
-    if pull.mergeable != true (
-        c.json(409, {ok: false, error: "merge conflict", code: "conflict"})
-        return
-    )
+    c.json(200, {ok: true, pull: pullResponse(pull)})
+)
 
-    object resp = giteaPost(repoApiPath(project) ++ "/pulls/" ++ index ++ "/merge", {Do: "merge"}, c.getString("username"))
-    if !resp.success (
-        c.json(502, {ok: false, error: "merge failed"})
+def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) boolean (
+    if !c.getBool("authenticated") (
+        return false
+    )
+    array matches = pullDocs.where("index", db.equal, pullIndex.toNum()).limit(20).all()
+    for i matches.len (
+        object pull = matches[i].assert(object)
+        boolean related = pull.sourceProjectId.toStr() == project.id.toStr() or pull.targetProjectId.toStr() == project.id.toStr()
+        if related (
+            auto targetResult = loadProject(pull.targetProjectId.toStr())
+            if targetResult.ok (
+                object target = targetResult.project.assert(object)
+                string viewer = normalizeUsername(c.getString("username"))
+                if canEditProject(target, c) or viewer == normalizeUsername(pull.sourceOwner.toStr()) (
+                    return true
+                )
+            )
+        )
+    )
+    return false
+)
+
+def handleGetPullDiff(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
+        c.notFound("pull request not found")
         return
     )
-    c.json(200, {ok: true})
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !targetResult.ok or !sourceResult.ok (
+        c.notFound("project not found")
+        return
+    )
+    object target = targetResult.project.assert(object)
+    object source = sourceResult.project.assert(object)
+    if !canAccessPullWorkspace(target, pull.index.toStr(), c) (
+        c.forbidden("only the fork owner and project maintainers can inspect this pull request")
+        return
+    )
+    string suffix = "?pull=" ++ pull.index.toStr()
+    c.json(200, {
+        ok: true,
+        pull: pullResponse(pull),
+        targetWorkspaceUrl: appURL ++ "/api/projects/" ++ target.id.toStr() ++ "/workspace.mwp" ++ suffix,
+        sourceWorkspaceUrl: appURL ++ "/api/projects/" ++ source.id.toStr() ++ "/workspace.mwp" ++ suffix,
+        expectedHead: projectGitHead(target)
+    })
+)
+
+def handleMergePull(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true or pull.state.toStr() != "open" (
+        c.notFound("open pull request not found")
+        return
+    )
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canEditProject(result.project.assert(object), c) (
+        c.forbidden("only the project owner can merge")
+        return
+    )
+    handleGetPullDiff(c)
+)
+
+def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
+    object pull = pullDocument(project.id.toStr(), pullIndex)
+    if pull.isEmpty() == true or pull.state.toStr() != "open" (
+        return false
+    )
+    if normalizeUsername(username) != normalizeUsername(project.owner.toStr()) and projectRole(project, username) != "maintainer" (
+        return false
+    )
+    if expectedHead == "" or pull.targetHead.toStr() != expectedHead (
+        return false
+    )
+    pull.state = "merged"
+    pull.mergedCommit = projectGitHead(project)
+    pull.updated = timestamp
+    putDocument(pullDocs, pull["_id"].toStr(), pull)
+
+    number acceptedChanges = 0
+    if project.contains("acceptedChanges") and project.acceptedChanges != null (
+        acceptedChanges = project.acceptedChanges.toNum()
+    )
+    project.acceptedChanges = acceptedChanges + 1
+    array mergedContributors = []
+    if project.contains("mergedContributors") and project.mergedContributors != null (
+        mergedContributors = project.mergedContributors.assert(array)
+    )
+    string contributor = pull.sourceOwner.toStr()
+    if contributor != "" and !mergedContributors.contains(contributor) (
+        mergedContributors.append(contributor)
+    )
+    project.mergedContributors = mergedContributors
+    saveProject(project)
+    upsertIndexEntry(project)
+    addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", {projectId: project.id, projectTitle: project.title, pull: pull.index})
+    return true
 )

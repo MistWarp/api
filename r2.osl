@@ -2,6 +2,10 @@ def projectJsonKey(string id) string (
     return "projects/" ++ id ++ "/project.json"
 )
 
+def projectWorkspaceKey(string id) string (
+    return "projects/" ++ id ++ "/project.mwp"
+)
+
 def assetObjectKey(string md5ext) string (
     return "assets/" ++ md5ext
 )
@@ -358,4 +362,40 @@ def handleGetProjectBlob(*serve.Context c) (
     )
 
     serveProjectJson(c, project)
+)
+
+def handleGetProjectWorkspace(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    boolean allowed = canSeeInsideProject(project, c)
+    if !allowed and c.query("pull") != "" (
+        allowed = canAccessPullWorkspace(project, c.query("pull"), c)
+    )
+    if !allowed or !project.contains("workspaceKey") or project.workspaceKey.toStr() == "" (
+        c.notFound("workspace not found")
+        return
+    )
+    string key = project.workspaceKey.toStr()
+    string localPath = localBlobPath(key)
+    if fs.exists(localPath) (
+        c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
+        c.file(localPath)
+        return
+    )
+    if r2Local (
+        c.notFound("workspace not found")
+        return
+    )
+    auto fetched = r2Client.get({key: key})
+    if !fetched.ok or fetched.status.toInt() != 200 (
+        c.notFound("workspace not found")
+        return
+    )
+    string body = fetched.body.toStr()
+    c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
+    c.data(200, "application/x-mistwarp-project", raw("[]byte(body)"))
 )

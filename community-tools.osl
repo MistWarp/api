@@ -1338,34 +1338,17 @@ def handleCreateContribution(*serve.Context c) (
     )
     object parent = parentResult.project.assert(object)
     object remix = remixResult.project.assert(object)
-    if !projectHasRepo(parent) or !projectHasRepo(remix) (
-        c.badRequest("both projects need a repository")
-        return
-    )
-    if normalizeUsername(remix.owner.toStr()) != normalizeUsername(c.getString("username")) or remix.remixParent.toStr() != parent.id.toStr() (
-        c.forbidden("use a remix you own")
-        return
-    )
     string title = body.title.toStr().strip()
-    if title == "" or title.len > 200 (
-        c.badRequest("invalid title")
-        return
-    )
-    object parentRepo = parent.repo.assert(object)
-    object remixRepo = remix.repo.assert(object)
-    string head = remixRepo.owner.toStr() ++ ":" ++ remixRepo.defaultBranch.toStr()
     string description = ""
     if body.contains("body") (
         description = body.body.toStr()
     )
-    object resp = giteaPost(repoApiPath(parent) ++ "/pulls", {title: title, body: description, head: head, base: parentRepo.defaultBranch}, c.getString("username"))
-    object parsed = parseGiteaObject(resp)
-    if !parsed.ok (
-        c.json(502, {ok: false, error: "could not send contribution"})
+    object created = createNativePull(c, parent, remix, title, description)
+    if !created.ok (
+        c.json(created.status.toInt(), {ok: false, error: created.error})
         return
     )
-    addNotification(parent.owner.toStr(), c.getString("username"), "contribution", {projectId: parent.id, projectTitle: parent.title})
-    c.json(201, {ok: true, pull: slimPull(parsed.data.assert(object))})
+    c.json(201, created)
 )
 
 def beginPlaytimeSession(string projectId, string username) boolean (
