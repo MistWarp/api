@@ -61,7 +61,19 @@ def spaceThumbnailUrl(object space) string (
 )
 
 def isSpaceOwner(object space, *serve.Context c) boolean (
-    return c.getBool("isAdmin") or normalizeUsername(space.owner.toStr()) == normalizeUsername(c.getString("username"))
+    string ownerId = ""
+    if space.contains("ownerId") and space.ownerId != null (
+        ownerId = space.ownerId.toStr()
+    )
+    return c.getBool("isAdmin") or identityMatches(ownerId, space.owner.toStr(), c.getString("userId"), c.getString("username"))
+)
+
+def searchEntryOwnedByContext(object project, *serve.Context c) boolean (
+    string ownerId = ""
+    if project.contains("ownerId") and project.ownerId != null (
+        ownerId = project.ownerId.toStr()
+    )
+    return identityMatches(ownerId, project.owner.toStr(), c.getString("userId"), c.getString("username"))
 )
 
 def isSpaceInvitee(object space, *serve.Context c) boolean (
@@ -80,7 +92,7 @@ def canManageSpace(object space, *serve.Context c) boolean (
         return true
     )
     string username = c.getString("username")
-    if normalizeUsername(space.owner.toStr()) == normalizeUsername(username) (
+    if isSpaceOwner(space, c) (
         return true
     )
     return stringArrayContainsUser(spaceManagers(space), username)
@@ -416,6 +428,7 @@ def handleCreateSpace(*serve.Context c) (
         kind: kind,
         visibility: visibility,
         owner: c.getString("username"),
+        ownerId: c.getString("userId"),
         managers: [],
         curatorInvites: [],
         projects: [],
@@ -545,7 +558,7 @@ def handleDeleteSpace(*serve.Context c) (
         c.notFound("space not found")
         return
     )
-    if normalizeUsername(space.owner.toStr()) != normalizeUsername(c.getString("username")) and !c.getBool("isAdmin") (
+    if !isSpaceOwner(space, c) (
         c.forbidden("only the owner can delete this space")
         return
     )
@@ -598,7 +611,7 @@ def handleAddSpaceProject(*serve.Context c) (
         return
     )
     boolean allowed = canManageSpace(space, c)
-    boolean ownsProject = normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+    boolean ownsProject = searchEntryOwnedByContext(project, c)
     boolean participantCanSubmit = space.openSubmissions == true and ownsProject
     if space.kind.toStr() == "challenge" (
         participantCanSubmit = participantCanSubmit and challengePhase(space) == "submissions"
@@ -638,7 +651,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
     object project = projectSearchDocs.findById(c.param("project"))
     boolean allowed = canManageSpace(space, c)
     if project.isEmpty() != true (
-        allowed = allowed or normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username"))
+        allowed = allowed or searchEntryOwnedByContext(project, c)
     )
     if !allowed (
         c.forbidden("you cannot remove this project")
@@ -709,7 +722,7 @@ def handleJoinChallenge(*serve.Context c) (
         space.participants = participants
         space.edited = timestamp
         putDocument(spaceDocs, space["_id"].toStr(), space)
-        if normalizeUsername(space.owner.toStr()) != normalizeUsername(c.getString("username")) (
+        if !isSpaceOwner(space, c) (
             addNotification(space.owner.toStr(), c.getString("username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
         )
     )
@@ -730,7 +743,7 @@ def handleLeaveChallenge(*serve.Context c) (
     array ids = space.projects.assert(array)
     for i ids.len (
         object project = projectSearchDocs.findById(ids[i].toStr())
-        if project.isEmpty() == false and normalizeUsername(project.owner.toStr()) == normalizeUsername(username) (
+        if project.isEmpty() == false and searchEntryOwnedByContext(project, c) (
             c.badRequest("remove your submission before leaving the challenge")
             return
         )
@@ -869,7 +882,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
         return
     )
     object project = projectSearchDocs.findById(projectId)
-    if project.isEmpty() == false and normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username")) (
+    if project.isEmpty() == false and searchEntryOwnedByContext(project, c) (
         c.forbidden("you cannot vote for your own entry")
         return
     )
@@ -1169,7 +1182,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), body.content.toStr(), parentId, "comment")
+    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
@@ -1233,7 +1246,7 @@ def handleCreatePreview(*serve.Context c) (
     )
     string key = randomString(24)
     string previewId = project.id.toStr() ++ ":" ++ key
-    object preview = {_id: previewId, projectId: project.id, key: key, owner: c.getString("username"), created: timestamp, expiresAt: timestamp + (hours * 3600000)}
+    object preview = {_id: previewId, projectId: project.id, key: key, owner: c.getString("username"), ownerId: c.getString("userId"), created: timestamp, expiresAt: timestamp + (hours * 3600000)}
     previewDocs.insertOne(preview)
     c.json(201, {ok: true, key: key, expiresAt: preview.expiresAt})
 )
@@ -1298,7 +1311,7 @@ def handleCreateRelease(*serve.Context c) (
         return
     )
     string jsonUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
-    object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username")}
+    object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username"), creatorId: c.getString("userId")}
     releaseDocs.insertOne(release)
     if channel == "stable" (
         project.publicRelease = releaseId
@@ -1352,26 +1365,34 @@ def handleCreateContribution(*serve.Context c) (
 )
 
 def beginPlaytimeSession(string projectId, string username) boolean (
-    string sessionId = normalizeUsername(username)
+    string userId = userIdForUsername(username)
+    string sessionId = userId
+    if sessionId == "" (
+        sessionId = normalizeUsername(username)
+    )
     object session = playtimeSessionDocs.findById(sessionId)
     if session.isEmpty() == true or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
-        putDocument(playtimeSessionDocs, sessionId, {_id: sessionId, projectId: projectId, username: username, lastCredit: timestamp, lastSeen: timestamp})
+        putDocument(playtimeSessionDocs, sessionId, {_id: sessionId, projectId: projectId, username: username, userId: userId, lastCredit: timestamp, lastSeen: timestamp})
     )
     return true
 )
 
 def creditPlaytimeSession(string projectId, string username, boolean finished) number (
-    string sessionId = normalizeUsername(username)
+    string userId = userIdForUsername(username)
+    string sessionId = userId
+    if sessionId == "" (
+        sessionId = normalizeUsername(username)
+    )
     object session = playtimeSessionDocs.findById(sessionId)
     if session.isEmpty() == true or session.projectId.toStr() != projectId (
         return 0
     )
     number credited = clampNumber(timestamp - session.lastCredit.toNum(), 0, 60000)
     if credited > 0 (
-        string playtimeId = projectId ++ ":" ++ normalizeUsername(username)
+        string playtimeId = projectId ++ ":" ++ sessionId
         object playtime = playtimeDocs.findById(playtimeId)
         if playtime.isEmpty() == true (
-            playtime = {_id: playtimeId, projectId: projectId, username: username, duration: 0, updated: timestamp}
+            playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
         )
         playtime.duration = playtime.duration.toNum() + credited
         playtime.updated = timestamp
@@ -1484,7 +1505,7 @@ def handleCreateProjectFeedback(*serve.Context c) (
         return
     )
     string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
-    object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: c.getString("username"), created: timestamp, edited: timestamp}
+    object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: c.getString("username"), authorId: c.getString("userId"), created: timestamp, edited: timestamp}
     feedbackDocs.insertOne(feedback)
     addNotification(project.owner.toStr(), c.getString("username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
     c.json(201, {ok: true})
@@ -1535,7 +1556,11 @@ def handleListProjectReviews(*serve.Context c) (
         object review = reviews[i].assert(object)
         ratingTotal = ratingTotal + review.rating.toNum()
         review.playtimeMs = projectPlaytime(c.param("id"), review.author.toStr())
-        if normalizeUsername(review.author.toStr()) == normalizeUsername(c.getString("username")) (
+        string authorId = ""
+        if review.contains("authorId") and review.authorId != null (
+            authorId = review.authorId.toStr()
+        )
+        if identityMatches(authorId, review.author.toStr(), c.getString("userId"), c.getString("username")) (
             myReview = review
         )
         reviews[i] = review
@@ -1549,11 +1574,16 @@ def handleListProjectReviews(*serve.Context c) (
 
 def handleListUserReviews(*serve.Context c) (
     string name = normalizeUsername(c.param("name"))
+    string requestedId = userIdForUsername(name)
     array allReviews = reviewDocs.sort("edited", db.desc).limit(1000).all()
     array reviews = []
     for i allReviews.len (
         object review = allReviews[i].assert(object)
-        if normalizeUsername(review.author.toStr()) == name and reviews.len < 100 (
+        string authorId = ""
+        if review.contains("authorId") and review.authorId != null (
+            authorId = review.authorId.toStr()
+        )
+        if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < 100 (
             auto result = loadProject(review.projectId.toStr())
             if result.ok and canViewProject(result.project.assert(object), c) (
                 object project = result.project.assert(object)
@@ -1574,7 +1604,7 @@ def handleSaveProjectReview(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    if normalizeUsername(project.owner.toStr()) == normalizeUsername(c.getString("username")) (
+    if projectRole(project, c.getString("username")) == "owner" (
         c.badRequest("you cannot review your own project")
         return
     )
@@ -1592,13 +1622,17 @@ def handleSaveProjectReview(*serve.Context c) (
         c.badRequest("review is too long")
         return
     )
-    string reviewId = project.id.toStr() ++ ":" ++ normalizeUsername(c.getString("username"))
+    string reviewerId = c.getString("userId")
+    if reviewerId == "" (
+        reviewerId = normalizeUsername(c.getString("username"))
+    )
+    string reviewId = project.id.toStr() ++ ":" ++ reviewerId
     object existing = reviewDocs.findById(reviewId)
     number created = timestamp
     if existing.isEmpty() == false (
         created = existing.created.toNum()
     )
-    object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), rating: rating, message: message, created: created, edited: timestamp}
+    object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), authorId: c.getString("userId"), rating: rating, message: message, created: created, edited: timestamp}
     putDocument(reviewDocs, reviewId, review)
     if existing.isEmpty() == true (
         addNotification(project.owner.toStr(), c.getString("username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
@@ -1613,7 +1647,11 @@ def handleDeleteProjectReview(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    string reviewId = c.param("id") ++ ":" ++ normalizeUsername(c.getString("username"))
+    string reviewerId = c.getString("userId")
+    if reviewerId == "" (
+        reviewerId = normalizeUsername(c.getString("username"))
+    )
+    string reviewId = c.param("id") ++ ":" ++ reviewerId
     reviewDocs.deleteOne({_id: reviewId})
     c.json(200, {ok: true})
 )
@@ -1689,7 +1727,7 @@ def handleCreateIdea(*serve.Context c) (
     if c.getBool("isAdmin") == true (
         source = "mistwarp"
     )
-    object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
+    object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
     ideaDocs.insertOne(idea)
     idea.myVote = "like"
     idea.likesCount = 1
@@ -1772,7 +1810,7 @@ def handleCreateIdeaComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), body.content.toStr(), parentId, "comment")
+    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return

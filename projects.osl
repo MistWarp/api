@@ -9,15 +9,23 @@ def removeString(array items, string value) array (
 )
 
 def projectRole(object project, string username) string (
-    string key = normalizeUsername(username)
-    if normalizeUsername(project.owner.toStr()) == key (
+    string userId = userIdForUsername(username)
+    string ownerId = ""
+    if project.contains("ownerId") and project.ownerId != null (
+        ownerId = project.ownerId.toStr()
+    )
+    if identityMatches(ownerId, project.owner.toStr(), userId, username) (
         return "owner"
     )
     if project.contains("collaborators") and project.collaborators != null (
         array collaborators = project.collaborators.assert(array)
         for i collaborators.len (
             object collaborator = collaborators[i].assert(object)
-            if normalizeUsername(collaborator.username.toStr()) == key (
+            string collaboratorId = ""
+            if collaborator.contains("userId") and collaborator.userId != null (
+                collaboratorId = collaborator.userId.toStr()
+            )
+            if identityMatches(collaboratorId, collaborator.username.toStr(), userId, username) (
                 return collaborator.role.toStr()
             )
         )
@@ -449,6 +457,7 @@ def handleCreateProject(*serve.Context c) (
     object project = {
         id: id,
         owner: username,
+        ownerId: c.getString("userId"),
         title: title,
         description: "",
         instructions: "",
@@ -1396,7 +1405,7 @@ def handleUpdateProject(*serve.Context c) (
                 string role = entry.role.toStr().toLower().strip()
                 boolean validRole = role == "maintainer" or role == "contributor" or role == "tester"
                 if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
-                    collaborators.append({username: username, role: role})
+                    collaborators.append({username: username, userId: userIdForUsername(username), role: role})
                 )
             )
         )
@@ -1569,7 +1578,7 @@ def handleViewProject(*serve.Context c) (
         return
     )
     string viewer = normalizeUsername(c.getString("username"))
-    if viewer != "" and viewer == normalizeUsername(project.owner.toStr()) (
+    if viewer != "" and projectRole(project, c.getString("username")) == "owner" (
         c.json(200, {ok: true})
         return
     )
@@ -1913,6 +1922,7 @@ def handleRemixProject(*serve.Context c) (
     object project = {
         id: id,
         owner: username,
+        ownerId: c.getString("userId"),
         title: forkTitle,
         description: "",
         instructions: "",

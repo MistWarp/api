@@ -41,7 +41,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
         return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
     )
-    if normalizeUsername(source.owner.toStr()) != normalizeUsername(c.getString("username")) (
+    if projectRole(source, c.getString("username")) != "owner" (
         return {ok: false, status: 403, error: "use a remix you own"}
     )
     if source.remixParent.toStr() != target.id.toStr() (
@@ -81,7 +81,9 @@ def createNativePull(*serve.Context c, object target, object source, string titl
         body: description.trim(1, 5000),
         state: "open",
         author: c.getString("username"),
+        authorId: c.getString("userId"),
         sourceOwner: source.owner,
+        sourceOwnerId: source.ownerId,
         sourceProjectId: source.id,
         sourceTitle: source.title,
         sourceBranch: sourceBranch,
@@ -231,7 +233,8 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
     if pull.isEmpty() == true or pull.state.toStr() != "open" (
         return false
     )
-    if normalizeUsername(username) != normalizeUsername(project.owner.toStr()) and projectRole(project, username) != "maintainer" (
+    string role = projectRole(project, username)
+    if role != "owner" and role != "maintainer" (
         return false
     )
     if expectedHead == "" or pull.targetHead.toStr() != expectedHead (

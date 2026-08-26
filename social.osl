@@ -1,7 +1,14 @@
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
     string ownerKey = normalizeUsername(owner)
+    string ownerId = userIdForUsername(owner)
     array entries = []
-    array stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    array stored = []
+    if ownerId != "" (
+        stored = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
+    )
+    if stored.len == 0 (
+        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    )
     for i stored.len (
         object entry = stored[i].assert(object)
         if entry.shared == true or includeUnshared (
@@ -18,12 +25,20 @@ def isViewerOwner(*serve.Context c, string name) boolean (
     if c.getBool("isAdmin") (
         return true
     )
-    return normalizeUsername(c.getString("username")) == normalizeUsername(name)
+    object profile = loadProfile(name)
+    string profileId = ""
+    if profile.contains("userId") and profile.userId != null (
+        profileId = profile.userId.toStr()
+    )
+    return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
 )
 
 def handleGetUser(*serve.Context c) (
     string name = c.param("name")
     string key = normalizeUsername(name)
+    if isSafePathPart(key) and !fs.exists(usersDir ++ key ++ ".json") (
+        discoverUserIdentity(name)
+    )
     boolean exists = isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
     object profile = loadProfile(name)
     array followers = profile.followers.assert(array)
@@ -91,7 +106,7 @@ def handleUpdateProfile(*serve.Context c) (
                 return
             )
             object project = result.project.assert(object)
-            if normalizeUsername(project.owner.toStr()) != normalizeUsername(username) (
+            if projectRole(project, username) != "owner" (
                 c.forbidden("not your project")
                 return
             )
@@ -162,6 +177,9 @@ def handleUnfollowUser(*serve.Context c) (
 
 def handleGetUserProjects(*serve.Context c) (
     string name = c.param("name")
+    if userIdForUsername(name) == "" (
+        discoverUserIdentity(name)
+    )
     boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
     c.json(200, {ok: true, projects: ownerIndexEntries(name, includeUnshared)})
 )
