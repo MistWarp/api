@@ -22,8 +22,9 @@ def projectPrice(object project) number (
     if project.contains("price") and project.price != null (
         number p = project.price.toNum()
         if p > 0 (
-            if p > maxProjectPrice (
-                return maxProjectPrice
+            number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
+            if p > priceLimit (
+                return priceLimit
             )
             return p
         )
@@ -188,7 +189,7 @@ def addCommerceSplit(object totals, string username, number basisPoints) (
 
 def projectCommerceSplits(object project) array (
     object totals = {}
-    number platformPoints = (paywallFeePercent * 100).toInt()
+    number platformPoints = mistwarpBenefitsForProject(project).salesFeeBasisPoints.toNum().toInt()
     if platformPoints < 0 (
         platformPoints = 0
     )
@@ -437,6 +438,7 @@ def mergeDayHistory(object into, object from) (
 
 def handleGetMyStats(*serve.Context c) (
     string owner = normalizeUsername(c.getString("username"))
+    number analyticsDays = mistwarpBenefitsForUserId(c.getString("userId")).analyticsDays.toNum()
     array projects = projectSearchDocs.where("ownerKey", db.equal, owner).all()
     number today = (timestamp / 86400000).toInt()
 
@@ -487,8 +489,9 @@ def handleGetMyStats(*serve.Context c) (
         totalBuyers: totalBuyers,
         projectCount: projectCount,
         sharedCount: sharedCount,
-        viewHistory: viewHistory,
-        saleHistory: saleHistory
+        viewHistory: trimDayHistory(viewHistory, analyticsDays),
+        saleHistory: trimDayHistory(saleHistory, analyticsDays),
+        historyDays: analyticsDays
     }
     c.json(200, {ok: true, stats: stats})
 )
@@ -681,8 +684,9 @@ def handlePurchaseConfirm(*serve.Context c) (
         return
     )
     number owed = pending.price.toNum()
-    if owed > maxProjectPrice (
-        owed = maxProjectPrice
+    number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
+    if owed > priceLimit (
+        owed = priceLimit
     )
 
     array splits = projectCommerceSplits(project)

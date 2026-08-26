@@ -277,6 +277,7 @@ def projectResponse(object project, *serve.Context c) object (
         )
     )
     if isOwner (
+        number analyticsDays = mistwarpBenefitsForProject(project).analyticsDays.toNum()
         object viewHistory = {}
         if project.contains("viewHistory") and project.viewHistory != null (
             viewHistory = project.viewHistory.assert(object)
@@ -287,10 +288,11 @@ def projectResponse(object project, *serve.Context c) object (
         )
         response.analytics = {
             revenue: projectRevenue(project),
-            buyers: projectBuyers(project),
+            buyers: trimTimedEntries(projectBuyers(project), analyticsDays),
             saves: projectSaves(project),
-            viewHistory: viewHistory,
-            saleHistory: saleHistory
+            viewHistory: trimDayHistory(viewHistory, analyticsDays),
+            saleHistory: trimDayHistory(saleHistory, analyticsDays),
+            historyDays: analyticsDays
         }
     )
     return response
@@ -418,7 +420,7 @@ def handleQuotaResetConfirm(*serve.Context c) (
         return
     )
 
-    c.json(200, {ok: true, used: 0, limit: weeklyUploadQuotaBytes})
+    c.json(200, {ok: true, used: 0, limit: mistwarpBenefitsForUserId(c.getString("userId")).weeklyUploadBytes})
 )
 def handleCreateProject(*serve.Context c) (
     object body = c.bodyJSON()
@@ -549,9 +551,10 @@ def recordUploadBytes(string username, number bytes) (
 )
 
 def quotaDetails(string username) object (
+    number uploadLimit = mistwarpBenefitsForUsername(username).weeklyUploadBytes.toNum()
     auto result = readFile(quotaPath(username))
     if !result.ok (
-        return {used: 0, limit: weeklyUploadQuotaBytes, oldestEventMs: 0, eventCount: 0}
+        return {used: 0, limit: uploadLimit, oldestEventMs: 0, eventCount: 0}
     )
     object data = result.data.assert(object)
     array events = data.events.assert(array)
@@ -577,7 +580,7 @@ def quotaDetails(string username) object (
             msUntilExpiry = 0
         )
     )
-    return {used: total, limit: weeklyUploadQuotaBytes, oldestEventMs: msUntilExpiry, eventCount: count}
+    return {used: total, limit: uploadLimit, oldestEventMs: msUntilExpiry, eventCount: count}
 )
 
 def inspectProjectJson(string path) object (
@@ -882,9 +885,10 @@ def handleUploadProject(*serve.Context c) (
     )
     if !c.getBool("isAdmin") (
         number usedBytes = weeklyUploadedBytes(uploader)
-        if usedBytes + incomingBytes > weeklyUploadQuotaBytes (
+        number uploadLimit = mistwarpBenefitsForUserId(c.getString("userId")).weeklyUploadBytes.toNum()
+        if usedBytes + incomingBytes > uploadLimit (
             number usedMb = (usedBytes / 1048576).toInt()
-            number limitMb = (weeklyUploadQuotaBytes / 1048576).toInt()
+            number limitMb = (uploadLimit / 1048576).toInt()
             c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
             return
         )
@@ -1428,8 +1432,9 @@ def handleUpdateProject(*serve.Context c) (
             c.badRequest("invalid price")
             return
         )
-        if price > maxProjectPrice (
-            c.badRequest("price cannot exceed " ++ maxProjectPrice.toStr() ++ " credits")
+        number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
+        if price > priceLimit (
+            c.badRequest("your Rotur plan allows project prices up to " ++ priceLimit.toStr() ++ " credits")
             return
         )
         number oldPrice = projectPrice(project)
@@ -1514,15 +1519,19 @@ def handleUpdateProject(*serve.Context c) (
 
 def collectAssetsUsedByOthers(string excludeId) object (
     object used = {}
-    array files = fs.readDir(projectsDir).toArray()
-    for i files.len (
-        auto res = readFile(projectsDir ++ files[i].toStr())
-        if res.ok (
-            object p = res.data.assert(object)
-            if p.id.toStr() != excludeId and p.contains("assets") and p.assets != null (
-                array a = p.assets.assert(array)
-                for j a.len (
-                    used[a[j].toStr()] = true
+    array directories = [projectsDir, trashDir]
+    for d directories.len (
+        string directory = directories[d].toStr()
+        array files = fs.readDir(directory).toArray()
+        for i files.len (
+            auto res = readFile(directory ++ files[i].toStr())
+            if res.ok (
+                object p = res.data.assert(object)
+                if p.id.toStr() != excludeId and p.contains("assets") and p.assets != null (
+                    array a = p.assets.assert(array)
+                    for j a.len (
+                        used[a[j].toStr()] = true
+                    )
                 )
             )
         )
@@ -1577,6 +1586,8 @@ def purgeProjectStorage(object project, boolean cleanAssets) (
 
 def purgeProject(object project) (
     purgeProjectStorage(project, true)
+    fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+    deleteProjectCommunityRecords(project.id.toStr())
 )
 
 def purgeProjects(array projects) (
@@ -1613,14 +1624,128 @@ def handleDeleteProject(*serve.Context c) (
         return
     )
 
-    purgeProject(project)
-    deleteProjectCommunityRecords(project.id.toStr())
+    number recoveryDays = mistwarpBenefitsForProject(project).recoveryDays.toNum()
+    project.deletedAt = timestamp
+    project.purgeAt = timestamp + (recoveryDays * 86400000)
+    project.recoveryDays = recoveryDays
+    project.shared = false
+    project.visibility = "private"
+    if !writeFile(trashDir ++ project.id.toStr() ++ ".json", project) (
+        c.internalError("failed to move the project to trash")
+        return
+    )
+    deleteProjectFile(project.id.toStr())
+    removeFromIndex(project.id.toStr())
     removeProjectFromSpaces(project.id.toStr())
     object profile = loadProfile(project.owner.toStr())
     if profile.featuredProject.toStr() == project.id.toStr() (
         profile.featuredProject = ""
         saveProfile(profile)
     )
+    c.json(200, {ok: true, recoverableUntil: project.purgeAt, recoveryDays: recoveryDays})
+)
+
+def loadTrashedProject(string id) object (
+    if !isSafePathPart(id) (
+        return {ok: false, error: "invalid project id"}
+    )
+    auto result = readFile(trashDir ++ id ++ ".json")
+    if !result.ok (
+        return {ok: false, error: "trashed project not found"}
+    )
+    return {ok: true, project: result.data.assert(object)}
+)
+
+def purgeExpiredTrash() (
+    array files = fs.readDir(trashDir).toArray()
+    for i files.len (
+        string file = files[i].toStr()
+        if file.endsWith(".json") (
+            auto result = readFile(trashDir ++ file)
+            if result.ok (
+                object project = result.data.assert(object)
+                if project.contains("purgeAt") and project.purgeAt.toNum() <= timestamp (
+                    purgeProject(project)
+                )
+            )
+        )
+    )
+)
+
+def handleGetMyTrash(*serve.Context c) (
+    purgeExpiredTrash()
+    array projects = []
+    string userId = c.getString("userId")
+    string username = c.getString("username")
+    array files = fs.readDir(trashDir).toArray()
+    for i files.len (
+        string file = files[i].toStr()
+        if file.endsWith(".json") (
+            auto result = readFile(trashDir ++ file)
+            if result.ok (
+                object project = result.data.assert(object)
+                string ownerId = (project.ownerId ?? "").toStr()
+                if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+                    projects.append({
+                        id: project.id,
+                        title: project.title,
+                        deletedAt: project.deletedAt,
+                        purgeAt: project.purgeAt,
+                        recoveryDays: project.recoveryDays,
+                        thumbUrl: thumbUrlFor(project)
+                    })
+                )
+            )
+        )
+    )
+    projects.sortBy("deletedAt", "descending")
+    c.json(200, {ok: true, projects: projects})
+)
+
+def handleRestoreProject(*serve.Context c) (
+    auto result = loadTrashedProject(c.param("id"))
+    if !result.ok (
+        c.notFound("trashed project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), c.getString("userId"), c.getString("username")) and !c.getBool("isAdmin") (
+        c.forbidden("not your project")
+        return
+    )
+    if project.purgeAt.toNum() <= timestamp (
+        purgeProject(project)
+        c.notFound("the recovery period has ended")
+        return
+    )
+    if fs.exists(projectsDir ++ project.id.toStr() ++ ".json") (
+        c.json(409, {ok: false, error: "a project with this id already exists"})
+        return
+    )
+    project.delete("deletedAt")
+    project.delete("purgeAt")
+    project.delete("recoveryDays")
+    if !saveProject(project) (
+        c.internalError("failed to restore the project")
+        return
+    )
+    fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+    upsertIndexEntry(project)
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handlePurgeTrashedProject(*serve.Context c) (
+    auto result = loadTrashedProject(c.param("id"))
+    if !result.ok (
+        c.notFound("trashed project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), c.getString("userId"), c.getString("username")) and !c.getBool("isAdmin") (
+        c.forbidden("not your project")
+        return
+    )
+    purgeProject(project)
     c.json(200, {ok: true})
 )
 

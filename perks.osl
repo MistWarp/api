@@ -1,0 +1,221 @@
+def normalizeRoturTier(string rawTier) string (
+    string tier = rawTier.toLower().strip()
+    if tier == "lite" (
+        return "Lite"
+    )
+    if tier == "plus" (
+        return "Plus"
+    )
+    if tier == "pro" or tier == "drive" or tier == "max" (
+        return "Pro"
+    )
+    return "Free"
+)
+
+def roturTierForUser(string userId) string (
+    if userId == "" (
+        return "Free"
+    )
+    if paidPerksCache.has(userId) (
+        return paidPerksCache.get(userId).toStr()
+    )
+    object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
+    if !response.success or response.status.toInt() != 200 (
+        return "Free"
+    )
+    auto parsed = json.parse(response.body, {type: "object"})
+    if parsed.isErr() (
+        return "Free"
+    )
+    object profile = parsed.unwrap().assert(object)
+    string tier = "Free"
+    if profile.contains("subscription") and profile.subscription != null (
+        tier = normalizeRoturTier(profile.subscription.toStr())
+    )
+    paidPerksCache.set(userId, tier)
+    return tier
+)
+
+def mistwarpBenefitsForTier(string rawTier) object (
+    string tier = normalizeRoturTier(rawTier)
+    object benefits = {
+        weeklyUploadBytes: 104857600,
+        recoveryDays: 7,
+        analyticsDays: 7,
+        collaborationLimit: 3,
+        salesFeeBasisPoints: 1000,
+        maxProjectPrice: 100,
+        themeListingLimit: 5
+    }
+    if tier == "Lite" (
+        benefits.weeklyUploadBytes = 262144000
+        benefits.recoveryDays = 14
+        benefits.analyticsDays = 30
+        benefits.collaborationLimit = 5
+        benefits.themeListingLimit = 10
+    ) else if tier == "Plus" (
+        benefits.weeklyUploadBytes = 1073741824
+        benefits.recoveryDays = 30
+        benefits.analyticsDays = 365
+        benefits.collaborationLimit = 10
+        benefits.salesFeeBasisPoints = 700
+        benefits.maxProjectPrice = 250
+        benefits.themeListingLimit = 25
+    ) else if tier == "Pro" (
+        benefits.weeklyUploadBytes = 5368709120
+        benefits.recoveryDays = 90
+        benefits.analyticsDays = 0
+        benefits.collaborationLimit = 25
+        benefits.salesFeeBasisPoints = 500
+        benefits.maxProjectPrice = 500
+        benefits.themeListingLimit = 100
+    )
+    return benefits
+)
+
+def mistwarpBenefitsForUserId(string userId) object (
+    return mistwarpBenefitsForTier(roturTierForUser(userId))
+)
+
+def mistwarpBenefitsForUsername(string username) object (
+    return mistwarpBenefitsForUserId(userIdForUsername(username))
+)
+
+def mistwarpBenefitsForProject(object project) object (
+    string ownerId = ""
+    if project.contains("ownerId") and project.ownerId != null (
+        ownerId = project.ownerId.toStr()
+    )
+    if ownerId == "" (
+        ownerId = userIdForUsername(project.owner.toStr())
+    )
+    return mistwarpBenefitsForUserId(ownerId)
+)
+
+def roturBenefitsForTier(string rawTier) object (
+    string tier = normalizeRoturTier(rawTier)
+    object benefits = {
+        fileStorageBytes: 5000000,
+        accessProducts: 5,
+        transactionHistoryMonths: 1,
+        dailyCreditMultiplier: 1,
+        loginHistory: 10,
+        rmailMessages: 100,
+        clawPostLength: 300,
+        bioLength: 200,
+        bioTemplates: false,
+        animatedProfileMedia: false,
+        customAvatarOverlays: false,
+        customVideoBackground: false,
+        bannerUploadIncluded: false,
+        privateFriendNotes: false,
+        roturGateLinks: 20,
+        customGateNames: false,
+        fullSableCatalogue: false,
+        sableTokenDiscountPercent: 0
+    }
+    if tier == "Lite" (
+        benefits.fileStorageBytes = 25000000
+        benefits.accessProducts = 10
+        benefits.transactionHistoryMonths = 6
+        benefits.loginHistory = 25
+        benefits.rmailMessages = 250
+        benefits.clawPostLength = 400
+        benefits.bioLength = 300
+        benefits.bioTemplates = true
+    ) else if tier == "Plus" (
+        benefits.fileStorageBytes = 100000000
+        benefits.accessProducts = 20
+        benefits.transactionHistoryMonths = 12
+        benefits.dailyCreditMultiplier = 2
+        benefits.loginHistory = 100
+        benefits.rmailMessages = 1000
+        benefits.clawPostLength = 600
+        benefits.bioLength = 500
+        benefits.bioTemplates = true
+        benefits.animatedProfileMedia = true
+        benefits.customAvatarOverlays = true
+        benefits.privateFriendNotes = true
+        benefits.roturGateLinks = 100
+        benefits.customGateNames = true
+        benefits.fullSableCatalogue = true
+        benefits.sableTokenDiscountPercent = 25
+    ) else if tier == "Pro" (
+        benefits.fileStorageBytes = 1000000000
+        benefits.accessProducts = 50
+        benefits.transactionHistoryMonths = 0
+        benefits.dailyCreditMultiplier = 3
+        benefits.loginHistory = 100
+        benefits.rmailMessages = 100000
+        benefits.clawPostLength = 800
+        benefits.bioLength = 1000
+        benefits.bioTemplates = true
+        benefits.animatedProfileMedia = true
+        benefits.customAvatarOverlays = true
+        benefits.customVideoBackground = true
+        benefits.bannerUploadIncluded = true
+        benefits.privateFriendNotes = true
+        benefits.roturGateLinks = 1000
+        benefits.customGateNames = true
+        benefits.fullSableCatalogue = true
+        benefits.sableTokenDiscountPercent = 50
+    )
+    return benefits
+)
+
+def perkPlan(string tier) object (
+    return {
+        tier: tier,
+        mistwarp: mistwarpBenefitsForTier(tier),
+        rotur: roturBenefitsForTier(tier)
+    }
+)
+
+def currentPerks(*serve.Context c) object (
+    string tier = "Free"
+    if c.getBool("authenticated") (
+        tier = roturTierForUser(c.getString("userId"))
+    )
+    return {tier: tier, mistwarp: mistwarpBenefitsForTier(tier), rotur: roturBenefitsForTier(tier)}
+)
+
+def trimDayHistory(object history, number days) object (
+    if days <= 0 (
+        return history
+    )
+    object kept = {}
+    number today = (timestamp / 86400000).toInt()
+    array keys = history.getKeys().toArray()
+    for i keys.len (
+        string key = keys[i].toStr()
+        if today - key.toNum() < days (
+            kept[key] = history[key]
+        )
+    )
+    return kept
+)
+
+def trimTimedEntries(array entries, number days) array (
+    if days <= 0 (
+        return entries
+    )
+    array kept = []
+    number cutoff = timestamp - (days * 86400000)
+    for i entries.len (
+        object entry = entries[i].assert(object)
+        if entry.contains("at") and entry.at.toNum() >= cutoff (
+            kept.append(entry)
+        )
+    )
+    return kept
+)
+
+def handleGetPerks(*serve.Context c) (
+    object current = currentPerks(c)
+    c.json(200, {
+        ok: true,
+        current: current,
+        plans: [perkPlan("Free"), perkPlan("Lite"), perkPlan("Plus"), perkPlan("Pro")],
+        roturMembershipUrl: "https://rotur.dev/premium"
+    })
+)
