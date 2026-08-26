@@ -1956,7 +1956,7 @@ def handleCreateContribution(*serve.Context c) (
     if body.contains("body") (
         description = body.body.toStr()
     )
-    object created = createNativePull(c, parent, remix, title, description)
+    object created = createNativePull(c, parent, remix, title, description, "")
     if !created.ok (
         c.json(created.status.toInt(), {ok: false, error: created.error})
         return
