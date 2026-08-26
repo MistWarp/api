@@ -620,7 +620,7 @@ def inspectProjectJson(string path) object (
     return {ok: valid, targets: targets, md5ext: md5ext}
 )
 
-def uploadProjectFiles(object project, string extractDir) object (
+def uploadProjectFiles(object project, string extractDir, object benefits) object (
     array names = fs.readDir(extractDir).toArray()
     string jsonPath = extractDir ++ "/project.json"
     if !fs.exists(jsonPath) (
@@ -658,8 +658,10 @@ def uploadProjectFiles(object project, string extractDir) object (
                     return {ok: false, error: "too many assets", status: 400}
                 )
                 string assetPath = extractDir ++ "/" ++ name
-                if fs.getSize(assetPath) > maxAssetBytes (
-                    return {ok: false, error: "an asset exceeds the 10 MB limit: " ++ name, code: "project_too_large", status: 413}
+                number assetLimit = benefits.maxProjectAssetBytes.toNum()
+                if fs.getSize(assetPath) > assetLimit (
+                    number assetLimitMb = (assetLimit / 1048576).toInt()
+                    return {ok: false, error: "an asset exceeds your " ++ assetLimitMb.toStr() ++ " MB limit: " ++ name, code: "project_too_large", status: 413}
                 )
                 string content = fs.readFile(assetPath)
                 string actualHash = content.hashMD5()
@@ -709,8 +711,10 @@ def uploadProjectFiles(object project, string extractDir) object (
             assetBytes = assetBytes + knownAssets[name].toNum()
         )
     )
-    if assetBytes > maxProjectAssetsBytes (
-        return {ok: false, error: "project assets exceed the 50 MB limit", code: "project_too_large", status: 413}
+    number projectAssetLimit = benefits.maxProjectAssetsBytes.toNum()
+    if assetBytes > projectAssetLimit (
+        number projectAssetLimitMb = (projectAssetLimit / 1048576).toInt()
+        return {ok: false, error: "project assets exceed your " ++ projectAssetLimitMb.toStr() ++ " MB limit", code: "project_too_large", status: 413}
     )
 
     number uploaded = 0
@@ -875,6 +879,7 @@ def handleUploadProject(*serve.Context c) (
         return
     )
     object file = fileResult.unwrap().assert(object)
+    object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
 
     string uploader = normalizeUsername(c.getString("username"))
     number incomingBytes = file.size.toNum()
@@ -885,7 +890,7 @@ def handleUploadProject(*serve.Context c) (
     )
     if !c.getBool("isAdmin") (
         number usedBytes = weeklyUploadedBytes(uploader)
-        number uploadLimit = mistwarpBenefitsForUserId(c.getString("userId")).weeklyUploadBytes.toNum()
+        number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
         if usedBytes + incomingBytes > uploadLimit (
             number usedMb = (usedBytes / 1048576).toInt()
             number limitMb = (uploadLimit / 1048576).toInt()
@@ -903,7 +908,8 @@ def handleUploadProject(*serve.Context c) (
         return
     )
 
-    if !zip.decompressLimited(zipPath, extractDir, maxExtractedProjectBytes, maxAssetCount + 1) (
+    number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
+    if !zip.decompressLimited(zipPath, extractDir, extractedLimit, maxAssetCount + 1) (
         fs.remove(zipPath)
         fs.remove(extractDir)
         c.badRequest("invalid sb3 file")
@@ -922,7 +928,7 @@ def handleUploadProject(*serve.Context c) (
         return
     )
 
-    object uploadResult = uploadProjectFiles(project, extractDir)
+    object uploadResult = uploadProjectFiles(project, extractDir, projectBenefits)
 
     if !uploadResult.ok (
         fs.remove(zipPath)

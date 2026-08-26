@@ -207,7 +207,7 @@ def handleGetUserAdmin(*serve.Context c) (
         projects: ownerIndexEntries(name, true),
         quota: {
             used: weeklyUploadedBytes(name),
-            limit: mistwarpBenefitsForUserId(name).weeklyUploadBytes
+            limit: mistwarpBenefitsForUsername(name).weeklyUploadBytes
         }
     })
 )

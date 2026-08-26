@@ -85,18 +85,13 @@ number maxWorkspaceBytes = 134217728
 
 number maxProjectJsonBytes = 1073741824
 number maxStoredProjectJsonBytes = 20971520
-number maxAssetBytes = 10485760
 number maxThumbBytes = 1048576
 number maxAssetCount = 2000
-number maxProjectAssetsBytes = 52428800
-number maxExtractedProjectBytes = maxProjectJsonBytes + maxProjectAssetsBytes
-number weeklyUploadQuotaBytes = 104857600
 number quotaWindowMs = 604800000
 number uploadDebounceMs = 86400000
 number maxProjectExtensions = 100
 number maxExtensionSourceBytes = 2097152
 number maxProjectExtensionBytes = 10485760
-number maxProjectPrice = 100
 
 string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
 string port = configValue("PORT", "5627")
