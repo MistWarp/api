@@ -19,6 +19,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | PORT | 5627 | Listen port |
 | APP_URL | https://mwapi.mistium.com | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
+| COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
 | R2_ACCESS_KEY_ID | | R2 access key |

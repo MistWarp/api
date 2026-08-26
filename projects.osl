@@ -214,6 +214,7 @@ def projectResponse(object project, *serve.Context c) object (
         shared: project.shared,
         visibility: projectVisibility(project),
         price: price,
+        remixShare: project.contains("remixShare") ? project.remixShare : 0,
         locked: locked,
         bought: bought,
         saved: isInLibrary(viewer, project.id.toStr()),
@@ -474,6 +475,7 @@ def handleCreateProject(*serve.Context c) (
         shared: false,
         lastUploadAt: 0,
         remixParent: remixParent,
+        remixShare: remixParent == "" ? 0 : 10,
         remixNotified: false,
         scratchOrigin: scratchOrigin,
         views: 0,
@@ -1436,6 +1438,18 @@ def handleUpdateProject(*serve.Context c) (
             project.viewKey = randomString(16)
         )
     )
+    if body.contains("remixShare") (
+        if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
+            c.forbidden("only the owner can change the remix share")
+            return
+        )
+        number remixShare = body.remixShare.toNum()
+        if remixShare < 0 or remixShare > 50 (
+            c.badRequest("remix share must be between 0 and 50 percent")
+            return
+        )
+        project.remixShare = remixShare
+    )
     if body.contains("tags") (
         array incoming = body.tags.assert(array)
         array tags = []
@@ -1464,16 +1478,30 @@ def handleUpdateProject(*serve.Context c) (
         )
         array incoming = body.collaborators.assert(array)
         array collaborators = []
+        number totalShare = 0
         for i incoming.len (
             if collaborators.len < 25 (
                 object entry = incoming[i].assert(object)
                 string username = entry.username.toStr().strip()
                 string role = entry.role.toStr().toLower().strip()
                 boolean validRole = role == "maintainer" or role == "contributor" or role == "tester"
+                number share = 0
+                if entry.contains("share") and entry.share != null (
+                    share = entry.share.toNum()
+                )
+                if share < 0 or share > 50 (
+                    c.badRequest("each teammate share must be between 0 and 50 percent")
+                    return
+                )
                 if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
-                    collaborators.append({username: username, userId: userIdForUsername(username), role: role})
+                    totalShare = totalShare + share
+                    collaborators.append({username: username, userId: userIdForUsername(username), role: role, share: share})
                 )
             )
+        )
+        if totalShare > 70 (
+            c.badRequest("teammate revenue shares cannot exceed 70 percent")
+            return
         )
         project.collaborators = collaborators
     )
@@ -2047,6 +2075,7 @@ def handleRemixProject(*serve.Context c) (
         storedJsonBytes: copiedJsonBytes,
         remixParent: parent.id,
         remixRoot: parent.id,
+        remixShare: 10,
         remixNotified: false,
         scratchOrigin: "",
         views: 0,

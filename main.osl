@@ -111,6 +111,7 @@ array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
 string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
 string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
+string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
 number paywallFeePercent = configValue("PAYWALL_FEE_PERCENT", "10").toNum()
 string purchaseKeysFile = "data/purchase-keys.json"
 string pendingPayoutsFile = "data/pending-payouts.json"
