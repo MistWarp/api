@@ -37,7 +37,7 @@ def pullResponse(object pull) object (
     }
 )
 
-def createNativePull(*serve.Context c, object target, object source, string title, string description) object (
+def createNativePull(*serve.Context c, object target, object source, string title, string description, string bountyId) object (
     if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
         return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
     )
@@ -94,7 +94,8 @@ def createNativePull(*serve.Context c, object target, object source, string titl
         targetHead: projectGitHead(target),
         created: timestamp,
         updated: timestamp,
-        mergedCommit: ""
+        mergedCommit: "",
+        bountyId: bountyId
     }
     if !putDocument(pullDocs, id, pull) (
         return {ok: false, status: 500, error: "could not store the pull request"}
@@ -147,7 +148,11 @@ def handleCreatePull(*serve.Context c) (
     if body.contains("body") and body.body != null (
         description = body.body.toStr()
     )
-    object created = createNativePull(c, targetResult.project.assert(object), sourceResult.project.assert(object), body.title.toStr().strip(), description)
+    string bountyId = ""
+    if body.contains("bountyId") and body.bountyId != null (
+        bountyId = body.bountyId.toStr().strip()
+    )
+    object created = createNativePull(c, targetResult.project.assert(object), sourceResult.project.assert(object), body.title.toStr().strip(), description, bountyId)
     if !created.ok (
         c.json(created.status.toInt(), {ok: false, error: created.error})
         return
@@ -262,5 +267,11 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
     saveProject(project)
     upsertIndexEntry(project)
     addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", {projectId: project.id, projectTitle: project.title, pull: pull.index})
+    if pull.contains("bountyId") and pull.bountyId != null and pull.bountyId.toStr() != "" (
+        boolean bountyPaid = awardContributionBounty(pull.bountyId.toStr(), project.id.toStr(), pull.sourceOwner.toStr())
+        if !bountyPaid (
+            log "WARNING: could not award contribution bounty " ++ pull.bountyId.toStr()
+        )
+    )
     return true
 )

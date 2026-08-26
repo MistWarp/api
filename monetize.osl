@@ -174,6 +174,147 @@ def verifyIncomingTransfer(string fromLower, string note, number minAmount) bool
     return false
 )
 
+def addCommerceSplit(object totals, string username, number basisPoints) (
+    string normalized = normalizeUsername(username)
+    if normalized == "" or basisPoints <= 0 (
+        return
+    )
+    number current = 0
+    if totals.contains(normalized) (
+        current = totals[normalized].toNum()
+    )
+    totals[normalized] = current + basisPoints
+)
+
+def projectCommerceSplits(object project) array (
+    object totals = {}
+    number platformPoints = (paywallFeePercent * 100).toInt()
+    if platformPoints < 0 (
+        platformPoints = 0
+    )
+    if platformPoints > 5000 (
+        platformPoints = 5000
+    )
+    string platformUser = mistwarpAccountUser()
+    number allocated = 0
+    if platformUser != "" and platformPoints > 0 (
+        addCommerceSplit(totals, platformUser, platformPoints)
+        allocated = platformPoints
+    )
+    if project.contains("collaborators") and project.collaborators != null (
+        array collaborators = project.collaborators.assert(array)
+        for i collaborators.len (
+            object collaborator = collaborators[i].assert(object)
+            number share = 0
+            if collaborator.contains("share") and collaborator.share != null (
+                share = (collaborator.share.toNum() * 100).toInt()
+            )
+            if share > 0 and allocated + share <= 9000 (
+                addCommerceSplit(totals, collaborator.username.toStr(), share)
+                allocated = allocated + share
+            )
+        )
+    )
+
+    if project.contains("remixParent") and project.remixParent.toStr() != "" (
+        number remixPoints = 1000
+        if project.contains("remixShare") and project.remixShare != null (
+            remixPoints = (project.remixShare.toNum() * 100).toInt()
+        )
+        auto parentResult = loadProject(project.remixParent.toStr())
+        if parentResult.ok and remixPoints > 0 and allocated + remixPoints <= 9000 (
+            addCommerceSplit(totals, parentResult.project.owner.toStr(), remixPoints)
+            allocated = allocated + remixPoints
+        )
+    )
+
+    addCommerceSplit(totals, project.owner.toStr(), 10000 - allocated)
+    array result = []
+    array usernames = totals.getKeys().toArray()
+    for i usernames.len (
+        string username = usernames[i].toStr()
+        result.append({username: username, basis_points: totals[username].toNum().toInt()})
+    )
+    return result
+)
+
+def ownerAmountFromSplits(object project, number amount, array splits) number (
+    string owner = normalizeUsername(project.owner.toStr())
+    for i splits.len (
+        object split = splits[i].assert(object)
+        if normalizeUsername(split.username.toStr()) == owner (
+            return (amount * split.basis_points.toNum()) / 10000
+        )
+    )
+    return 0
+)
+
+def verifyCommerceProjectPayment(string paymentId, string buyer, object project, number amount, array expectedSplits) boolean (
+    if commerceServiceKey == "" or paymentId == "" (
+        return false
+    )
+    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+    if !resp.success or resp.status.toInt() != 200 (
+        return false
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        return false
+    )
+    object payload = parsed.unwrap().assert(object)
+    if !payload.contains("payment") or payload.payment == null (
+        return false
+    )
+    object payment = payload.payment.assert(object)
+    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "project_sale" (
+        return false
+    )
+    if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
+        return false
+    )
+    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < amount (
+        return false
+    )
+    array actual = payment.recipients.assert(array)
+    if actual.len != expectedSplits.len (
+        return false
+    )
+    for i expectedSplits.len (
+        object expected = expectedSplits[i].assert(object)
+        boolean found = false
+        for j actual.len (
+            object recipient = actual[j].assert(object)
+            if normalizeUsername(recipient.username.toStr()) == normalizeUsername(expected.username.toStr()) and recipient.basis_points.toNum().toInt() == expected.basis_points.toNum().toInt() (
+                found = true
+            )
+        )
+        if !found (
+            return false
+        )
+    )
+    return true
+)
+
+def awardContributionBounty(string bountyId, string projectId, string recipient) boolean (
+    if bountyId == "" or commerceServiceKey == "" (
+        return false
+    )
+    object response = requests.post(
+        roturBase ++ "/v2/commerce/bounties/" ++ url.escape(bountyId) ++ "/service-award",
+        {
+            headers: {"X-Commerce-Key": commerceServiceKey, "Content-Type": "application/json"},
+            body: json.stringify({
+                source: "mistwarp",
+                recipient: recipient,
+                resource_type: "project",
+                resource_id: projectId
+            })
+        }
+    )
+    return response.success and response.status.toInt() == 200
+)
+
 def loadPurchaseKeys() object (
     auto result = readFile(purchaseKeysFile)
     if !result.ok (
@@ -448,7 +589,7 @@ def recordSale(object project, string buyer, number price, number sellerAmount) 
 )
 
 def handlePurchaseIntent(*serve.Context c) (
-    if mistwarpRoturToken == "" (
+    if commerceServiceKey == "" (
         c.json(503, {ok: false, error: "purchases are not available right now"})
         return
     )
@@ -477,12 +618,6 @@ def handlePurchaseIntent(*serve.Context c) (
         return
     )
 
-    string payTo = mistwarpAccountUser()
-    if payTo == "" (
-        c.internalError("could not start the purchase, try again")
-        return
-    )
-
     string key = "mwbuy_" ++ randomString(16)
     object store = prunePurchaseKeys(loadPurchaseKeys())
     object keys = store.keys
@@ -490,11 +625,11 @@ def handlePurchaseIntent(*serve.Context c) (
     store.keys = keys
     savePurchaseKeys(store)
 
-    c.json(200, {ok: true, key: key, payTo: payTo, amount: price})
+    c.json(200, {ok: true, key: key, amount: price, title: project.title, splits: projectCommerceSplits(project)})
 )
 
 def handlePurchaseConfirm(*serve.Context c) (
-    if mistwarpRoturToken == "" (
+    if commerceServiceKey == "" (
         c.json(503, {ok: false, error: "purchases are not available right now"})
         return
     )
@@ -525,6 +660,14 @@ def handlePurchaseConfirm(*serve.Context c) (
         c.badRequest("missing purchase key")
         return
     )
+    string paymentId = ""
+    if body.contains("paymentId") and body.paymentId != null (
+        paymentId = body.paymentId.toStr().strip()
+    )
+    if paymentId == "" (
+        c.badRequest("missing payment id")
+        return
+    )
 
     object store = loadPurchaseKeys()
     object keys = store.keys
@@ -542,26 +685,18 @@ def handlePurchaseConfirm(*serve.Context c) (
         owed = maxProjectPrice
     )
 
-    if !verifyIncomingTransfer(buyerLower, key, owed) (
+    array splits = projectCommerceSplits(project)
+    if !verifyCommerceProjectPayment(paymentId, buyerLower, project, owed, splits) (
         c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
         return
     )
 
     string seller = project.owner.toStr()
-    number sellerAmount = owed
-    if paywallFeePercent > 0 (
-        sellerAmount = owed - ((owed * paywallFeePercent) / 100)
-    )
-    boolean paidOut = payoutTo(seller, sellerAmount, "MistWarp sale")
+    number sellerAmount = ownerAmountFromSplits(project, owed, splits)
 
     keys.delete(key)
     store.keys = keys
     savePurchaseKeys(store)
-
-    if !paidOut (
-        log "WARNING: paywall payout failed for project " ++ project.id.toStr() ++ " to " ++ seller ++ " amount " ++ sellerAmount.toStr()
-        recordPendingPayout(project.id.toStr(), seller, buyer, sellerAmount)
-    )
 
     recordSale(project, buyer, owed, sellerAmount)
     if addToLibrary(buyerLower, project.id.toStr()) (
@@ -573,5 +708,5 @@ def handlePurchaseConfirm(*serve.Context c) (
     addPurchaseRecord(buyerLower, {projectId: project.id.toStr(), title: project.title, seller: seller, amount: owed, at: timestamp})
     addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
 
-    c.json(200, {ok: true, paidOut: paidOut, project: projectResponse(project, c)})
+    c.json(200, {ok: true, paidOut: true, project: projectResponse(project, c)})
 )
