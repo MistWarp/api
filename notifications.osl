@@ -232,14 +232,19 @@ def postRoturNotification(string target, string actor, string notifType, object 
 
 
 def addNotification(string target, string actor, string notifType, object extra) (
-    object payload = sanitizeNotificationPayload(extra, notifType, actor)
     string targetKey = normalizeUsername(target)
-    if targetKey == "" or targetKey == normalizeUsername(actor) (
+    string actorKey = normalizeUsername(actor)
+    if targetKey == "" or targetKey == actorKey (
         return
     )
-    if usersAreBlocked(target, actor) or loadSafety(target).muted.assert(array).contains(normalizeUsername(actor)) (
+    object targetSafety = loadSafety(target)
+    if targetSafety.blocked.assert(array).contains(actorKey) or targetSafety.muted.assert(array).contains(actorKey) (
         return
     )
+    if userHasBlocked(actor, target) (
+        return
+    )
+    object payload = sanitizeNotificationPayload(extra, notifType, actor)
 
     object item = {
         id: "n" ++ randomString(12),

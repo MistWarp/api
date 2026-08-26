@@ -31,6 +31,7 @@ def loadBans() object (
 
 def saveBans(object data) boolean (
     bansCache.delete("bans")
+    sharedProjectsCache.delete("projects")
     return writeFile(bansFile, data)
 )
 
@@ -194,12 +195,10 @@ def handleListBans(*serve.Context c) (
 
 def handleListUsers(*serve.Context c) (
     array userFiles = fs.readDir(usersDir).toArray()
-    object index = loadIndex()
-    object projects = index.projects
-    array pkeys = projects.getKeys().toArray()
+    array projects = projectSearchDocs.all()
     object ownerCounts = {}
-    for i pkeys.len (
-        object entry = projects[pkeys[i].toStr()]
+    for i projects.len (
+        object entry = projects[i].assert(object)
         string owner = normalizeUsername(entry.owner.toStr())
         number prev = 0
         if ownerCounts.contains(owner) (
@@ -236,17 +235,15 @@ def handleListUsers(*serve.Context c) (
 )
 
 def handleAdminStats(*serve.Context c) (
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
-    number totalProjects = keys.len
+    array projects = projectSearchDocs.all()
+    number totalProjects = projects.len
     number sharedProjects = 0
     number totalBytes = 0
     number totalViews = 0
     number totalLoves = 0
     object projectsByDay = {}
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
+    for i projects.len (
+        object entry = projects[i].assert(object)
         if entry.shared == true (
             sharedProjects = sharedProjects + 1
         )
@@ -333,12 +330,10 @@ def handleAdminStats(*serve.Context c) (
 
 def handleAdminSearchProjects(*serve.Context c) (
     string q = c.query("q").toLower().strip()
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
+    array projects = projectSearchDocs.all()
     array matches = []
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
+    for i projects.len (
+        object entry = projects[i].assert(object)
         string hay = (entry.title.toStr() ++ " " ++ entry.owner.toStr() ++ " " ++ entry.id.toStr()).toLower()
         if q == "" or hay.contains(q) (
             matches.append(entry)
@@ -396,10 +391,16 @@ def handleReportAction(*serve.Context c) (
         )
         object project = result.project.assert(object)
         project.shared = false
+        project.visibility = "private"
         project.viewKey = randomString(16)
         project.edited = timestamp
         saveProject(project)
         upsertIndexEntry(project)
+        object ownerProfile = loadProfile(project.owner.toStr())
+        if ownerProfile.featuredProject.toStr() == project.id.toStr() (
+            ownerProfile.featuredProject = ""
+            saveProfile(ownerProfile)
+        )
     )
     if action == "ban_user" (
         string name = reportTargetUser(found)
@@ -426,7 +427,15 @@ def handleReportAction(*serve.Context c) (
         if found.type.toStr() == "project" (
             auto pr = loadProject(found.target.toStr())
             if pr.ok (
-                purgeProject(pr.project.assert(object))
+                object removedProject = pr.project.assert(object)
+                purgeProject(removedProject)
+                deleteProjectCommunityRecords(found.target.toStr())
+                removeProjectFromSpaces(found.target.toStr())
+                object ownerProfile = loadProfile(removedProject.owner.toStr())
+                if ownerProfile.featuredProject.toStr() == removedProject.id.toStr() (
+                    ownerProfile.featuredProject = ""
+                    saveProfile(ownerProfile)
+                )
             )
         )
     )

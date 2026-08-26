@@ -7,19 +7,27 @@ def createComment(string key, string author, string authorId, string content, st
         return {ok: false, error: "comment too long"}
     )
 
-    array comments = loadComments(key)
+    string lockName = "comments:" ++ key
+    sync.lock(lockName)
+    string commentsPath = commentsDir ++ key ++ ".jsonl"
+    boolean hasJsonLines = fs.exists(commentsPath)
+    array comments = []
+    if parentId != "" or !hasJsonLines (
+        comments = loadComments(key)
+    )
 
     string parentAuthor = ""
     if parentId != "" (
         boolean parentOk = false
         for i comments.len (
             object existing = comments[i]
-            if existing.id.toStr() == parentId and existing.parent.toStr() == "" (
+            if existing.id.toStr() == parentId and commentParentId(existing) == "" (
                 parentOk = true
                 parentAuthor = existing.author.toStr()
             )
         )
         if !parentOk (
+            sync.unlock(lockName)
             return {ok: false, error: "invalid parent comment"}
         )
     )
@@ -33,18 +41,29 @@ def createComment(string key, string author, string authorId, string content, st
         parent: parentId,
         kind: kind
     }
-    if fs.exists(commentsDir ++ key ++ ".jsonl") (
-        appendComment(key, comment)
+    boolean saved = false
+    if hasJsonLines (
+        saved = appendComment(key, comment)
     ) else (
         comments.append(comment)
-        saveComments(key, comments)
+        saved = saveComments(key, comments)
+    )
+    sync.unlock(lockName)
+    if !saved (
+        return {ok: false, error: "could not save comment"}
     )
     return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 
-def notifyMentions(string content, string actor, string skip, object extra) (
+def notifyMentions(string content, string actor, array skip, object extra) (
     array tokens = regex.findAll("(^|[^A-Za-z0-9_])@[A-Za-z0-9_]+", content)
-    array notified = [normalizeUsername(skip)]
+    array notified = [normalizeUsername(actor)]
+    for i skip.len (
+        string skipped = normalizeUsername(skip[i].toStr())
+        if skipped != "" and !notified.contains(skipped) (
+            notified.append(skipped)
+        )
+    )
     for i tokens.len (
         array parts = tokens[i].toStr().split("@")
         string name = normalizeUsername(parts[2].toStr())
@@ -55,7 +74,16 @@ def notifyMentions(string content, string actor, string skip, object extra) (
     )
 )
 
+def commentParentId(object comment) string (
+    if comment.contains("parent") and comment.parent != null (
+        return comment.parent.toStr()
+    )
+    return ""
+)
+
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
+    string lockName = "comments:" ++ key
+    sync.lock(lockName)
     array comments = loadComments(key)
     object target = {}
     boolean found = false
@@ -67,6 +95,7 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
         )
     )
     if !found (
+        sync.unlock(lockName)
         return {ok: false, error: "comment not found", status: 404}
     )
 
@@ -75,18 +104,78 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
     allowed = allowed or requesterKey == normalizeUsername(target.author.toStr())
     allowed = allowed or requesterKey == normalizeUsername(moderator)
     if !allowed (
+        sync.unlock(lockName)
         return {ok: false, error: "not allowed", status: 403}
     )
 
     array next = []
     for i comments.len (
         object existing = comments[i]
-        if existing.id.toStr() != cid and existing.parent.toStr() != cid (
+        if existing.id.toStr() != cid and commentParentId(existing) != cid (
             next.append(existing)
         )
     )
-    saveComments(key, next)
-    return {ok: true}
+    boolean saved = saveComments(key, next)
+    sync.unlock(lockName)
+    if !saved (
+        return {ok: false, error: "could not delete comment", status: 500}
+    )
+    return {ok: true, removed: comments.len - next.len}
+)
+
+def commentPage(array comments, *serve.Context c) object (
+    array roots = []
+    for i comments.len (
+        object comment = comments[i].assert(object)
+        if commentParentId(comment) == "" (
+            roots.append(comment)
+        )
+    )
+    roots.sortBy("created", "descending")
+    number totalRoots = roots.len
+    number requestedLimit = c.queryInt("limit", 0)
+    if requestedLimit <= 0 or c.queryBool("all", false) (
+        return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots}
+    )
+    number offset = clampNumber(c.queryInt("offset", 0), 0, totalRoots)
+    number limit = clampNumber(requestedLimit, 1, 100)
+    array selectedRoots = paginate(roots, offset, limit)
+    object selected = {}
+    for i selectedRoots.len (
+        selected[selectedRoots[i].id.toStr()] = true
+    )
+    string anchor = c.query("anchor")
+    if anchor != "" (
+        string anchorRoot = ""
+        for i comments.len (
+            object comment = comments[i].assert(object)
+            if comment.id.toStr() == anchor (
+                anchorRoot = comment.id.toStr()
+                if commentParentId(comment) != "" (
+                    anchorRoot = commentParentId(comment)
+                )
+            )
+        )
+        if anchorRoot != "" (
+            selected[anchorRoot] = true
+        )
+    )
+    array page = []
+    for i comments.len (
+        object comment = comments[i].assert(object)
+        string rootId = comment.id.toStr()
+        if commentParentId(comment) != "" (
+            rootId = commentParentId(comment)
+        )
+        if selected.contains(rootId) (
+            page.append(comment)
+        )
+    )
+    return {
+        comments: page,
+        totalRoots: totalRoots,
+        nextOffset: clampNumber(offset + limit, 0, totalRoots)
+    }
 )
 
 def handleGetProjectComments(*serve.Context c) (
@@ -100,16 +189,24 @@ def handleGetProjectComments(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    array comments = loadComments("project-" ++ project.id.toStr())
+    object page = commentPage(loadComments("project-" ++ project.id.toStr()), c)
+    array comments = page.comments.assert(array)
+    object playtimeByAuthor = {}
     for i comments.len (
         object comment = comments[i].assert(object)
         if !comment.contains("kind") or comment.kind == null (
             comment.kind = "comment"
         )
-        comment.playtimeMs = projectPlaytime(project.id.toStr(), comment.author.toStr())
+        string authorKey = normalizeUsername(comment.author.toStr())
+        if !playtimeByAuthor.contains(authorKey) (
+            playtimeByAuthor[authorKey] = projectPlaytime(project.id.toStr(), comment.author.toStr())
+        )
+        comment.playtimeMs = playtimeByAuthor[authorKey]
         comments[i] = comment
     )
-    c.json(200, {ok: true, comments: comments})
+    page.ok = true
+    page.comments = comments
+    c.json(200, page)
 )
 
 def handleCreateProjectComment(*serve.Context c) (
@@ -170,7 +267,7 @@ def handleCreateProjectComment(*serve.Context c) (
     if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
         addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     )
-    notifyMentions(created.comment.content.toStr(), commenter, project.owner.toStr(), {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+    notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     c.json(201, created)
 )
 
@@ -205,7 +302,10 @@ def profileCommentsOff(string name) boolean (
 
 def handleGetProfileComments(*serve.Context c) (
     string name = c.param("name")
-    c.json(200, {ok: true, comments: loadComments(profileCommentKey(name)), commentsOff: profileCommentsOff(name)})
+    object page = commentPage(loadComments(profileCommentKey(name)), c)
+    page.ok = true
+    page.commentsOff = profileCommentsOff(name)
+    c.json(200, page)
 )
 
 def handleCreateProfileComment(*serve.Context c) (
@@ -248,7 +348,7 @@ def handleCreateProfileComment(*serve.Context c) (
     if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
         addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId})
     )
-    notifyMentions(created.comment.content.toStr(), commenter, name, {profile: name, commentId: newCommentId})
+    notifyMentions(created.comment.content.toStr(), commenter, [name, parentAuthor], {profile: name, commentId: newCommentId})
     c.json(201, created)
 )
 
@@ -271,6 +371,8 @@ def reactToComment(*serve.Context c, string key) (
     )
     string username = normalizeUsername(c.getString("username"))
     string cid = c.param("cid")
+    string lockName = "comments:" ++ key
+    sync.lock(lockName)
     array comments = loadComments(key)
     boolean found = false
     for i comments.len (
@@ -286,10 +388,16 @@ def reactToComment(*serve.Context c, string key) (
         )
     )
     if !found (
+        sync.unlock(lockName)
         c.notFound("comment not found")
         return
     )
-    saveComments(key, comments)
+    boolean saved = saveComments(key, comments)
+    sync.unlock(lockName)
+    if !saved (
+        c.internalError("could not save reaction")
+        return
+    )
     c.json(200, {ok: true})
 )
 
@@ -304,9 +412,22 @@ def handleReactProjectComment(*serve.Context c) (
         c.notFound("project not found")
         return
     )
+    if !canInteractProject(project, c) (
+        c.json(403, {ok: false, error: "buy this project to react to its comments"})
+        return
+    )
     reactToComment(c, "project-" ++ project.id.toStr())
 )
 
 def handleReactProfileComment(*serve.Context c) (
-    reactToComment(c, profileCommentKey(c.param("name")))
+    string name = c.param("name")
+    if !profileExists(name) (
+        c.notFound("this user is not on MistWarp")
+        return
+    )
+    if usersAreBlocked(c.getString("username"), name) (
+        c.forbidden("you cannot react to comments on this profile")
+        return
+    )
+    reactToComment(c, profileCommentKey(name))
 )

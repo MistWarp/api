@@ -40,6 +40,10 @@ def updateSafetyList(*serve.Context c, string field, boolean add) (
         c.badRequest("choose another MistWarp user")
         return
     )
+    if add and !profileExists(target) (
+        c.notFound("user not found")
+        return
+    )
     object safety = loadSafety(username)
     array values = safety[field].assert(array)
     values = removeString(values, target)
@@ -90,6 +94,24 @@ def removeUserFromSafetyLists(string username) (
             )
         )
     )
+)
+
+def renameUserSafety(string oldKey, string newKey) boolean (
+    renameUserFile(safetyDir, oldKey, newKey)
+    array files = fs.readDir(safetyDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = readFile(safetyDir ++ name)
+            if result.ok (
+                object safety = result.data.assert(object)
+                safety.blocked = replaceUserInArray(safety.blocked.assertElse(array, []), oldKey, newKey)
+                safety.muted = replaceUserInArray(safety.muted.assertElse(array, []), oldKey, newKey)
+                writeFile(safetyDir ++ name, safety)
+            )
+        )
+    )
+    return true
 )
 
 def handleGetMySafety(*serve.Context c) (
@@ -168,13 +190,25 @@ def handleDeleteMyData(*serve.Context c) (
     )
     string userId = c.getString("userId")
     array ownedProjects = ownerIndexEntries(username, true)
+    array ownedProjectIds = []
+    array projectsToPurge = []
     for i ownedProjects.len (
         object projectEntry = ownedProjects[i].assert(object)
-        auto loaded = loadProject(projectEntry.id.toStr())
+        string projectId = projectEntry.id.toStr()
+        ownedProjectIds.append(projectId)
+        auto loaded = loadProject(projectId)
         if loaded.ok (
-            purgeProject(loaded.project.assert(object))
+            projectsToPurge.append(loaded.project.assert(object))
         )
     )
+    purgeProjects(projectsToPurge)
+    for i ownedProjectIds.len (
+        deleteProjectCommunityRecords(ownedProjectIds[i].toStr())
+    )
+    purgeUserFromSpaces(username)
+    removeProjectsFromSpaces(ownedProjectIds)
+    purgeUserCommunityRecords(username)
+    purgeUserFromNews(username)
     purgeUser(userId, username)
     removeUserFromSafetyLists(username)
     fs.remove(safetyPath(username))
