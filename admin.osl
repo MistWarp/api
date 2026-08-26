@@ -235,13 +235,26 @@ def handleListUsers(*serve.Context c) (
 )
 
 def handleAdminStats(*serve.Context c) (
+    number days = 30
+    if c.query("days") != "" (
+        days = c.query("days").toNum().toInt()
+        if days < 7 (
+            days = 7
+        )
+        if days > 365 (
+            days = 365
+        )
+    )
+    number since = timestamp - (days * 86400000)
     array projects = projectSearchDocs.all()
     number totalProjects = projects.len
     number sharedProjects = 0
     number totalBytes = 0
     number totalViews = 0
     number totalLoves = 0
+    number totalRemixes = 0
     object projectsByDay = {}
+    object projectUpdatesByDay = {}
     for i projects.len (
         object entry = projects[i].assert(object)
         if entry.shared == true (
@@ -256,18 +269,37 @@ def handleAdminStats(*serve.Context c) (
         if entry.contains("loveCount") and entry.loveCount != null (
             totalLoves = totalLoves + entry.loveCount.toNum()
         )
+        if entry.contains("remixParent") and entry.remixParent != null and entry.remixParent.toStr() != "" (
+            totalRemixes = totalRemixes + 1
+        )
         string dk = (entry.created.toNum() / 86400000).toInt().toStr()
         number prev = 0
         if projectsByDay.contains(dk) (
             prev = projectsByDay[dk].toNum()
         )
         projectsByDay[dk] = prev + 1
+        string editKey = (entry.edited.toNum() / 86400000).toInt().toStr()
+        number previousUpdates = 0
+        if projectUpdatesByDay.contains(editKey) (
+            previousUpdates = projectUpdatesByDay[editKey].toNum()
+        )
+        projectUpdatesByDay[editKey] = previousUpdates + 1
     )
     array userFiles = fs.readDir(usersDir).toArray()
     number totalUsers = 0
+    object usersByDay = {}
     for i userFiles.len (
         if userFiles[i].toStr().endsWith(".json") (
             totalUsers = totalUsers + 1
+            object profile = loadProfile(userFiles[i].toStr().replace(".json", ""))
+            if profile.contains("created") and profile.created != null (
+                string userDay = (profile.created.toNum() / 86400000).toInt().toStr()
+                number previousUsers = 0
+                if usersByDay.contains(userDay) (
+                    previousUsers = usersByDay[userDay].toNum()
+                )
+                usersByDay[userDay] = previousUsers + 1
+            )
         )
     )
     array sessionFiles = fs.readDir(sessionsDir).toArray()
@@ -288,6 +320,84 @@ def handleAdminStats(*serve.Context c) (
                 loginsByDay[dk] = prev + 1
             )
         )
+    )
+    array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+    object loadsByDay = {}
+    object startsByDay = {}
+    object crashesByDay = {}
+    object loadTimeTotalsByDay = {}
+    object loadSamplesByDay = {}
+    object averageLoadMsByDay = {}
+    number totalLoads = 0
+    number totalStarts = 0
+    number totalCrashes = 0
+    number loadTimeTotal = 0
+    number loadTimeSamples = 0
+    number desktopLoads = 0
+    number touchLoads = 0
+    number otherLoads = 0
+    for i diagnostics.len (
+        object diagnostic = diagnostics[i].assert(object)
+        string diagnosticDay = (diagnostic.created.toNum() / 86400000).toInt().toStr()
+        string kind = diagnostic.type.toStr()
+        if kind == "load" (
+            totalLoads = totalLoads + 1
+            number previousLoads = 0
+            if loadsByDay.contains(diagnosticDay) (
+                previousLoads = loadsByDay[diagnosticDay].toNum()
+            )
+            loadsByDay[diagnosticDay] = previousLoads + 1
+            if diagnostic.device.toStr() == "desktop" (
+                desktopLoads = desktopLoads + 1
+            ) else if diagnostic.device.toStr() == "touch" (
+                touchLoads = touchLoads + 1
+            ) else (
+                otherLoads = otherLoads + 1
+            )
+            if diagnostic.loadMs.toNum() > 0 (
+                number loadMs = diagnostic.loadMs.toNum()
+                loadTimeTotal = loadTimeTotal + loadMs
+                loadTimeSamples = loadTimeSamples + 1
+                number previousLoadTime = 0
+                number previousSamples = 0
+                if loadTimeTotalsByDay.contains(diagnosticDay) (
+                    previousLoadTime = loadTimeTotalsByDay[diagnosticDay].toNum()
+                )
+                if loadSamplesByDay.contains(diagnosticDay) (
+                    previousSamples = loadSamplesByDay[diagnosticDay].toNum()
+                )
+                loadTimeTotalsByDay[diagnosticDay] = previousLoadTime + loadMs
+                loadSamplesByDay[diagnosticDay] = previousSamples + 1
+            )
+        ) else if kind == "start" (
+            totalStarts = totalStarts + 1
+            number previousStarts = 0
+            if startsByDay.contains(diagnosticDay) (
+                previousStarts = startsByDay[diagnosticDay].toNum()
+            )
+            startsByDay[diagnosticDay] = previousStarts + 1
+        ) else if kind == "crash" (
+            totalCrashes = totalCrashes + 1
+            number previousCrashes = 0
+            if crashesByDay.contains(diagnosticDay) (
+                previousCrashes = crashesByDay[diagnosticDay].toNum()
+            )
+            crashesByDay[diagnosticDay] = previousCrashes + 1
+        )
+    )
+    array loadDays = loadSamplesByDay.getKeys().toArray()
+    for i loadDays.len (
+        string loadDay = loadDays[i].toStr()
+        averageLoadMsByDay[loadDay] = loadTimeTotalsByDay[loadDay].toNum() / loadSamplesByDay[loadDay].toNum()
+    )
+    number averageLoadMs = 0
+    if loadTimeSamples > 0 (
+        averageLoadMs = loadTimeTotal / loadTimeSamples
+    )
+    number totalPlaytimeMs = 0
+    array playtime = playtimeDocs.all()
+    for i playtime.len (
+        totalPlaytimeMs = totalPlaytimeMs + playtime[i].duration.toNum()
     )
     array reports = loadReports()
     number openReports = 0
@@ -323,8 +433,27 @@ def handleAdminStats(*serve.Context c) (
         newsPosts: news.len,
         pendingPayouts: pendingPayouts.len,
         pendingPayoutAmount: pendingPayoutAmount,
+        days: days,
+        averageProjectBytes: totalProjects > 0 ? totalBytes / totalProjects 0,
+        averageViews: totalProjects > 0 ? totalViews / totalProjects 0,
+        averageLoves: totalProjects > 0 ? totalLoves / totalProjects 0,
+        totalRemixes: totalRemixes,
+        totalPlaytimeMs: totalPlaytimeMs,
+        totalLoads: totalLoads,
+        totalStarts: totalStarts,
+        totalCrashes: totalCrashes,
+        averageLoadMs: averageLoadMs,
+        loadTimeSamples: loadTimeSamples,
+        loadsByDevice: {desktop: desktopLoads, touch: touchLoads, other: otherLoads},
         projectsByDay: projectsByDay,
-        loginsByDay: loginsByDay
+        projectUpdatesByDay: projectUpdatesByDay,
+        usersByDay: usersByDay,
+        loginsByDay: loginsByDay,
+        loadsByDay: loadsByDay,
+        startsByDay: startsByDay,
+        crashesByDay: crashesByDay,
+        averageLoadMsByDay: averageLoadMsByDay,
+        loadSamplesByDay: loadSamplesByDay
     })
 )
 
