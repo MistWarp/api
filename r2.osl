@@ -223,6 +223,30 @@ def r2Remove(string key) boolean (
     return result.ok == true
 )
 
+def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
+    if !project.contains("workspaceKey") or project.workspaceKey.toStr() == "" (
+        return false
+    )
+    string key = project.workspaceKey.toStr()
+    string localPath = localBlobPath(key)
+    if fs.exists(localPath) (
+        return zip.copyFile(localPath, outputPath)
+    )
+    if r2Local (
+        return false
+    )
+    auto existing = r2Client.get({key: key})
+    if !existing.ok or existing.status.toInt() != 200 (
+        return false
+    )
+    string body = existing.body.toStr()
+    return fs.writeFileBytes(outputPath, raw("[]byte(body)"))
+)
+
+def mergeWorkspaceArchives(string basePath, string deltaPath, string outputPath) boolean (
+    return raw("func() bool { output, err := OSLos.Create(outputPath); if err != nil { return false }; writer := OSLgozip.NewWriter(output); seen := map[string]bool{}; fileCount := 0; var expandedBytes uint64; copyArchive := func(sourcePath string) bool { reader, openErr := OSLgozip.OpenReader(sourcePath); if openErr != nil { return false }; defer reader.Close(); for _, item := range reader.File { name := item.Name; cleanName := OSLstrings.TrimSuffix(name, \"/\"); unsafe := cleanName == \"\" || OSLstrings.HasPrefix(cleanName, \"/\") || OSLstrings.Contains(cleanName, \"\\\\\"); for _, part := range OSLstrings.Split(cleanName, \"/\") { if part == \"\" || part == \".\" || part == \"..\" { unsafe = true } }; if unsafe { return false }; if seen[name] { continue }; seen[name] = true; fileCount++; if fileCount > 20000 || item.UncompressedSize64 > 536870912-expandedBytes { return false }; expandedBytes += item.UncompressedSize64; source, readErr := item.Open(); if readErr != nil { return false }; header := item.FileHeader; target, createErr := writer.CreateHeader(&header); if createErr != nil { source.Close(); return false }; _, copyErr := OSLio.Copy(target, source); closeErr := source.Close(); if copyErr != nil || closeErr != nil { return false } }; return true }; ok := copyArchive(deltaPath) && copyArchive(basePath); closeErr := writer.Close(); fileCloseErr := output.Close(); if !ok || closeErr != nil || fileCloseErr != nil { OSLos.Remove(outputPath); return false }; return true }()")
+)
+
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     string localPath = localProjectJsonPathFor(project, 0)
     if localPath != "" (

@@ -846,6 +846,24 @@ def handleUploadProject(*serve.Context c) (
         return
     )
 
+    string gitMetadata = c.formValue("git")
+    object gitInfo = {}
+    if gitMetadata != "" (
+        auto parsedGit = json.parse(gitMetadata, {type: "object"})
+        if parsedGit.isErr() (
+            c.badRequest("invalid MistWarp history metadata")
+            return
+        )
+        gitInfo = parsedGit.unwrap().assert(object)
+        if gitInfo.contains("delta") and gitInfo.delta == true (
+            string baseHead = (gitInfo.baseHead ?? "").toStr()
+            if baseHead == "" or baseHead != currentHead or !projectHasWorkspace(project) (
+                c.json(409, {ok: false, error: "the saved project history changed", code: "workspace_base_changed", currentHead: currentHead})
+                return
+            )
+        )
+    )
+
     auto fileResult = c.formFile("project")
     if fileResult.isErr() (
         c.badRequest("missing project file")
@@ -855,6 +873,11 @@ def handleUploadProject(*serve.Context c) (
 
     string uploader = normalizeUsername(c.getString("username"))
     number incomingBytes = file.size.toNum()
+    auto workspaceResult = c.formFile("workspace")
+    if !workspaceResult.isErr() (
+        object incomingWorkspace = workspaceResult.unwrap().assert(object)
+        incomingBytes += incomingWorkspace.size.toNum()
+    )
     if !c.getBool("isAdmin") (
         number usedBytes = weeklyUploadedBytes(uploader)
         if usedBytes + incomingBytes > weeklyUploadQuotaBytes (
@@ -935,7 +958,6 @@ def handleUploadProject(*serve.Context c) (
     project.extensionsIndexed = true
     project.delete("pendingExtensionUrls")
 
-    auto workspaceResult = c.formFile("workspace")
     if !workspaceResult.isErr() (
         object workspace = workspaceResult.unwrap().assert(object)
         if workspace.size.toNum() > maxWorkspaceBytes (
@@ -944,31 +966,76 @@ def handleUploadProject(*serve.Context c) (
             c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
             return
         )
+        any workspaceBody = workspace.data
+        string baseWorkspacePath = ""
+        string deltaWorkspacePath = ""
+        string mergedWorkspacePath = ""
+        boolean workspaceDelta = gitInfo.contains("delta") and gitInfo.delta == true
+        if workspaceDelta (
+            baseWorkspacePath = tmpDir ++ workId ++ ".base.mwp"
+            deltaWorkspacePath = tmpDir ++ workId ++ ".delta.mwp"
+            mergedWorkspacePath = tmpDir ++ workId ++ ".merged.mwp"
+            boolean mergeOk = copyProjectWorkspaceToPath(project, baseWorkspacePath)
+            mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, workspace.data)
+            mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, deltaWorkspacePath, mergedWorkspacePath)
+            if !mergeOk (
+                fs.remove(baseWorkspacePath)
+                fs.remove(deltaWorkspacePath)
+                fs.remove(mergedWorkspacePath)
+                fs.remove(zipPath)
+                fs.remove(extractDir)
+                c.internalError("failed to apply project history update")
+                return
+            )
+            if fs.getSize(mergedWorkspacePath) > maxWorkspaceBytes (
+                fs.remove(baseWorkspacePath)
+                fs.remove(deltaWorkspacePath)
+                fs.remove(mergedWorkspacePath)
+                fs.remove(zipPath)
+                fs.remove(extractDir)
+                c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
+                return
+            )
+            workspaceBody = fs.readFileBytes(mergedWorkspacePath)
+        )
         string workspaceKey = projectWorkspaceKey(id)
-        if !r2Put(workspaceKey, workspace.data, "application/x-mistwarp-project") (
+        if !r2Put(workspaceKey, workspaceBody, "application/x-mistwarp-project") (
+            if baseWorkspacePath != "" (
+                fs.remove(baseWorkspacePath)
+            )
+            if deltaWorkspacePath != "" (
+                fs.remove(deltaWorkspacePath)
+            )
+            if mergedWorkspacePath != "" (
+                fs.remove(mergedWorkspacePath)
+            )
             fs.remove(zipPath)
             fs.remove(extractDir)
             c.internalError("failed to store MistWarp project history")
             return
         )
+        if baseWorkspacePath != "" (
+            fs.remove(baseWorkspacePath)
+        )
+        if deltaWorkspacePath != "" (
+            fs.remove(deltaWorkspacePath)
+        )
+        if mergedWorkspacePath != "" (
+            fs.remove(mergedWorkspacePath)
+        )
         project.workspaceKey = workspaceKey
-        string gitMetadata = c.formValue("git")
         if gitMetadata != "" (
-            auto parsedGit = json.parse(gitMetadata, {type: "object"})
-            if !parsedGit.isErr() (
-                object gitInfo = parsedGit.unwrap().assert(object)
-                project.gitHead = gitInfo.head.toStr()
-                project.gitBranch = gitInfo.branch.toStr()
-                if gitInfo.contains("commits") and gitInfo.commits != null (
-                    project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
+            project.gitHead = gitInfo.head.toStr()
+            project.gitBranch = gitInfo.branch.toStr()
+            if gitInfo.contains("commits") and gitInfo.commits != null (
+                project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
+            )
+            if gitInfo.contains("graph") and gitInfo.graph != null (
+                object graph = gitInfo.graph.assert(object)
+                if graph.contains("nodes") and graph.nodes != null (
+                    graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
                 )
-                if gitInfo.contains("graph") and gitInfo.graph != null (
-                    object graph = gitInfo.graph.assert(object)
-                    if graph.contains("nodes") and graph.nodes != null (
-                        graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
-                    )
-                    project.gitGraph = graph
-                )
+                project.gitGraph = graph
             )
         )
     )

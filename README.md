@@ -59,6 +59,8 @@ The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fie
 
 Project JSON is staged on local disk before the upload request returns. The API serves that staged copy immediately, then the background flush loop writes at most one R2 snapshot per project every 24 hours. Git carries every save. `data/assets-index.json` tracks which assets R2 already has so duplicates are never re-uploaded.
 
+The first editor save uploads a compact MWP archive containing the Git repository without a duplicate worktree. Later saves compare the local HEAD with the server HEAD and send only new Git objects plus updated refs. The API merges that delta into the stored archive. If the user saves without making a commit, the editor sends a full archive with the worktree so uncommitted changes are not lost.
+
 ## Auth flow
 
 1. Client holds a rotur token (rotur-sdk login).

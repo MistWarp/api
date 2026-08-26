@@ -876,7 +876,22 @@ def handleListSpaces(*serve.Context c) (
     string q = c.query("q").toLower().strip()
     number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
     number offset = c.queryInt("offset", 0)
+    number startsBefore = c.queryInt("startsBefore", 0)
+    number endsAfter = c.queryInt("endsAfter", 0)
     array stored = []
+
+    if q == "" and kind == "challenge" and startsBefore > 0 and endsAfter > 0 (
+        number total = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).and("startsAt", db.lessEqual, startsBefore).and("endsAt", db.greaterEqual, endsAfter).count()
+        offset = clampNumber(offset, 0, total)
+        stored = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).and("startsAt", db.lessEqual, startsBefore).and("endsAt", db.greaterEqual, endsAfter).sort("startsAt", db.asc).limit(offset + limit).all()
+        array page = paginate(stored, offset, limit)
+        array spaces = []
+        for i page.len (
+            spaces.append(spaceListResponse(page[i].assert(object), c))
+        )
+        c.json(200, {ok: true, total: total, spaces: spaces})
+        return
+    )
 
     if q == "" (
         number total = 0
