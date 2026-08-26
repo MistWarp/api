@@ -2,4 +2,8 @@
 set -e
 
 osl compile main.osl
-../../rotur_manager.sh start mistwarp-api
+
+manager="$(cd "$(dirname "$0")" && pwd)/../../rotur_manager.sh"
+if [ -x "$manager" ]; then
+    "$manager" start mistwarp-api
+fi
