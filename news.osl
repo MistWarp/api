@@ -11,6 +11,74 @@ def saveNews(array items) boolean (
     return writeFile(newsFile, {items: items})
 )
 
+def purgeUserFromNews(string username) boolean (
+    string key = normalizeUsername(username)
+    array items = loadNews()
+    for i items.len (
+        object item = items[i].assert(object)
+        if normalizeUsername(item.author.toStr()) == key (
+            item.author = "Deleted User"
+        )
+        object reactions = {}
+        if item.contains("reactions") and item.reactions != null (
+            reactions = item.reactions.assert(object)
+        )
+        array reactionTypes = reactions.getKeys().toArray()
+        for j reactionTypes.len (
+            string reactionType = reactionTypes[j].toStr()
+            reactions[reactionType] = removeUser(reactions[reactionType].assertElse(array, []), key)
+        )
+        item.reactions = reactions
+        if item.contains("poll") and item.poll != null (
+            object poll = item.poll.assert(object)
+            array options = poll.options.assertElse(array, [])
+            for j options.len (
+                object option = options[j].assert(object)
+                option.voters = removeUser(option.voters.assertElse(array, []), key)
+                options[j] = option
+            )
+            poll.options = options
+            item.poll = poll
+        )
+        items[i] = item
+    )
+    return saveNews(items)
+)
+
+def renameUserInNews(string oldKey, string newName) boolean (
+    string newKey = normalizeUsername(newName)
+    array items = loadNews()
+    for i items.len (
+        object item = items[i].assert(object)
+        if normalizeUsername(item.author.toStr()) == oldKey (
+            item.author = newName
+        )
+        object reactions = {}
+        if item.contains("reactions") and item.reactions != null (
+            reactions = item.reactions.assert(object)
+        )
+        array reactionTypes = reactions.getKeys().toArray()
+        for j reactionTypes.len (
+            string reactionType = reactionTypes[j].toStr()
+            reactions[reactionType] = replaceUserInArray(reactions[reactionType].assertElse(array, []), oldKey, newKey)
+        )
+        item.reactions = reactions
+        if item.contains("poll") and item.poll != null (
+            object poll = item.poll.assert(object)
+            array options = poll.options.assertElse(array, [])
+            for j options.len (
+                object option = options[j].assert(object)
+                option.voters = replaceUserInArray(option.voters.assertElse(array, []), oldKey, newKey)
+                options[j] = option
+            )
+            poll.options = options
+            item.poll = poll
+        )
+        items[i] = item
+    )
+    return saveNews(items)
+)
+
 def toggleReactionMap(object reactions, string username, string reactionType) object (
     array chosen = []
     if reactions.contains(reactionType) and reactions[reactionType] != null (

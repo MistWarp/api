@@ -92,8 +92,20 @@ def renameUserInProfiles(string oldKey, string newKey, string newName) (
                     other.following = replaceUserInArray(following, oldKey, newName)
                     changed = true
                 )
+                if other.contains("purchases") and other.purchases != null (
+                    array purchases = other.purchases.assert(array)
+                    for j purchases.len (
+                        object purchase = purchases[j].assert(object)
+                        if normalizeUsername(purchase.seller.toStr()) == oldKey (
+                            purchase.seller = newName
+                            purchases[j] = purchase
+                            changed = true
+                        )
+                    )
+                    other.purchases = purchases
+                )
                 if changed (
-                    writeFile(usersDir ++ name, other)
+                    saveProfile(other)
                 )
             )
         )
@@ -128,10 +140,15 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
                 )
                 if project.contains("buyers") and project.buyers != null (
                     array buyers = project.buyers.assert(array)
-                    if arrayContainsUserKey(buyers, oldKey) (
-                        project.buyers = replaceUserInArray(buyers, oldKey, newName)
-                        changed = true
+                    for j buyers.len (
+                        object buyer = buyers[j].assert(object)
+                        if normalizeUsername(buyer.user.toStr()) == oldKey (
+                            buyer.user = newName
+                            buyers[j] = buyer
+                            changed = true
+                        )
                     )
+                    project.buyers = buyers
                 )
                 if project.contains("collaborators") and project.collaborators != null (
                     array collaborators = project.collaborators.assert(array)
@@ -140,8 +157,17 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
                         if normalizeUsername(collaborator.username.toStr()) == oldKey (
                             collaborator.username = newName
                             collaborator.userId = userId
+                            collaborators[j] = collaborator
                             changed = true
                         )
+                    )
+                    project.collaborators = collaborators
+                )
+                if project.contains("mergedContributors") and project.mergedContributors != null (
+                    array contributors = project.mergedContributors.assert(array)
+                    if stringArrayContainsUser(contributors, oldKey) (
+                        project.mergedContributors = replaceUserInArray(contributors, oldKey, newName)
+                        changed = true
                     )
                 )
                 if changed (
@@ -213,6 +239,7 @@ def renameUserInSpaces(string oldKey, string newName, string userId) (
         if changed (
             putDocument(spaceDocs, space["_id"].toStr(), space)
         )
+        syncSpaceMemberships(space)
     )
 )
 
@@ -306,7 +333,7 @@ def renameUserInNotifications(string oldKey, string newKey, string newName) (
     )
 )
 
-def renameUserInActivity(string oldKey, string newKey) (
+def renameUserInActivity(string oldKey, string newKey, string newName) (
     renameUserFile(activityDir, oldKey, newKey)
     string path = activityDir ++ newKey ++ ".json"
     auto result = readFile(path)
@@ -316,7 +343,7 @@ def renameUserInActivity(string oldKey, string newKey) (
         for i items.len (
             object item = items[i]
             if normalizeUsername(item.actor.toStr()) == oldKey (
-                item.actor = newKey
+                item.actor = newName
             )
         )
         writeFile(path, data)
@@ -333,10 +360,14 @@ def renameUser(string userId, string oldName, string newName) (
     renameUserInProjects(oldKey, newKey, newName, userId)
     renameUserInComments(oldKey, newKey, newName, userId)
     renameUserInNotifications(oldKey, newKey, newName)
-    renameUserInActivity(oldKey, newKey)
+    renameUserInActivity(oldKey, newKey, newName)
     renameUserInCommunityDatabase(oldKey, newName, userId)
+    renameUserSafety(oldKey, newKey)
+    renameUserInNews(oldKey, newName)
+    renameUserMonetization(oldKey, newName)
     renameUserFile(userSettingsDir, oldKey, newKey)
     renameUserFile(quotaDir, oldKey, newKey)
+    renameUserFile(agreementAcceptDir, oldKey, newKey)
     array admins = loadAdmins()
     if admins.contains(oldKey) (
         saveAdmins(replaceUserInArray(admins, oldKey, newKey))
@@ -448,6 +479,7 @@ def removeUserFromArray(array items, string key) array (
 
 def purgeUserFromProfiles(string key) (
     fs.remove(usersDir ++ key ++ ".json")
+    profileSearchDocs.deleteOne({_id: key})
     array files = fs.readDir(usersDir).toArray()
     for i files.len (
         string name = files[i].toStr()
@@ -457,17 +489,17 @@ def purgeUserFromProfiles(string key) (
                 object other = result.data.assert(object)
                 boolean changed = false
                 array followers = other.followers.assert(array)
-                if followers.contains(key) (
+                if stringArrayContainsUser(followers, key) (
                     other.followers = removeUserFromArray(followers, key)
                     changed = true
                 )
                 array following = other.following.assert(array)
-                if following.contains(key) (
+                if stringArrayContainsUser(following, key) (
                     other.following = removeUserFromArray(following, key)
                     changed = true
                 )
                 if changed (
-                    writeFile(usersDir ++ name, other)
+                    saveProfile(other)
                 )
             )
         )
@@ -488,14 +520,35 @@ def purgeUserFromProjects(string key) (
                     changed = true
                 )
                 array loves = project.loves.assert(array)
-                if loves.contains(key) (
+                if stringArrayContainsUser(loves, key) (
                     project.loves = removeUserFromArray(loves, key)
                     changed = true
                 )
                 if project.contains("brokenhearts") and project.brokenhearts != null (
                     array broken = project.brokenhearts.assert(array)
-                    if broken.contains(key) (
+                    if stringArrayContainsUser(broken, key) (
                         project.brokenhearts = removeUserFromArray(broken, key)
+                        changed = true
+                    )
+                )
+                if project.contains("collaborators") and project.collaborators != null (
+                    array collaborators = project.collaborators.assert(array)
+                    array keptCollaborators = []
+                    for j collaborators.len (
+                        object collaborator = collaborators[j].assert(object)
+                        if normalizeUsername(collaborator.username.toStr()) != key (
+                            keptCollaborators.append(collaborator)
+                        ) else (
+                            changed = true
+                        )
+                    )
+                    project.collaborators = keptCollaborators
+                )
+                if project.contains("mergedContributors") and project.mergedContributors != null (
+                    array contributors = project.mergedContributors.assert(array)
+                    array keptContributors = removeUserFromArray(contributors, key)
+                    if keptContributors.len != contributors.len (
+                        project.mergedContributors = keptContributors
                         changed = true
                     )
                 )

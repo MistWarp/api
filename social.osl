@@ -18,6 +18,26 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
     return entries
 )
 
+def ownerIndexCount(string owner, boolean includeUnshared) number (
+    string ownerKey = normalizeUsername(owner)
+    if includeUnshared (
+        return projectSearchDocs.where("ownerKey", db.equal, ownerKey).count()
+    )
+    return projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).count()
+)
+
+def ownerIndexPage(string owner, boolean includeUnshared, number offset, number limit) array (
+    string ownerKey = normalizeUsername(owner)
+    number scanLimit = offset + limit
+    array stored = []
+    if includeUnshared (
+        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).limit(scanLimit).all()
+    ) else (
+        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).sort("edited", db.desc).limit(scanLimit).all()
+    )
+    return paginate(stored, offset, limit)
+)
+
 def isViewerOwner(*serve.Context c, string name) boolean (
     if !c.getBool("authenticated") (
         return false
@@ -39,13 +59,33 @@ def handleGetUser(*serve.Context c) (
     if isSafePathPart(key) and !fs.exists(usersDir ++ key ++ ".json") (
         discoverUserIdentity(name)
     )
-    boolean exists = isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
+    boolean exists = profileExists(name)
     object profile = loadProfile(name)
     array followers = profile.followers.assert(array)
     array following = profile.following.assert(array)
     string viewer = normalizeUsername(c.getString("username"))
-    object viewerSafety = loadSafety(viewer)
-    array projects = ownerIndexEntries(name, false)
+    object viewerSafety = {blocked: [], muted: []}
+    if c.getBool("authenticated") and viewer != "" (
+        viewerSafety = loadSafety(viewer)
+    )
+    number projectLimit = 24
+    number projectTotal = ownerIndexCount(name, false)
+    array projects = ownerIndexPage(name, false, 0, projectLimit)
+    string featuredId = profile.featuredProject.toStr()
+    if featuredId != "" (
+        boolean featuredIncluded = false
+        for i projects.len (
+            if projects[i].id.toStr() == featuredId (
+                featuredIncluded = true
+            )
+        )
+        if !featuredIncluded (
+            object featured = projectSearchDocs.findById(featuredId)
+            if featured.isEmpty() == false and featured.shared == true and featured.ownerKey.toStr() == key (
+                projects.append(featured)
+            )
+        )
+    )
 
     boolean commentsOff = false
     if profile.contains("commentsOff") and profile.commentsOff == true (
@@ -53,7 +93,7 @@ def handleGetUser(*serve.Context c) (
     )
     c.json(200, {
         ok: true,
-        exists: exists or projects.len > 0,
+        exists: exists or projectTotal > 0,
         username: profile.username,
         bio: profile.bio,
         featuredProject: profile.featuredProject,
@@ -63,7 +103,9 @@ def handleGetUser(*serve.Context c) (
         viewerBlocked: viewerSafety.blocked.assert(array).contains(key),
         viewerMuted: viewerSafety.muted.assert(array).contains(key),
         commentsOff: commentsOff,
-        projects: projects
+        projects: projects,
+        projectTotal: projectTotal,
+        projectOffset: projectLimit
     })
 )
 
@@ -87,6 +129,7 @@ def handleUpdateProfile(*serve.Context c) (
     string username = c.getString("username")
     object profile = loadProfile(username)
     object body = c.bodyJSON()
+    boolean changed = false
 
     if body.contains("bio") (
         string bio = body.bio.toStr()
@@ -94,12 +137,15 @@ def handleUpdateProfile(*serve.Context c) (
             c.badRequest("bio too long")
             return
         )
-        profile.bio = bio
+        if profile.bio.toStr() != bio (
+            profile.bio = bio
+            changed = true
+        )
     )
 
     if body.contains("featuredProject") (
         string featured = body.featuredProject.toStr()
-        if featured != "" (
+        if featured != profile.featuredProject.toStr() and featured != "" (
             auto result = loadProject(featured)
             if !result.ok (
                 c.badRequest("project not found")
@@ -115,22 +161,38 @@ def handleUpdateProfile(*serve.Context c) (
                 return
             )
         )
-        profile.featuredProject = featured
+        if profile.featuredProject.toStr() != featured (
+            profile.featuredProject = featured
+            changed = true
+        )
     )
 
     if body.contains("commentsOff") (
-        profile.commentsOff = body.commentsOff == true
+        boolean commentsOff = body.commentsOff == true
+        boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
+        if currentCommentsOff != commentsOff (
+            profile.commentsOff = commentsOff
+            changed = true
+        )
     )
 
-    saveProfile(profile)
+    if changed (
+        saveProfile(profile)
+    )
     c.json(200, {ok: true})
 )
 
 def handleFollowUser(*serve.Context c) (
     string actor = c.getString("username")
     string target = c.param("name")
-    if normalizeUsername(actor) == normalizeUsername(target) (
+    string actorKey = normalizeUsername(actor)
+    string targetKey = normalizeUsername(target)
+    if actorKey == targetKey (
         c.badRequest("cannot follow yourself")
+        return
+    )
+    if !profileExists(target) (
+        c.notFound("user not found")
         return
     )
     if usersAreBlocked(actor, target) (
@@ -140,18 +202,20 @@ def handleFollowUser(*serve.Context c) (
 
     object targetProfile = loadProfile(target)
     array followers = targetProfile.followers.assert(array)
-    boolean wasFollowing = followers.contains(normalizeUsername(actor))
-    followers = removeString(followers, normalizeUsername(actor))
-    followers.append(normalizeUsername(actor))
-    targetProfile.followers = followers
-    saveProfile(targetProfile)
+    boolean wasFollowing = followers.contains(actorKey)
+    if !wasFollowing (
+        followers.append(actorKey)
+        targetProfile.followers = followers
+        saveProfile(targetProfile)
+    )
 
     object actorProfile = loadProfile(actor)
     array following = actorProfile.following.assert(array)
-    following = removeString(following, normalizeUsername(target))
-    following.append(normalizeUsername(target))
-    actorProfile.following = following
-    saveProfile(actorProfile)
+    if !following.contains(targetKey) (
+        following.append(targetKey)
+        actorProfile.following = following
+        saveProfile(actorProfile)
+    )
 
     if !wasFollowing (
         addNotification(target, actor, "follow", {})
@@ -163,14 +227,24 @@ def handleFollowUser(*serve.Context c) (
 def handleUnfollowUser(*serve.Context c) (
     string actor = c.getString("username")
     string target = c.param("name")
+    string actorKey = normalizeUsername(actor)
+    string targetKey = normalizeUsername(target)
 
-    object targetProfile = loadProfile(target)
-    targetProfile.followers = removeString(targetProfile.followers.assert(array), normalizeUsername(actor))
-    saveProfile(targetProfile)
+    if profileExists(target) (
+        object targetProfile = loadProfile(target)
+        array followers = targetProfile.followers.assert(array)
+        if followers.contains(actorKey) (
+            targetProfile.followers = removeString(followers, actorKey)
+            saveProfile(targetProfile)
+        )
+    )
 
     object actorProfile = loadProfile(actor)
-    actorProfile.following = removeString(actorProfile.following.assert(array), normalizeUsername(target))
-    saveProfile(actorProfile)
+    array following = actorProfile.following.assert(array)
+    if following.contains(targetKey) (
+        actorProfile.following = removeString(following, targetKey)
+        saveProfile(actorProfile)
+    )
 
     c.json(200, {ok: true})
 )
@@ -181,7 +255,21 @@ def handleGetUserProjects(*serve.Context c) (
         discoverUserIdentity(name)
     )
     boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
-    c.json(200, {ok: true, projects: ownerIndexEntries(name, includeUnshared)})
+    number requestedLimit = c.queryInt("limit", 0)
+    if requestedLimit > 0 (
+        number total = ownerIndexCount(name, includeUnshared)
+        number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+        number limit = clampNumber(requestedLimit, 1, 100)
+        c.json(200, {
+            ok: true,
+            projects: ownerIndexPage(name, includeUnshared, offset, limit),
+            total: total,
+            nextOffset: clampNumber(offset + limit, 0, total)
+        })
+        return
+    )
+    array projects = ownerIndexEntries(name, includeUnshared)
+    c.json(200, {ok: true, projects: projects, total: projects.len})
 )
 
 def userLibrary(string userLower) array (
@@ -260,9 +348,9 @@ def handleUnsaveProject(*serve.Context c) (
     )
     string pid = c.param("id")
     boolean had = lib.contains(pid)
-    profile.library = removeString(lib, pid)
-    saveProfile(profile)
     if had (
+        profile.library = removeString(lib, pid)
+        saveProfile(profile)
         bumpProjectSaves(pid, -1)
     )
     c.json(200, {ok: true, saved: false})
@@ -294,42 +382,71 @@ def handleGetMyPurchases(*serve.Context c) (
 )
 
 def handleGetMyLibrary(*serve.Context c) (
-    array ids = userLibrary(normalizeUsername(c.getString("username")))
+    object profile = loadProfile(normalizeUsername(c.getString("username")))
+    array ids = []
+    if profile.contains("library") and profile.library != null (
+        ids = profile.library.assert(array)
+    )
     array entries = []
+    array validIds = []
+    object seen = {}
     for i ids.len (
         string id = ids[i].toStr()
         object entry = projectSearchDocs.findById(id)
-        if entry.isEmpty() == false (
+        if entry.isEmpty() == false and !seen.contains(id) (
+            seen[id] = true
+            validIds.append(id)
             entries.append(entry)
         )
     )
+    if validIds.len != ids.len (
+        profile.library = validIds
+        saveProfile(profile)
+    )
     entries.reverse()
-    c.json(200, {ok: true, projects: entries})
+    number total = entries.len
+    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+    number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+    c.json(200, {
+        ok: true,
+        projects: paginate(entries, offset, limit),
+        total: total,
+        nextOffset: clampNumber(offset + limit, 0, total)
+    })
 )
 
 def handleGetActivity(*serve.Context c) (
     array users = c.query("users").split(",")
     array items = []
-    array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
+    object selectedUsers = {}
     number count = 0
     for i users.len (
         if count < 50 (
             string username = normalizeUsername(users[i].toStr())
-            array userItems = loadActivity(username)
-            for j userItems.len (
-                items.append(userItems[j])
+            if username != "" and !selectedUsers.contains(username) (
+                selectedUsers[username] = true
+                array userItems = loadActivity(username)
+                number activityLimit = clampNumber(userItems.len, 0, 40)
+                for j activityLimit (
+                    items.append(userItems[j])
+                )
+                count = count + 1
             )
-            for j recentReviews.len (
-                object review = recentReviews[j].assert(object)
-                if normalizeUsername(review.author.toStr()) == username (
-                    auto result = loadProject(review.projectId.toStr())
-                    if result.ok and projectIsViewable(result.project.assert(object)) (
-                        object project = result.project.assert(object)
-                        items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
-                    )
+        )
+    )
+    array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
+    number reviewItems = 0
+    for i recentReviews.len (
+        if reviewItems < 40 (
+            object review = recentReviews[i].assert(object)
+            string author = normalizeUsername(review.author.toStr())
+            if selectedUsers.contains(author) (
+                object project = projectSearchDocs.findById(review.projectId.toStr())
+                if !project.isEmpty() and projectIsViewable(project) (
+                    items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
+                    reviewItems = reviewItems + 1
                 )
             )
-            count = count + 1
         )
     )
     items.sortBy("created", "descending")

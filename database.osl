@@ -2,6 +2,7 @@ auto communityDb = db.open("data/community.db")
 *db.Collection projectSearchDocs = communityDb.collection("project_search")
 *db.Collection profileSearchDocs = communityDb.collection("profile_search")
 *db.Collection spaceDocs = communityDb.collection("spaces")
+*db.Collection spaceMemberDocs = communityDb.collection("space_members")
 *db.Collection releaseDocs = communityDb.collection("releases")
 *db.Collection previewDocs = communityDb.collection("previews")
 *db.Collection diagnosticDocs = communityDb.collection("diagnostics")
@@ -20,9 +21,49 @@ def putDocument(*db.Collection collection, string id, object value) boolean (
     return collection.insertOne(value) != null
 )
 
+def deleteDocumentsByField(*db.Collection collection, string field, string value) number (
+    array documents = collection.where(field, db.equal, value).all()
+    for i documents.len (
+        object document = documents[i].assert(object)
+        collection.deleteOne({_id: document["_id"]})
+    )
+    return documents.len
+)
+
+def deleteProjectCommunityRecords(string projectId) boolean (
+    array releases = releaseDocs.where("projectId", db.equal, projectId).all()
+    for i releases.len (
+        object release = releases[i].assert(object)
+        fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
+        releaseDocs.deleteOne({_id: release["_id"]})
+    )
+    deleteDocumentsByField(previewDocs, "projectId", projectId)
+    deleteDocumentsByField(diagnosticDocs, "projectId", projectId)
+    deleteDocumentsByField(feedbackDocs, "projectId", projectId)
+    deleteDocumentsByField(reviewDocs, "projectId", projectId)
+    deleteDocumentsByField(playtimeDocs, "projectId", projectId)
+    deleteDocumentsByField(playtimeSessionDocs, "projectId", projectId)
+    deleteDocumentsByField(pullDocs, "targetProjectId", projectId)
+    deleteDocumentsByField(pullDocs, "sourceProjectId", projectId)
+    return true
+)
+
 def syncSearchProject(object project) boolean (
     object entry = indexEntryFromProject(project)
-    return putDocument(projectSearchDocs, project.id.toStr(), entry)
+    if entry.remixRoot.toStr() == "" and entry.remixParent.toStr() != "" (
+        object parent = projectSearchDocs.findById(entry.remixParent.toStr())
+        if parent.isEmpty() == false (
+            entry.remixRoot = parent.id
+            if parent.contains("remixRoot") and parent.remixRoot.toStr() != "" (
+                entry.remixRoot = parent.remixRoot
+            )
+        )
+    )
+    boolean saved = putDocument(projectSearchDocs, project.id.toStr(), entry)
+    if saved (
+        sharedProjectsCache.delete("projects")
+    )
+    return saved
 )
 
 def syncSearchProfile(object profile) boolean (
@@ -38,21 +79,23 @@ def syncSearchProfile(object profile) boolean (
 
 def removeSearchProject(string id) boolean (
     projectSearchDocs.deleteOne({_id: id})
+    sharedProjectsCache.delete("projects")
     return true
 )
 
 def initCommunityDatabase() boolean (
     if projectSearchDocs.count({}) == 0 (
-        object index = loadIndex()
-        object projects = index.projects.assert(object)
-        array keys = projects.getKeys().toArray()
-        for i keys.len (
-            string id = keys[i].toStr()
-            auto loaded = loadProject(id)
-            if loaded.ok (
-                object entry = indexEntryFromProject(loaded.project.assert(object))
-                entry["_id"] = id
-                projectSearchDocs.insertOne(entry)
+        array projectFiles = fs.readDir(projectsDir).toArray()
+        for i projectFiles.len (
+            string file = projectFiles[i].toStr()
+            if file.endsWith(".json") (
+                string id = file.replace(".json", "")
+                auto loaded = loadProject(id)
+                if loaded.ok (
+                    object entry = indexEntryFromProject(loaded.project.assert(object))
+                    entry["_id"] = id
+                    projectSearchDocs.insertOne(entry)
+                )
             )
         )
     )
@@ -63,6 +106,56 @@ def initCommunityDatabase() boolean (
             if file.endsWith(".json") (
                 syncSearchProfile(loadProfile(file.replace(".json", "")))
             )
+        )
+    )
+    array projectEntries = projectSearchDocs.all()
+    object projectsById = {}
+    for i projectEntries.len (
+        object entry = projectEntries[i].assert(object)
+        projectsById[entry.id.toStr()] = entry
+    )
+    for i projectEntries.len (
+        object entry = projectEntries[i].assert(object)
+        string id = entry.id.toStr()
+        boolean changed = false
+        string ownerKey = normalizeUsername(entry.owner.toStr())
+        if !entry.contains("ownerKey") or entry.ownerKey.toStr() != ownerKey (
+            entry.ownerKey = ownerKey
+            changed = true
+        )
+        string root = id
+        string current = id
+        number hops = 0
+        boolean walking = true
+        while walking and hops < 100 (
+            object cursor = projectsById[current]
+            string parent = cursor.remixParent.toStr()
+            if parent != "" and parent != current and projectsById.contains(parent) (
+                root = parent
+                current = parent
+            ) else (
+                walking = false
+            )
+            hops = hops + 1
+        )
+        string remixRoot = ""
+        if root != id (
+            remixRoot = root
+        )
+        if !entry.contains("remixRoot") or entry.remixRoot.toStr() != remixRoot (
+            entry.remixRoot = remixRoot
+            changed = true
+        )
+        if changed (
+            putDocument(projectSearchDocs, id, entry)
+        )
+    )
+    array reviews = reviewDocs.all()
+    for i reviews.len (
+        object review = reviews[i].assert(object)
+        if !review.contains("authorKey") (
+            review.authorKey = normalizeUsername(review.author.toStr())
+            putDocument(reviewDocs, review["_id"].toStr(), review)
         )
     )
     return true

@@ -2,6 +2,9 @@ def projectVisibility(object project) string (
     if project.contains("visibility") and project.visibility != null (
         string v = project.visibility.toStr()
         if v == "public" or v == "unlisted" or v == "private" (
+            if v == "public" and project.shared != true (
+                return "private"
+            )
             return v
         )
     )
@@ -191,6 +194,38 @@ def loadPendingPayouts() object (
     return result.data.assert(object)
 )
 
+def renameUserMonetization(string oldKey, string newName) boolean (
+    string newKey = normalizeUsername(newName)
+    object purchaseStore = loadPurchaseKeys()
+    object keys = purchaseStore.keys
+    array purchaseKeys = keys.getKeys().toArray()
+    for i purchaseKeys.len (
+        string purchaseKey = purchaseKeys[i].toStr()
+        object purchase = keys[purchaseKey].assert(object)
+        if normalizeUsername(purchase.buyer.toStr()) == oldKey (
+            purchase.buyer = newKey
+            keys[purchaseKey] = purchase
+        )
+    )
+    purchaseStore.keys = keys
+    savePurchaseKeys(purchaseStore)
+
+    object payoutStore = loadPendingPayouts()
+    array payouts = payoutStore.payouts.assertElse(array, [])
+    for i payouts.len (
+        object payout = payouts[i].assert(object)
+        if normalizeUsername(payout.seller.toStr()) == oldKey (
+            payout.seller = newName
+        )
+        if normalizeUsername(payout.buyer.toStr()) == oldKey (
+            payout.buyer = newName
+        )
+        payouts[i] = payout
+    )
+    payoutStore.payouts = payouts
+    return writeFile(pendingPayoutsFile, payoutStore)
+)
+
 def recordPendingPayout(string projectId, string seller, string buyer, number amount) (
     object store = loadPendingPayouts()
     array payouts = store.payouts.assert(array)
@@ -261,9 +296,7 @@ def mergeDayHistory(object into, object from) (
 
 def handleGetMyStats(*serve.Context c) (
     string owner = normalizeUsername(c.getString("username"))
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
+    array projects = projectSearchDocs.where("ownerKey", db.equal, owner).all()
     number today = (timestamp / 86400000).toInt()
 
     number totalViews = 0
@@ -275,26 +308,24 @@ def handleGetMyStats(*serve.Context c) (
     object viewHistory = {}
     object saleHistory = {}
 
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
-        if normalizeUsername(entry.owner.toStr()) == owner (
-            auto res = loadProject(entry.id.toStr())
-            if res.ok (
-                object p = res.project.assert(object)
-                projectCount = projectCount + 1
-                if projectVisibility(p) == "public" (
-                    sharedCount = sharedCount + 1
-                )
-                totalViews = totalViews + p.views.toNum()
-                totalHearts = totalHearts + p.loves.assert(array).len
-                totalRevenue = totalRevenue + projectRevenue(p)
-                totalBuyers = totalBuyers + projectBuyers(p).len
-                if p.contains("viewHistory") and p.viewHistory != null (
-                    mergeDayHistory(viewHistory, p.viewHistory.assert(object))
-                )
-                if p.contains("saleHistory") and p.saleHistory != null (
-                    mergeDayHistory(saleHistory, p.saleHistory.assert(object))
-                )
+    for i projects.len (
+        object entry = projects[i].assert(object)
+        auto res = loadProject(entry.id.toStr())
+        if res.ok (
+            object p = res.project.assert(object)
+            projectCount = projectCount + 1
+            if projectVisibility(p) == "public" (
+                sharedCount = sharedCount + 1
+            )
+            totalViews = totalViews + p.views.toNum()
+            totalHearts = totalHearts + p.loves.assert(array).len
+            totalRevenue = totalRevenue + projectRevenue(p)
+            totalBuyers = totalBuyers + projectBuyers(p).len
+            if p.contains("viewHistory") and p.viewHistory != null (
+                mergeDayHistory(viewHistory, p.viewHistory.assert(object))
+            )
+            if p.contains("saleHistory") and p.saleHistory != null (
+                mergeDayHistory(saleHistory, p.saleHistory.assert(object))
             )
         )
     )
@@ -340,6 +371,10 @@ def handleSetVisibility(*serve.Context c) (
     )
     if target != "public" and target != "unlisted" and target != "private" (
         c.badRequest("visibility must be public, unlisted, or private")
+        return
+    )
+    if projectVisibility(project) == target (
+        c.json(200, {ok: true, project: projectResponse(project, c)})
         return
     )
 

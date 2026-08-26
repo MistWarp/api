@@ -241,11 +241,10 @@ def projectResponse(object project, *serve.Context c) object (
     if project.contains("gitHead") and project.gitHead != null (
         response.gitHead = project.gitHead
     )
-    object history = projectVersionHistory(project)
-    response.gitBranch = history.branch
-    response.gitCommits = history.commits
-    response.gitGraph = history.graph
-    response.gitHistoryVirtual = history.virtual
+    response.gitBranch = "main"
+    if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+        response.gitBranch = project.gitBranch
+    )
     response.remixBaseCommit = ""
     if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
         response.remixBaseCommit = project.remixBaseCommit
@@ -1463,7 +1462,7 @@ def deleteOrphanedAssets(object project) (
     )
 )
 
-def purgeProject(object project) (
+def purgeProjectStorage(object project, boolean cleanAssets) (
     string id = project.id.toStr()
     removeProjectExtensionUsage(id, storedProjectExtensions(project))
     deleteProjectFile(id)
@@ -1476,7 +1475,31 @@ def purgeProject(object project) (
     if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
         r2Remove(project.workspaceKey.toStr())
     )
-    deleteOrphanedAssets(project)
+    if cleanAssets (
+        deleteOrphanedAssets(project)
+    )
+)
+
+def purgeProject(object project) (
+    purgeProjectStorage(project, true)
+)
+
+def purgeProjects(array projects) (
+    array assets = []
+    for i projects.len (
+        object project = projects[i].assert(object)
+        if project.contains("assets") and project.assets != null (
+            array projectAssets = project.assets.assert(array)
+            for j projectAssets.len (
+                string asset = projectAssets[j].toStr()
+                if !assets.contains(asset) (
+                    assets.append(asset)
+                )
+            )
+        )
+        purgeProjectStorage(project, false)
+    )
+    deleteOrphanedAssets({id: "", assets: assets})
 )
 
 def handleDeleteProject(*serve.Context c) (
@@ -1496,6 +1519,13 @@ def handleDeleteProject(*serve.Context c) (
     )
 
     purgeProject(project)
+    deleteProjectCommunityRecords(project.id.toStr())
+    removeProjectFromSpaces(project.id.toStr())
+    object profile = loadProfile(project.owner.toStr())
+    if profile.featuredProject.toStr() == project.id.toStr() (
+        profile.featuredProject = ""
+        saveProfile(profile)
+    )
     c.json(200, {ok: true})
 )
 
@@ -1508,6 +1538,10 @@ def handlePublishProject(*serve.Context c) (
     object project = result.project.assert(object)
     if !canEditProject(project, c) (
         c.forbidden("not your project")
+        return
+    )
+    if project.shared == true and projectVisibility(project) == "public" (
+        c.json(200, {ok: true, project: projectResponse(project, c)})
         return
     )
 
@@ -1549,6 +1583,10 @@ def handleUnpublishProject(*serve.Context c) (
     object project = result.project.assert(object)
     if !canEditProject(project, c) (
         c.forbidden("not your project")
+        return
+    )
+    if project.shared != true and projectVisibility(project) == "private" (
+        c.json(200, {ok: true, project: projectResponse(project, c)})
         return
     )
 
@@ -1671,10 +1709,25 @@ def handleReactProject(*serve.Context c) (
         addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
     )
 
-    c.json(200, {ok: true, hearts: loves.len, brokenHearts: broken.len})
+    string myReaction = ""
+    if loves.contains(viewer) (
+        myReaction = "heart"
+    )
+    if broken.contains(viewer) (
+        myReaction = "brokenheart"
+    )
+    c.json(200, {
+        ok: true,
+        hearts: loves.len,
+        brokenHearts: broken.len,
+        myReaction: myReaction
+    })
 )
 
 def sharedIndexEntries() array (
+    if sharedProjectsCache.has("projects") (
+        return sharedProjectsCache.get("projects").assert(array)
+    )
     object banData = cachedBans()
     object bans = banData.bans
     array entries = []
@@ -1685,6 +1738,7 @@ def sharedIndexEntries() array (
             entries.append(entry)
         )
     )
+    sharedProjectsCache.set("projects", entries)
     return entries
 )
 
@@ -1788,15 +1842,16 @@ def handleLeaderboard(*serve.Context c) (
 
 def handleGetRemixes(*serve.Context c) (
     string id = c.param("id")
-    array entries = sharedIndexEntries()
+    array entries = projectSearchDocs.where("remixParent", db.equal, id).and("shared", db.equal, true).and("visibility", db.equal, "public").sort("sharedAt", db.desc).all()
+    object banData = cachedBans()
+    object bans = banData.bans
     array remixes = []
     for i entries.len (
         object entry = entries[i]
-        if entry.remixParent.toStr() == id (
+        if !bans.contains(normalizeUsername(entry.owner.toStr())) (
             remixes.append(entry)
         )
     )
-    remixes.sortBy("sharedAt", "descending")
     c.json(200, {ok: true, remixes: remixes})
 )
 
@@ -1813,34 +1868,19 @@ def handleGetRemixTree(*serve.Context c) (
         return
     )
 
-    array entries = sharedIndexEntries()
-    object byId = {}
-    object childrenByParent = {}
-    for i entries.len (
-        object entry = entries[i]
-        byId[entry.id.toStr()] = entry
-        string parentKey = entry.remixParent.toStr()
-        if parentKey != "" (
-            array kids = []
-            if childrenByParent.contains(parentKey) (
-                kids = childrenByParent[parentKey].assert(array)
-            )
-            kids.append(entry.id.toStr())
-            childrenByParent[parentKey] = kids
-        )
-    )
-    if !byId.contains(id) (
-        byId[id] = indexEntryFromProject(project)
-    )
-
     string rootId = id
+    object current = projectSearchDocs.findById(id)
+    if current.isEmpty() == true (
+        current = indexEntryFromProject(project)
+    )
     number hops = 0
     boolean walking = true
     while walking and hops < 100 (
-        object current = byId[rootId]
         string parent = current.remixParent.toStr()
-        if parent != "" and byId.contains(parent) and parent != rootId (
+        object parentEntry = projectSearchDocs.findById(parent)
+        if parent != "" and parent != rootId and parentEntry.isEmpty() == false (
             rootId = parent
+            current = parentEntry
         ) else (
             walking = false
         )
@@ -1848,24 +1888,25 @@ def handleGetRemixTree(*serve.Context c) (
     )
 
     array nodes = []
-    array order = [rootId]
     object seen = {}
-    seen[rootId] = true
-    number cursor = 1
-    while cursor <= order.len and nodes.len < 500 (
-        string currentId = order[cursor].toStr()
-        nodes.append(byId[currentId])
-        if childrenByParent.contains(currentId) (
-            array kids = childrenByParent[currentId].assert(array)
-            for i kids.len (
-                string entryId = kids[i].toStr()
-                if !seen.contains(entryId) (
-                    seen[entryId] = true
-                    order.append(entryId)
-                )
-            )
+    object root = projectSearchDocs.findById(rootId)
+    if root.isEmpty() == false (
+        nodes.append(root)
+        seen[rootId] = true
+    )
+    object banData = cachedBans()
+    object bans = banData.bans
+    array treeEntries = projectSearchDocs.where("remixRoot", db.equal, rootId).and("shared", db.equal, true).and("visibility", db.equal, "public").limit(499).all()
+    for i treeEntries.len (
+        object entry = treeEntries[i].assert(object)
+        string entryId = entry.id.toStr()
+        if !seen.contains(entryId) and !bans.contains(normalizeUsername(entry.owner.toStr())) (
+            nodes.append(entry)
+            seen[entryId] = true
         )
-        cursor = cursor + 1
+    )
+    if !seen.contains(id) and nodes.len < 500 (
+        nodes.append(indexEntryFromProject(project))
     )
 
     c.json(200, {ok: true, root: rootId, nodes: nodes})
@@ -1938,6 +1979,7 @@ def handleRemixProject(*serve.Context c) (
         jsonGzip: true,
         storedJsonBytes: copiedJsonBytes,
         remixParent: parent.id,
+        remixRoot: parent.id,
         remixNotified: false,
         scratchOrigin: "",
         views: 0,
@@ -1947,6 +1989,10 @@ def handleRemixProject(*serve.Context c) (
         sizeBytes: projectSizeBytes(parent),
         collaborators: []
     }
+    object parentEntry = projectSearchDocs.findById(parent.id.toStr())
+    if parentEntry.isEmpty() == false and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
+        project.remixRoot = parentEntry.remixRoot
+    )
     if parent.contains("workspaceKey") and parent.workspaceKey.toStr() != "" (
         if r2Local (
             string sourceWorkspace = localBlobPath(parent.workspaceKey.toStr())

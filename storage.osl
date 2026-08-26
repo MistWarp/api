@@ -128,6 +128,10 @@ def indexEntryFromProject(object project) object (
     if project.contains("ownerId") and project.ownerId != null (
         ownerId = project.ownerId.toStr()
     )
+    string remixRoot = ""
+    if project.contains("remixRoot") and project.remixRoot != null (
+        remixRoot = project.remixRoot.toStr()
+    )
     return {
         id: project.id,
         owner: project.owner,
@@ -139,6 +143,7 @@ def indexEntryFromProject(object project) object (
         loveCount: loves.len,
         brokenHeartCount: broken.len,
         remixParent: project.remixParent,
+        remixRoot: remixRoot,
         shared: project.shared,
         visibility: projectVisibility(project),
         price: projectPrice(project),
@@ -156,36 +161,29 @@ def indexEntryFromProject(object project) object (
 )
 
 def refreshIndexUrls() boolean (
-    object index = loadIndex()
-    object projects = index.projects
-    array keys = projects.getKeys().toArray()
-    for i keys.len (
-        object entry = projects[keys[i].toStr()]
-        entry.thumbUrl = thumbUrlFor(entry)
+    array projects = projectSearchDocs.all()
+    boolean changed = false
+    for i projects.len (
+        object entry = projects[i].assert(object)
+        string thumbUrl = thumbUrlFor(entry)
+        if entry.thumbUrl.toStr() != thumbUrl (
+            entry.thumbUrl = thumbUrl
+            putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+            changed = true
+        )
     )
-    return saveIndex(index)
+    if changed (
+        sharedProjectsCache.delete("projects")
+    )
+    return true
 )
 
 def upsertIndexEntry(object project) boolean (
-    object index = loadIndex()
-    object projects = index.projects
-    projects[project.id.toStr()] = indexEntryFromProject(project)
-    boolean saved = saveIndex(index)
-    syncSearchProject(project)
-    return saved
+    return syncSearchProject(project)
 )
 
 def removeFromIndex(string id) boolean (
-    object index = loadIndex()
-    object projects = index.projects
-    if projects.contains(id) (
-        projects.delete(id)
-        boolean saved = saveIndex(index)
-        removeSearchProject(id)
-        return saved
-    )
-    removeSearchProject(id)
-    return true
+    return removeSearchProject(id)
 )
 
 def loadProject(string id) object (
@@ -224,6 +222,11 @@ def defaultProfile(string username) object (
         following: [],
         created: timestamp
     }
+)
+
+def profileExists(string username) boolean (
+    string key = normalizeUsername(username)
+    return isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
 )
 
 def loadProfile(string username) object (
@@ -321,9 +324,18 @@ def saveComments(string key, array comments) boolean (
     for i comments.len (
         out = out ++ json.stringify(comments[i]) ++ "\n"
     )
-    boolean ok = fs.writeFile(commentsDir ++ key ++ ".jsonl", out)
+    string path = commentsDir ++ key ++ ".jsonl"
+    string tmpPath = path ++ ".tmp." ++ randomString(8)
+    if !fs.writeFile(tmpPath, out) (
+        return false
+    )
+    boolean ok = fs.rename(tmpPath, path)
+    if !ok (
+        fs.remove(tmpPath)
+        return false
+    )
     fs.remove(commentsDir ++ key ++ ".json")
-    return ok
+    return true
 )
 
 def appendComment(string key, object comment) boolean (

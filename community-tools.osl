@@ -8,6 +8,17 @@ def stringArrayContainsUser(array users, string username) boolean (
     return false
 )
 
+def removeUser(array users, string username) array (
+    string wanted = normalizeUsername(username)
+    array next = []
+    for i users.len (
+        if normalizeUsername(users[i].toStr()) != wanted (
+            next.append(users[i])
+        )
+    )
+    return next
+)
+
 def validSpaceKind(string kind) boolean (
     return (kind == "studio") or (kind == "collection") or (kind == "challenge")
 )
@@ -110,6 +121,461 @@ def challengeArray(object space, string field) array (
         return space[field].assertElse(array, [])
     )
     return []
+)
+
+def appendSpaceUserKey(array keys, string username) array (
+    string key = normalizeUsername(username)
+    if key != "" and !keys.contains(key) (
+        keys.append(key)
+    )
+    return keys
+)
+
+def spaceRelatedUserKeys(object space) array (
+    array keys = appendSpaceUserKey([], space.owner.toStr())
+    array managers = spaceManagers(space)
+    for i managers.len (
+        keys = appendSpaceUserKey(keys, managers[i].toStr())
+    )
+    array followers = space.followers.assertElse(array, [])
+    for i followers.len (
+        keys = appendSpaceUserKey(keys, followers[i].toStr())
+    )
+    array curatorInvites = spaceCuratorInvites(space)
+    for i curatorInvites.len (
+        object invite = curatorInvites[i].assert(object)
+        keys = appendSpaceUserKey(keys, invite.username.toStr())
+    )
+    if space.kind.toStr() == "challenge" (
+        array participants = challengeArray(space, "participants")
+        for i participants.len (
+            keys = appendSpaceUserKey(keys, participants[i].toStr())
+        )
+        array judges = challengeArray(space, "judges")
+        for i judges.len (
+            keys = appendSpaceUserKey(keys, judges[i].toStr())
+        )
+        array judgeInvites = challengeArray(space, "judgeInvites")
+        for i judgeInvites.len (
+            object invite = judgeInvites[i].assert(object)
+            keys = appendSpaceUserKey(keys, invite.username.toStr())
+        )
+    )
+    return keys
+)
+
+def syncSpaceMemberships(object space) boolean (
+    string spaceId = space["_id"].toStr()
+    array keys = spaceRelatedUserKeys(space)
+    string signature = json.stringify(keys)
+    string stateId = "space:" ++ spaceId
+    object state = spaceMemberDocs.findById(stateId)
+    if state.isEmpty() == false and state.signature.toStr() == signature (
+        return true
+    )
+    array previous = spaceMemberDocs.where("spaceId", db.equal, spaceId).all()
+    for i previous.len (
+        object membership = previous[i].assert(object)
+        spaceMemberDocs.deleteOne({_id: membership["_id"]})
+    )
+    for i keys.len (
+        string userKey = keys[i].toStr()
+        spaceMemberDocs.insertOne({_id: "member:" ++ userKey ++ ":" ++ spaceId, kind: "member", userKey: userKey, spaceId: spaceId})
+    )
+    return putDocument(spaceMemberDocs, stateId, {kind: "state", signature: signature})
+)
+
+def putSpaceDocument(object space) boolean (
+    boolean saved = putDocument(spaceDocs, space["_id"].toStr(), space)
+    if saved (
+        syncSpaceMemberships(space)
+    )
+    return saved
+)
+
+def deleteSpaceMemberships(string spaceId) boolean (
+    array memberships = spaceMemberDocs.where("spaceId", db.equal, spaceId).all()
+    for i memberships.len (
+        object membership = memberships[i].assert(object)
+        spaceMemberDocs.deleteOne({_id: membership["_id"]})
+    )
+    spaceMemberDocs.deleteOne({_id: "space:" ++ spaceId})
+    return true
+)
+
+def migrateSpaceMemberships() boolean (
+    string migrationId = "migration:space-members-v1"
+    if spaceMemberDocs.findById(migrationId).isEmpty() == false (
+        return true
+    )
+    array previous = spaceMemberDocs.all()
+    for i previous.len (
+        object document = previous[i].assert(object)
+        spaceMemberDocs.deleteOne({_id: document["_id"]})
+    )
+    array spaces = spaceDocs.all()
+    for i spaces.len (
+        syncSpaceMemberships(spaces[i].assert(object))
+    )
+    return putDocument(spaceMemberDocs, migrationId, {kind: "migration", completed: timestamp})
+)
+
+def removeProjectsFromSpaces(array removedProjectIds) boolean (
+    array spaces = spaceDocs.all()
+    for i spaces.len (
+        object space = spaces[i].assert(object)
+        array storedProjectIds = space.projects.assertElse(array, [])
+        array projectIds = []
+        boolean changed = false
+        for j storedProjectIds.len (
+            if removedProjectIds.contains(storedProjectIds[j].toStr()) (
+                changed = true
+            ) else (
+                projectIds.append(storedProjectIds[j])
+            )
+        )
+        if changed (
+            space.projects = projectIds
+            array submissions = []
+            array storedSubmissions = challengeArray(space, "submissions")
+            for j storedSubmissions.len (
+                object submission = storedSubmissions[j].assert(object)
+                if !removedProjectIds.contains(submission.projectId.toStr()) (
+                    submissions.append(submission)
+                )
+            )
+            space.submissions = submissions
+            array scores = []
+            array storedScores = challengeArray(space, "scores")
+            for j storedScores.len (
+                object score = storedScores[j].assert(object)
+                if !removedProjectIds.contains(score.projectId.toStr()) (
+                    scores.append(score)
+                )
+            )
+            space.scores = scores
+            array votes = []
+            array storedVotes = challengeArray(space, "audienceVotes")
+            for j storedVotes.len (
+                object vote = storedVotes[j].assert(object)
+                if !removedProjectIds.contains(vote.projectId.toStr()) (
+                    votes.append(vote)
+                )
+            )
+            space.audienceVotes = votes
+            space.edited = timestamp
+            putSpaceDocument(space)
+        )
+    )
+    return true
+)
+
+def removeProjectFromSpaces(string projectId) boolean (
+    return removeProjectsFromSpaces([projectId])
+)
+
+def purgeUserFromSpaces(string username) boolean (
+    string key = normalizeUsername(username)
+    array spaces = spaceDocs.all()
+    for i spaces.len (
+        object space = spaces[i].assert(object)
+        string spaceId = space["_id"].toStr()
+        if normalizeUsername(space.owner.toStr()) == key (
+            spaceDocs.deleteOne({_id: space["_id"]})
+            deleteSpaceMemberships(spaceId)
+            fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")
+            fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".jsonl")
+            fs.remove(spaceThumbnailPath(spaceId))
+        ) else (
+            boolean changed = spaceRelatedUserKeys(space).contains(key)
+            array likes = spaceLikes(space)
+            array broken = spaceBrokenHearts(space)
+            if stringArrayContainsUser(likes, key) or stringArrayContainsUser(broken, key) (
+                changed = true
+            )
+            space.managers = removeUser(spaceManagers(space), key)
+            space.followers = removeUser(space.followers.assertElse(array, []), key)
+            space.likes = removeUser(likes, key)
+            space.brokenHearts = removeUser(broken, key)
+            array curatorInvites = []
+            array storedCuratorInvites = spaceCuratorInvites(space)
+            for j storedCuratorInvites.len (
+                object invite = storedCuratorInvites[j].assert(object)
+                if normalizeUsername(invite.username.toStr()) != key (
+                    curatorInvites.append(invite)
+                )
+            )
+            space.curatorInvites = curatorInvites
+            if space.kind.toStr() == "challenge" (
+                space.participants = removeUser(challengeArray(space, "participants"), key)
+                space.judges = removeUser(challengeArray(space, "judges"), key)
+                array judgeInvites = []
+                array storedJudgeInvites = challengeArray(space, "judgeInvites")
+                for j storedJudgeInvites.len (
+                    object invite = storedJudgeInvites[j].assert(object)
+                    if normalizeUsername(invite.username.toStr()) != key (
+                        judgeInvites.append(invite)
+                    )
+                )
+                space.judgeInvites = judgeInvites
+                array scores = []
+                array storedScores = challengeArray(space, "scores")
+                for j storedScores.len (
+                    object score = storedScores[j].assert(object)
+                    if normalizeUsername(score.judge.toStr()) != key (
+                        scores.append(score)
+                    ) else (
+                        changed = true
+                    )
+                )
+                space.scores = scores
+                array votes = []
+                array storedVotes = challengeArray(space, "audienceVotes")
+                for j storedVotes.len (
+                    object vote = storedVotes[j].assert(object)
+                    if normalizeUsername(vote.username.toStr()) != key (
+                        votes.append(vote)
+                    ) else (
+                        changed = true
+                    )
+                )
+                space.audienceVotes = votes
+            )
+            if changed (
+                space.edited = timestamp
+                putSpaceDocument(space)
+            )
+        )
+    )
+    return true
+)
+
+def purgeUserCommunityRecords(string username) boolean (
+    string key = normalizeUsername(username)
+    deleteDocumentsByField(reviewDocs, "authorKey", key)
+    deleteDocumentsByField(feedbackDocs, "author", username)
+    deleteDocumentsByField(playtimeDocs, "username", username)
+    playtimeSessionDocs.deleteOne({_id: key})
+
+    array releases = releaseDocs.where("creator", db.equal, username).all()
+    for i releases.len (
+        object release = releases[i].assert(object)
+        release.creator = "Deleted User"
+        putDocument(releaseDocs, release["_id"].toStr(), release)
+    )
+
+    array ideas = ideaDocs.all()
+    for i ideas.len (
+        object idea = ideas[i].assert(object)
+        string ideaId = idea["_id"].toStr()
+        if normalizeUsername(idea.author.toStr()) == key (
+            ideaDocs.deleteOne({_id: idea["_id"]})
+            fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".json")
+            fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".jsonl")
+        ) else (
+            array likes = []
+            if idea.contains("likes") (
+                likes = idea["likes"].assertElse(array, [])
+            ) else if idea.contains("voters") (
+                likes = idea["voters"].assertElse(array, [])
+            )
+            array dislikes = []
+            if idea.contains("dislikes") (
+                dislikes = idea["dislikes"].assertElse(array, [])
+            )
+            array nextLikes = removeUser(likes, key)
+            array nextDislikes = removeUser(dislikes, key)
+            if nextLikes.len != likes.len or nextDislikes.len != dislikes.len (
+                idea.likes = nextLikes
+                idea.dislikes = nextDislikes
+                idea.voters = []
+                idea.votes = nextLikes.len - nextDislikes.len
+                putDocument(ideaDocs, ideaId, idea)
+            )
+        )
+    )
+    return true
+)
+
+def renameUserCommunityRecords(string oldKey, string newKey, string newName) boolean (
+    array spaces = spaceDocs.all()
+    for i spaces.len (
+        object space = spaces[i].assert(object)
+        boolean changed = spaceRelatedUserKeys(space).contains(oldKey)
+        array likes = spaceLikes(space)
+        array brokenHearts = spaceBrokenHearts(space)
+        if stringArrayContainsUser(likes, oldKey) or stringArrayContainsUser(brokenHearts, oldKey) (
+            changed = true
+        )
+        if normalizeUsername(space.owner.toStr()) == oldKey (
+            space.owner = newName
+        )
+        space.managers = replaceUserInArray(spaceManagers(space), oldKey, newName)
+        space.followers = replaceUserInArray(space.followers.assertElse(array, []), oldKey, newKey)
+        space.likes = replaceUserInArray(likes, oldKey, newKey)
+        space.brokenHearts = replaceUserInArray(brokenHearts, oldKey, newKey)
+        array curatorInvites = spaceCuratorInvites(space)
+        for j curatorInvites.len (
+            object invite = curatorInvites[j].assert(object)
+            if normalizeUsername(invite.username.toStr()) == oldKey (
+                invite.username = newName
+                changed = true
+            )
+            if normalizeUsername(invite.invitedBy.toStr()) == oldKey (
+                invite.invitedBy = newName
+                changed = true
+            )
+            curatorInvites[j] = invite
+        )
+        space.curatorInvites = curatorInvites
+        if space.kind.toStr() == "challenge" (
+            space.participants = replaceUserInArray(challengeArray(space, "participants"), oldKey, newName)
+            space.judges = replaceUserInArray(challengeArray(space, "judges"), oldKey, newName)
+            array judgeInvites = challengeArray(space, "judgeInvites")
+            for j judgeInvites.len (
+                object invite = judgeInvites[j].assert(object)
+                if normalizeUsername(invite.username.toStr()) == oldKey (
+                    invite.username = newName
+                    changed = true
+                )
+                if normalizeUsername(invite.invitedBy.toStr()) == oldKey (
+                    invite.invitedBy = newName
+                    changed = true
+                )
+                judgeInvites[j] = invite
+            )
+            space.judgeInvites = judgeInvites
+            array scores = challengeArray(space, "scores")
+            for j scores.len (
+                object score = scores[j].assert(object)
+                if normalizeUsername(score.judge.toStr()) == oldKey (
+                    score.judge = newName
+                    scores[j] = score
+                    changed = true
+                )
+            )
+            space.scores = scores
+            array votes = challengeArray(space, "audienceVotes")
+            for j votes.len (
+                object vote = votes[j].assert(object)
+                if normalizeUsername(vote.username.toStr()) == oldKey (
+                    vote.username = newName
+                    votes[j] = vote
+                    changed = true
+                )
+            )
+            space.audienceVotes = votes
+            array submissions = challengeArray(space, "submissions")
+            for j submissions.len (
+                object submission = submissions[j].assert(object)
+                if normalizeUsername(submission.owner.toStr()) == oldKey (
+                    submission.owner = newName
+                    submissions[j] = submission
+                    changed = true
+                )
+            )
+            space.submissions = submissions
+        )
+        if changed (
+            putSpaceDocument(space)
+        )
+    )
+
+    array reviews = reviewDocs.where("authorKey", db.equal, oldKey).all()
+    for i reviews.len (
+        object review = reviews[i].assert(object)
+        string oldId = review["_id"].toStr()
+        string newId = review.projectId.toStr() ++ ":" ++ newKey
+        review.author = newName
+        review.authorKey = newKey
+        reviewDocs.deleteOne({_id: oldId})
+        putDocument(reviewDocs, newId, review)
+    )
+
+    array playtimeRecords = playtimeDocs.all()
+    for i playtimeRecords.len (
+        object playtime = playtimeRecords[i].assert(object)
+        if normalizeUsername(playtime.username.toStr()) == oldKey (
+            string oldId = playtime["_id"].toStr()
+            string newId = playtime.projectId.toStr() ++ ":" ++ newKey
+            object existing = playtimeDocs.findById(newId)
+            if existing.isEmpty() == false and newId != oldId (
+                playtime.duration = playtime.duration.toNum() + existing.duration.toNum()
+            )
+            playtime.username = newName
+            playtimeDocs.deleteOne({_id: oldId})
+            putDocument(playtimeDocs, newId, playtime)
+        )
+    )
+    object session = playtimeSessionDocs.findById(oldKey)
+    if session.isEmpty() == false (
+        session.username = newName
+        playtimeSessionDocs.deleteOne({_id: oldKey})
+        putDocument(playtimeSessionDocs, newKey, session)
+    )
+
+    array feedback = feedbackDocs.all()
+    for i feedback.len (
+        object item = feedback[i].assert(object)
+        if normalizeUsername(item.author.toStr()) == oldKey (
+            item.author = newName
+            putDocument(feedbackDocs, item["_id"].toStr(), item)
+        )
+    )
+    array releases = releaseDocs.all()
+    for i releases.len (
+        object release = releases[i].assert(object)
+        if normalizeUsername(release.creator.toStr()) == oldKey (
+            release.creator = newName
+            putDocument(releaseDocs, release["_id"].toStr(), release)
+        )
+    )
+    array pulls = pullDocs.all()
+    for i pulls.len (
+        object pull = pulls[i].assert(object)
+        boolean changed = false
+        if normalizeUsername(pull.author.toStr()) == oldKey (
+            pull.author = newName
+            changed = true
+        )
+        if normalizeUsername(pull.sourceOwner.toStr()) == oldKey (
+            pull.sourceOwner = newName
+            changed = true
+        )
+        if changed (
+            putDocument(pullDocs, pull["_id"].toStr(), pull)
+        )
+    )
+
+    array ideas = ideaDocs.all()
+    for i ideas.len (
+        object idea = ideas[i].assert(object)
+        boolean changed = false
+        if normalizeUsername(idea.author.toStr()) == oldKey (
+            idea.author = newName
+            changed = true
+        )
+        array likes = []
+        if idea.contains("likes") (
+            likes = idea["likes"].assertElse(array, [])
+        ) else if idea.contains("voters") (
+            likes = idea["voters"].assertElse(array, [])
+        )
+        array dislikes = []
+        if idea.contains("dislikes") (
+            dislikes = idea["dislikes"].assertElse(array, [])
+        )
+        if stringArrayContainsUser(likes, oldKey) or stringArrayContainsUser(dislikes, oldKey) (
+            idea.likes = replaceUserInArray(likes, oldKey, newName)
+            idea.dislikes = replaceUserInArray(dislikes, oldKey, newName)
+            idea.voters = []
+            changed = true
+        )
+        if changed (
+            putDocument(ideaDocs, idea["_id"].toStr(), idea)
+        )
+    )
+    return true
 )
 
 def challengeCriteria(object space) array (
@@ -268,29 +734,43 @@ def spaceTotalPlaytime(array ids) number (
 )
 
 def spaceResponse(object space, *serve.Context c) object (
+    if !space.contains("commentCount") (
+        space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+        putSpaceDocument(space)
+    )
     array projects = []
     array ids = space.projects.assert(array)
-    for i ids.len (
-        auto loaded = loadProject(ids[i].toStr())
-        if loaded.ok == true (
-            object project = loaded.project.assert(object)
-            if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
-                projects.append(indexEntryFromProject(project))
+    if space.kind.toStr() == "challenge" (
+        projects = challengeProjects(space, c)
+    ) else (
+        for i ids.len (
+            auto loaded = loadProject(ids[i].toStr())
+            if loaded.ok == true (
+                object project = loaded.project.assert(object)
+                if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
+                    projects.append(indexEntryFromProject(project))
+                )
             )
         )
     )
     object response = space
     response.projects = projects
-    response.projectIds = ids
+    array visibleIds = []
+    for i projects.len (
+        object visibleProject = projects[i].assert(object)
+        visibleIds.append(visibleProject.id)
+    )
+    response.projectIds = canManageSpace(space, c) ? ids visibleIds
     response.canManage = canManageSpace(space, c)
     response.isOwner = isSpaceOwner(space, c)
     response.following = stringArrayContainsUser(space.followers.assert(array), c.getString("username"))
+    response.followerCount = space.followers.assertElse(array, []).len
     response.invited = isSpaceInvitee(space, c)
     array likes = spaceLikes(space)
     array brokenHearts = spaceBrokenHearts(space)
     response.likeCount = likes.len
     response.brokenHeartCount = brokenHearts.len
-    response.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    response.commentCount = space.commentCount
     response.myReaction = ""
     if stringArrayContainsUser(likes, c.getString("username")) (
         response.myReaction = "heart"
@@ -321,7 +801,6 @@ def spaceResponse(object space, *serve.Context c) object (
         if !response.contains("resultsPublishedAt") (
             response.resultsPublishedAt = 0
         )
-        response.projects = challengeProjects(space, c)
         response.phase = challengePhase(space)
         response.isJudge = isChallengeJudge(space, c.getString("username"))
         response.judgeInvited = isChallengeJudgeInvitee(space, c.getString("username"))
@@ -333,6 +812,48 @@ def spaceResponse(object space, *serve.Context c) object (
         response.scores = []
         response.audienceVotes = []
         response.participants = []
+    )
+    return response
+)
+
+def spaceListResponse(object space, *serve.Context c) object (
+    array ids = space.projects.assert(array)
+    array followers = space.followers.assert(array)
+    string thumbnailURL = spaceThumbnailUrl(space)
+    number projectCount = 0
+    boolean canManage = canManageSpace(space, c)
+    for i ids.len (
+        object project = projectSearchDocs.findById(ids[i].toStr())
+        if !project.isEmpty() and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
+            projectCount = projectCount + 1
+            if thumbnailURL == "" and project.contains("thumbUrl") (
+                thumbnailURL = project.thumbUrl.toStr()
+            )
+        )
+    )
+    object response = {
+        _id: space["_id"],
+        title: space.title,
+        description: space.description,
+        kind: space.kind,
+        visibility: space.visibility,
+        owner: space.owner,
+        edited: space.edited,
+        startsAt: space.startsAt,
+        endsAt: space.endsAt,
+        openSubmissions: space.openSubmissions,
+        projects: [],
+        projectCount: projectCount,
+        followers: [],
+        followerCount: followers.len,
+        thumbnailUrl: thumbnailURL,
+        canManage: canManage,
+        isOwner: isSpaceOwner(space, c),
+        following: stringArrayContainsUser(followers, c.getString("username")),
+        invited: isSpaceInvitee(space, c)
+    }
+    if space.kind.toStr() == "challenge" (
+        response.participantCount = challengeArray(space, "participants").len
     )
     return response
 )
@@ -353,8 +874,36 @@ def spaceManagementResponse(object space, *serve.Context c) object (
 def handleListSpaces(*serve.Context c) (
     string kind = c.query("kind").toLower().strip()
     string q = c.query("q").toLower().strip()
-    array stored = spaceDocs.sort("edited", db.desc).all()
-    array spaces = []
+    number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+    number offset = c.queryInt("offset", 0)
+    array stored = []
+
+    if q == "" (
+        number total = 0
+        if kind != "" (
+            total = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).count()
+            offset = clampNumber(offset, 0, total)
+            stored = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).sort("edited", db.desc).limit(offset + limit).all()
+        ) else (
+            total = spaceDocs.where("visibility", db.equal, "public").count()
+            offset = clampNumber(offset, 0, total)
+            stored = spaceDocs.where("visibility", db.equal, "public").sort("edited", db.desc).limit(offset + limit).all()
+        )
+        array page = paginate(stored, offset, limit)
+        array spaces = []
+        for i page.len (
+            spaces.append(spaceListResponse(page[i].assert(object), c))
+        )
+        c.json(200, {ok: true, total: total, spaces: spaces})
+        return
+    )
+
+    if kind != "" (
+        stored = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).sort("edited", db.desc).all()
+    ) else (
+        stored = spaceDocs.where("visibility", db.equal, "public").sort("edited", db.desc).all()
+    )
+    array matches = []
     for i stored.len (
         object space = stored[i].assert(object)
         boolean include = space.visibility.toStr() == "public"
@@ -365,10 +914,17 @@ def handleListSpaces(*serve.Context c) (
             include = space.title.toStr().toLower().contains(q) or space.description.toStr().toLower().contains(q)
         )
         if include (
-            spaces.append(spaceResponse(space, c))
+            matches.append(space)
         )
     )
-    c.json(200, {ok: true, spaces: spaces})
+    number total = matches.len
+    offset = clampNumber(offset, 0, total)
+    array page = paginate(matches, offset, limit)
+    array spaces = []
+    for i page.len (
+        spaces.append(spaceListResponse(page[i].assert(object), c))
+    )
+    c.json(200, {ok: true, total: total, spaces: spaces})
 )
 
 def handleGetSpace(*serve.Context c) (
@@ -448,12 +1004,13 @@ def handleCreateSpace(*serve.Context c) (
         audienceVotes: [],
         submissions: [],
         participants: [],
+        commentCount: 0,
         communityVoting: false,
         resultsPublishedAt: 0,
         created: timestamp,
         edited: timestamp
     }
-    spaceDocs.insertOne(space)
+    putSpaceDocument(space)
     c.json(201, {ok: true, space: spaceResponse(space, c)})
 )
 
@@ -548,7 +1105,7 @@ def handleUpdateSpace(*serve.Context c) (
         return
     )
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, space: spaceResponse(space, c)})
 )
 
@@ -563,6 +1120,9 @@ def handleDeleteSpace(*serve.Context c) (
         return
     )
     spaceDocs.deleteOne({_id: space["_id"]})
+    deleteSpaceMemberships(space["_id"].toStr())
+    fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
+    fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
     if fs.exists(spaceThumbnailPath(space["_id"].toStr())) (
         fs.remove(spaceThumbnailPath(space["_id"].toStr()))
     )
@@ -594,7 +1154,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
         return
     )
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
 )
 
@@ -636,7 +1196,7 @@ def handleAddSpaceProject(*serve.Context c) (
             space.participants = participants
         )
         space.edited = timestamp
-        putDocument(spaceDocs, space["_id"].toStr(), space)
+        putSpaceDocument(space)
         addNotification(space.owner.toStr(), c.getString("username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
     )
     c.json(200, {ok: true, space: spaceResponse(space, c)})
@@ -670,7 +1230,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
         space.submissions = nextSubmissions
     )
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, space: spaceResponse(space, c)})
 )
 
@@ -700,7 +1260,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
     invites.append(invite)
     space.judgeInvites = invites
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     addNotification(profile.username.toStr(), c.getString("username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
     c.json(201, {ok: true, invitation: invite})
 )
@@ -721,7 +1281,7 @@ def handleJoinChallenge(*serve.Context c) (
         participants.append(c.getString("username"))
         space.participants = participants
         space.edited = timestamp
-        putDocument(spaceDocs, space["_id"].toStr(), space)
+        putSpaceDocument(space)
         if !isSpaceOwner(space, c) (
             addNotification(space.owner.toStr(), c.getString("username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
         )
@@ -740,6 +1300,11 @@ def handleLeaveChallenge(*serve.Context c) (
         return
     )
     string username = c.getString("username")
+    array participants = challengeArray(space, "participants")
+    if !stringArrayContainsUser(participants, username) (
+        c.json(200, {ok: true, joined: false, participantCount: participants.len})
+        return
+    )
     array ids = space.projects.assert(array)
     for i ids.len (
         object project = projectSearchDocs.findById(ids[i].toStr())
@@ -748,9 +1313,9 @@ def handleLeaveChallenge(*serve.Context c) (
             return
         )
     )
-    space.participants = removeString(challengeArray(space, "participants"), username)
+    space.participants = removeUser(participants, username)
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, joined: false, participantCount: space.participants.len})
 )
 
@@ -778,7 +1343,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
         addNotification(space.owner.toStr(), c.getString("username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
     )
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, space: spaceResponse(space, c)})
 )
 
@@ -789,7 +1354,9 @@ def handleRemoveChallengeJudge(*serve.Context c) (
         return
     )
     string username = c.param("username")
-    space.judges = removeString(challengeArray(space, "judges"), username)
+    array judges = challengeArray(space, "judges")
+    boolean changed = stringArrayContainsUser(judges, username)
+    space.judges = removeUser(judges, username)
     array scores = challengeArray(space, "scores")
     array nextScores = []
     for i scores.len (
@@ -798,9 +1365,14 @@ def handleRemoveChallengeJudge(*serve.Context c) (
             nextScores.append(score)
         )
     )
+    if nextScores.len != scores.len (
+        changed = true
+    )
     space.scores = nextScores
-    space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    if changed (
+        space.edited = timestamp
+        putSpaceDocument(space)
+    )
     c.json(200, {ok: true})
 )
 
@@ -865,7 +1437,7 @@ def handleScoreChallengeEntry(*serve.Context c) (
     nextScores.append(score)
     space.scores = nextScores
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, score: score})
 )
 
@@ -902,7 +1474,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
     )
     nextVotes.append({projectId: projectId, username: username, value: value, edited: timestamp})
     space.audienceVotes = nextVotes
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, value: value})
 )
 
@@ -922,7 +1494,7 @@ def handlePublishChallengeResults(*serve.Context c) (
     )
     space.resultsPublishedAt = timestamp
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, space: spaceResponse(space, c)})
 )
 
@@ -935,9 +1507,9 @@ def handleFollowSpace(*serve.Context c) (
     array followers = space.followers.assert(array)
     if !stringArrayContainsUser(followers, c.getString("username")) (
         followers.append(c.getString("username"))
+        space.followers = followers
+        putSpaceDocument(space)
     )
-    space.followers = followers
-    putDocument(spaceDocs, space["_id"].toStr(), space)
     c.json(200, {ok: true, following: true, followers: followers.len})
 )
 
@@ -947,40 +1519,31 @@ def handleUnfollowSpace(*serve.Context c) (
         c.notFound("space not found")
         return
     )
-    space.followers = removeString(space.followers.assert(array), c.getString("username"))
-    putDocument(spaceDocs, space["_id"].toStr(), space)
-    c.json(200, {ok: true, following: false, followers: space.followers.len})
+    array followers = space.followers.assert(array)
+    if stringArrayContainsUser(followers, c.getString("username")) (
+        followers = removeUser(followers, c.getString("username"))
+        space.followers = followers
+        putSpaceDocument(space)
+    )
+    c.json(200, {ok: true, following: false, followers: followers.len})
 )
 
 def handleMySpaces(*serve.Context c) (
-    string username = c.getString("username")
-    array stored = spaceDocs.sort("edited", db.desc).all()
+    string userKey = normalizeUsername(c.getString("username"))
+    array memberships = spaceMemberDocs.where("userKey", db.equal, userKey).all()
+    array stored = []
+    for i memberships.len (
+        object membership = memberships[i].assert(object)
+        object space = spaceDocs.findById(membership.spaceId.toStr())
+        if space.isEmpty() == false (
+            stored.append(space)
+        )
+    )
+    stored.sortBy("edited", "descending")
     array spaces = []
     for i stored.len (
         object space = stored[i].assert(object)
-        boolean related = normalizeUsername(space.owner.toStr()) == normalizeUsername(username) or stringArrayContainsUser(spaceManagers(space), username) or stringArrayContainsUser(space.followers.assert(array), username)
-        array invites = spaceCuratorInvites(space)
-        for j invites.len (
-            object invite = invites[j].assert(object)
-            if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
-                related = true
-            )
-        )
-        if space.kind.toStr() == "challenge" (
-            if stringArrayContainsUser(challengeArray(space, "participants"), username) or stringArrayContainsUser(challengeArray(space, "judges"), username) (
-                related = true
-            )
-            array judgeInvites = challengeArray(space, "judgeInvites")
-            for j judgeInvites.len (
-                object invite = judgeInvites[j].assert(object)
-                if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
-                    related = true
-                )
-            )
-        )
-        if related (
-            spaces.append(spaceResponse(space, c))
-        )
+        spaces.append(spaceListResponse(space, c))
     )
     c.json(200, {ok: true, spaces: spaces})
 )
@@ -1035,7 +1598,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
     invites.append(invite)
     space.curatorInvites = invites
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     addNotification(profile.username.toStr(), c.getString("username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
     c.json(201, {ok: true, invitation: invite})
 )
@@ -1072,7 +1635,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
     )
     space.curatorInvites = remaining
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     string notificationType = "space_curator_declined"
     if accepted (
         notificationType = "space_curator_accepted"
@@ -1092,10 +1655,13 @@ def handleRemoveSpaceCurator(*serve.Context c) (
         return
     )
     string username = c.param("username")
-    space.managers = removeString(spaceManagers(space), username)
-    space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
-    addNotification(username, c.getString("username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
+    array managers = spaceManagers(space)
+    if stringArrayContainsUser(managers, username) (
+        space.managers = removeUser(managers, username)
+        space.edited = timestamp
+        putSpaceDocument(space)
+        addNotification(username, c.getString("username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
+    )
     c.json(200, {ok: true})
 )
 
@@ -1112,15 +1678,20 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
     string username = c.param("username")
     array remaining = []
     array invites = spaceCuratorInvites(space)
+    boolean found = false
     for i invites.len (
         object invite = invites[i].assert(object)
         if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
             remaining.append(invite)
+        ) else (
+            found = true
         )
     )
-    space.curatorInvites = remaining
-    space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    if found (
+        space.curatorInvites = remaining
+        space.edited = timestamp
+        putSpaceDocument(space)
+    )
     c.json(200, {ok: true})
 )
 
@@ -1144,8 +1715,8 @@ def handleReactSpace(*serve.Context c) (
     ) else (
         hadReaction = stringArrayContainsUser(brokenHearts, username)
     )
-    likes = removeString(likes, username)
-    brokenHearts = removeString(brokenHearts, username)
+    likes = removeUser(likes, username)
+    brokenHearts = removeUser(brokenHearts, username)
     if !hadReaction and reactionType == "heart" (
         likes.append(username)
     ) else if !hadReaction and reactionType == "brokenheart" (
@@ -1154,7 +1725,7 @@ def handleReactSpace(*serve.Context c) (
     space.likes = likes
     space.brokenHearts = brokenHearts
     space.edited = timestamp
-    putDocument(spaceDocs, space["_id"].toStr(), space)
+    putSpaceDocument(space)
     c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: hadReaction ? "" reactionType})
 )
 
@@ -1164,7 +1735,9 @@ def handleGetSpaceComments(*serve.Context c) (
         c.notFound("space not found")
         return
     )
-    c.json(200, {ok: true, comments: loadComments(spaceCommentKey(space["_id"].toStr()))})
+    object page = commentPage(loadComments(spaceCommentKey(space["_id"].toStr())), c)
+    page.ok = true
+    c.json(200, page)
 )
 
 def handleCreateSpaceComment(*serve.Context c) (
@@ -1187,6 +1760,12 @@ def handleCreateSpaceComment(*serve.Context c) (
         c.badRequest(created.error.toStr())
         return
     )
+    if space.contains("commentCount") (
+        space.commentCount = space.commentCount.toNum() + 1
+    ) else (
+        space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    )
+    putSpaceDocument(space)
     string commenter = c.getString("username")
     string parentAuthor = created.parentAuthor.toStr()
     string newCommentId = created.comment.id.toStr()
@@ -1197,7 +1776,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     if normalizeUsername(space.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(space.owner.toStr()) != normalizeUsername(parentAuthor) (
         addNotification(space.owner.toStr(), commenter, "space_comment", notificationData)
     )
-    notifyMentions(created.comment.content.toStr(), commenter, space.owner.toStr(), notificationData)
+    notifyMentions(created.comment.content.toStr(), commenter, [space.owner.toStr(), parentAuthor], notificationData)
     c.json(201, created)
 )
 
@@ -1216,6 +1795,12 @@ def handleDeleteSpaceComment(*serve.Context c) (
         c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
         return
     )
+    if space.contains("commentCount") (
+        space.commentCount = clampNumber(space.commentCount.toNum() - deleted.removed.toNum(), 0, space.commentCount.toNum())
+    ) else (
+        space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    )
+    putSpaceDocument(space)
     c.json(200, {ok: true})
 )
 
@@ -1257,7 +1842,7 @@ def handleListReleases(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    array releases = releaseDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).all()
+    array releases = releaseDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(100).all()
     c.json(200, {ok: true, releases: releases})
 )
 
@@ -1575,6 +2160,7 @@ def handleListProjectReviews(*serve.Context c) (
 def handleListUserReviews(*serve.Context c) (
     string name = normalizeUsername(c.param("name"))
     string requestedId = userIdForUsername(name)
+    number limit = clampNumber(c.queryInt("limit", 20), 1, 50)
     array allReviews = reviewDocs.sort("edited", db.desc).limit(1000).all()
     array reviews = []
     for i allReviews.len (
@@ -1583,7 +2169,7 @@ def handleListUserReviews(*serve.Context c) (
         if review.contains("authorId") and review.authorId != null (
             authorId = review.authorId.toStr()
         )
-        if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < 100 (
+        if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < limit (
             auto result = loadProject(review.projectId.toStr())
             if result.ok and canViewProject(result.project.assert(object), c) (
                 object project = result.project.assert(object)
@@ -1632,7 +2218,7 @@ def handleSaveProjectReview(*serve.Context c) (
     if existing.isEmpty() == false (
         created = existing.created.toNum()
     )
-    object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), authorId: c.getString("userId"), rating: rating, message: message, created: created, edited: timestamp}
+    object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), authorId: c.getString("userId"), authorKey: normalizeUsername(c.getString("username")), rating: rating, message: message, created: created, edited: timestamp}
     putDocument(reviewDocs, reviewId, review)
     if existing.isEmpty() == true (
         addNotification(project.owner.toStr(), c.getString("username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
@@ -1661,6 +2247,29 @@ def handleListIdeas(*serve.Context c) (
     string username = c.getString("username")
     for i ideas.len (
         object idea = ideas[i].assert(object)
+        boolean needsSave = false
+        if !idea.contains("source") (
+            idea.source = "community"
+            if normalizeUsername(idea.author.toStr()) == "mist" (
+                idea.source = "mistwarp"
+            )
+            needsSave = true
+        )
+        if !idea.contains("interested") (
+            idea.interested = idea.source.toStr() == "mistwarp"
+            needsSave = true
+        )
+        if !idea.contains("kind") (
+            idea.kind = "idea"
+            needsSave = true
+        )
+        if !idea.contains("commentCount") (
+            idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+            needsSave = true
+        )
+        if needsSave (
+            putDocument(ideaDocs, idea["_id"].toStr(), idea)
+        )
         array likes = []
         array dislikes = []
         if idea.contains("likes") (
@@ -1680,19 +2289,6 @@ def handleListIdeas(*serve.Context c) (
         ) else if stringArrayContainsUser(dislikes, username) (
             idea.myVote = "dislike"
         )
-        if !idea.contains("source") (
-            idea.source = "community"
-            if normalizeUsername(idea.author.toStr()) == "mist" (
-                idea.source = "mistwarp"
-            )
-        )
-        if !idea.contains("interested") (
-            idea.interested = idea.source.toStr() == "mistwarp"
-        )
-        if !idea.contains("kind") (
-            idea.kind = "idea"
-        )
-        idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
         idea.likes = []
         idea.dislikes = []
         idea.voters = []
@@ -1727,7 +2323,7 @@ def handleCreateIdea(*serve.Context c) (
     if c.getBool("isAdmin") == true (
         source = "mistwarp"
     )
-    object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, created: timestamp, edited: timestamp}
+    object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
     ideaDocs.insertOne(idea)
     idea.myVote = "like"
     idea.likesCount = 1
@@ -1767,8 +2363,8 @@ def handleVoteIdea(*serve.Context c) (
     ) else (
         hadVote = stringArrayContainsUser(dislikes, username)
     )
-    likes = removeString(likes, username)
-    dislikes = removeString(dislikes, username)
+    likes = removeUser(likes, username)
+    dislikes = removeUser(dislikes, username)
     if !hadVote and vote == "like" (
         likes.append(username)
     ) else if !hadVote and vote == "dislike" (
@@ -1792,7 +2388,9 @@ def handleGetIdeaComments(*serve.Context c) (
         c.notFound("idea not found")
         return
     )
-    c.json(200, {ok: true, comments: loadComments("roadmap-" ++ idea["_id"].toStr())})
+    object page = commentPage(loadComments("roadmap-" ++ idea["_id"].toStr()), c)
+    page.ok = true
+    c.json(200, page)
 )
 
 def handleCreateIdeaComment(*serve.Context c) (
@@ -1815,6 +2413,12 @@ def handleCreateIdeaComment(*serve.Context c) (
         c.badRequest(created.error.toStr())
         return
     )
+    if idea.contains("commentCount") (
+        idea.commentCount = idea.commentCount.toNum() + 1
+    ) else (
+        idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+    )
+    putDocument(ideaDocs, idea["_id"].toStr(), idea)
     string commenter = c.getString("username")
     string parentAuthor = created.parentAuthor.toStr()
     if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
@@ -1823,7 +2427,7 @@ def handleCreateIdeaComment(*serve.Context c) (
     if normalizeUsername(idea.author.toStr()) != normalizeUsername(parentAuthor) (
         addNotification(idea.author.toStr(), commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title})
     )
-    notifyMentions(created.comment.content.toStr(), commenter, idea.author.toStr(), {roadmapId: idea["_id"], roadmapTitle: idea.title})
+    notifyMentions(created.comment.content.toStr(), commenter, [idea.author.toStr(), parentAuthor], {roadmapId: idea["_id"], roadmapTitle: idea.title})
     c.json(201, created)
 )
 
@@ -1838,6 +2442,16 @@ def handleDeleteIdeaComment(*serve.Context c) (
         c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
         return
     )
+    if idea.contains("commentCount") (
+        idea.commentCount = clampNumber(
+            idea.commentCount.toNum() - deleted.removed.toNum(),
+            0,
+            idea.commentCount.toNum()
+        )
+    ) else (
+        idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+    )
+    putDocument(ideaDocs, idea["_id"].toStr(), idea)
     c.json(200, {ok: true})
 )
 
