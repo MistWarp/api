@@ -202,6 +202,20 @@ def handleDeleteMyData(*serve.Context c) (
         )
     )
     purgeProjects(projectsToPurge)
+    array trashFiles = fs.readDir(trashDir).toArray()
+    for i trashFiles.len (
+        string trashFile = trashFiles[i].toStr()
+        if trashFile.endsWith(".json") (
+            auto trashed = readFile(trashDir ++ trashFile)
+            if trashed.ok (
+                object trashedProject = trashed.data.assert(object)
+                if identityMatches((trashedProject.ownerId ?? "").toStr(), trashedProject.owner.toStr(), userId, username) (
+                    purgeProject(trashedProject)
+                )
+            )
+        )
+    )
+    purgeThemesForUser(userId, username)
     for i ownedProjectIds.len (
         deleteProjectCommunityRecords(ownedProjectIds[i].toStr())
     )

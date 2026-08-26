@@ -77,6 +77,9 @@ string extensionsDir = "data/extensions/"
 string releasesDir = "data/releases/"
 string extensionsFile = "data/extensions.json"
 string safetyDir = "data/safety/"
+string trashDir = "data/trash/"
+string themesDir = "data/themes/"
+string themePreviewsDir = "data/theme-previews/"
 
 number maxWorkspaceBytes = 134217728
 
@@ -112,7 +115,6 @@ string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
 string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
 string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
-number paywallFeePercent = configValue("PAYWALL_FEE_PERCENT", "10").toNum()
 string purchaseKeysFile = "data/purchase-keys.json"
 string pendingPayoutsFile = "data/pending-payouts.json"
 
@@ -137,9 +139,11 @@ import "./r2.osl"
 import "./gitea.osl"
 import "./auth.osl"
 import "./middleware.osl"
+import "./perks.osl"
 import "./projects.osl"
 import "./extensions.osl"
 import "./monetize.osl"
+import "./themes.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
 import "./social.osl"
@@ -162,6 +166,7 @@ auto sessionCache = cache.create(10000, 3600)
 auto bansCache = cache.create(2, 300)
 auto adminsCache = cache.create(2, 300)
 auto sharedProjectsCache = cache.create(2, 60)
+auto paidPerksCache = cache.create(10000, 300)
 
 ensureDirectories()
 initCommunityDatabase()
@@ -193,6 +198,7 @@ app.use(corsMiddleware)
 app.use(serve.logger())
 
 app.static("/thumbnails", "./data/thumbnails")
+app.static("/theme-previews", "./data/theme-previews")
 app.GET("/blobs/assets/:name", handleGetAssetBlob)
 app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
 app.GET("/blobs/evidence/:id/project.json", handleGetEvidenceJson)
@@ -209,6 +215,7 @@ uploads.POST("/projects/:id/upload", requireAuth, handleUploadProject)
 uploads.POST("/projects/:id/history/bootstrap", requireAuth, handleBootstrapProjectHistory)
 uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
 uploads.POST("/spaces/:id/thumbnail", requireAuth, handleSetSpaceThumbnail)
+uploads.POST("/themes/:id/preview", requireAuth, handleSetThemePreview)
 uploads.POST("/admin/projects/:id/extensions/index", requireAdmin, handleAdminIndexProjectExtensions)
 
 *serve.Router api = app.group("/api")
@@ -216,6 +223,7 @@ api.use(serve.maxBodySize(262144))
 
 api.GET("/health", handleHealth)
 api.GET("/health/dependencies", handleDependencyHealth)
+api.GET("/perks", handleGetPerks)
 api.POST("/auth", handleRoturAuth)
 api.GET("/me", handleGetMe)
 api.POST("/logout", handleLogout)
@@ -228,6 +236,7 @@ api.POST("/me/quota/reset", requireAuth, handleQuotaReset)
 api.POST("/me/quota/reset/confirm", requireAuth, handleQuotaResetConfirm)
 api.GET("/me/stats", requireAuth, handleGetMyStats)
 api.GET("/me/library", requireAuth, handleGetMyLibrary)
+api.GET("/me/trash", requireAuth, handleGetMyTrash)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
@@ -243,6 +252,15 @@ api.GET("/agreement", handleGetAgreement)
 api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
 
 api.GET("/explore", handleExplore)
+api.GET("/themes", handleListThemes)
+api.GET("/themes/:id", handleGetTheme)
+api.POST("/themes", requireAuth, handleCreateTheme)
+api.PUT("/themes/:id", requireAuth, handleUpdateTheme)
+api.DELETE("/themes/:id", requireAuth, handleDeleteTheme)
+api.POST("/themes/:id/like", requireAuth, requireGoodStanding, handleLikeTheme)
+api.GET("/themes/:id/download", handleDownloadTheme)
+api.POST("/themes/:id/purchase/intent", requireAuth, handleThemePurchaseIntent)
+api.POST("/themes/:id/purchase/confirm", requireAuth, handleThemePurchaseConfirm)
 api.GET("/leaderboard", handleLeaderboard)
 api.GET("/roadmap", handleListIdeas)
 api.POST("/roadmap", requireAuth, requireGoodStanding, handleCreateIdea)
@@ -290,6 +308,8 @@ api.GET("/projects/:id", handleGetProject)
 api.GET("/projects/:id/card.svg", handleProjectCard)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
+api.POST("/projects/:id/restore", requireAuth, handleRestoreProject)
+api.DELETE("/trash/:id", requireAuth, handlePurgeTrashedProject)
 api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
 api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
 api.POST("/projects/:id/visibility", requireAuth, requireGoodStanding, handleSetVisibility)
