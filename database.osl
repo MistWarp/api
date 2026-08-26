@@ -28,7 +28,11 @@ def syncSearchProject(object project) boolean (
 def syncSearchProfile(object profile) boolean (
     string key = normalizeUsername(profile.username.toStr())
     array followers = profile.followers.assert(array)
-    object entry = {_id: key, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, edited: timestamp}
+    string userId = ""
+    if profile.contains("userId") and profile.userId != null (
+        userId = profile.userId.toStr()
+    )
+    object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, edited: timestamp}
     return putDocument(profileSearchDocs, key, entry)
 )
 
@@ -79,7 +83,14 @@ def projectPlaytime(string projectId, string username) number (
     if username == "" (
         return 0
     )
-    object entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
+    string identityKey = userIdForUsername(username)
+    if identityKey == "" (
+        identityKey = normalizeUsername(username)
+    )
+    object entry = playtimeDocs.findById(projectId ++ ":" ++ identityKey)
+    if entry.isEmpty() == true and identityKey != normalizeUsername(username) (
+        entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
+    )
     if entry.isEmpty() == true (
         return 0
     )

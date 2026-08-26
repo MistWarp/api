@@ -41,7 +41,7 @@ def getSession(string token) object (
     )
     string username = session.username.toStr()
     string userId = session.userId.toStr()
-    string mapped = usernameForId(userId)
+    string mapped = refreshUsernameForId(userId)
     if mapped != "" (
         username = mapped
     )
@@ -132,6 +132,7 @@ def handleRoturAuth(*serve.Context c) (
     )
 
     object profile = loadProfile(username)
+    profile.userId = userId
     profile.username = username
     saveProfile(profile)
 

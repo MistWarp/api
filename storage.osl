@@ -124,9 +124,14 @@ def indexEntryFromProject(object project) object (
     if project.contains("acceptedChanges") and project.acceptedChanges != null (
         acceptedChanges = project.acceptedChanges.toNum()
     )
+    string ownerId = ""
+    if project.contains("ownerId") and project.ownerId != null (
+        ownerId = project.ownerId.toStr()
+    )
     return {
         id: project.id,
         owner: project.owner,
+        ownerId: ownerId,
         ownerKey: normalizeUsername(project.owner.toStr()),
         title: project.title,
         thumbUrl: thumbUrlFor(project),
@@ -211,6 +216,7 @@ def deleteProjectFile(string id) boolean (
 
 def defaultProfile(string username) object (
     return {
+        userId: "",
         username: username,
         bio: "",
         featuredProject: "",

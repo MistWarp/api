@@ -1,4 +1,4 @@
-def createComment(string key, string author, string content, string parentId, string kind) object (
+def createComment(string key, string author, string authorId, string content, string parentId, string kind) object (
     string trimmed = content.strip()
     if trimmed == "" (
         return {ok: false, error: "comment is empty"}
@@ -27,6 +27,7 @@ def createComment(string key, string author, string content, string parentId, st
     object comment = {
         id: generateCommentId(),
         author: author,
+        authorId: authorId,
         content: trimmed,
         created: timestamp,
         parent: parentId,
@@ -155,7 +156,7 @@ def handleCreateProjectComment(*serve.Context c) (
         )
     )
 
-    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), body.content.toStr(), parentId, kind)
+    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind)
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
@@ -233,7 +234,7 @@ def handleCreateProfileComment(*serve.Context c) (
         parentId = body.parent.toStr()
     )
 
-    object created = createComment(profileCommentKey(name), c.getString("username"), body.content.toStr(), parentId, "comment")
+    object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
