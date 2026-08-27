@@ -10,6 +10,10 @@ def createComment(string key, string author, string authorId, string content, st
     string lockName = "comments:" ++ key
     sync.lock(lockName)
     string commentsPath = commentsDir ++ key ++ ".jsonl"
+    if fs.exists(commentsPath) and fs.getSize(commentsPath) + json.stringify({author: author, content: trimmed}).len > 8388608 (
+        sync.unlock(lockName)
+        return {ok: false, error: "this comment thread is full"}
+    )
     boolean hasJsonLines = fs.exists(commentsPath)
     array comments = []
     if parentId != "" or !hasJsonLines (

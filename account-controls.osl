@@ -216,7 +216,6 @@ def handleDeleteMyData(*serve.Context c) (
             )
         )
     )
-    purgeThemesForUser(userId, username)
     for i ownedProjectIds.len (
         deleteProjectCommunityRecords(ownedProjectIds[i].toStr())
     )

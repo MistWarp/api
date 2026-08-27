@@ -431,6 +431,11 @@ def handleQuotaResetConfirm(*serve.Context c) (
 def handleCreateProject(*serve.Context c) (
     object body = c.bodyJSON()
     string username = c.getString("username")
+    number projectLimit = mistwarpBenefitsForUserId(c.getString("userId")).maxProjects.toNum()
+    if !c.getBool("isAdmin") and ownedProjectSlotCount(c.getString("userId"), username) >= projectLimit (
+        c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+        return
+    )
     string groupTag = ""
     if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
         groupTag = normalizeGroupTag(body.groupTag.toStr())
@@ -516,6 +521,24 @@ def handleCreateProject(*serve.Context c) (
     upsertIndexEntry(project)
 
     c.json(201, {ok: true, id: id})
+)
+
+def ownedProjectSlotCount(string userId, string username) number (
+    number count = ownerIndexCount(username, true)
+    array trashFiles = fs.readDir(trashDir).toArray()
+    for i trashFiles.len (
+        string file = trashFiles[i].toStr()
+        if file.endsWith(".json") (
+            auto loaded = readFile(trashDir ++ file)
+            if loaded.ok (
+                object project = loaded.data.assert(object)
+                if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, username) (
+                    count = count + 1
+                )
+            )
+        )
+    )
+    return count
 )
 
 def notifyPublishedRemix(object project) (
@@ -662,7 +685,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
     )
     number projectJsonBytes = fs.getSize(jsonPath)
     if projectJsonBytes > maxProjectJsonBytes (
-        return {ok: false, error: "project.json exceeds the 1 GB expanded limit", code: "project_too_large", status: 413}
+        return {ok: false, error: "project.json exceeds the 256 MB expanded limit", code: "project_too_large", status: 413}
     )
     object inspected = inspectProjectJson(jsonPath)
     if !inspected.ok (
@@ -799,6 +822,120 @@ def stageProjectJson(object project, string gzipPath) boolean (
         return false
     )
     return true
+)
+
+def projectReferencesWorkspaceKey(object project, string key) boolean (
+    array keys = projectWorkspaceKeys(project)
+    return keys.contains(key)
+)
+
+def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean workspace) boolean (
+    if key == "" (
+        return false
+    )
+    array directories = [projectsDir, trashDir]
+    for d directories.len (
+        string directory = directories[d].toStr()
+        array files = fs.readDir(directory).toArray()
+        for i files.len (
+            auto loaded = readFile(directory ++ files[i].toStr())
+            if loaded.ok (
+                object candidate = loaded.data.assert(object)
+                if candidate.id.toStr() != excludedId (
+                    if workspace and projectReferencesWorkspaceKey(candidate, key) (
+                        return true
+                    )
+                    if !workspace and candidate.jsonKey.toStr() == key (
+                        return true
+                    )
+                )
+            )
+        )
+    )
+    if !workspace and releaseDocs.where("jsonKey", db.equal, key).limit(1).all().len > 0 (
+        return true
+    )
+    if !workspace (
+        array evidenceIds = fs.readDir(reportEvidenceDir).toArray()
+        for i evidenceIds.len (
+            object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+            if (evidence.evidenceJsonKey ?? "").toStr() == key (
+                return true
+            )
+        )
+    )
+    return false
+)
+
+def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean workspace) (
+    if key != "" and !projectStorageKeyUsedByAnotherProject(key, excludedId, workspace) (
+        r2Remove(key)
+    )
+)
+
+def ensureProjectJsonSnapshot(object project) object (
+    if project.jsonKey.toStr().startsWith("project-json/") and (!project.contains("pendingJson") or project.pendingJson != true) (
+        return {ok: true, project: project}
+    )
+    string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".json.gz"
+    if !copyStoredProjectJsonToPath(project, tempPath) (
+        fs.remove(tempPath)
+        return {ok: false}
+    )
+    byte[] snapshotBody = fs.readFileBytes(tempPath)
+    string key = projectJsonSnapshotKey(contentHash(snapshotBody))
+    if !r2PutEncoded(key, snapshotBody, "application/json", "gzip") (
+        fs.remove(tempPath)
+        return {ok: false}
+    )
+    string previousKey = project.jsonKey.toStr()
+    project.jsonKey = key
+    project.jsonGzip = true
+    project.pendingJson = false
+    fs.remove(stagingJsonPath(project.id.toStr()))
+    fs.remove(tempPath)
+    if !saveProject(project) (
+        removeProjectStorageKeyIfOrphaned(key, project.id.toStr(), false)
+        return {ok: false}
+    )
+    if previousKey != key (
+        removeProjectStorageKeyIfOrphaned(previousKey, project.id.toStr(), false)
+    )
+    return {ok: true, project: project}
+)
+
+def ensureProjectWorkspaceSnapshots(object project) object (
+    if project.contains("workspaceLayers") and project.workspaceLayers != null and project.workspaceLayers.assertElse(array, []).len > 0 (
+        return {ok: true, project: project}
+    )
+    array previousKeys = projectWorkspaceKeys(project)
+    if previousKeys.len == 0 (
+        return {ok: true, project: project}
+    )
+    string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
+    if !copyProjectWorkspaceToPath(project, tempPath) (
+        fs.remove(tempPath)
+        return {ok: false}
+    )
+    byte[] workspaceBody = fs.readFileBytes(tempPath)
+    string key = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
+    if !r2Put(key, workspaceBody, "application/x-mistwarp-project") (
+        fs.remove(tempPath)
+        return {ok: false}
+    )
+    fs.remove(tempPath)
+    project.workspaceKey = key
+    project.workspaceLayers = [key]
+    if !saveProject(project) (
+        removeProjectStorageKeyIfOrphaned(key, project.id.toStr(), true)
+        return {ok: false}
+    )
+    for i previousKeys.len (
+        if previousKeys[i].toStr() != key (
+            removeProjectStorageKeyIfOrphaned(previousKeys[i].toStr(), project.id.toStr(), true)
+        )
+    )
+    return {ok: true, project: project}
 )
 
 def maybeFlushProject(object project) (
@@ -1008,6 +1145,11 @@ def handleUploadProject(*serve.Context c) (
     project.edited = timestamp
 
     string gzipPath = uploadResult.gzipPath.toStr()
+    string previousJsonKey = project.jsonKey.toStr()
+    if previousJsonKey.startsWith("project-json/") or (project.contains("inheritedJson") and project.inheritedJson == true) (
+        project.jsonKey = projectJsonKey(id)
+    )
+    project.inheritedJson = false
     project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
     project.jsonBytes = uploadResult.jsonBytes
     project.storedJsonBytes = uploadResult.storedJsonBytes
@@ -1017,6 +1159,7 @@ def handleUploadProject(*serve.Context c) (
     project.extensionsIndexed = true
     project.delete("pendingExtensionUrls")
 
+    array previousWorkspaceKeys = []
     if !workspaceResult.isErr() (
         object workspace = workspaceResult.unwrap().assert(object)
         if workspace.size.toNum() > maxWorkspaceBytes (
@@ -1063,8 +1206,11 @@ def handleUploadProject(*serve.Context c) (
             )
             workspaceBody = fs.readFileBytes(mergedWorkspacePath)
         )
-        string workspaceKey = projectWorkspaceKey(id)
-        if !r2Put(workspaceKey, workspaceBody, "application/x-mistwarp-project") (
+        previousWorkspaceKeys = projectWorkspaceKeys(project)
+        boolean compactWorkspace = !workspaceDelta or previousWorkspaceKeys.len >= 8
+        any storedWorkspaceBody = compactWorkspace ? workspaceBody workspace.data
+        string workspaceKey = projectWorkspaceSnapshotKey(contentHash(storedWorkspaceBody))
+        if !r2Put(workspaceKey, storedWorkspaceBody, "application/x-mistwarp-project") (
             if baseWorkspacePath != "" (
                 fs.remove(baseWorkspacePath)
             )
@@ -1088,7 +1234,13 @@ def handleUploadProject(*serve.Context c) (
         if mergedWorkspacePath != "" (
             fs.remove(mergedWorkspacePath)
         )
+        array nextWorkspaceLayers = [workspaceKey]
+        if !compactWorkspace (
+            nextWorkspaceLayers = previousWorkspaceKeys
+            nextWorkspaceLayers.append(workspaceKey)
+        )
         project.workspaceKey = workspaceKey
+        project.workspaceLayers = nextWorkspaceLayers
         if gitMetadata != "" (
             project.gitHead = gitInfo.head.toStr()
             project.gitBranch = gitInfo.branch.toStr()
@@ -1124,14 +1276,53 @@ def handleUploadProject(*serve.Context c) (
         )
     )
     if !storedJson (
+        if project.contains("workspaceLayers") and project.workspaceLayers != null (
+            array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+            for i failedWorkspaceKeys.len (
+                string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+                if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+                    removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+                )
+            )
+        )
         c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
         fs.remove(zipPath)
         fs.remove(extractDir)
         return
     )
 
-    saveProject(project)
+    if !saveProject(project) (
+        fs.remove(stagingJsonPath(project.id.toStr()))
+        if project.jsonKey.toStr() != previousJsonKey (
+            removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
+        )
+        if project.contains("workspaceLayers") and project.workspaceLayers != null (
+            array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+            for i failedWorkspaceKeys.len (
+                string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+                if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+                    removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+                )
+            )
+        )
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.internalError("failed to save project metadata")
+        return
+    )
     upsertIndexEntry(project)
+    if previousJsonKey != project.jsonKey.toStr() and !previousJsonKey.startsWith("project-json/") (
+        removeProjectStorageKeyIfOrphaned(previousJsonKey, project.id.toStr(), false)
+    )
+    if project.contains("workspaceLayers") and project.workspaceLayers != null (
+        array keptWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+        for i previousWorkspaceKeys.len (
+            string oldWorkspaceKey = previousWorkspaceKeys[i].toStr()
+            if !keptWorkspaceKeys.contains(oldWorkspaceKey) (
+                removeProjectStorageKeyIfOrphaned(oldWorkspaceKey, project.id.toStr(), true)
+            )
+        )
+    )
     fs.remove(zipPath)
     fs.remove(extractDir)
 
@@ -1235,23 +1426,14 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     )
 
     if hasParent and projectHasWorkspace(parent) (
-        boolean copied = false
-        if r2Local (
-            string sourcePath = localBlobPath(parent.workspaceKey.toStr())
-            string targetPath = localBlobPath(projectWorkspaceKey(project.id.toStr()))
-            fs.mkdirAll(parentDirOf(targetPath))
-            copied = fs.exists(sourcePath) and zip.copyFile(sourcePath, targetPath)
-        ) else (
-            auto existing = r2Client.get({key: parent.workspaceKey.toStr()})
-            if existing.ok and existing.status.toInt() == 200 (
-                copied = r2Put(projectWorkspaceKey(project.id.toStr()), existing.body, "application/x-mistwarp-project")
-            )
-        )
-        if !copied (
-            c.internalError("could not copy parent history")
+        object snapshots = ensureProjectWorkspaceSnapshots(parent)
+        if !snapshots.ok (
+            c.internalError("could not prepare parent history")
             return
         )
-        project.workspaceKey = projectWorkspaceKey(project.id.toStr())
+        parent = snapshots.project.assert(object)
+        project.workspaceKey = parent.workspaceKey
+        project.workspaceLayers = projectWorkspaceKeys(parent)
         project.gitHead = parent.gitHead
         project.gitCommits = []
         if parent.contains("gitCommits") and parent.gitCommits != null (
@@ -1276,11 +1458,13 @@ def handleBootstrapProjectHistory(*serve.Context c) (
         return
     )
 
-    if !r2Put(projectWorkspaceKey(project.id.toStr()), workspace.data, "application/x-mistwarp-project") (
+    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace.data))
+    if !r2Put(workspaceKey, workspace.data, "application/x-mistwarp-project") (
         c.internalError("could not store MistWarp history")
         return
     )
-    project.workspaceKey = projectWorkspaceKey(project.id.toStr())
+    project.workspaceKey = workspaceKey
+    project.workspaceLayers = [workspaceKey]
     project.gitHead = head
     if !project.contains("gitBranch") or project.gitBranch.toStr() == "" (
         project.gitBranch = baseBranch
@@ -1296,22 +1480,25 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     )
 
     if hasParent (
-        if !r2Put(projectWorkspaceKey(parent.id.toStr()), workspace.data, "application/x-mistwarp-project") (
-            r2Remove(project.workspaceKey.toStr())
-            c.internalError("could not store parent history")
-            return
-        )
-        parent.workspaceKey = projectWorkspaceKey(parent.id.toStr())
+        parent.workspaceKey = workspaceKey
+        parent.workspaceLayers = [workspaceKey]
         parent.gitHead = head
         parent.gitBranch = baseBranch
         parent.gitCommits = project.gitCommits
         parent.gitGraph = project.gitGraph
-        saveProject(parent)
+        if !saveProject(parent) (
+            removeProjectStorageKeyIfOrphaned(workspaceKey, project.id.toStr(), true)
+            c.internalError("failed to save parent project history")
+            return
+        )
         upsertIndexEntry(parent)
         project.remixBaseCommit = head
         remixBase = head
     )
-    saveProject(project)
+    if !saveProject(project) (
+        c.internalError("failed to save project history")
+        return
+    )
     upsertIndexEntry(project)
     c.json(201, {
         ok: true,
@@ -1350,7 +1537,10 @@ def handleSetThumbnail(*serve.Context c) (
         return
     )
     project.edited = timestamp
-    saveProject(project)
+    if !saveProject(project) (
+        c.internalError("failed to save the remix")
+        return
+    )
     upsertIndexEntry(project)
     c.json(200, {ok: true, thumbUrl: thumbUrlFor(project)})
 )
@@ -1457,6 +1647,11 @@ def handleUpdateProject(*serve.Context c) (
         string nextOwner = usernameForId(nextOwnerId)
         if nextOwner == "" (
             c.badRequest("Rotur user not found")
+            return
+        )
+        number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxProjects.toNum()
+        if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner) and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
+            c.badRequest("the new owner has reached their project limit")
             return
         )
         project.owner = nextOwner
@@ -1844,6 +2039,16 @@ def collectAssetsUsedByOthers(string excludeId) object (
             )
         )
     )
+    array evidenceIds = fs.readDir(reportEvidenceDir).toArray()
+    for i evidenceIds.len (
+        object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+        if evidence.id.toStr() != excludeId and evidence.contains("assets") and evidence.assets != null (
+            array assets = evidence.assets.assertElse(array, [])
+            for j assets.len (
+                used[assets[j].toStr()] = true
+            )
+        )
+    )
     return used
 )
 
@@ -1883,10 +2088,12 @@ def purgeProjectStorage(object project, boolean cleanAssets) (
     fs.remove(thumbnailPath(id))
     fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
     fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
-    r2Remove(project.jsonKey.toStr())
-    if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
-        r2Remove(project.workspaceKey.toStr())
+    removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), id, false)
+    array workspaceKeys = projectWorkspaceKeys(project)
+    for i workspaceKeys.len (
+        removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), id, true)
     )
+    purgeGameDataForProject(id)
     if cleanAssets (
         deleteOrphanedAssets(project)
     )
@@ -2456,6 +2663,12 @@ def handleRemixProject(*serve.Context c) (
         return
     )
 
+    number projectLimit = mistwarpBenefitsForUserId(c.getString("userId")).maxProjects.toNum()
+    if !c.getBool("isAdmin") and ownedProjectSlotCount(c.getString("userId"), c.getString("username")) >= projectLimit (
+        c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+        return
+    )
+
     string username = c.getString("username")
     string id = generateId()
     object body = c.bodyJSON()
@@ -2475,18 +2688,18 @@ def handleRemixProject(*serve.Context c) (
         return
     )
 
-    string copiedJsonPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".json.gz"
-    if !copyStoredProjectJsonToPath(parent, copiedJsonPath) (
+    object jsonSnapshot = ensureProjectJsonSnapshot(parent)
+    if !jsonSnapshot.ok (
         c.internalError("could not copy the original project, try again")
         return
     )
-    if !r2PutEncoded(projectJsonKey(id), fs.readFileBytes(copiedJsonPath), "application/json", "gzip") (
-        fs.remove(copiedJsonPath)
-        c.internalError("could not copy the original project, try again")
+    parent = jsonSnapshot.project.assert(object)
+    object workspaceSnapshots = ensureProjectWorkspaceSnapshots(parent)
+    if !workspaceSnapshots.ok (
+        c.internalError("could not prepare the original project history, try again")
         return
     )
-    number copiedJsonBytes = fs.getSize(copiedJsonPath)
-    fs.remove(copiedJsonPath)
+    parent = workspaceSnapshots.project.assert(object)
 
     object project = {
         id: id,
@@ -2496,8 +2709,9 @@ def handleRemixProject(*serve.Context c) (
         description: "",
         instructions: "",
         repo: null,
-        workspaceKey: "",
-        jsonKey: projectJsonKey(id),
+        workspaceKey: parent.contains("workspaceKey") ? parent.workspaceKey "",
+        workspaceLayers: projectWorkspaceKeys(parent),
+        jsonKey: parent.jsonKey,
         viewKey: randomString(16),
         created: timestamp,
         edited: timestamp,
@@ -2505,7 +2719,8 @@ def handleRemixProject(*serve.Context c) (
         shared: false,
         lastUploadAt: timestamp,
         jsonGzip: true,
-        storedJsonBytes: copiedJsonBytes,
+        inheritedJson: true,
+        storedJsonBytes: parent.contains("storedJsonBytes") ? parent.storedJsonBytes 0,
         remixParent: parent.id,
         remixRoot: parent.id,
         remixShare: 10,
@@ -2521,21 +2736,6 @@ def handleRemixProject(*serve.Context c) (
     object parentEntry = projectSearchDocs.findById(parent.id.toStr())
     if parentEntry.isEmpty() == false and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
         project.remixRoot = parentEntry.remixRoot
-    )
-    if parent.contains("workspaceKey") and parent.workspaceKey.toStr() != "" (
-        if r2Local (
-            string sourceWorkspace = localBlobPath(parent.workspaceKey.toStr())
-            string targetWorkspace = localBlobPath(projectWorkspaceKey(id))
-            fs.mkdirAll(parentDirOf(targetWorkspace))
-            if fs.exists(sourceWorkspace) and zip.copyFile(sourceWorkspace, targetWorkspace) (
-                project.workspaceKey = projectWorkspaceKey(id)
-            )
-        ) else (
-            auto workspace = r2Client.get({key: parent.workspaceKey.toStr()})
-            if workspace.ok and workspace.status.toInt() == 200 and r2Put(projectWorkspaceKey(id), workspace.body, "application/x-mistwarp-project") (
-                project.workspaceKey = projectWorkspaceKey(id)
-            )
-        )
     )
     if parent.contains("gitHead") (
         project.gitHead = parent.gitHead
@@ -2562,7 +2762,6 @@ def handleRemixProject(*serve.Context c) (
     )
 
     if !storeProjectExtensions(id, [], storedProjectExtensions(project), {}) (
-        r2Remove(project.jsonKey.toStr())
         c.internalError("could not index project extensions")
         return
     )

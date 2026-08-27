@@ -10,25 +10,6 @@ def loadEvidenceMeta(string id) object (
     return res.data.assert(object)
 )
 
-def readAssetBytes(string name) string (
-    string local = localBlobPath(assetObjectKey(name))
-    if fs.exists(local) (
-        return fs.readFile(local)
-    )
-    if r2Local (
-        return ""
-    )
-    string direct = r2DirectUrl(assetObjectKey(name))
-    if direct == "" (
-        return ""
-    )
-    auto fetched = requests.get(direct, {})
-    if fetched.success and fetched.status.toInt() == 200 (
-        return fetched.body.toStr()
-    )
-    return ""
-)
-
 def snapshotProjectEvidence(string projectId) (
     if !isSafePathPart(projectId) (
         return
@@ -41,22 +22,15 @@ def snapshotProjectEvidence(string projectId) (
     if !res.ok (
         return
     )
-    object project = res.project.assert(object)
-    fs.mkdirAll(dir ++ "assets/")
+    object snapshot = ensureProjectJsonSnapshot(res.project.assert(object))
+    if !snapshot.ok (
+        return
+    )
+    object project = snapshot.project.assert(object)
     project.evidenceKey = randomString(16)
+    project.evidenceJsonKey = project.jsonKey
     project.snapshotAt = timestamp
     writeFile(dir ++ "meta.json", project)
-
-    if copyStoredProjectJsonToPath(project, dir ++ "project.json.gz") (
-        array list = project.assets.assert(array)
-        for i list.len (
-            string name = list[i].toStr()
-            string bytes = readAssetBytes(name)
-            if bytes != "" (
-                fs.writeFileBytes(dir ++ "assets/" ++ name, bytes)
-            )
-        )
-    )
 
     string thumb = thumbnailPath(projectId)
     if fs.exists(thumb) (
@@ -77,6 +51,7 @@ def projectHasOpenReports(string projectId) boolean (
 
 def removeEvidenceDir(string id) (
     string dir = evidenceDirFor(id)
+    object meta = loadEvidenceMeta(id)
     string assetsDir = dir ++ "assets/"
     if fs.exists(assetsDir) (
         array files = fs.readDir(assetsDir).toArray()
@@ -90,6 +65,13 @@ def removeEvidenceDir(string id) (
     fs.remove(dir ++ "meta.json")
     fs.remove(dir ++ "thumbnail.png")
     fs.remove(dir)
+    string jsonKey = (meta.evidenceJsonKey ?? "").toStr()
+    if jsonKey != "" (
+        removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+    )
+    if !meta.isEmpty() (
+        deleteOrphanedAssets(meta)
+    )
 )
 
 def maybeClearProjectEvidence(string projectId) (
@@ -119,6 +101,11 @@ def handleGetEvidenceJson(*serve.Context c) (
         c.notFound("not found")
         return
     )
+    string jsonKey = (meta.evidenceJsonKey ?? "").toStr()
+    if jsonKey != "" (
+        serveProjectJsonStorageKey(c, jsonKey, true)
+        return
+    )
     string path = evidenceDirFor(id) ++ "project.json.gz"
     boolean compressed = true
     if !fs.exists(path) (
@@ -144,14 +131,12 @@ def handleGetEvidenceAsset(*serve.Context c) (
         c.notFound("not found")
         return
     )
-    string path = evidenceDirFor(id) ++ "assets/" ++ name
-    if !fs.exists(path) (
+    object meta = loadEvidenceMeta(id)
+    if meta.isEmpty() or !meta.assets.assertElse(array, []).contains(name) (
         c.notFound("not found")
         return
     )
-    c.setHeader("Content-Type", contentTypeForKey(name))
-    c.setHeader("Cache-Control", "no-store")
-    c.file(path)
+    serveBlobKey(c, assetObjectKey(name))
 )
 
 def handleGetReportEvidence(*serve.Context c) (

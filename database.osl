@@ -30,12 +30,33 @@ def deleteDocumentsByField(*db.Collection collection, string field, string value
     return documents.len
 )
 
+def cleanupExpiredCommunityRecords() (
+    array previews = previewDocs.all()
+    for i previews.len (
+        object preview = previews[i].assert(object)
+        if preview.expiresAt.toNum() <= timestamp (
+            previewDocs.deleteOne({_id: preview["_id"]})
+        )
+    )
+    array sessions = playtimeSessionDocs.all()
+    for i sessions.len (
+        object session = sessions[i].assert(object)
+        if timestamp - session.lastSeen.toNum() > 86400000 (
+            playtimeSessionDocs.deleteOne({_id: session["_id"]})
+        )
+    )
+)
+
 def deleteProjectCommunityRecords(string projectId) boolean (
     array releases = releaseDocs.where("projectId", db.equal, projectId).all()
     for i releases.len (
         object release = releases[i].assert(object)
+        string jsonKey = (release.jsonKey ?? "").toStr()
         fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
         releaseDocs.deleteOne({_id: release["_id"]})
+        if jsonKey != "" (
+            removeProjectStorageKeyIfOrphaned(jsonKey, projectId, false)
+        )
     )
     deleteDocumentsByField(previewDocs, "projectId", projectId)
     deleteDocumentsByField(diagnosticDocs, "projectId", projectId)
