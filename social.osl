@@ -132,7 +132,6 @@ def handleGetUser(*serve.Context c) (
         username: profile.username,
         bio: profile.bio,
         featuredProject: profile.featuredProject,
-        profileLayout: profile.contains("profileLayout") ? profile.profileLayout "classic",
         followerCount: followers.len,
         followingCount: following.len,
         isFollowing: followers.contains(viewer),
@@ -219,18 +218,6 @@ def handleUpdateProfile(*serve.Context c) (
         boolean currentShowRecentActivity = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
         if currentShowRecentActivity != showRecentActivity (
             profile.showRecentActivity = showRecentActivity
-            changed = true
-        )
-    )
-
-    if body.contains("profileLayout") (
-        string layout = body.profileLayout.toStr()
-        if !unlockedProfileLayouts(profile).contains(layout) (
-            c.forbidden("unlock this profile layout first")
-            return
-        )
-        if (profile.profileLayout ?? "classic").toStr() != layout (
-            profile.profileLayout = layout
             changed = true
         )
     )
@@ -451,11 +438,13 @@ def handleGetMyLibrary(*serve.Context c) (
     object seen = {}
     for i ids.len (
         string id = ids[i].toStr()
-        object entry = projectSearchDocs.findById(id)
-        if entry.isEmpty() == false and !seen.contains(id) (
-            seen[id] = true
-            validIds.append(id)
-            entries.append(entry)
+        if !seen.contains(id) (
+            auto loaded = loadProject(id)
+            if loaded.ok and canViewProject(loaded.project.assert(object), c) (
+                seen[id] = true
+                validIds.append(id)
+                entries.append(indexEntryFromProject(loaded.project.assert(object)))
+            )
         )
     )
     if validIds.len != ids.len (
