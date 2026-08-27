@@ -678,7 +678,6 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
 
     object assetsIndex = loadAssetsIndex()
     object knownAssets = assetsIndex.assets
-    object r2Assets = assetsIndex.r2Assets
     array projectAssets = []
     array pendingUploads = []
     object pendingNames = {}
@@ -704,8 +703,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
                     return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
                 )
                 projectAssets.append(name)
-                boolean needsUpload = !knownAssets.contains(name) or (!r2Local and !r2Assets.contains(name))
-                if needsUpload and !pendingNames.contains(name) (
+                if !knownAssets.contains(name) and !pendingNames.contains(name) (
                     pendingUploads.append({source: name, name: name})
                     pendingNames[name] = true
                     knownAssets[name] = content.len
@@ -763,9 +761,6 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
             return {ok: false, error: "asset upload failed", status: 502}
         )
         knownAssets[name] = content.len
-        if !r2Local (
-            r2Assets[name] = true
-        )
         uploaded = uploaded + 1
     )
     if uploaded > 0 (
@@ -1715,7 +1710,6 @@ def deleteOrphanedAssets(object project) (
     object usedByOthers = collectAssetsUsedByOthers(project.id.toStr())
     object assetsIndex = loadAssetsIndex()
     object knownAssets = assetsIndex.assets
-    object r2Assets = assetsIndex.r2Assets
     boolean indexChanged = false
     for i myAssets.len (
         string name = myAssets[i].toStr()
@@ -1723,10 +1717,6 @@ def deleteOrphanedAssets(object project) (
             r2Remove(assetObjectKey(name))
             if knownAssets.contains(name) (
                 knownAssets.delete(name)
-                indexChanged = true
-            )
-            if r2Assets.contains(name) (
-                r2Assets.delete(name)
                 indexChanged = true
             )
         )

@@ -48,33 +48,13 @@ def weekViewsOf(object project) number (
 def loadAssetsIndex() object (
     auto result = readFile(assetsIndexFile)
     if !result.ok (
-        return {assets: {}, r2Assets: {}}
+        return {assets: {}}
     )
-    object index = result.data.assert(object)
-    if !index.contains("assets") or index.assets == null (
-        index.assets = {}
-    )
-    if !index.contains("r2Assets") or index.r2Assets == null (
-        index.r2Assets = {}
-    )
-    return index
+    return result.data.assert(object)
 )
 
 def saveAssetsIndex(object index) boolean (
-    boolean saved = writeFile(assetsIndexFile, index)
-    if saved (
-        assetsIndexCache.set("assets", index)
-    )
-    return saved
-)
-
-def cachedAssetsIndex() object (
-    if assetsIndexCache.has("assets") (
-        return assetsIndexCache.get("assets").assert(object)
-    )
-    object index = loadAssetsIndex()
-    assetsIndexCache.set("assets", index)
-    return index
+    return writeFile(assetsIndexFile, index)
 )
 
 def readFile(string path) object (

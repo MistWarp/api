@@ -358,10 +358,11 @@ def handleGetAssetBlob(*serve.Context c) (
         return
     )
 
-    object assetsIndex = cachedAssetsIndex()
-    string directUrl = r2AssetUrlIfPushed(name, !r2Local, r2PublicBase, assetsIndex.r2Assets.assert(object))
-    if directUrl != "" (
-        c.setHeader("Location", directUrl)
+    string localUrl = publicUrl(key)
+    string remoteBase = r2Local ? "" r2PublicBase
+    string assetUrl = assetUrlForLocation(name, fs.exists(localBlobPath(key)), blobBase() ++ "/assets", remoteBase)
+    if assetUrl != localUrl (
+        c.setHeader("Location", assetUrl)
         c.setHeader("Cache-Control", "no-cache")
         c.status(307)
         return
