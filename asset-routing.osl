@@ -1,0 +1,6 @@
+def r2AssetUrlIfPushed(string name, boolean r2Configured, string publicBase, object pushedAssets) string (
+  if !r2Configured or publicBase == "" or !pushedAssets.contains(name) (
+    return ""
+  )
+  return publicBase ++ "/assets/" ++ name
+)

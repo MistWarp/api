@@ -132,6 +132,7 @@ import "./archive-security.osl"
 import "./storage.osl"
 import "./database.osl"
 import "./user-identity.osl"
+import "./asset-routing.osl"
 import "./r2.osl"
 import "./gitea.osl"
 import "./auth.osl"
@@ -164,6 +165,7 @@ auto sessionCache = cache.create(10000, 3600)
 auto bansCache = cache.create(2, 300)
 auto adminsCache = cache.create(2, 300)
 auto sharedProjectsCache = cache.create(2, 60)
+auto assetsIndexCache = cache.create(2, 60)
 auto paidPerksCache = cache.create(10000, 300)
 auto groupSnapshotCache = cache.create(10000, 60)
 
