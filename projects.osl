@@ -703,8 +703,10 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
                     return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
                 )
                 projectAssets.append(name)
-                if !knownAssets.contains(name) and !pendingNames.contains(name) (
-                    pendingUploads.append({source: name, name: name})
+                string localAssetPath = localBlobPath(assetObjectKey(name))
+                boolean needsUpload = assetNeedsUpload(knownAssets.contains(name), fs.exists(localAssetPath), !r2Local)
+                if needsUpload and !pendingNames.contains(name) (
+                    pendingUploads.append({path: assetPath, name: name})
                     pendingNames[name] = true
                     knownAssets[name] = content.len
                 )
@@ -732,6 +734,11 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
                 return {ok: false, error: "missing asset: " ++ name, status: 400}
             )
             projectAssets.append(name)
+            string localAssetPath = localBlobPath(assetObjectKey(name))
+            if !r2Local and fs.exists(localAssetPath) and !pendingNames.contains(name) (
+                pendingUploads.append({path: localAssetPath, name: name})
+                pendingNames[name] = true
+            )
         )
     )
     if projectAssets.len > maxAssetCount (
@@ -754,11 +761,14 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
     number uploaded = 0
     for i pendingUploads.len (
         object upload = pendingUploads[i].assert(object)
-        string source = upload.source.toStr()
+        string path = upload.path.toStr()
         string name = upload.name.toStr()
-        string content = fs.readFile(extractDir ++ "/" ++ source)
+        string content = fs.readFile(path)
         if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
             return {ok: false, error: "asset upload failed", status: 502}
+        )
+        if !removeLocalAssetAfterUpload(localBlobPath(assetObjectKey(name)), !r2Local) (
+            return {ok: false, error: "local asset cleanup failed", status: 500}
         )
         knownAssets[name] = content.len
         uploaded = uploaded + 1

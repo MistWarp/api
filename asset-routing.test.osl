@@ -1,4 +1,5 @@
 import "std:testing"
+import "std:fs"
 import "./asset-routing.osl"
 
 testing.assert(
@@ -12,4 +13,21 @@ testing.assert(
 testing.assert(
   assetUrlForLocation("0123456789abcdef0123456789abcdef.png", false, "https://mwapi.mistium.com/blobs/assets", "") == "https://mwapi.mistium.com/blobs/assets/0123456789abcdef0123456789abcdef.png",
   "falls back to the local asset URL when no R2 origin is configured"
+)
+
+string uploadedAssetPath = "data/tmp/asset-routing-uploaded.test"
+fs.mkdirAll("data/tmp")
+fs.writeFile(uploadedAssetPath, "asset")
+removeLocalAssetAfterUpload(uploadedAssetPath, true)
+testing.assert(!fs.exists(uploadedAssetPath), "removes the local asset after a successful R2 upload")
+
+string failedAssetPath = "data/tmp/asset-routing-failed.test"
+fs.writeFile(failedAssetPath, "asset")
+removeLocalAssetAfterUpload(failedAssetPath, false)
+testing.assert(fs.exists(failedAssetPath), "keeps the local asset when no R2 upload completed")
+fs.remove(failedAssetPath)
+
+testing.assert(
+  assetNeedsUpload(true, true, true),
+  "uploads an indexed local asset when remote storage is configured"
 )

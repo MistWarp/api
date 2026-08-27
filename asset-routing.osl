@@ -4,3 +4,14 @@ def assetUrlForLocation(string name, boolean localExists, string localAssetsBase
   )
   return r2PublicBase ++ "/assets/" ++ name
 )
+
+def removeLocalAssetAfterUpload(string path, boolean uploadedToR2) boolean (
+  if uploadedToR2 and fs.exists(path) (
+    return fs.remove(path)
+  )
+  return true
+)
+
+def assetNeedsUpload(boolean known, boolean localExists, boolean remoteConfigured) boolean (
+  return !known or (remoteConfigured and localExists)
+)
