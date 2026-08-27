@@ -1,6 +1,6 @@
-def r2AssetUrlIfPushed(string name, boolean r2Configured, string publicBase, object pushedAssets) string (
-  if !r2Configured or publicBase == "" or !pushedAssets.contains(name) (
-    return ""
+def assetUrlForLocation(string name, boolean localExists, string localAssetsBase, string r2PublicBase) string (
+  if localExists or r2PublicBase == "" (
+    return localAssetsBase ++ "/" ++ name
   )
-  return publicBase ++ "/assets/" ++ name
+  return r2PublicBase ++ "/assets/" ++ name
 )

@@ -1,23 +1,15 @@
 import "std:testing"
 import "./asset-routing.osl"
 
-object pushedAssets = {
-  "0123456789abcdef0123456789abcdef.png": true
-}
-
 testing.assert(
-  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", false, "https://mwassets.mistium.com", pushedAssets) == "",
-  "keeps local-mode assets on the API origin"
+  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", true, "https://mwapi.mistium.com/blobs/assets", "https://mwassets.mistium.com") == "https://mwapi.mistium.com/blobs/assets/0123456789abcdef0123456789abcdef.png",
+  "uses the local asset URL when the file exists locally"
 )
 testing.assert(
-  r2AssetUrlIfPushed("fedcba9876543210fedcba9876543210.wav", true, "https://mwassets.mistium.com", pushedAssets) == "",
-  "keeps assets absent from the persisted R2 index on the API origin"
+  assetUrlForLocation("fedcba9876543210fedcba9876543210.wav", false, "https://mwapi.mistium.com/blobs/assets", "https://mwassets.mistium.com") == "https://mwassets.mistium.com/assets/fedcba9876543210fedcba9876543210.wav",
+  "uses the R2 asset URL when the file does not exist locally"
 )
 testing.assert(
-  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", true, "https://mwassets.mistium.com", pushedAssets) == "https://mwassets.mistium.com/assets/0123456789abcdef0123456789abcdef.png",
-  "routes assets recorded as pushed to the public R2 origin"
-)
-testing.assert(
-  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", true, "", pushedAssets) == "",
-  "keeps assets on the API origin when no public R2 origin is configured"
+  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", false, "https://mwapi.mistium.com/blobs/assets", "") == "https://mwapi.mistium.com/blobs/assets/0123456789abcdef0123456789abcdef.png",
+  "falls back to the local asset URL when no R2 origin is configured"
 )
