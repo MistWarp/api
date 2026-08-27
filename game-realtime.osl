@@ -63,15 +63,7 @@ def realtimeSafeState(object values) boolean (
     return true
 )
 
-def realtimeOnConnect(*ws.Connection conn) (
-    string handshakeKey = conn.GetHeader("Sec-WebSocket-Key")
-    if handshakeKey == "" or !realtimeHandshakeCache.has(handshakeKey) (
-        realtimeError(conn, "multiplayer ticket is invalid or expired")
-        conn.Close()
-        return
-    )
-    object identity = realtimeHandshakeCache.get(handshakeKey).assertElse(object, {})
-    realtimeHandshakeCache.delete(handshakeKey)
+def realtimeAcceptIdentity(*ws.Connection conn, object identity) (
     if identity.isEmpty() or identity.expiresAt.toNum() <= timestamp (
         realtimeError(conn, "multiplayer ticket is invalid or expired")
         conn.Close()
@@ -104,17 +96,32 @@ def realtimeOnConnect(*ws.Connection conn) (
     realtimeBroadcast(roomKey, {type: "player_joined", player: realtimePublicPlayer(conn)}, conn)
 )
 
-def realtimeOnMessage(*ws.Connection conn, string raw) (
-    if conn.Get("ready") != true (
+def realtimeAuthenticate(*ws.Connection conn, string ticket) (
+    if !regex.match("^mwt_[A-Za-z0-9_-]{40,80}$", ticket) or !multiplayerTicketCache.has(ticket) (
+        realtimeError(conn, "multiplayer ticket is invalid or expired")
         conn.Close()
         return
     )
+    object identity = multiplayerTicketCache.get(ticket).assertElse(object, {})
+    multiplayerTicketCache.delete(ticket)
+    realtimeAcceptIdentity(conn, identity)
+)
+
+def realtimeOnConnect(*ws.Connection conn) (
+    conn.Set("ready", false)
+    conn.Set("messageTimes", [])
+    conn.Set("chatTimes", [])
+    string handshakeKey = conn.GetHeader("Sec-WebSocket-Key")
+    if handshakeKey != "" and realtimeHandshakeCache.has(handshakeKey) (
+        object identity = realtimeHandshakeCache.get(handshakeKey).assertElse(object, {})
+        realtimeHandshakeCache.delete(handshakeKey)
+        realtimeAcceptIdentity(conn, identity)
+    )
+)
+
+def realtimeOnMessage(*ws.Connection conn, string raw) (
     if raw.len > 16384 (
         realtimeError(conn, "message is too large")
-        return
-    )
-    if !realtimeAllow(conn, "messageTimes", 30, 1000) (
-        realtimeError(conn, "sending updates too quickly")
         return
     )
     auto parsed = json.parseObject(raw)
@@ -124,6 +131,19 @@ def realtimeOnMessage(*ws.Connection conn, string raw) (
     )
     object message = parsed.unwrapAs(object)
     string messageType = message.type.toStr()
+    if conn.Get("ready") != true (
+        if messageType != "authenticate" (
+            realtimeError(conn, "authenticate before using multiplayer")
+            conn.Close()
+            return
+        )
+        realtimeAuthenticate(conn, message.ticket.toStr())
+        return
+    )
+    if !realtimeAllow(conn, "messageTimes", 30, 1000) (
+        realtimeError(conn, "sending updates too quickly")
+        return
+    )
     if messageType == "ping" (
         conn.Send(json.stringify({type: "pong", at: timestamp}))
         return
@@ -176,6 +196,10 @@ def realtimeUpgradeGuard(*serve.Context c) (
         return
     )
     string ticket = c.query("ticket")
+    if ticket == "" (
+        c.next()
+        return
+    )
     if !regex.match("^mwt_[A-Za-z0-9_-]{40,80}$", ticket) or !multiplayerTicketCache.has(ticket) (
         c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
         c.abort()
