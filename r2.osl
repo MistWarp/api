@@ -137,6 +137,9 @@ def publicUrl(string key) string (
 )
 
 def assetsBaseUrl() string (
+    if !r2Local and r2PublicBase != "" (
+        return r2PublicBase ++ "/assets"
+    )
     return blobBase() ++ "/assets"
 )
 
