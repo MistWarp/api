@@ -1,0 +1,452 @@
+number gameSaveMaxBytes = 65536
+number globalGameDataMaxBytes = 16384
+number gameDataCapabilityTtlMs = 300000
+number multiplayerTicketTtlMs = 60000
+
+def gameDataUserKey(string userId) string (
+    return userId.hashSHA256()
+)
+
+def gameSaveNamespace(string context) string (
+    if context == "editor" (
+        return "test"
+    )
+    return "production"
+)
+
+def gameSaveProjectDir(string projectId, string context) string (
+    return gameSavesDir ++ projectId ++ "/" ++ gameSaveNamespace(context) ++ "/"
+)
+
+def gameSavePath(string projectId, string userId, string context) string (
+    return gameSaveProjectDir(projectId, context) ++ gameDataUserKey(userId) ++ ".json"
+)
+
+def globalGameDataPath(string userId) string (
+    return accountGameDataDir ++ gameDataUserKey(userId) ++ ".json"
+)
+
+def emptyGameSave(string projectId, string userId, string context) object (
+    return {
+        projectId: projectId,
+        userId: userId,
+        context: gameSaveNamespace(context),
+        revision: 0,
+        value: {},
+        updatedAt: 0,
+        lastRequestId: ""
+    }
+)
+
+def loadGameSave(string projectId, string userId, string context) object (
+    auto result = readFile(gameSavePath(projectId, userId, context))
+    if !result.ok (
+        return emptyGameSave(projectId, userId, context)
+    )
+    return result.data.assert(object)
+)
+
+def gameSaveResponse(object save) object (
+    return {
+        revision: save.revision,
+        value: save.value,
+        updatedAt: save.updatedAt,
+        context: save.context
+    }
+)
+
+def validGameDataContext(string context) boolean (
+    return context == "play" or context == "editor"
+)
+
+def validMultiplayerRoom(string room) boolean (
+    return room.len >= 1 and room.len <= 40 and regex.match("^[A-Za-z0-9_-]+$", room)
+)
+
+def handleCreateMultiplayerTicket(*serve.Context c) (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = loaded.project.assert(object)
+    object body = c.bodyJSON()
+    string context = body.context.toStr().toLower().strip()
+    string room = body.room.toStr().strip()
+    if context == "" (
+        context = "play"
+    )
+    if room == "" (
+        room = "main"
+    )
+    if !validGameDataContext(context) or !validMultiplayerRoom(room) (
+        c.badRequest("invalid multiplayer context or room")
+        return
+    )
+    if context == "editor" and !canEditProject(project, c) (
+        c.forbidden("project editor access required")
+        return
+    )
+    if context == "play" and (!projectIsViewable(project) or (projectPrice(project) > 0 and !canAccessPaidJson(project, c))) (
+        c.forbidden("project access required")
+        return
+    )
+    string ticket = "mwt_" ++ randomString(48)
+    object identity = {
+        projectId: project.id.toStr(),
+        projectVersion: gameDataProjectVersion(project),
+        room: room,
+        context: gameSaveNamespace(context),
+        userId: c.getString("userId"),
+        username: c.getString("username"),
+        expiresAt: timestamp + multiplayerTicketTtlMs
+    }
+    multiplayerTicketCache.set(ticket, identity)
+    c.json(200, {ok: true, ticket: ticket, connectUrl: realtimeURL, expiresAt: identity.expiresAt})
+)
+
+def handleVerifyMultiplayerTicket(*serve.Context c) (
+    if realtimeServiceKey == "" or c.header("X-Realtime-Service-Key") != realtimeServiceKey (
+        c.forbidden("realtime service authentication required")
+        return
+    )
+    object body = c.bodyJSON()
+    string ticket = body.ticket.toStr()
+    if ticket == "" or !multiplayerTicketCache.has(ticket) (
+        c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
+        return
+    )
+    object identity = multiplayerTicketCache.get(ticket).assertElse(object, {})
+    multiplayerTicketCache.delete(ticket)
+    if identity.isEmpty() or identity.expiresAt.toNum() <= timestamp (
+        c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
+        return
+    )
+    c.json(200, {ok: true, identity: identity})
+)
+
+def gameDataProjectVersion(object project) string (
+    return project.lastUploadAt.toStr()
+)
+
+def handleCreateGameDataCapability(*serve.Context c) (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = loaded.project.assert(object)
+    object body = c.bodyJSON()
+    string context = body.context.toStr().toLower().strip()
+    if !validGameDataContext(context) (
+        c.badRequest("context must be play or editor")
+        return
+    )
+    if context == "editor" and !canEditProject(project, c) (
+        c.forbidden("project editor access required")
+        return
+    )
+    if context == "play" and !projectIsViewable(project) (
+        c.forbidden("project is not playable")
+        return
+    )
+    if context == "play" and projectPrice(project) > 0 and !canAccessPaidJson(project, c) (
+        c.forbidden("purchase this project before using account saves")
+        return
+    )
+
+    string token = "gdc_" ++ randomString(40)
+    object capability = {
+        projectId: project.id.toStr(),
+        projectVersion: gameDataProjectVersion(project),
+        userId: c.getString("userId"),
+        context: context,
+        expiresAt: timestamp + gameDataCapabilityTtlMs
+    }
+    gameDataCapabilityCache.set(token, capability)
+    c.json(200, {
+        ok: true,
+        capability: token,
+        context: gameSaveNamespace(context),
+        expiresAt: capability.expiresAt
+    })
+)
+
+def requireGameDataCapability(*serve.Context c, object project) object (
+    string token = c.header("X-MistWarp-Game-Data")
+    if token == "" or !gameDataCapabilityCache.has(token) (
+        return {ok: false, status: 403, error: "game data capability required"}
+    )
+    object capability = gameDataCapabilityCache.get(token).assertElse(object, {})
+    if capability.isEmpty() or capability.expiresAt.toNum() <= timestamp (
+        gameDataCapabilityCache.delete(token)
+        return {ok: false, status: 403, error: "game data capability expired"}
+    )
+    if capability.projectId.toStr() != project.id.toStr() or capability.userId.toStr() != c.getString("userId") (
+        return {ok: false, status: 403, error: "game data capability does not match"}
+    )
+    if capability.projectVersion.toStr() != gameDataProjectVersion(project) (
+        gameDataCapabilityCache.delete(token)
+        return {ok: false, status: 409, error: "project changed; reconnect game data"}
+    )
+    return {ok: true, capability: capability}
+)
+
+def rejectGameDataCapability(*serve.Context c, object result) boolean (
+    if result.ok == true (
+        return false
+    )
+    c.json(result.status.toNum().toInt(), {ok: false, error: result.error})
+    return true
+)
+
+def loadGameDataProject(*serve.Context c) object (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        return {ok: false, status: 404, error: "project not found"}
+    )
+    object project = loaded.project.assert(object)
+    object access = requireGameDataCapability(c, project)
+    if access.ok != true (
+        return access
+    )
+    return {ok: true, project: project, capability: access.capability}
+)
+
+def handleGetMyProjectSave(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    object capability = access.capability.assert(object)
+    object save = loadGameSave(c.param("id"), c.getString("userId"), capability.context.toStr())
+    c.json(200, {ok: true, save: gameSaveResponse(save)})
+)
+
+def validGameSaveRequestId(string requestId) boolean (
+    return requestId.len >= 8 and requestId.len <= 100 and regex.match("^[A-Za-z0-9_-]+$", requestId)
+)
+
+def validAccountDataKeys(object value) boolean (
+    array keys = value.getKeys().toArray()
+    if keys.len > 128 (
+        return false
+    )
+    for i keys.len (
+        string key = keys[i].toStr()
+        if key.len < 1 or key.len > 64 or key.startsWith("$") or key == "__proto__" or key == "prototype" or key == "constructor" (
+            return false
+        )
+    )
+    return true
+)
+
+def handlePutMyProjectSave(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    object body = c.bodyJSON()
+    object value = body.value.assertElse(object, {})
+    if !body.contains("value") or body.value == null (
+        c.badRequest("save value must be a JSON object")
+        return
+    )
+    if !validAccountDataKeys(value) (
+        c.badRequest("save keys must be safe 1 to 64 character names")
+        return
+    )
+    string serialized = json.stringify(value)
+    if serialized.len > gameSaveMaxBytes (
+        c.badRequest("project save exceeds 64 KiB")
+        return
+    )
+    string requestId = body.requestId.toStr().strip()
+    if !validGameSaveRequestId(requestId) (
+        c.badRequest("a valid request id is required")
+        return
+    )
+
+    object capability = access.capability.assert(object)
+    string projectId = c.param("id")
+    string userId = c.getString("userId")
+    string context = capability.context.toStr()
+    string lockName = "game-save-" ++ projectId ++ "-" ++ gameDataUserKey(userId) ++ "-" ++ gameSaveNamespace(context)
+    sync.lock(lockName)
+    object current = loadGameSave(projectId, userId, context)
+    if current.lastRequestId.toStr() == requestId (
+        sync.unlock(lockName)
+        c.json(200, {ok: true, replayed: true, save: gameSaveResponse(current)})
+        return
+    )
+    number revision = body.revision.toNum().toInt()
+    if revision != current.revision.toNum().toInt() (
+        sync.unlock(lockName)
+        c.json(409, {ok: false, error: "save revision is stale", save: gameSaveResponse(current)})
+        return
+    )
+
+    current.value = value
+    current.revision = revision + 1
+    current.updatedAt = timestamp
+    current.lastRequestId = requestId
+    fs.mkdirAll(gameSaveProjectDir(projectId, context))
+    if !writeFile(gameSavePath(projectId, userId, context), current) (
+        sync.unlock(lockName)
+        c.internalError("failed to store project save")
+        return
+    )
+    sync.unlock(lockName)
+    c.json(200, {ok: true, save: gameSaveResponse(current)})
+)
+
+def loadGlobalGameData(string userId) object (
+    auto loaded = readFile(globalGameDataPath(userId))
+    if !loaded.ok (
+        return {revision: 0, value: {}, updatedAt: 0}
+    )
+    return loaded.data.assert(object)
+)
+
+def handleGetMyGlobalGameData(*serve.Context c) (
+    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId"))})
+)
+
+def handlePutMyGlobalGameData(*serve.Context c) (
+    object body = c.bodyJSON()
+    object value = body.value.assertElse(object, {})
+    if !body.contains("value") or body.value == null (
+        c.badRequest("global game data must be a JSON object")
+        return
+    )
+    if !validAccountDataKeys(value) (
+        c.badRequest("global game data keys must be safe 1 to 64 character names")
+        return
+    )
+    if json.stringify(value).len > globalGameDataMaxBytes (
+        c.badRequest("global game data exceeds 16 KiB")
+        return
+    )
+    string userId = c.getString("userId")
+    string lockName = "global-game-data-" ++ gameDataUserKey(userId)
+    sync.lock(lockName)
+    object current = loadGlobalGameData(userId)
+    number revision = body.revision.toNum().toInt()
+    if revision != current.revision.toNum().toInt() (
+        sync.unlock(lockName)
+        c.json(409, {ok: false, error: "global data revision is stale", data: current})
+        return
+    )
+    object next = {revision: revision + 1, value: value, updatedAt: timestamp}
+    if !writeFile(globalGameDataPath(userId), next) (
+        sync.unlock(lockName)
+        c.internalError("failed to store global game data")
+        return
+    )
+    sync.unlock(lockName)
+    c.json(200, {ok: true, data: next})
+)
+
+def handleGetProjectGlobalGameData(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId")), readOnly: true})
+)
+
+def handleListMyGameSaves(*serve.Context c) (
+    string userId = c.getString("userId")
+    string filename = gameDataUserKey(userId) ++ ".json"
+    array saves = []
+    array projects = fs.readDir(gameSavesDir).toArray()
+    for i projects.len (
+        string projectId = projects[i].toStr()
+        if isSafePathPart(projectId) (
+            string path = gameSavesDir ++ projectId ++ "/production/" ++ filename
+            auto loaded = readFile(path)
+            if loaded.ok (
+                object record = loaded.data.assert(object)
+                string title = projectId
+                string owner = ""
+                auto project = loadProject(projectId)
+                if project.ok (
+                    title = project.project.assert(object).title.toStr()
+                    owner = project.project.assert(object).owner.toStr()
+                )
+                saves.append({projectId: projectId, title: title, owner: owner, revision: record.revision, updatedAt: record.updatedAt, bytes: json.stringify(record.value).len})
+            )
+        )
+    )
+    c.json(200, {ok: true, saves: saves})
+)
+
+def handleDeleteMyGameSave(*serve.Context c) (
+    string projectId = c.param("project")
+    if !isSafePathPart(projectId) (
+        c.badRequest("invalid project id")
+        return
+    )
+    string userId = c.getString("userId")
+    string lockName = "game-save-" ++ projectId ++ "-" ++ gameDataUserKey(userId) ++ "-production"
+    sync.lock(lockName)
+    string path = gameSavePath(projectId, userId, "play")
+    boolean existed = fs.exists(path)
+    if existed (
+        fs.remove(path)
+    )
+    sync.unlock(lockName)
+    c.json(200, {ok: true, deleted: existed})
+)
+
+def collectGameDataForUser(string userId) object (
+    string filename = gameDataUserKey(userId) ++ ".json"
+    array saves = []
+    array entitlements = []
+    array projects = fs.readDir(gameSavesDir).toArray()
+    array namespaces = ["production", "test"]
+    for i projects.len (
+        string projectId = projects[i].toStr()
+        if isSafePathPart(projectId) (
+            for n namespaces.len (
+                string namespace = namespaces[n].toStr()
+                auto loaded = readFile(gameSavesDir ++ projectId ++ "/" ++ namespace ++ "/" ++ filename)
+                if loaded.ok (
+                    saves.append({projectId: projectId, context: namespace, save: gameSaveResponse(loaded.data.assert(object))})
+                )
+            )
+        )
+    )
+    array entitlementProjects = fs.readDir(gameEntitlementsDir).toArray()
+    for i entitlementProjects.len (
+        string projectId = entitlementProjects[i].toStr()
+        if isSafePathPart(projectId) (
+            auto loaded = readFile(gameEntitlementsDir ++ projectId ++ "/" ++ filename)
+            if loaded.ok (
+                entitlements.append({projectId: projectId, entitlements: loaded.data})
+            )
+        )
+    )
+    return {global: loadGlobalGameData(userId), saves: saves, entitlements: entitlements, inventory: loadGameInventory(userId)}
+)
+
+def purgeGameDataForUser(string userId) (
+    string filename = gameDataUserKey(userId) ++ ".json"
+    array projects = fs.readDir(gameSavesDir).toArray()
+    for i projects.len (
+        string projectId = projects[i].toStr()
+        if isSafePathPart(projectId) (
+            fs.remove(gameSavesDir ++ projectId ++ "/production/" ++ filename)
+            fs.remove(gameSavesDir ++ projectId ++ "/test/" ++ filename)
+        )
+    )
+    array entitlementProjects = fs.readDir(gameEntitlementsDir).toArray()
+    for i entitlementProjects.len (
+        string projectId = entitlementProjects[i].toStr()
+        if isSafePathPart(projectId) (
+            fs.remove(gameEntitlementsDir ++ projectId ++ "/" ++ filename)
+        )
+    )
+    fs.remove(globalGameDataPath(userId))
+    fs.remove(gameInventoryPath(userId))
+)

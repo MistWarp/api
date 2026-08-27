@@ -177,6 +177,7 @@ def handleExportMyData(*serve.Context c) (
         activity: loadActivity(username),
         settings: settings,
         safety: loadSafety(username),
+        gameData: collectGameDataForUser(c.getString("userId")),
         agreement: agreement
     })
 )
@@ -223,6 +224,7 @@ def handleDeleteMyData(*serve.Context c) (
     removeProjectsFromSpaces(ownedProjectIds)
     purgeUserCommunityRecords(username)
     purgeUserFromNews(username)
+    purgeGameDataForUser(userId)
     purgeUser(userId, username)
     removeUserFromSafetyLists(username)
     fs.remove(safetyPath(username))
