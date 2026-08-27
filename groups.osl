@@ -6,30 +6,37 @@ def normalizeGroupTag(string value) string (
     return tag
 )
 
+def roturPublicGroupSnapshot(string tag) object (
+    object publicResponse = requests.get(roturBase ++ "/groups/" ++ url.escape(tag))
+    if !publicResponse.success or publicResponse.status.toInt() != 200 (
+        return {ok: false, error: publicResponse.status.toInt() == 404 ? "group not found" "could not load group"}
+    )
+    auto publicParsed = json.parse(publicResponse.body, {type: "object"})
+    if publicParsed.isErr() (
+        return {ok: false, error: "invalid group response"}
+    )
+    object fallback = {ok: true, degraded: true, group: publicParsed.unwrap(), members: []}
+    groupSnapshotCache.set(tag, fallback)
+    return fallback
+)
+
 def roturGroupSnapshot(string rawTag) object (
     string tag = normalizeGroupTag(rawTag)
-    if tag == "" or commerceServiceKey == "" (
-        return {ok: false, error: "group integration is unavailable"}
+    if tag == "" (
+        return {ok: false, error: "invalid group tag"}
     )
     if groupSnapshotCache.has(tag) (
         return groupSnapshotCache.get(tag).assertElse(object, {ok: false})
+    )
+    if commerceServiceKey == "" (
+        return roturPublicGroupSnapshot(tag)
     )
     object response = requests.get(
         roturBase ++ "/groups/" ++ url.escape(tag) ++ "/integrations/mistwarp",
         {headers: {"X-Commerce-Key": commerceServiceKey}}
     )
     if !response.success or response.status.toInt() != 200 (
-        object publicResponse = requests.get(roturBase ++ "/groups/" ++ url.escape(tag))
-        if !publicResponse.success or publicResponse.status.toInt() != 200 (
-            return {ok: false, error: publicResponse.status.toInt() == 404 ? "group not found" "could not load group"}
-        )
-        auto publicParsed = json.parse(publicResponse.body, {type: "object"})
-        if publicParsed.isErr() (
-            return {ok: false, error: "invalid group response"}
-        )
-        object fallback = {ok: true, degraded: true, group: publicParsed.unwrap(), members: []}
-        groupSnapshotCache.set(tag, fallback)
-        return fallback
+        return roturPublicGroupSnapshot(tag)
     )
     auto parsed = json.parse(response.body, {type: "object"})
     if parsed.isErr() (
