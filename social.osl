@@ -1,16 +1,69 @@
+def sortProjectsByEditedDesc(array items) array (
+    array sorted = []
+    for i items.len (
+        object current = items[i].assert(object)
+        number currentEdited = current.edited.toNum()
+        boolean inserted = false
+        array next = []
+        for j sorted.len (
+            object other = sorted[j].assert(object)
+            if !inserted and currentEdited > other.edited.toNum() (
+                next.append(current)
+                inserted = true
+            )
+            next.append(other)
+        )
+        if !inserted (
+            next.append(current)
+        )
+        sorted = next
+    )
+    return sorted
+)
+
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
     string ownerKey = normalizeUsername(owner)
     string ownerId = userIdForUsername(owner)
-    array entries = []
+    object seen = {}
     array stored = []
     if ownerId != "" (
-        stored = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
+        array idMatches = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
+        for i idMatches.len (
+            object entry = idMatches[i].assert(object)
+            string pid = entry.id.toStr()
+            if !seen.contains(pid) (
+                seen[pid] = true
+                stored.append(entry)
+            )
+        )
     )
-    if stored.len == 0 (
-        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    if ownerKey != "" (
+        array keyMatches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+        for i keyMatches.len (
+            object entry = keyMatches[i].assert(object)
+            string pid = entry.id.toStr()
+            if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId (
+                entry.ownerId = ownerId
+                putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+                auto loaded = loadProject(pid)
+                if loaded.ok (
+                    object project = loaded.project.assert(object)
+                    if (project.ownerId ?? "").toStr() != ownerId (
+                        project.ownerId = ownerId
+                        saveProject(project)
+                    )
+                )
+            )
+            if !seen.contains(pid) (
+                seen[pid] = true
+                stored.append(entry)
+            )
+        )
     )
-    for i stored.len (
-        object entry = stored[i].assert(object)
+    array sorted = sortProjectsByEditedDesc(stored)
+    array entries = []
+    for i sorted.len (
+        object entry = sorted[i].assert(object)
         if entry.shared == true or includeUnshared (
             entries.append(entry)
         )
@@ -19,47 +72,12 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
 )
 
 def ownerIndexCount(string owner, boolean includeUnshared) number (
-    string ownerKey = normalizeUsername(owner)
-    string ownerId = userIdForUsername(owner)
-    if ownerId != "" (
-        if includeUnshared (
-            number idCount = projectSearchDocs.where("ownerId", db.equal, ownerId).count()
-            if idCount > 0 (
-                return idCount
-            )
-        ) else (
-            number idCount = projectSearchDocs.where("ownerId", db.equal, ownerId).and("shared", db.equal, true).count()
-            if idCount > 0 (
-                return idCount
-            )
-        )
-    )
-    if includeUnshared (
-        return projectSearchDocs.where("ownerKey", db.equal, ownerKey).count()
-    )
-    return projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).count()
+    return ownerIndexEntries(owner, includeUnshared).len
 )
 
 def ownerIndexPage(string owner, boolean includeUnshared, number offset, number limit) array (
-    string ownerKey = normalizeUsername(owner)
-    string ownerId = userIdForUsername(owner)
-    number scanLimit = offset + limit
-    array stored = []
-    if ownerId != "" (
-        if includeUnshared (
-            stored = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).limit(scanLimit).all()
-        ) else (
-            stored = projectSearchDocs.where("ownerId", db.equal, ownerId).and("shared", db.equal, true).limit(scanLimit).sort("edited", db.desc).all()
-        )
-    )
-    if stored.len == 0 (
-        if includeUnshared (
-            stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).limit(scanLimit).all()
-        ) else (
-            stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).sort("edited", db.desc).limit(scanLimit).all()
-        )
-    )
-    return paginate(stored, offset, limit)
+    array entries = ownerIndexEntries(owner, includeUnshared)
+    return paginate(entries, offset, limit)
 )
 
 def isViewerOwner(*serve.Context c, string name) boolean (

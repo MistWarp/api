@@ -381,6 +381,29 @@ def renameUser(string userId, string oldName, string newName) (
     )
 )
 
+def backfillOwnerIdForUserProjects(string userId, string username) (
+    string ownerKey = normalizeUsername(username)
+    if userId == "" or ownerKey == "" (
+        return
+    )
+    array matches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).all()
+    for i matches.len (
+        object entry = matches[i].assert(object)
+        if (entry.ownerId ?? "").toStr() != userId (
+            entry.ownerId = userId
+            putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+            auto loaded = loadProject(entry.id.toStr())
+            if loaded.ok (
+                object project = loaded.project.assert(object)
+                if (project.ownerId ?? "").toStr() != userId (
+                    project.ownerId = userId
+                    saveProject(project)
+                )
+            )
+        )
+    )
+)
+
 def ensureUserIdentity(string userId, string username) (
     if userId == "" or username == "" (
         return
@@ -393,6 +416,8 @@ def ensureUserIdentity(string userId, string username) (
     )
     if current != "" and current != username (
         renameUser(userId, current, username)
+    ) else (
+        backfillOwnerIdForUserProjects(userId, username)
     )
     if current != username (
         users[userId] = username
