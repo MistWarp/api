@@ -1615,11 +1615,28 @@ def handleMySpaces(*serve.Context c) (
     string userKey = normalizeUsername(c.getString("username"))
     array memberships = spaceMemberDocs.where("userKey", db.equal, userKey).all()
     array stored = []
+    object seen = {}
     for i memberships.len (
         object membership = memberships[i].assert(object)
         object space = spaceDocs.findById(membership.spaceId.toStr())
         if space.isEmpty() == false (
+            seen[space["_id"].toStr()] = true
             stored.append(space)
+        )
+    )
+    array allSpaces = spaceDocs.all()
+    for i allSpaces.len (
+        object space = allSpaces[i].assert(object)
+        string spaceId = space["_id"].toStr()
+        if !seen.contains(spaceId) (
+            boolean include = isSpaceOwner(space, c)
+            if !include and groupTagOf(space) != "" (
+                include = canManageGroupContent(space, c)
+            )
+            if include (
+                seen[spaceId] = true
+                stored.append(space)
+            )
         )
     )
     stored.sortBy("edited", "descending")
@@ -2060,6 +2077,24 @@ def beginPlaytimeSession(string projectId, string username) boolean (
     return true
 )
 
+def touchRecentProjectActivity(string projectId, string username) boolean (
+    string userId = userIdForUsername(username)
+    string identityKey = userId
+    if identityKey == "" (
+        identityKey = normalizeUsername(username)
+    )
+    string playtimeId = projectId ++ ":" ++ identityKey
+    object playtime = playtimeDocs.findById(playtimeId)
+    if playtime.isEmpty() == true (
+        playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
+    ) else (
+        playtime.username = username
+        playtime.userId = userId
+        playtime.updated = timestamp
+    )
+    return putDocument(playtimeDocs, playtimeId, playtime)
+)
+
 def creditPlaytimeSession(string projectId, string username, boolean finished) number (
     string userId = userIdForUsername(username)
     string sessionId = userId
@@ -2137,6 +2172,9 @@ def handleRecordDiagnostic(*serve.Context c) (
     )
     if eventType == "start" and c.getBool("authenticated") (
         beginPlaytimeSession(c.param("id"), c.getString("username"))
+    )
+    if eventType == "load" and c.getBool("authenticated") (
+        touchRecentProjectActivity(c.param("id"), c.getString("username"))
     )
     object item = {_id: diagnosticId, projectId: c.param("id"), type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
     diagnosticDocs.insertOne(item)
