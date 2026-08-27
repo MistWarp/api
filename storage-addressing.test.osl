@@ -1,0 +1,22 @@
+import "std:regex"
+import "std:testing"
+import "./storage-addressing.osl"
+
+byte[] first = [0, 1, 2, 255]
+byte[] same = [0, 1, 2, 255]
+byte[] changed = [0, 1, 3, 255]
+
+string firstHash = contentHash(first)
+testing.assert(firstHash == contentHash(same), "identical binary content has the same hash")
+testing.assert(firstHash != contentHash(changed), "different binary content has a different hash")
+testing.assert(regex.match("^[a-f0-9]{64}$", firstHash), "content hashes use lowercase SHA-256")
+testing.assert(projectJsonSnapshotKey(firstHash) == "project-json/" ++ firstHash ++ ".json.gz", "project JSON snapshots are content addressed")
+testing.assert(projectWorkspaceSnapshotKey(firstHash) == "project-workspaces/" ++ firstHash ++ ".mwp", "workspace snapshots are content addressed")
+
+array legacy = projectWorkspaceKeys({workspaceKey: "projects/old/project.mwp"})
+testing.assert(legacy.len == 1 and legacy[1].toStr() == "projects/old/project.mwp", "legacy projects expose their existing workspace")
+
+array layers = projectWorkspaceKeys({workspaceKey: "ignored", workspaceLayers: ["base", "delta"]})
+testing.assert(layers.len == 2 and layers[1].toStr() == "base" and layers[2].toStr() == "delta", "layered projects preserve base-to-delta order")
+
+testing.assert(projectWorkspaceKeys({}).len == 0, "projects without history have no workspace keys")

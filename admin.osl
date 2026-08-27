@@ -569,11 +569,23 @@ def handleReportAction(*serve.Context c) (
         )
     )
 
-    found.resolved = true
-    found.resolvedBy = c.getString("username")
-    found.action = action
-    found.resolvedAt = timestamp
-    saveReports(reports)
+    sync.lock("reports-storage")
+    array currentReports = loadReports()
+    for i currentReports.len (
+        object currentReport = currentReports[i].assert(object)
+        if currentReport.id.toStr() == id (
+            currentReport.resolved = true
+            currentReport.resolvedBy = c.getString("username")
+            currentReport.action = action
+            currentReport.resolvedAt = timestamp
+        )
+    )
+    boolean reportsSaved = saveReports(currentReports)
+    sync.unlock("reports-storage")
+    if !reportsSaved (
+        c.internalError("could not update report")
+        return
+    )
     if found.type.toStr() == "project" (
         maybeClearProjectEvidence(found.target.toStr())
     )

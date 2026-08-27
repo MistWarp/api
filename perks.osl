@@ -45,6 +45,11 @@ def mistwarpBenefitsForTier(string rawTier) object (
         weeklyUploadBytes: 104857600,
         maxProjectAssetBytes: 10485760,
         maxProjectAssetsBytes: 52428800,
+        maxProjects: 100,
+        maxSpaces: 25,
+        maxProjectReleases: 20,
+        gameSaveStorageBytes: 5000000,
+        maxGameInventoryItems: 1000,
         recoveryDays: 7,
         analyticsDays: 7,
         advancedAnalytics: false,
@@ -61,6 +66,11 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.weeklyUploadBytes = 262144000
         benefits.maxProjectAssetBytes = 26214400
         benefits.maxProjectAssetsBytes = 104857600
+        benefits.maxProjects = 500
+        benefits.maxSpaces = 100
+        benefits.maxProjectReleases = 50
+        benefits.gameSaveStorageBytes = 25000000
+        benefits.maxGameInventoryItems = 5000
         benefits.recoveryDays = 14
         benefits.analyticsDays = 30
         benefits.historyCheckpoints = true
@@ -69,6 +79,11 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.weeklyUploadBytes = 1073741824
         benefits.maxProjectAssetBytes = 52428800
         benefits.maxProjectAssetsBytes = 262144000
+        benefits.maxProjects = 2000
+        benefits.maxSpaces = 500
+        benefits.maxProjectReleases = 100
+        benefits.gameSaveStorageBytes = 100000000
+        benefits.maxGameInventoryItems = 20000
         benefits.recoveryDays = 30
         benefits.analyticsDays = 365
         benefits.advancedAnalytics = true
@@ -83,6 +98,11 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.weeklyUploadBytes = 5368709120
         benefits.maxProjectAssetBytes = 104857600
         benefits.maxProjectAssetsBytes = 1073741824
+        benefits.maxProjects = 10000
+        benefits.maxSpaces = 2000
+        benefits.maxProjectReleases = 500
+        benefits.gameSaveStorageBytes = 1000000000
+        benefits.maxGameInventoryItems = 100000
         benefits.recoveryDays = 90
         benefits.analyticsDays = 0
         benefits.advancedAnalytics = true

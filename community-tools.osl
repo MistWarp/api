@@ -972,6 +972,11 @@ def handleGetSpace(*serve.Context c) (
 
 def handleCreateSpace(*serve.Context c) (
     object body = c.bodyJSON()
+    number ownedSpaces = spaceDocs.where("ownerId", db.equal, c.getString("userId")).count()
+    if !c.getBool("isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(c.getString("userId")).maxSpaces.toNum() (
+        c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+        return
+    )
     string groupTag = ""
     if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
         groupTag = normalizeGroupTag(body.groupTag.toStr())
@@ -1087,6 +1092,11 @@ def handleUpdateSpace(*serve.Context c) (
         string nextOwner = usernameForId(nextOwnerId)
         if nextOwner == "" (
             c.badRequest("Rotur user not found")
+            return
+        )
+        number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxSpaces.toNum()
+        if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", db.equal, nextOwnerId).count() >= nextOwnerLimit (
+            c.badRequest("the new owner has reached their space limit")
             return
         )
         space.owner = nextOwner
@@ -1924,6 +1934,20 @@ def handleCreatePreview(*serve.Context c) (
         c.forbidden("not your project")
         return
     )
+    array previews = previewDocs.where("projectId", db.equal, project.id.toStr()).all()
+    number activePreviews = 0
+    for i previews.len (
+        object existing = previews[i].assert(object)
+        if existing.expiresAt.toNum() <= timestamp (
+            previewDocs.deleteOne({_id: existing["_id"]})
+        ) else (
+            activePreviews = activePreviews + 1
+        )
+    )
+    if activePreviews >= 20 (
+        c.badRequest("a project can have at most 20 active previews")
+        return
+    )
     object body = c.bodyJSON()
     number hours = 24
     if body.contains("hours") (
@@ -1981,6 +2005,11 @@ def handleCreateRelease(*serve.Context c) (
         c.forbidden("named history checkpoints require Rotur Lite, Plus, or Pro")
         return
     )
+    number releaseLimit = mistwarpBenefitsForProject(project).maxProjectReleases.toNum()
+    if releaseDocs.where("projectId", db.equal, project.id.toStr()).limit(releaseLimit.toInt()).all().len >= releaseLimit (
+        c.badRequest("this project has reached its release limit")
+        return
+    )
     string notes = ""
     if body.contains("notes") (
         notes = body.notes.toStr().strip()
@@ -1994,22 +2023,14 @@ def handleCreateRelease(*serve.Context c) (
     if body.contains("commit") (
         commit = body.commit.toStr()
     )
-    string sourceUrl = projectJsonBaseUrl(project)
-    if projectViewKey(project) != "" (
-        sourceUrl = sourceUrl ++ "?k=" ++ projectViewKey(project)
-    )
-    object snapshot = requests.get(sourceUrl)
-    if !snapshot.success (
+    object snapshot = ensureProjectJsonSnapshot(project)
+    if !snapshot.ok (
         c.internalError("could not snapshot the current project")
         return
     )
-    string releasePath = releasesDir ++ releaseId.replace(":", "-") ++ ".json"
-    if !fs.writeFile(releasePath, snapshot.body.toStr()) (
-        c.internalError("could not store the release")
-        return
-    )
+    project = snapshot.project.assert(object)
     string jsonUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
-    object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username"), creatorId: c.getString("userId")}
+    object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username"), creatorId: c.getString("userId")}
     releaseDocs.insertOne(release)
     if channel == "stable" (
         project.publicRelease = releaseId
@@ -2032,6 +2053,10 @@ def handleGetReleaseProjectJson(*serve.Context c) (
         c.notFound("release not found")
         return
     )
+    if release.contains("jsonKey") and release.jsonKey.toStr() != "" (
+        serveProjectJsonStorageKey(c, release.jsonKey.toStr(), release.contains("jsonGzip") and release.jsonGzip == true)
+        return
+    )
     string releasePath = releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json"
     if !fs.exists(releasePath) (
         c.notFound("release snapshot not found")
@@ -2039,6 +2064,35 @@ def handleGetReleaseProjectJson(*serve.Context c) (
     )
     c.setHeader("Content-Type", "application/json")
     c.text(200, fs.readFile(releasePath))
+)
+
+def handleDeleteRelease(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("not your project")
+        return
+    )
+    object release = releaseDocs.findById(c.param("release"))
+    if release.isEmpty() or release.projectId.toStr() != project.id.toStr() (
+        c.notFound("release not found")
+        return
+    )
+    string jsonKey = (release.jsonKey ?? "").toStr()
+    releaseDocs.deleteOne({_id: release["_id"]})
+    fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
+    if jsonKey != "" (
+        removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+    )
+    if project.publicRelease.toStr() == release["_id"].toStr() (
+        project.publicRelease = ""
+        saveProject(project)
+    )
+    c.json(200, {ok: true})
 )
 
 def handleCreateContribution(*serve.Context c) (
@@ -2177,7 +2231,16 @@ def handleRecordDiagnostic(*serve.Context c) (
         touchRecentProjectActivity(c.param("id"), c.getString("username"))
     )
     object item = {_id: diagnosticId, projectId: c.param("id"), type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
+    string diagnosticLock = "project-diagnostics-" ++ c.param("id")
+    sync.lock(diagnosticLock)
     diagnosticDocs.insertOne(item)
+    array storedDiagnostics = diagnosticDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(550).all()
+    for i storedDiagnostics.len (
+        if i > 500 (
+            diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
+        )
+    )
+    sync.unlock(diagnosticLock)
     c.json(201, {ok: true})
 )
 
@@ -2214,6 +2277,10 @@ def handleCreateProjectFeedback(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
+    if feedbackDocs.where("projectId", db.equal, project.id.toStr()).limit(200).all().len >= 200 (
+        c.badRequest("this project has reached its feedback limit")
+        return
+    )
     object body = c.bodyJSON()
     string feedbackType = body.type.toStr().toLower().strip()
     if feedbackType != "bug" and feedbackType != "idea" and feedbackType != "confusing" and feedbackType != "other" (

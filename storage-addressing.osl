@@ -1,0 +1,24 @@
+def projectJsonSnapshotKey(string hash) string (
+    return "project-json/" ++ hash ++ ".json.gz"
+)
+
+def projectWorkspaceSnapshotKey(string hash) string (
+    return "project-workspaces/" ++ hash ++ ".mwp"
+)
+
+def contentHash(any body) string (
+    return body.toStr().hashSHA256()
+)
+
+def projectWorkspaceKeys(object project) array (
+    if project.contains("workspaceLayers") and project.workspaceLayers != null (
+        array layers = project.workspaceLayers.assertElse(array, [])
+        if layers.len > 0 (
+            return layers
+        )
+    )
+    if project.contains("workspaceKey") and project.workspaceKey != null and project.workspaceKey.toStr() != "" (
+        return [project.workspaceKey]
+    )
+    return []
+)

@@ -409,7 +409,7 @@ def refreshUsernameForId(string userId) string (
         return identityRefreshCache.get(userId).toStr()
     )
     object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
-    if resp.success (
+    if resp.success and resp.status.toInt() == 200 (
         auto parsed = json.parse(resp.body, {type: "object"})
         if !parsed.isErr() (
             object profile = parsed.unwrap().assert(object)
@@ -420,6 +420,15 @@ def refreshUsernameForId(string userId) string (
                 return username
             )
         )
+    )
+    if resp.status.toInt() == 404 (
+        string fallback = usernameForId(userId)
+        if fallback != "" (
+            log "Lazy detection: purging deleted rotur user " ++ userId ++ " (" ++ fallback ++ ")"
+            purgeUser(userId, fallback)
+        )
+        identityRefreshCache.set(userId, "")
+        return ""
     )
     string fallback = usernameForId(userId)
     if fallback != "" (
@@ -435,6 +444,13 @@ def discoverUserIdentity(string username) string (
     )
     object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0")
     if !resp.success (
+        if resp.status.toInt() == 404 (
+            string uid = userIdForUsername(username)
+            if uid != "" (
+                log "Lazy detection: purging deleted rotur user " ++ uid ++ " (" ++ username ++ ")"
+                purgeUser(uid, username)
+            )
+        )
         return ""
     )
     auto parsed = json.parse(resp.body, {type: "object"})
@@ -498,6 +514,18 @@ def purgeUserFromProfiles(string key) (
                     other.following = removeUserFromArray(following, key)
                     changed = true
                 )
+                if other.contains("purchases") and other.purchases != null (
+                    array purchases = other.purchases.assert(array)
+                    for j purchases.len (
+                        object purchase = purchases[j].assert(object)
+                        if normalizeUsername(purchase.seller.toStr()) == key (
+                            purchase.seller = "Deleted User"
+                            purchases[j] = purchase
+                            changed = true
+                        )
+                    )
+                    other.purchases = purchases
+                )
                 if changed (
                     saveProfile(other)
                 )
@@ -517,6 +545,7 @@ def purgeUserFromProjects(string key) (
                 boolean changed = false
                 if normalizeUsername(project.owner.toStr()) == key (
                     project.owner = "Deleted User"
+                    project.ownerId = ""
                     changed = true
                 )
                 array loves = project.loves.assert(array)
@@ -530,6 +559,19 @@ def purgeUserFromProjects(string key) (
                         project.brokenhearts = removeUserFromArray(broken, key)
                         changed = true
                     )
+                )
+                if project.contains("buyers") and project.buyers != null (
+                    array buyers = project.buyers.assert(array)
+                    array keptBuyers = []
+                    for j buyers.len (
+                        object buyer = buyers[j].assert(object)
+                        if normalizeUsername(buyer.user.toStr()) != key (
+                            keptBuyers.append(buyer)
+                        ) else (
+                            changed = true
+                        )
+                    )
+                    project.buyers = keptBuyers
                 )
                 if project.contains("collaborators") and project.collaborators != null (
                     array collaborators = project.collaborators.assert(array)
@@ -574,6 +616,7 @@ def purgeUserFromComments(string key) (
             object comment = comments[j]
             if normalizeUsername(comment.author.toStr()) == key (
                 comment.author = "Deleted User"
+                comment.authorId = ""
                 changed = true
             )
         )
@@ -637,6 +680,11 @@ def purgeUser(string userId, string username) (
     purgeUserFromProjects(key)
     purgeUserFromComments(key)
     purgeUserFromNotifications(key)
+    purgeGameDataForUser(userId)
+    purgeUserFromSpaces(username)
+    purgeUserCommunityRecords(username)
+    purgeUserFromNews(username)
+    removeUserFromSafetyLists(username)
     fs.remove(activityDir ++ key ++ ".json")
     fs.remove(userSettingsDir ++ key ++ ".json")
     fs.remove(quotaDir ++ key ++ ".json")
@@ -660,12 +708,24 @@ def purgeUser(string userId, string username) (
         saveUserIds(idData)
     )
     userIdsCache.set(userId, "")
+    identityRefreshCache.set(userId, "")
 )
 
 def reconcileDeletedUsers() (
     object idData = loadUserIds()
     object idUsers = idData.users
     array ids = idUsers.getKeys().toArray()
+    array profileFiles = fs.readDir(usersDir).toArray()
+    for i profileFiles.len (
+        string name = profileFiles[i].toStr()
+        if name.endsWith(".json") (
+            string uname = name.replace(".json", "")
+            string uid = userIdForUsername(uname)
+            if uid != "" and !ids.contains(uid) (
+                ids.append(uid)
+            )
+        )
+    )
     if ids.len == 0 (
         return
     )
@@ -686,12 +746,16 @@ def reconcileDeletedUsers() (
     array deleted = data.deleted.assert(array)
     for i deleted.len (
         string uid = deleted[i].toStr()
+        string uname = ""
         if idUsers.contains(uid) (
-            string uname = idUsers[uid].toStr()
-            if uname != "" (
-                log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
-                purgeUser(uid, uname)
-            )
+            uname = idUsers[uid].toStr()
+        )
+        if uname == "" (
+            uname = usernameForId(uid)
+        )
+        if uname != "" (
+            log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
+            purgeUser(uid, uname)
         )
     )
 )

@@ -7,8 +7,57 @@ def loadReports() array (
     return data.reports.assert(array)
 )
 
+def compactReports(array reports) array (
+    array unresolved = []
+    array resolved = []
+    for i reports.len (
+        object report = reports[i].assert(object)
+        if report.resolved == true (
+            resolved.append(report)
+        ) else (
+            unresolved.append(report)
+        )
+    )
+    number resolvedLimit = 5000 - unresolved.len
+    if resolvedLimit < 0 (
+        resolvedLimit = 0
+    )
+    number resolvedOffset = resolved.len - resolvedLimit
+    if resolvedOffset < 0 (
+        resolvedOffset = 0
+    )
+    array kept = unresolved
+    array recentResolved = paginate(resolved, resolvedOffset, resolvedLimit)
+    for i recentResolved.len (
+        kept.append(recentResolved[i])
+    )
+    return kept
+)
+
 def saveReports(array reports) boolean (
-    return writeFile(reportsFile, {reports: reports})
+    return writeFile(reportsFile, {reports: compactReports(reports)})
+)
+
+def reportSourceKey(*serve.Context c) string (
+    if c.getBool("authenticated") (
+        return "user:" ++ c.getString("userId")
+    )
+    return "ip:" ++ c.ip().hashSHA256()
+)
+
+def canAppendPendingReport(array reports, string sourceKey) boolean (
+    number totalPending = 0
+    number sourcePending = 0
+    for i reports.len (
+        object report = reports[i].assert(object)
+        if report.resolved != true (
+            totalPending = totalPending + 1
+            if (report.sourceKey ?? "").toStr() == sourceKey (
+                sourcePending = sourcePending + 1
+            )
+        )
+    )
+    return totalPending < 1000 and sourcePending < 10
 )
 
 def handleCreateReport(*serve.Context c) (
@@ -21,14 +70,19 @@ def handleCreateReport(*serve.Context c) (
         c.badRequest("invalid report type")
         return
     )
-    if target == "" or reason == "" or reason.len > 1000 (
+    if target == "" or target.len > 200 or reason == "" or reason.len > 1000 (
         c.badRequest("invalid report")
+        return
+    )
+    if reportType == "project" and !loadProject(target).ok (
+        c.badRequest("project not found")
         return
     )
 
     object report = {
         id: "r" ++ randomString(12),
         reporter: c.getString("username"),
+        sourceKey: reportSourceKey(c),
         type: reportType,
         target: target,
         reason: reason,
@@ -36,11 +90,22 @@ def handleCreateReport(*serve.Context c) (
         resolved: false
     }
     if body.contains("context") and body.context != null (
-        report.context = body.context.toStr()
+        report.context = body.context.toStr().trim(1, 5000)
     )
+    sync.lock("reports-storage")
     array reports = loadReports()
+    if !canAppendPendingReport(reports, report.sourceKey.toStr()) (
+        sync.unlock("reports-storage")
+        c.json(429, {ok: false, error: "too many pending reports"})
+        return
+    )
     reports.append(report)
-    saveReports(reports)
+    boolean saved = saveReports(reports)
+    sync.unlock("reports-storage")
+    if !saved (
+        c.internalError("could not save report")
+        return
+    )
     if reportType == "project" (
         snapshotProjectEvidence(target)
     )
@@ -67,6 +132,7 @@ def handleCreateSupportRequest(*serve.Context c) (
     object report = {
         id: "s" ++ randomString(12),
         reporter: username,
+        sourceKey: reportSourceKey(c),
         type: "support",
         supportType: requestType,
         target: username,
@@ -75,9 +141,20 @@ def handleCreateSupportRequest(*serve.Context c) (
         created: timestamp,
         resolved: false
     }
+    sync.lock("reports-storage")
     array reports = loadReports()
+    if !canAppendPendingReport(reports, report.sourceKey.toStr()) (
+        sync.unlock("reports-storage")
+        c.json(429, {ok: false, error: "too many pending support requests"})
+        return
+    )
     reports.append(report)
-    saveReports(reports)
+    boolean saved = saveReports(reports)
+    sync.unlock("reports-storage")
+    if !saved (
+        c.internalError("could not save support request")
+        return
+    )
     c.json(201, {ok: true, id: report.id})
 )
 
@@ -88,6 +165,7 @@ def handleGetReports(*serve.Context c) (
 def handleResolveReport(*serve.Context c) (
     object body = c.bodyJSON()
     string id = body.id.toStr()
+    sync.lock("reports-storage")
     array reports = loadReports()
     boolean found = false
     string projectTarget = ""
@@ -102,10 +180,16 @@ def handleResolveReport(*serve.Context c) (
         )
     )
     if !found (
+        sync.unlock("reports-storage")
         c.notFound("report not found")
         return
     )
-    saveReports(reports)
+    boolean saved = saveReports(reports)
+    sync.unlock("reports-storage")
+    if !saved (
+        c.internalError("could not update report")
+        return
+    )
     if projectTarget != "" (
         maybeClearProjectEvidence(projectTarget)
     )

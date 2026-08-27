@@ -4,7 +4,8 @@ def realtimeRoomKey(object identity) string (
 
 def realtimePublicPlayer(*ws.Connection conn) object (
     return {
-        id: conn.Get("userId").toStr(),
+        id: conn.Get("playerId").toStr(),
+        userId: conn.Get("userId").toStr(),
         username: conn.Get("username").toStr(),
         state: conn.Get("state").assertElse(object, {})
     }
@@ -27,6 +28,16 @@ def realtimeBroadcast(string roomKey, object message, *ws.Connection? except) (
             conn.Send(encoded)
         )
     )
+)
+
+def realtimeSendTo(string roomKey, string playerId, object message) boolean (
+    for conn in gameRealtimeSocket.GetConnections() (
+        if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey and conn.Get("playerId").toStr() == playerId (
+            conn.Send(json.stringify(message))
+            return true
+        )
+    )
+    return false
 )
 
 def realtimeError(*ws.Connection conn, string message) (
@@ -72,27 +83,24 @@ def realtimeAcceptIdentity(*ws.Connection conn, object identity) (
 
     string roomKey = realtimeRoomKey(identity)
     string userId = identity.userId.toStr()
+    string playerId = conn.Get("playerId").toStr()
+    if playerId == "" (
+        playerId = userId ++ ":" ++ timestamp.toStr()
+    )
     array roomPlayers = realtimeRoster(roomKey)
     if roomPlayers.len >= 50 (
         realtimeError(conn, "room is full")
         conn.Close()
         return
     )
-    for existing in gameRealtimeSocket.GetConnections() (
-        if existing != conn and existing.Get("ready") == true and existing.Get("roomKey").toStr() == roomKey and existing.Get("userId").toStr() == userId (
-            existing.Set("replaced", true)
-            existing.Close()
-        )
-    )
-
     conn.Set("roomKey", roomKey)
+    conn.Set("playerId", playerId)
     conn.Set("userId", userId)
     conn.Set("username", identity.username.toStr())
     conn.Set("state", {})
     conn.Set("messageTimes", [])
-    conn.Set("chatTimes", [])
     conn.Set("ready", true)
-    conn.Send(json.stringify({type: "welcome", self: userId, players: realtimeRoster(roomKey)}))
+    conn.Send(json.stringify({type: "welcome", self: playerId, players: realtimeRoster(roomKey)}))
     realtimeBroadcast(roomKey, {type: "player_joined", player: realtimePublicPlayer(conn)}, conn)
 )
 
@@ -110,8 +118,8 @@ def realtimeAuthenticate(*ws.Connection conn, string ticket) (
 def realtimeOnConnect(*ws.Connection conn) (
     conn.Set("ready", false)
     conn.Set("messageTimes", [])
-    conn.Set("chatTimes", [])
     string handshakeKey = conn.GetHeader("Sec-WebSocket-Key")
+    conn.Set("playerId", handshakeKey)
     if handshakeKey != "" and realtimeHandshakeCache.has(handshakeKey) (
         object identity = realtimeHandshakeCache.get(handshakeKey).assertElse(object, {})
         realtimeHandshakeCache.delete(handshakeKey)
@@ -158,35 +166,57 @@ def realtimeOnMessage(*ws.Connection conn, string raw) (
         realtimeBroadcast(conn.Get("roomKey").toStr(), {type: "player_state", player: realtimePublicPlayer(conn)}, null)
         return
     )
-    if messageType == "chat" (
-        if !realtimeAllow(conn, "chatTimes", 4, 5000) (
-            realtimeError(conn, "sending chat too quickly")
+    if messageType == "game_event" (
+        string eventName = message.name.toStr().strip()
+        if !regex.match("^[A-Za-z0-9_.:-]{1,64}$", eventName) (
+            realtimeError(conn, "event name must be 1 to 64 letters, numbers, dots, colons, underscores, or dashes")
             return
         )
-        string chat = message.message.toStr().replace("\n", "").replace("\r", "").replace("\t", "").strip()
-        if chat.len < 1 or chat.len > 300 (
-            realtimeError(conn, "chat must be 1 to 300 characters")
+        if !message.contains("value") or json.stringify(message.value).len > 4096 (
+            realtimeError(conn, "event value must be safe JSON no larger than 4 KiB")
             return
         )
-        realtimeBroadcast(conn.Get("roomKey").toStr(), {
-            type: "chat",
-            id: generateId(),
-            sender: {id: conn.Get("userId").toStr(), username: conn.Get("username").toStr()},
-            message: chat,
-            sentAt: timestamp
-        }, null)
+        string recipientId = ""
+        if message.contains("to") and message.to != null (
+            recipientId = message.to.toStr().strip()
+        )
+        if recipientId.len > 128 (
+            realtimeError(conn, "event player ID is too long")
+            return
+        )
+        object packet = {
+            type: "game_event",
+            name: eventName,
+            value: message.value,
+            sender: {
+                id: conn.Get("playerId").toStr(),
+                userId: conn.Get("userId").toStr(),
+                username: conn.Get("username").toStr()
+            }
+        }
+        if recipientId != "" (
+            if !realtimeSendTo(conn.Get("roomKey").toStr(), recipientId, packet) (
+                realtimeError(conn, "event player is not in the room")
+            )
+        ) else (
+            realtimeBroadcast(conn.Get("roomKey").toStr(), packet, null)
+        )
         return
     )
     realtimeError(conn, "unknown message type")
 )
 
 def realtimeOnDisconnect(*ws.Connection conn) (
-    if conn.Get("ready") != true or conn.Get("replaced") == true (
+    if conn.Get("ready") != true (
         return
     )
     realtimeBroadcast(conn.Get("roomKey").toStr(), {
         type: "player_left",
-        player: {id: conn.Get("userId").toStr(), username: conn.Get("username").toStr()}
+        player: {
+            id: conn.Get("playerId").toStr(),
+            userId: conn.Get("userId").toStr(),
+            username: conn.Get("username").toStr()
+        }
     }, conn)
 )
 

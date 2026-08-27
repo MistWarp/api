@@ -56,9 +56,12 @@ def isUntouchedRemix(object project) boolean (
         return false
     )
     if project.contains("inheritedJson") and project.inheritedJson == true (
-        return true
+        return project.created.toNum() == project.edited.toNum()
     )
-    return project.created.toNum() == project.edited.toNum()
+    if project.contains("lastUploadAt") and project.lastUploadAt.toNum() > 0 (
+        return project.created.toNum() == project.edited.toNum()
+    )
+    return false
 )
 
 def localProjectJsonPathFor(object project, number hops) string (
@@ -101,7 +104,7 @@ def projectViewKey(object project) string (
 
 def projectJsonBaseUrl(object project) string (
     string base = publicUrl(project.jsonKey.toStr())
-    if localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
+    if project.jsonKey.toStr().startsWith("project-json/") or localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
         base = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
     )
     return base
@@ -176,6 +179,12 @@ def isSafeBlobKey(string key) boolean (
         string name = key.replace("assets/", "")
         return isValidMd5Ext(name)
     )
+    if regex.match("^project-json/[a-f0-9]{64}\\.json\\.gz$", key) (
+        return true
+    )
+    if regex.match("^project-workspaces/[a-f0-9]{64}\\.mwp$", key) (
+        return true
+    )
     return regex.match("^projects/[A-Za-z0-9]+/project\\.json$", key)
 )
 
@@ -223,11 +232,7 @@ def r2Remove(string key) boolean (
     return result.ok == true
 )
 
-def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
-    if !project.contains("workspaceKey") or project.workspaceKey.toStr() == "" (
-        return false
-    )
-    string key = project.workspaceKey.toStr()
+def copyStorageKeyToPath(string key, string outputPath) boolean (
     string localPath = localBlobPath(key)
     if fs.exists(localPath) (
         return zip.copyFile(localPath, outputPath)
@@ -239,8 +244,36 @@ def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
     if !existing.ok or existing.status.toInt() != 200 (
         return false
     )
-    string body = existing.body.toStr()
-    return fs.writeFileBytes(outputPath, raw("[]byte(body)"))
+    return fs.writeFileBytes(outputPath, existing.body)
+)
+
+def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
+    array keys = projectWorkspaceKeys(project)
+    if keys.len == 0 (
+        return false
+    )
+    string currentPath = outputPath ++ ".layer.0"
+    if !copyStorageKeyToPath(keys[1].toStr(), currentPath) (
+        return false
+    )
+    for i keys.len (
+        if i > 1 (
+            string deltaPath = outputPath ++ ".delta." ++ i.toStr()
+            string mergedPath = outputPath ++ ".layer." ++ i.toStr()
+            boolean ok = copyStorageKeyToPath(keys[i].toStr(), deltaPath)
+            ok = ok and mergeWorkspaceArchives(currentPath, deltaPath, mergedPath, maxProjectJsonBytes + 1073741824)
+            fs.remove(deltaPath)
+            fs.remove(currentPath)
+            if !ok (
+                fs.remove(mergedPath)
+                return false
+            )
+            currentPath = mergedPath
+        )
+    )
+    boolean copied = zip.copyFile(currentPath, outputPath)
+    fs.remove(currentPath)
+    return copied
 )
 
 def mergeWorkspaceArchives(string basePath, string deltaPath, string outputPath, number maxExpandedBytes) boolean (
@@ -350,6 +383,38 @@ def serveProjectJson(*serve.Context c, object project) (
     serveBlobKey(c, project.jsonKey.toStr())
 )
 
+def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
+    if !isSafeBlobKey(key) (
+        c.notFound("project snapshot not found")
+        return
+    )
+    string localPath = localBlobPath(key)
+    if fs.exists(localPath) (
+        c.setHeader("Content-Type", "application/json")
+        c.setHeader("Cache-Control", "no-cache")
+        if gzip (
+            c.setHeader("Content-Encoding", "gzip")
+        )
+        c.file(localPath)
+        return
+    )
+    if r2Local (
+        c.notFound("project snapshot not found")
+        return
+    )
+    auto fetched = r2Client.get({key: key})
+    if !fetched.ok or fetched.status.toInt() != 200 (
+        c.notFound("project snapshot not found")
+        return
+    )
+    c.setHeader("Cache-Control", "no-cache")
+    if gzip (
+        c.setHeader("Content-Encoding", "gzip")
+    )
+    byte[] snapshotBody = fetched.body.assert(byte[])
+    c.data(200, "application/json", snapshotBody)
+)
+
 def handleGetAssetBlob(*serve.Context c) (
     string name = c.param("name")
     string key = assetObjectKey(name)
@@ -416,11 +481,25 @@ def handleGetProjectWorkspace(*serve.Context c) (
     if !allowed and c.query("pull") != "" (
         allowed = canAccessPullWorkspace(project, c.query("pull"), c)
     )
-    if !allowed or !project.contains("workspaceKey") or project.workspaceKey.toStr() == "" (
+    array keys = projectWorkspaceKeys(project)
+    if !allowed or keys.len == 0 (
         c.notFound("workspace not found")
         return
     )
-    string key = project.workspaceKey.toStr()
+    if keys.len > 1 (
+        string materializedPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
+        if !copyProjectWorkspaceToPath(project, materializedPath) (
+            fs.remove(materializedPath)
+            c.internalError("could not assemble project history")
+            return
+        )
+        byte[] assembledBody = fs.readFileBytes(materializedPath)
+        fs.remove(materializedPath)
+        c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
+        c.data(200, "application/x-mistwarp-project", assembledBody)
+        return
+    )
+    string key = keys[1].toStr()
     string localPath = localBlobPath(key)
     if fs.exists(localPath) (
         c.setHeader("Content-Disposition", "attachment; filename=project.mwp")

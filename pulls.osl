@@ -6,7 +6,7 @@ def projectGitHead(object project) string (
 )
 
 def projectHasWorkspace(object project) boolean (
-    return project.contains("workspaceKey") and project.workspaceKey != null and project.workspaceKey.toStr() != "" and projectGitHead(project) != ""
+    return projectWorkspaceKeys(project).len > 0 and projectGitHead(project) != ""
 )
 
 def pullDocument(string targetId, string index) object (
