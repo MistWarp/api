@@ -1638,6 +1638,144 @@ def handleUpdateProject(*serve.Context c) (
         )
         project.tags = tags
     )
+    if body.contains("gameProducts") (
+        array incomingProducts = body.gameProducts.assertElse(array, [])
+        if incomingProducts.len > 50 (
+            c.badRequest("projects can have at most 50 game products")
+            return
+        )
+        array products = []
+        array productIds = []
+        for i incomingProducts.len (
+            object incomingProduct = incomingProducts[i].assertElse(object, {})
+            string productId = incomingProduct.id.toStr().toLower().strip()
+            string productName = incomingProduct.name.toStr().strip()
+            string productDescription = incomingProduct.description.toStr().strip()
+            number productPrice = incomingProduct.price.toNum()
+            string grantsItem = incomingProduct.grantsItem.toStr().toLower().strip()
+            if !regex.match("^[a-z0-9_-]{1,40}$", productId) or productIds.contains(productId) (
+                c.badRequest("game product ids must be unique lowercase identifiers")
+                return
+            )
+            if productName.len < 1 or productName.len > 80 or productDescription.len > 300 (
+                c.badRequest("invalid game product name or description")
+                return
+            )
+            if productPrice < 0.01 or productPrice > 1000 (
+                c.badRequest("game product prices must be between 0.01 and 1000 credits")
+                return
+            )
+            if grantsItem != "" and !regex.match("^[a-z0-9_-]{1,40}$", grantsItem) (
+                c.badRequest("invalid portable item id on game product")
+                return
+            )
+            productIds.append(productId)
+            products.append({id: productId, name: productName, description: productDescription, price: productPrice, grantsItem: grantsItem})
+        )
+        project.gameProducts = products
+    )
+    if body.contains("gameItems") (
+        array incomingItems = body.gameItems.assertElse(array, [])
+        if incomingItems.len > 100 (
+            c.badRequest("projects can define at most 100 portable items")
+            return
+        )
+        array items = []
+        array itemIds = []
+        for i incomingItems.len (
+            object incomingItem = incomingItems[i].assertElse(object, {})
+            string itemId = incomingItem.id.toStr().toLower().strip()
+            string itemName = incomingItem.name.toStr().strip()
+            object visual = incomingItem.visual.assertElse(object, {})
+            if visual.isEmpty() and incomingItem.image.toStr().strip() != "" (
+                visual = {type: "image", url: incomingItem.image.toStr().strip()}
+            )
+            string visualType = visual.type.toStr().toLower().strip()
+            if !regex.match("^[a-z0-9_-]{1,40}$", itemId) or itemIds.contains(itemId) (
+                c.badRequest("portable item ids must be unique lowercase identifiers")
+                return
+            )
+            if itemName.len < 1 or itemName.len > 80 (
+                c.badRequest("invalid portable item definition")
+                return
+            )
+            object cleanVisual = {}
+            if visualType == "image" (
+                string itemImage = visual.url.toStr().strip()
+                if !itemImage.startsWith("https://") or itemImage.len > 500 (
+                    c.badRequest("portable item images must use a short HTTPS URL")
+                    return
+                )
+                cleanVisual = {type: "image", url: itemImage}
+            ) else if visualType == "costume" (
+                string assetId = visual.assetId.toStr().strip()
+                string dataFormat = visual.dataFormat.toStr().toLower().strip()
+                if !regex.match("^[A-Za-z0-9_-]{8,128}$", assetId) or (dataFormat != "png" and dataFormat != "jpg" and dataFormat != "jpeg" and dataFormat != "svg") (
+                    c.badRequest("invalid portable item costume asset")
+                    return
+                )
+                cleanVisual = {type: "costume", assetId: assetId, dataFormat: dataFormat}
+            ) else (
+                c.badRequest("portable items need an image or costume")
+                return
+            )
+            itemIds.append(itemId)
+            items.append({id: itemId, name: itemName, visual: cleanVisual, gameAwardable: incomingItem.gameAwardable != false})
+        )
+        project.gameItems = items
+    )
+    if body.contains("inventoryPolicy") (
+        object incomingPolicy = body.inventoryPolicy.assertElse(object, {})
+        string mode = incomingPolicy.mode.toStr().toLower().strip()
+        if mode != "none" and mode != "allowlist" and mode != "all" (
+            c.badRequest("inventory policy must be none, allowlist, or all")
+            return
+        )
+        array allowedItems = incomingPolicy.allowedItems.assertElse(array, [])
+        array allowedProjects = incomingPolicy.allowedProjects.assertElse(array, [])
+        if allowedItems.len > 100 or allowedProjects.len > 50 (
+            c.badRequest("portable item allowlist is too large")
+            return
+        )
+        array cleanItems = []
+        for i allowedItems.len (
+            string globalId = allowedItems[i].toStr().strip()
+            if !regex.match("^[A-Za-z0-9_-]{1,80}:[a-z0-9_-]{1,40}$", globalId) (
+                c.badRequest("invalid global portable item id")
+                return
+            )
+            if !cleanItems.contains(globalId) (
+                cleanItems.append(globalId)
+            )
+        )
+        array cleanProjects = []
+        for i allowedProjects.len (
+            string allowedProject = allowedProjects[i].toStr().strip()
+            if !isSafePathPart(allowedProject) (
+                c.badRequest("invalid portable item source project")
+                return
+            )
+            if !cleanProjects.contains(allowedProject) (
+                cleanProjects.append(allowedProject)
+            )
+        )
+        project.inventoryPolicy = {mode: mode, allowedItems: cleanItems, allowedProjects: cleanProjects}
+    )
+    if body.contains("gameProducts") or body.contains("gameItems") (
+        array configuredProducts = project.gameProducts.assertElse(array, [])
+        array configuredItems = project.gameItems.assertElse(array, [])
+        array configuredItemIds = []
+        for i configuredItems.len (
+            configuredItemIds.append(configuredItems[i].assert(object).id.toStr())
+        )
+        for i configuredProducts.len (
+            string grantedItem = configuredProducts[i].assert(object).grantsItem.toStr()
+            if grantedItem != "" and !configuredItemIds.contains(grantedItem) (
+                c.badRequest("a game product refers to an undefined portable item")
+                return
+            )
+        )
+    )
     if body.contains("compatibility") and body.compatibility != null (
         object compatibilityInfo = body.compatibility.assert(object)
         project.compatibility = {

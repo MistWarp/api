@@ -1,0 +1,236 @@
+def projectGameItems(object project) array (
+    if project.contains("gameItems") and project.gameItems != null (
+        return project.gameItems.assertElse(array, [])
+    )
+    return []
+)
+
+def findProjectGameItem(object project, string itemId) object (
+    array items = projectGameItems(project)
+    for i items.len (
+        object item = items[i].assertElse(object, {})
+        if item.id.toStr() == itemId (
+            return {ok: true, item: item}
+        )
+    )
+    return {ok: false}
+)
+
+def globalGameItemId(string projectId, string itemId) string (
+    return projectId ++ ":" ++ itemId
+)
+
+def splitGlobalGameItemId(string globalId) object (
+    array parts = globalId.split(":")
+    if parts.len != 2 (
+        return {ok: false}
+    )
+    string projectId = parts[1].toStr()
+    string itemId = parts[2].toStr()
+    if !isSafePathPart(projectId) or !regex.match("^[a-z0-9_-]{1,40}$", itemId) (
+        return {ok: false}
+    )
+    return {ok: true, projectId: projectId, itemId: itemId}
+)
+
+def resolveGlobalGameItem(string globalId) object (
+    object split = splitGlobalGameItemId(globalId)
+    if !split.ok (
+        return {ok: false}
+    )
+    auto loaded = loadProject(split.projectId.toStr())
+    if !loaded.ok (
+        return {ok: false}
+    )
+    object project = loaded.project.assert(object)
+    object found = findProjectGameItem(project, split.itemId.toStr())
+    if !found.ok (
+        return {ok: false}
+    )
+    return {ok: true, project: project, item: found.item, globalId: globalId}
+)
+
+def gameInventoryPath(string userId) string (
+    return gameInventoryDir ++ gameDataUserKey(userId) ++ ".json"
+)
+
+def loadGameInventory(string userId) object (
+    auto loaded = readFile(gameInventoryPath(userId))
+    if !loaded.ok (
+        return {revision: 0, items: {}, updatedAt: 0}
+    )
+    return loaded.data.assert(object)
+)
+
+def projectInventoryPolicy(object project) object (
+    if project.contains("inventoryPolicy") and project.inventoryPolicy != null (
+        return project.inventoryPolicy.assertElse(object, {mode: "none", allowedItems: [], allowedProjects: []})
+    )
+    return {mode: "none", allowedItems: [], allowedProjects: []}
+)
+
+def projectAllowsGlobalItem(object project, string globalId) boolean (
+    object split = splitGlobalGameItemId(globalId)
+    if !split.ok (
+        return false
+    )
+    if split.projectId.toStr() == project.id.toStr() (
+        return true
+    )
+    object policy = projectInventoryPolicy(project)
+    string mode = policy.mode.toStr()
+    if mode == "all" (
+        return true
+    )
+    if mode != "allowlist" (
+        return false
+    )
+    array allowedItems = policy.allowedItems.assertElse(array, [])
+    array allowedProjects = policy.allowedProjects.assertElse(array, [])
+    return allowedItems.contains(globalId) or allowedProjects.contains(split.projectId.toStr())
+)
+
+def gameInventoryItemResponse(string globalId, object owned) object (
+    object resolved = resolveGlobalGameItem(globalId)
+    if !resolved.ok (
+        return {ok: false}
+    )
+    object project = resolved.project.assert(object)
+    object item = resolved.item.assert(object)
+    object visual = item.visual.assertElse(object, {})
+    if visual.isEmpty() and item.image.toStr() != "" (
+        visual = {type: "image", url: item.image.toStr()}
+    )
+    if visual.type.toStr() == "costume" (
+        visual.url = assetsBaseUrl() ++ "/" ++ visual.assetId.toStr() ++ "." ++ visual.dataFormat.toStr()
+    )
+    return {
+        ok: true,
+        value: {
+            id: globalId,
+            itemId: item.id,
+            originProjectId: project.id,
+            originProjectTitle: project.title,
+            originOwner: project.owner,
+            name: item.name,
+            visual: visual,
+            quantity: owned.quantity,
+            acquiredAt: owned.acquiredAt,
+            updatedAt: owned.updatedAt,
+            source: owned.source
+        }
+    }
+)
+
+def gameInventoryResponse(string userId, object allowedProject) object (
+    object inventory = loadGameInventory(userId)
+    object ownedItems = inventory.items.assertElse(object, {})
+    array ids = ownedItems.getKeys().toArray()
+    array items = []
+    for i ids.len (
+        string globalId = ids[i].toStr()
+        if allowedProject.isEmpty() or projectAllowsGlobalItem(allowedProject, globalId) (
+            object response = gameInventoryItemResponse(globalId, ownedItems[globalId].assert(object))
+            if response.ok (
+                items.append(response.value)
+            )
+        )
+    )
+    return {revision: inventory.revision, items: items, updatedAt: inventory.updatedAt}
+)
+
+def grantInventoryItem(string userId, object project, object item, number amount, string source, string sourceId) object (
+    string globalId = globalGameItemId(project.id.toStr(), item.id.toStr())
+    string lockName = "game-inventory-" ++ gameDataUserKey(userId)
+    sync.lock(lockName)
+    object inventory = loadGameInventory(userId)
+    object items = inventory.items.assertElse(object, {})
+    object owned = items.contains(globalId) ? items[globalId].assertElse(object, {}) {}
+    array grantIds = owned.grantIds.assertElse(array, [])
+    if owned.lastGrantId.toStr() == sourceId or grantIds.contains(sourceId) (
+        sync.unlock(lockName)
+        return {ok: true, replayed: true, item: owned}
+    )
+    number current = owned.quantity.toNum().toInt()
+    number next = current + amount.toInt()
+    if next < 0 (
+        next = 0
+    )
+    if current == 0 (
+        owned.acquiredAt = timestamp
+    )
+    if next > current (
+        grantIds.append(sourceId)
+    )
+    owned.quantity = next
+    owned.updatedAt = timestamp
+    owned.source = source
+    owned.grantIds = grantIds
+    items[globalId] = owned
+    inventory.items = items
+    inventory.revision = inventory.revision.toNum().toInt() + 1
+    inventory.updatedAt = timestamp
+    boolean saved = writeFile(gameInventoryPath(userId), inventory)
+    sync.unlock(lockName)
+    if !saved (
+        return {ok: false, error: "failed to store portable item"}
+    )
+    return {ok: true, item: owned, globalId: globalId}
+)
+
+def handleGetMyGameInventory(*serve.Context c) (
+    c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), {})})
+)
+
+def handleGetGameInventoryConfig(*serve.Context c) (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = loaded.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("project editor access required")
+        return
+    )
+    c.json(200, {ok: true, items: projectGameItems(project), policy: projectInventoryPolicy(project)})
+)
+
+def handleGetProjectInventory(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), access.project.assert(object))})
+)
+
+def handleGrantProjectItem(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    object project = access.project.assert(object)
+    object body = c.bodyJSON()
+    string itemId = body.item.toStr().toLower().strip()
+    string requestId = body.requestId.toStr().strip()
+    if !validGameSaveRequestId(requestId) (
+        c.badRequest("a valid request id is required")
+        return
+    )
+    object found = findProjectGameItem(project, itemId)
+    if !found.ok (
+        c.notFound("portable item not found")
+        return
+    )
+    object item = found.item.assert(object)
+    if item.gameAwardable != true (
+        c.forbidden("this portable item cannot be awarded by game code")
+        return
+    )
+    object granted = grantInventoryItem(c.getString("userId"), project, item, 1, "game", "game:" ++ requestId)
+    if !granted.ok (
+        c.internalError(granted.error.toStr())
+        return
+    )
+    c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), project), granted: granted.globalId})
+)

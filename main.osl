@@ -80,6 +80,10 @@ string safetyDir = "data/safety/"
 string trashDir = "data/trash/"
 string themesDir = "data/themes/"
 string themePreviewsDir = "data/theme-previews/"
+string gameSavesDir = "data/game-saves/"
+string accountGameDataDir = "data/account-game-data/"
+string gameEntitlementsDir = "data/game-entitlements/"
+string gameInventoryDir = "data/game-inventory/"
 
 number maxWorkspaceBytes = 134217728
 number maxWorkspaceFiles = 20000
@@ -111,6 +115,8 @@ string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
 string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
 string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
+string realtimeServiceKey = configValue("REALTIME_SERVICE_KEY", "")
+string realtimeURL = configValue("REALTIME_URL", "wss://games.mistium.com/v1/connect")
 string purchaseKeysFile = "data/purchase-keys.json"
 string pendingPayoutsFile = "data/pending-payouts.json"
 
@@ -140,8 +146,11 @@ import "./middleware.osl"
 import "./perks.osl"
 import "./groups.osl"
 import "./projects.osl"
+import "./game-data.osl"
 import "./extensions.osl"
 import "./monetize.osl"
+import "./game-inventory.osl"
+import "./game-marketplace.osl"
 import "./themes.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
@@ -167,6 +176,8 @@ auto adminsCache = cache.create(2, 300)
 auto sharedProjectsCache = cache.create(2, 60)
 auto paidPerksCache = cache.create(10000, 300)
 auto groupSnapshotCache = cache.create(10000, 60)
+auto gameDataCapabilityCache = cache.create(100000, 300)
+auto multiplayerTicketCache = cache.create(100000, 120)
 
 ensureDirectories()
 initCommunityDatabase()
@@ -240,6 +251,11 @@ api.GET("/me/trash", requireAuth, handleGetMyTrash)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
+api.GET("/me/game-data/global", requireAuth, handleGetMyGlobalGameData)
+api.PUT("/me/game-data/global", requireAuth, handlePutMyGlobalGameData)
+api.GET("/me/game-saves", requireAuth, handleListMyGameSaves)
+api.GET("/me/game-inventory", requireAuth, handleGetMyGameInventory)
+api.DELETE("/me/game-saves/:project", requireAuth, handleDeleteMyGameSave)
 api.GET("/me/export", requireAuth, handleExportMyData)
 api.DELETE("/me/data", requireAuth, handleDeleteMyData)
 api.GET("/me/safety", requireAuth, handleGetMySafety)
@@ -306,6 +322,19 @@ api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
 api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
 api.GET("/projects/:id/editor", handleGetEditorProject)
 api.GET("/projects/:id", handleGetProject)
+api.POST("/projects/:id/data-capability", requireAuth, handleCreateGameDataCapability)
+api.POST("/projects/:id/multiplayer-ticket", requireAuth, handleCreateMultiplayerTicket)
+api.GET("/projects/:id/products", handleListGameProducts)
+api.GET("/projects/:id/products/:product/owns", requireAuth, handleOwnsGameProduct)
+api.POST("/projects/:id/products/:product/purchase/intent", requireAuth, handleGameProductIntent)
+api.POST("/projects/:id/products/:product/purchase/confirm", requireAuth, handleGameProductConfirm)
+api.GET("/projects/:id/game-inventory-config", requireAuth, handleGetGameInventoryConfig)
+api.GET("/projects/:id/me/inventory", requireAuth, handleGetProjectInventory)
+api.POST("/projects/:id/me/inventory/grant", requireAuth, handleGrantProjectItem)
+api.GET("/projects/:id/me/save", requireAuth, handleGetMyProjectSave)
+api.PUT("/projects/:id/me/save", requireAuth, handlePutMyProjectSave)
+api.GET("/projects/:id/me/global-data", requireAuth, handleGetProjectGlobalGameData)
+api.POST("/internal/multiplayer/verify", handleVerifyMultiplayerTicket)
 api.GET("/projects/:id/card.svg", handleProjectCard)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
