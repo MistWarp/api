@@ -175,12 +175,6 @@ def realtimeUpgradeGuard(*serve.Context c) (
         c.next()
         return
     )
-    string origin = c.header("Origin").strip()
-    if origin != "https://warp.mistium.com" and origin != editorOrigin and !corsAllowedOrigins.contains(origin) (
-        c.json(403, {ok: false, error: "websocket origin not allowed"})
-        c.abort()
-        return
-    )
     string ticket = c.query("ticket")
     if !regex.match("^mwt_[A-Za-z0-9_-]{40,80}$", ticket) or !multiplayerTicketCache.has(ticket) (
         c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
@@ -209,6 +203,7 @@ def handleRealtimeHTTP(*serve.Context c) (
 )
 
 def setupGameRealtime() (
+    gameRealtimeSocket.AllowAllOrigins()
     gameRealtimeSocket.OnConnect(realtimeOnConnect)
     gameRealtimeSocket.OnMessage(realtimeOnMessage)
     gameRealtimeSocket.OnDisconnect(realtimeOnDisconnect)
