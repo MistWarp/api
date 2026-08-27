@@ -141,6 +141,7 @@ import "./groups.osl"
 import "./projects.osl"
 import "./extensions.osl"
 import "./monetize.osl"
+import "./profile-layouts.osl"
 import "./themes.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
@@ -251,6 +252,9 @@ api.GET("/agreement", handleGetAgreement)
 api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
 
 api.GET("/explore", handleExplore)
+api.GET("/profile-layouts", handleListProfileLayouts)
+api.POST("/profile-layouts/:id/intent", requireAuth, handleProfileLayoutIntent)
+api.POST("/profile-layouts/:id/confirm", requireAuth, handleConfirmProfileLayout)
 api.GET("/vanity/:slug", handleResolveVanityProject)
 api.GET("/groups/:tag", handleGetMistWarpGroup)
 api.GET("/themes", handleListThemes)

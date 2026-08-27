@@ -1377,7 +1377,7 @@ def handleResolveVanityProject(*serve.Context c) (
         c.notFound("vanity project not found")
         return
     )
-    object entry = matches[0].assert(object)
+    object entry = matches[1].assert(object)
     auto result = loadProject(entry.id.toStr())
     if !result.ok or !canViewProject(result.project.assert(object), c) (
         c.notFound("vanity project not found")
@@ -1455,7 +1455,7 @@ def handleUpdateProject(*serve.Context c) (
         )
         string accentColor = (incomingBranding.accentColor ?? "").toStr().strip()
         string tagline = (incomingBranding.tagline ?? "").toStr().strip()
-        if accentColor != "" and !regex.matches(accentColor, "^#[0-9a-fA-F]{6}$") (
+        if accentColor != "" and !regex.match("^#[0-9a-fA-F]{6}$", accentColor) (
             c.badRequest("branding accent must be a six-digit hex colour")
             return
         )
@@ -1471,7 +1471,7 @@ def handleUpdateProject(*serve.Context c) (
             c.forbidden("vanity project URLs require Rotur Pro")
             return
         )
-        if slug != "" and (slug.len < 3 or slug.len > 40 or !regex.matches(slug, "^[a-z0-9][a-z0-9-]*[a-z0-9]$")) (
+        if slug != "" and (slug.len < 3 or slug.len > 40 or !regex.match("^[a-z0-9][a-z0-9-]*[a-z0-9]$", slug)) (
             c.badRequest("vanity URLs must be 3 to 40 letters, numbers, or hyphens")
             return
         )

@@ -1,6 +1,6 @@
 def normalizeGroupTag(string value) string (
     string tag = value.toLower().strip()
-    if tag.len < 2 or tag.len > 32 or !regex.matches(tag, "^[a-z0-9][a-z0-9_-]*$") (
+    if tag.len < 1 or tag.len > 10 or !regex.match("^[a-z0-9]+$", tag) (
         return ""
     )
     return tag
