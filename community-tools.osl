@@ -2057,6 +2057,13 @@ def handleGetReleaseProjectJson(*serve.Context c) (
         c.notFound("release not found")
         return
     )
+    string releaseEtag = "\"" ++ release["_id"].toStr() ++ "\""
+    c.setHeader("ETag", releaseEtag)
+    c.setHeader("Cache-Control", "no-cache")
+    if c.header("If-None-Match").contains(releaseEtag) (
+        c.status(304)
+        return
+    )
     if release.contains("jsonKey") and release.jsonKey.toStr() != "" (
         serveProjectJsonStorageKey(c, release.jsonKey.toStr(), release.contains("jsonGzip") and release.jsonGzip == true)
         return

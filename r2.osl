@@ -370,10 +370,12 @@ def serveBlobKey(*serve.Context c, string key) (
 )
 
 def serveProjectJson(*serve.Context c, object project) (
+    string etag = projectJsonEtag(project)
+    c.setHeader("ETag", etag)
+    c.setHeader("Cache-Control", "no-cache")
     string localPath = localProjectJsonPathFor(project, 0)
     if localPath != "" (
         c.setHeader("Content-Type", "application/json")
-        c.setHeader("Cache-Control", "no-cache")
         if projectJsonIsGzip(project) (
             c.setHeader("Content-Encoding", "gzip")
         )
@@ -388,10 +390,16 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
         c.notFound("project snapshot not found")
         return
     )
+    string etag = "\"" ++ key ++ "\""
+    c.setHeader("ETag", etag)
+    c.setHeader("Cache-Control", "no-cache")
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
+        return
+    )
     string localPath = localBlobPath(key)
     if fs.exists(localPath) (
         c.setHeader("Content-Type", "application/json")
-        c.setHeader("Cache-Control", "no-cache")
         if gzip (
             c.setHeader("Content-Encoding", "gzip")
         )
@@ -407,7 +415,6 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
         c.notFound("project snapshot not found")
         return
     )
-    c.setHeader("Cache-Control", "no-cache")
     if gzip (
         c.setHeader("Content-Encoding", "gzip")
     )
