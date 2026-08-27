@@ -106,6 +106,9 @@ def canManageSpace(object space, *serve.Context c) boolean (
     if isSpaceOwner(space, c) (
         return true
     )
+    if canManageGroupContent(space, c) (
+        return true
+    )
     return stringArrayContainsUser(spaceManagers(space), username)
 )
 
@@ -614,8 +617,23 @@ def challengePhase(object space) string (
     return "awaiting-results"
 )
 
+def challengeJudges(object space) array (
+    array judges = challengeArray(space, "judges")
+    string tag = groupTagOf(space)
+    if tag != "" (
+        array members = groupMemberNames(roturGroupSnapshot(tag))
+        for i members.len (
+            string member = members[i].toStr()
+            if !stringArrayContainsUser(judges, member) (
+                judges.append(member)
+            )
+        )
+    )
+    return judges
+)
+
 def isChallengeJudge(object space, string username) boolean (
-    return stringArrayContainsUser(challengeArray(space, "judges"), username)
+    return stringArrayContainsUser(challengeJudges(space), username)
 )
 
 def isChallengeJudgeInvitee(object space, string username) boolean (
@@ -804,10 +822,10 @@ def spaceResponse(object space, *serve.Context c) object (
         response.phase = challengePhase(space)
         response.isJudge = isChallengeJudge(space, c.getString("username"))
         response.judgeInvited = isChallengeJudgeInvitee(space, c.getString("username"))
-        response.judgeCount = challengeArray(space, "judges").len
+        response.judgeCount = challengeJudges(space).len
         response.participantCount = challengeArray(space, "participants").len
         response.joined = stringArrayContainsUser(challengeArray(space, "participants"), c.getString("username"))
-        response.judges = challengeArray(space, "judges")
+        response.judges = challengeJudges(space)
         response.judgeInvites = []
         response.scores = []
         response.audienceVotes = []
@@ -838,6 +856,7 @@ def spaceListResponse(object space, *serve.Context c) object (
         kind: space.kind,
         visibility: space.visibility,
         owner: space.owner,
+        groupTag: groupTagOf(space),
         edited: space.edited,
         startsAt: space.startsAt,
         endsAt: space.endsAt,
@@ -953,6 +972,18 @@ def handleGetSpace(*serve.Context c) (
 
 def handleCreateSpace(*serve.Context c) (
     object body = c.bodyJSON()
+    string groupTag = ""
+    if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
+        groupTag = normalizeGroupTag(body.groupTag.toStr())
+        if groupTag == "" (
+            c.badRequest("invalid group tag")
+            return
+        )
+        if !canManageGroupTag(groupTag, c) (
+            c.forbidden("you cannot create spaces for this group")
+            return
+        )
+    )
     string title = body.title.toStr().strip()
     string kind = body.kind.toStr().toLower().strip()
     if title == "" or title.len > 100 (
@@ -1000,6 +1031,7 @@ def handleCreateSpace(*serve.Context c) (
         visibility: visibility,
         owner: c.getString("username"),
         ownerId: c.getString("userId"),
+        groupTag: groupTag,
         managers: [],
         curatorInvites: [],
         projects: [],
@@ -1040,6 +1072,19 @@ def handleUpdateSpace(*serve.Context c) (
         return
     )
     object body = c.bodyJSON()
+    if body.contains("groupTag") (
+        string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
+        if body.groupTag.toStr().strip() == "" (
+            nextGroupTag = ""
+        ) else if nextGroupTag == "" (
+            c.badRequest("invalid group tag")
+            return
+        ) else if !canManageGroupTag(nextGroupTag, c) (
+            c.forbidden("you cannot move this space into that group")
+            return
+        )
+        space.groupTag = nextGroupTag
+    )
     if body.contains("title") (
         string title = body.title.toStr().strip()
         if title == "" or title.len > 100 (

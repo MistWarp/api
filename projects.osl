@@ -40,6 +40,9 @@ def canEditProject(object project, *serve.Context c) boolean (
     if c.getBool("isAdmin") (
         return true
     )
+    if canManageGroupContent(project, c) (
+        return true
+    )
     string role = projectRole(project, c.getString("username"))
     return role == "owner" or role == "maintainer"
 )
@@ -196,6 +199,9 @@ def projectResponse(object project, *serve.Context c) object (
     object response = {
         id: project.id,
         owner: project.owner,
+        groupTag: groupTagOf(project),
+        branding: project.contains("branding") ? project.branding {},
+        vanitySlug: project.contains("vanitySlug") ? project.vanitySlug "",
         title: project.title,
         tags: tags,
         compatibility: compatibility,
@@ -425,6 +431,18 @@ def handleQuotaResetConfirm(*serve.Context c) (
 def handleCreateProject(*serve.Context c) (
     object body = c.bodyJSON()
     string username = c.getString("username")
+    string groupTag = ""
+    if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
+        groupTag = normalizeGroupTag(body.groupTag.toStr())
+        if groupTag == "" (
+            c.badRequest("invalid group tag")
+            return
+        )
+        if !canManageGroupTag(groupTag, c) (
+            c.forbidden("you cannot create projects for this group")
+            return
+        )
+    )
 
     string title = body.title.toStr().strip()
     if title == "" (
@@ -460,6 +478,9 @@ def handleCreateProject(*serve.Context c) (
         id: id,
         owner: username,
         ownerId: c.getString("userId"),
+        groupTag: groupTag,
+        branding: {},
+        vanitySlug: "",
         title: title,
         description: "",
         instructions: "",
@@ -1349,6 +1370,22 @@ def handleGetProject(*serve.Context c) (
     c.json(200, {ok: true, project: response})
 )
 
+def handleResolveVanityProject(*serve.Context c) (
+    string slug = c.param("slug").toLower().strip()
+    array matches = projectSearchDocs.where("vanitySlug", db.equal, slug).all()
+    if matches.len == 0 (
+        c.notFound("vanity project not found")
+        return
+    )
+    object entry = matches[0].assert(object)
+    auto result = loadProject(entry.id.toStr())
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("vanity project not found")
+        return
+    )
+    c.json(200, {ok: true, id: entry.id})
+)
+
 def handleGetEditorProject(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok (
@@ -1395,6 +1432,60 @@ def handleUpdateProject(*serve.Context c) (
     )
 
     object body = c.bodyJSON()
+    if body.contains("groupTag") (
+        string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
+        if body.groupTag.toStr().strip() == "" (
+            nextGroupTag = ""
+        ) else if nextGroupTag == "" (
+            c.badRequest("invalid group tag")
+            return
+        ) else if !canManageGroupTag(nextGroupTag, c) (
+            c.forbidden("you cannot move this project into that group")
+            return
+        )
+        project.groupTag = nextGroupTag
+    )
+    object creatorBenefits = mistwarpBenefitsForProject(project)
+    if body.contains("branding") (
+        object incomingBranding = body.branding.assertElse(object, {})
+        boolean clearingBranding = incomingBranding.getKeys().toArray().len == 0
+        if !clearingBranding and creatorBenefits.customProjectBranding != true (
+            c.forbidden("custom project branding requires Rotur Plus or Pro")
+            return
+        )
+        string accentColor = (incomingBranding.accentColor ?? "").toStr().strip()
+        string tagline = (incomingBranding.tagline ?? "").toStr().strip()
+        if accentColor != "" and !regex.matches(accentColor, "^#[0-9a-fA-F]{6}$") (
+            c.badRequest("branding accent must be a six-digit hex colour")
+            return
+        )
+        if tagline.len > 120 (
+            c.badRequest("branding tagline is too long")
+            return
+        )
+        project.branding = clearingBranding ? {} {accentColor: accentColor, tagline: tagline}
+    )
+    if body.contains("vanitySlug") (
+        string slug = body.vanitySlug.toStr().toLower().strip()
+        if slug != "" and creatorBenefits.vanityProjectUrls != true (
+            c.forbidden("vanity project URLs require Rotur Pro")
+            return
+        )
+        if slug != "" and (slug.len < 3 or slug.len > 40 or !regex.matches(slug, "^[a-z0-9][a-z0-9-]*[a-z0-9]$")) (
+            c.badRequest("vanity URLs must be 3 to 40 letters, numbers, or hyphens")
+            return
+        )
+        if slug != "" (
+            array matches = projectSearchDocs.where("vanitySlug", db.equal, slug).all()
+            for i matches.len (
+                if matches[i].assert(object).id.toStr() != project.id.toStr() (
+                    c.json(409, {ok: false, error: "that vanity URL is already taken"})
+                    return
+                )
+            )
+        )
+        project.vanitySlug = slug
+    )
     if body.contains("title") (
         string title = body.title.toStr().strip()
         if title == "" or title.len > 100 (

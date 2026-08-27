@@ -135,11 +135,21 @@ def indexEntryFromProject(object project) object (
     if project.contains("remixRoot") and project.remixRoot != null (
         remixRoot = project.remixRoot.toStr()
     )
+    string groupTag = ""
+    if project.contains("groupTag") and project.groupTag != null (
+        groupTag = normalizeGroupTag(project.groupTag.toStr())
+    )
+    string vanitySlug = ""
+    if project.contains("vanitySlug") and project.vanitySlug != null (
+        vanitySlug = project.vanitySlug.toStr()
+    )
     return {
         id: project.id,
         owner: project.owner,
         ownerId: ownerId,
         ownerKey: normalizeUsername(project.owner.toStr()),
+        groupTag: groupTag,
+        vanitySlug: vanitySlug,
         title: project.title,
         thumbUrl: thumbUrlFor(project),
         views: project.views,
