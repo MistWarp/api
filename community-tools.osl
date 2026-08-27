@@ -1072,6 +1072,29 @@ def handleUpdateSpace(*serve.Context c) (
         return
     )
     object body = c.bodyJSON()
+    if body.contains("owner") (
+        boolean canTransfer = isSpaceOwner(space, c) or canManageGroupContent(space, c)
+        if !canTransfer (
+            c.forbidden("you cannot transfer this space")
+            return
+        )
+        string requestedOwner = body.owner.toStr().strip()
+        string nextOwnerId = discoverUserIdentity(requestedOwner)
+        if nextOwnerId == "" (
+            c.badRequest("Rotur user not found")
+            return
+        )
+        string nextOwner = usernameForId(nextOwnerId)
+        if nextOwner == "" (
+            c.badRequest("Rotur user not found")
+            return
+        )
+        space.owner = nextOwner
+        space.ownerId = nextOwnerId
+        if !body.contains("keepGroup") or body.keepGroup != true (
+            space.groupTag = ""
+        )
+    )
     if body.contains("groupTag") (
         string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
         if body.groupTag.toStr().strip() == "" (

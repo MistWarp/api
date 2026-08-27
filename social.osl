@@ -53,6 +53,35 @@ def isViewerOwner(*serve.Context c, string name) boolean (
     return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
 )
 
+def recentProjectActivity(string name, number limit) array (
+    string userId = userIdForUsername(name)
+    array records = []
+    if userId != "" (
+        records = playtimeDocs.where("userId", db.equal, userId).sort("updated", db.desc).limit(limit * 3).all()
+    )
+    if records.len == 0 (
+        records = playtimeDocs.where("username", db.equal, name).sort("updated", db.desc).limit(limit * 3).all()
+    )
+    array activity = []
+    for i records.len (
+        if activity.len < limit (
+            object record = records[i].assert(object)
+            object project = projectSearchDocs.findById(record.projectId.toStr())
+            if project.isEmpty() == false and projectVisibility(project) == "public" (
+                activity.append({
+                    projectId: project.id,
+                    title: project.title,
+                    owner: project.owner,
+                    thumbUrl: project.thumbUrl,
+                    duration: record.duration,
+                    lastPlayed: record.updated
+                })
+            )
+        )
+    )
+    return activity
+)
+
 def handleGetUser(*serve.Context c) (
     string name = c.param("name")
     string key = normalizeUsername(name)
@@ -91,6 +120,12 @@ def handleGetUser(*serve.Context c) (
     if profile.contains("commentsOff") and profile.commentsOff == true (
         commentsOff = true
     )
+    boolean recentActivityVisible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+    boolean ownsProfile = isViewerOwner(c, name)
+    array recentActivity = []
+    if recentActivityVisible or ownsProfile (
+        recentActivity = recentProjectActivity(profile.username.toStr(), 6)
+    )
     c.json(200, {
         ok: true,
         exists: exists or projectTotal > 0,
@@ -104,6 +139,8 @@ def handleGetUser(*serve.Context c) (
         viewerBlocked: viewerSafety.blocked.assert(array).contains(key),
         viewerMuted: viewerSafety.muted.assert(array).contains(key),
         commentsOff: commentsOff,
+        recentActivityVisible: recentActivityVisible,
+        recentActivity: recentActivity,
         projects: projects,
         projectTotal: projectTotal,
         projectOffset: projectLimit
@@ -173,6 +210,15 @@ def handleUpdateProfile(*serve.Context c) (
         boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
         if currentCommentsOff != commentsOff (
             profile.commentsOff = commentsOff
+            changed = true
+        )
+    )
+
+    if body.contains("showRecentActivity") (
+        boolean showRecentActivity = body.showRecentActivity == true
+        boolean currentShowRecentActivity = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+        if currentShowRecentActivity != showRecentActivity (
+            profile.showRecentActivity = showRecentActivity
             changed = true
         )
     )

@@ -1432,6 +1432,29 @@ def handleUpdateProject(*serve.Context c) (
     )
 
     object body = c.bodyJSON()
+    if body.contains("owner") (
+        boolean canTransfer = c.getBool("isAdmin") or projectRole(project, c.getString("username")) == "owner" or canManageGroupContent(project, c)
+        if !canTransfer (
+            c.forbidden("you cannot transfer this project")
+            return
+        )
+        string requestedOwner = body.owner.toStr().strip()
+        string nextOwnerId = discoverUserIdentity(requestedOwner)
+        if nextOwnerId == "" (
+            c.badRequest("Rotur user not found")
+            return
+        )
+        string nextOwner = usernameForId(nextOwnerId)
+        if nextOwner == "" (
+            c.badRequest("Rotur user not found")
+            return
+        )
+        project.owner = nextOwner
+        project.ownerId = nextOwnerId
+        if !body.contains("keepGroup") or body.keepGroup != true (
+            project.groupTag = ""
+        )
+    )
     if body.contains("groupTag") (
         string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
         if body.groupTag.toStr().strip() == "" (
