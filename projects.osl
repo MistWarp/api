@@ -48,6 +48,9 @@ def canEditProject(object project, *serve.Context c) boolean (
 )
 
 def canViewProject(object project, *serve.Context c) boolean (
+    if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
+        return false
+    )
     if projectIsViewable(project) (
         return true
     )
@@ -61,6 +64,9 @@ def canViewProject(object project, *serve.Context c) boolean (
 )
 
 def canViewProjectJson(object project, *serve.Context c) boolean (
+    if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
+        return false
+    )
     if validPreviewKey(project.id.toStr(), c.query("k")) (
         return true
     )

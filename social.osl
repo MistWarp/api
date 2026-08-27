@@ -22,6 +22,9 @@ def sortProjectsByEditedDesc(array items) array (
 )
 
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
+    if isBannedUser(owner) (
+        return []
+    )
     string ownerKey = normalizeUsername(owner)
     string ownerId = userIdForUsername(owner)
     object seen = {}
