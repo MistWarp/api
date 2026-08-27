@@ -17,7 +17,10 @@ def roturTierForUser(string userId) string (
         return "Free"
     )
     if paidPerksCache.has(userId) (
-        return paidPerksCache.get(userId).toStr()
+        object cached = paidPerksCache.get(userId).assertElse(object, {})
+        if cached.contains("expires") and cached.expires.toNum() > timestamp (
+            return cached.tier.toStr()
+        )
     )
     object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
     if !response.success or response.status.toInt() != 200 (
@@ -32,7 +35,7 @@ def roturTierForUser(string userId) string (
     if profile.contains("subscription") and profile.subscription != null (
         tier = normalizeRoturTier(profile.subscription.toStr())
     )
-    paidPerksCache.set(userId, tier)
+    paidPerksCache.set(userId, {tier: tier, expires: timestamp + 300000})
     return tier
 )
 
