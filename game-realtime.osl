@@ -176,7 +176,7 @@ def realtimeUpgradeGuard(*serve.Context c) (
         return
     )
     string origin = c.header("Origin").strip()
-    if origin != editorOrigin and !corsAllowedOrigins.contains(origin) (
+    if origin != "https://warp.mistium.com" and origin != editorOrigin and !corsAllowedOrigins.contains(origin) (
         c.json(403, {ok: false, error: "websocket origin not allowed"})
         c.abort()
         return
