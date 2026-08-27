@@ -1,0 +1,23 @@
+import "std:testing"
+import "./asset-routing.osl"
+
+object pushedAssets = {
+  "0123456789abcdef0123456789abcdef.png": true
+}
+
+testing.assert(
+  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", false, "https://mwassets.mistium.com", pushedAssets) == "",
+  "keeps local-mode assets on the API origin"
+)
+testing.assert(
+  r2AssetUrlIfPushed("fedcba9876543210fedcba9876543210.wav", true, "https://mwassets.mistium.com", pushedAssets) == "",
+  "keeps assets absent from the persisted R2 index on the API origin"
+)
+testing.assert(
+  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", true, "https://mwassets.mistium.com", pushedAssets) == "https://mwassets.mistium.com/assets/0123456789abcdef0123456789abcdef.png",
+  "routes assets recorded as pushed to the public R2 origin"
+)
+testing.assert(
+  r2AssetUrlIfPushed("0123456789abcdef0123456789abcdef.png", true, "", pushedAssets) == "",
+  "keeps assets on the API origin when no public R2 origin is configured"
+)

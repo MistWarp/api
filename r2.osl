@@ -137,9 +137,6 @@ def publicUrl(string key) string (
 )
 
 def assetsBaseUrl() string (
-    if !r2Local and r2PublicBase != "" (
-        return r2PublicBase ++ "/assets"
-    )
     return blobBase() ++ "/assets"
 )
 
@@ -354,7 +351,23 @@ def serveProjectJson(*serve.Context c, object project) (
 )
 
 def handleGetAssetBlob(*serve.Context c) (
-    serveBlobKey(c, assetObjectKey(c.param("name")))
+    string name = c.param("name")
+    string key = assetObjectKey(name)
+    if !isSafeBlobKey(key) (
+        c.notFound("blob not found")
+        return
+    )
+
+    object assetsIndex = cachedAssetsIndex()
+    string directUrl = r2AssetUrlIfPushed(name, !r2Local, r2PublicBase, assetsIndex.r2Assets.assert(object))
+    if directUrl != "" (
+        c.setHeader("Location", directUrl)
+        c.setHeader("Cache-Control", "no-cache")
+        c.status(307)
+        return
+    )
+
+    serveBlobKey(c, key)
 )
 
 def handleGetProjectBlob(*serve.Context c) (

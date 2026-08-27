@@ -49,7 +49,8 @@ Bearer-token based (the session token returned by `/api/auth`), so a
 cross-domain API works without shared cookies. CORS echoes the request Origin
 with credentials, so any frontend origin is accepted.
 
-R2 bucket only needs public GET through `R2_PUBLIC_BASE`. Project metadata uses `${R2_PUBLIC_BASE}/assets` for asset downloads, so the public domain must expose the bucket's `assets/` prefix. All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
+R2 bucket only needs public GET through `R2_PUBLIC_BASE`, and the public domain must expose the bucket's `assets/` prefix and allow CORS GET requests from the MistWarp frontend. Project metadata keeps the API `/blobs/assets` base: that endpoint redirects an asset to `R2_PUBLIC_BASE` only after a successful R2 upload has been recorded. Assets that exist only on local disk continue to be served by the API. All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
+
 ## Upload pipeline
 
 The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 1 GiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
@@ -60,7 +61,7 @@ Before extraction, the API rejects archives with unsafe paths, duplicate entries
 - `projects/<id>/project.json`: the gzip-encoded playable snapshot
 - `projects/<id>/thumb.png`
 
-Project JSON is staged on local disk before the upload request returns. The API serves that staged copy immediately, then the background flush loop writes at most one R2 snapshot per project every 24 hours. Git carries every save. `data/assets-index.json` tracks which assets R2 already has so duplicates are never re-uploaded.
+Project JSON is staged on local disk before the upload request returns. The API serves that staged copy immediately, then the background flush loop writes at most one R2 snapshot per project every 24 hours. Git carries every save. `data/assets-index.json` tracks known assets and separately records confirmed R2 uploads so duplicates are not re-uploaded and local-only assets are not redirected.
 
 The first editor save uploads a compact MWP archive containing the Git repository without a duplicate worktree. Later saves compare the local HEAD with the server HEAD and send only new Git objects plus updated refs. The API merges that delta into the stored archive. If the user saves without making a commit, the editor sends a full archive with the worktree so uncommitted changes are not lost.
 
