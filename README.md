@@ -29,6 +29,10 @@ The server loads `.env` automatically. Real environment variables override `.env
 | GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
 | EDITOR_ORIGIN | https://warp.mistium.com | Editor origin for CORS |
 | ADMIN_USERS | mist | Comma separated admin usernames |
+| REALTIME_URL | wss://mwapi.mistium.com/v1/connect | Public multiplayer WebSocket endpoint |
+
+The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
+uses the same listener, domain, and deployment as the HTTP API.
 
 ## Deployment layout
 

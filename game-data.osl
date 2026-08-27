@@ -105,26 +105,6 @@ def handleCreateMultiplayerTicket(*serve.Context c) (
     c.json(200, {ok: true, ticket: ticket, connectUrl: realtimeURL, expiresAt: identity.expiresAt})
 )
 
-def handleVerifyMultiplayerTicket(*serve.Context c) (
-    if realtimeServiceKey == "" or c.header("X-Realtime-Service-Key") != realtimeServiceKey (
-        c.forbidden("realtime service authentication required")
-        return
-    )
-    object body = c.bodyJSON()
-    string ticket = body.ticket.toStr()
-    if ticket == "" or !multiplayerTicketCache.has(ticket) (
-        c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
-        return
-    )
-    object identity = multiplayerTicketCache.get(ticket).assertElse(object, {})
-    multiplayerTicketCache.delete(ticket)
-    if identity.isEmpty() or identity.expiresAt.toNum() <= timestamp (
-        c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
-        return
-    )
-    c.json(200, {ok: true, identity: identity})
-)
-
 def gameDataProjectVersion(object project) string (
     return project.lastUploadAt.toStr()
 )
