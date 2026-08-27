@@ -20,6 +20,20 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
 
 def ownerIndexCount(string owner, boolean includeUnshared) number (
     string ownerKey = normalizeUsername(owner)
+    string ownerId = userIdForUsername(owner)
+    if ownerId != "" (
+        if includeUnshared (
+            number idCount = projectSearchDocs.where("ownerId", db.equal, ownerId).count()
+            if idCount > 0 (
+                return idCount
+            )
+        ) else (
+            number idCount = projectSearchDocs.where("ownerId", db.equal, ownerId).and("shared", db.equal, true).count()
+            if idCount > 0 (
+                return idCount
+            )
+        )
+    )
     if includeUnshared (
         return projectSearchDocs.where("ownerKey", db.equal, ownerKey).count()
     )
@@ -28,12 +42,22 @@ def ownerIndexCount(string owner, boolean includeUnshared) number (
 
 def ownerIndexPage(string owner, boolean includeUnshared, number offset, number limit) array (
     string ownerKey = normalizeUsername(owner)
+    string ownerId = userIdForUsername(owner)
     number scanLimit = offset + limit
     array stored = []
-    if includeUnshared (
-        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).limit(scanLimit).all()
-    ) else (
-        stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).sort("edited", db.desc).limit(scanLimit).all()
+    if ownerId != "" (
+        if includeUnshared (
+            stored = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).limit(scanLimit).all()
+        ) else (
+            stored = projectSearchDocs.where("ownerId", db.equal, ownerId).and("shared", db.equal, true).limit(scanLimit).sort("edited", db.desc).all()
+        )
+    )
+    if stored.len == 0 (
+        if includeUnshared (
+            stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).limit(scanLimit).all()
+        ) else (
+            stored = projectSearchDocs.where("ownerKey", db.equal, ownerKey).and("shared", db.equal, true).sort("edited", db.desc).limit(scanLimit).all()
+        )
     )
     return paginate(stored, offset, limit)
 )

@@ -353,11 +353,15 @@ def purgeUserFromSpaces(string username) boolean (
     return true
 )
 
-def purgeUserCommunityRecords(string username) boolean (
+def purgeUserCommunityRecords(string username, string userId) boolean (
     string key = normalizeUsername(username)
     deleteDocumentsByField(reviewDocs, "authorKey", key)
     deleteDocumentsByField(feedbackDocs, "author", username)
     deleteDocumentsByField(playtimeDocs, "username", username)
+    if userId != "" (
+        deleteDocumentsByField(playtimeDocs, "userId", userId)
+        deleteDocumentsByField(feedbackDocs, "authorId", userId)
+    )
     playtimeSessionDocs.deleteOne({_id: key})
 
     array releases = releaseDocs.where("creator", db.equal, username).all()

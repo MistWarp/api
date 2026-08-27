@@ -496,7 +496,12 @@ def purgeGameDataForProject(string projectId) (
         if fs.exists(dir) (
             array files = fs.readDir(dir).toArray()
             for i files.len (
-                fs.remove(dir ++ files[i].toStr())
+                string file = files[i].toStr()
+                if file.endsWith(".json") (
+                    string userKey = file.replace(".json", "")
+                    fs.remove(gameSaveUsageDir ++ userKey ++ ".json")
+                )
+                fs.remove(dir ++ file)
             )
             fs.remove(dir)
         )
