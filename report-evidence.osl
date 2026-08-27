@@ -34,7 +34,7 @@ def snapshotProjectEvidence(string projectId) (
 
     string thumb = thumbnailPath(projectId)
     if fs.exists(thumb) (
-        fs.writeFileBytes(dir ++ "thumbnail.png", fs.readFile(thumb))
+        fs.writeFileBytes(dir ++ "thumbnail.png", fs.readFileBytes(thumb))
     )
 )
 

@@ -447,8 +447,8 @@ def discoverUserIdentity(string username) string (
         if resp.status.toInt() == 404 (
             string uid = userIdForUsername(username)
             if uid != "" (
-                log "Lazy detection: purging deleted rotur user " ++ uid ++ " (" ++ username ++ ")"
-                purgeUser(uid, username)
+                identityRefreshCache.delete(uid)
+                refreshUsernameForId(uid)
             )
         )
         return ""
@@ -682,7 +682,7 @@ def purgeUser(string userId, string username) (
     purgeUserFromNotifications(key)
     purgeGameDataForUser(userId)
     purgeUserFromSpaces(username)
-    purgeUserCommunityRecords(username)
+    purgeUserCommunityRecords(username, userId)
     purgeUserFromNews(username)
     removeUserFromSafetyLists(username)
     fs.remove(activityDir ++ key ++ ".json")
@@ -715,14 +715,18 @@ def reconcileDeletedUsers() (
     object idData = loadUserIds()
     object idUsers = idData.users
     array ids = idUsers.getKeys().toArray()
+    object fallbackUsernames = {}
     array profileFiles = fs.readDir(usersDir).toArray()
     for i profileFiles.len (
         string name = profileFiles[i].toStr()
         if name.endsWith(".json") (
             string uname = name.replace(".json", "")
             string uid = userIdForUsername(uname)
-            if uid != "" and !ids.contains(uid) (
-                ids.append(uid)
+            if uid != "" (
+                fallbackUsernames[uid] = uname
+                if !ids.contains(uid) (
+                    ids.append(uid)
+                )
             )
         )
     )
@@ -752,6 +756,9 @@ def reconcileDeletedUsers() (
         )
         if uname == "" (
             uname = usernameForId(uid)
+        )
+        if uname == "" and fallbackUsernames.contains(uid) (
+            uname = fallbackUsernames[uid].toStr()
         )
         if uname != "" (
             log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"

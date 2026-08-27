@@ -1236,7 +1236,10 @@ def handleUploadProject(*serve.Context c) (
         )
         array nextWorkspaceLayers = [workspaceKey]
         if !compactWorkspace (
-            nextWorkspaceLayers = previousWorkspaceKeys
+            nextWorkspaceLayers = []
+            for i previousWorkspaceKeys.len (
+                nextWorkspaceLayers.append(previousWorkspaceKeys[i])
+            )
             nextWorkspaceLayers.append(workspaceKey)
         )
         project.workspaceKey = workspaceKey
@@ -1311,7 +1314,7 @@ def handleUploadProject(*serve.Context c) (
         return
     )
     upsertIndexEntry(project)
-    if previousJsonKey != project.jsonKey.toStr() and !previousJsonKey.startsWith("project-json/") (
+    if previousJsonKey != project.jsonKey.toStr() (
         removeProjectStorageKeyIfOrphaned(previousJsonKey, project.id.toStr(), false)
     )
     if project.contains("workspaceLayers") and project.workspaceLayers != null (
