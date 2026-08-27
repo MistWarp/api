@@ -1902,7 +1902,16 @@ def handleListReleases(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    array releases = releaseDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(100).all()
+    object project = result.project.assert(object)
+    boolean canEdit = canEditProject(project, c)
+    array stored = releaseDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(100).all()
+    array releases = []
+    for i stored.len (
+        object release = stored[i].assert(object)
+        if release.channel.toStr() != "checkpoint" or canEdit (
+            releases.append(release)
+        )
+    )
     c.json(200, {ok: true, releases: releases})
 )
 
@@ -1924,8 +1933,12 @@ def handleCreateRelease(*serve.Context c) (
         c.badRequest("invalid version")
         return
     )
-    if channel != "stable" and channel != "beta" and channel != "development" (
+    if channel != "stable" and channel != "beta" and channel != "development" and channel != "checkpoint" (
         c.badRequest("invalid release channel")
+        return
+    )
+    if channel == "checkpoint" and mistwarpBenefitsForProject(project).historyCheckpoints != true (
+        c.forbidden("named history checkpoints require Rotur Lite, Plus, or Pro")
         return
     )
     string notes = ""
@@ -1962,7 +1975,9 @@ def handleCreateRelease(*serve.Context c) (
         project.publicRelease = releaseId
         saveProject(project)
     )
-    addActivity(c.getString("username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
+    if channel != "checkpoint" (
+        addActivity(c.getString("username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
+    )
     c.json(201, {ok: true, release: release})
 )
 
