@@ -49,7 +49,7 @@ Bearer-token based (the session token returned by `/api/auth`), so a
 cross-domain API works without shared cookies. CORS echoes the request Origin
 with credentials, so any frontend origin is accepted.
 
-R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
+R2 bucket only needs public GET through `R2_PUBLIC_BASE`. Project metadata uses `${R2_PUBLIC_BASE}/assets` for asset downloads, so the public domain must expose the bucket's `assets/` prefix. All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
 ## Upload pipeline
 
 The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 1 GiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
