@@ -80,6 +80,13 @@ def themeSavedBy(object theme) array (
     return []
 )
 
+def themeDownloaders(object theme) array (
+    if theme.contains("downloaders") and theme.downloaders != null (
+        return theme.downloaders.assert(array)
+    )
+    return []
+)
+
 def themePreviewUrl(object theme) string (
     if fs.exists(themePreviewPath(theme.id.toStr())) (
         return appURL ++ "/theme-previews/" ++ theme.id.toStr() ++ ".png?v=" ++ theme.edited.toStr()
@@ -119,7 +126,7 @@ def themeResponse(object theme, *serve.Context c, boolean includeData) object (
         published: theme.published == true,
         likes: likes.len,
         liked: likes.contains(viewer),
-        downloads: (theme.downloads ?? 0).toNum(),
+        downloads: themeDownloaders(theme).len,
         isOwner: owner,
         saved: themeSavedBy(theme).contains(viewer),
         locked: false
@@ -167,7 +174,7 @@ def handleListThemes(*serve.Context c) (
             )
         )
     )
-    string sort = c.queryDefault("sort", "newest")
+    string sort = c.queryDefault("sort", "likes")
     if sort == "likes" (
         themes.sortBy("likes", "descending")
     ) else if sort == "downloads" (
@@ -248,7 +255,7 @@ def handleCreateTheme(*serve.Context c) (
         created: timestamp,
         edited: timestamp,
         likes: [],
-        downloads: 0,
+        downloaders: [],
         revenue: 0,
         buyers: [],
         savedBy: []
@@ -522,8 +529,15 @@ def handleDownloadTheme(*serve.Context c) (
         return
     )
     object theme = result.theme.assert(object)
-    theme.downloads = (theme.downloads ?? 0).toNum() + 1
-    saveTheme(theme)
+    string userId = c.getString("userId")
+    if userId != "" (
+        array downloaders = themeDownloaders(theme)
+        if !downloaders.contains(userId) (
+            downloaders.append(userId)
+            theme.downloaders = downloaders
+            saveTheme(theme)
+        )
+    )
     c.json(200, {ok: true, id: theme.id, name: theme.name, author: theme.owner, theme: theme.theme})
 )
 

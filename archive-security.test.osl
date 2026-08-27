@@ -1,0 +1,20 @@
+import "std:zip"
+import "std:testing"
+import "./archive-security.osl"
+
+def zipFixture(string kind) any (
+    return raw("func() []byte { var buffer OSLbytes.Buffer; writer := OSLgozip.NewWriter(&buffer); add := func(name string, data []byte, mode OSLos.FileMode) { header := &OSLgozip.FileHeader{Name: name, Method: OSLgozip.Deflate}; header.SetMode(mode); entry, err := writer.CreateHeader(header); if err == nil { entry.Write(data) } }; if kind == \"valid\" { add(\"project.json\", []byte(\"{}\"), 0644) }; if kind == \"duplicate\" { add(\"same\", []byte(\"a\"), 0644); add(\"same\", []byte(\"b\"), 0644) }; if kind == \"traversal\" { add(\"../escape\", []byte(\"x\"), 0644) }; if kind == \"symlink\" { add(\"link\", []byte(\"target\"), OSLos.ModeSymlink|0777) }; if kind == \"bomb\" { add(\"huge\", make([]byte, 2097152), 0644) }; if kind == \"many\" || kind == \"count-lie\" { add(\"one\", []byte(\"1\"), 0644); add(\"two\", []byte(\"2\"), 0644) }; if kind == \"file-parent\" { add(\"parent/child\", []byte(\"1\"), 0644); add(\"parent\", []byte(\"2\"), 0644) }; if kind == \"corrupt\" { add(\"corrupt\", OSLbytes.Repeat([]byte(\"x\"), 100), 0644) }; writer.Close(); data := buffer.Bytes(); if kind == \"corrupt\" && len(data) > 37 { data[37] ^= 255 }; if kind == \"count-lie\" && len(data) >= 22 { data[len(data)-14] = 1; data[len(data)-13] = 0; data[len(data)-12] = 1; data[len(data)-11] = 0 }; return data }()")
+)
+
+testing.assert(validateZipArchive(zipFixture("valid"), 1048576, 1048576, 10, true), "accepts a normal ZIP")
+testing.assert(!validateZipArchive(zipFixture("duplicate"), 1048576, 1048576, 10, true), "rejects duplicate paths")
+testing.assert(!validateZipArchive(zipFixture("traversal"), 1048576, 1048576, 10, true), "rejects path traversal")
+testing.assert(!validateZipArchive(zipFixture("symlink"), 1048576, 1048576, 10, true), "rejects symlinks")
+testing.assert(!validateZipArchive(zipFixture("bomb"), 1048576, 1048576, 10, true), "stops expansion at the byte ceiling")
+testing.assert(validateZipArchive(zipFixture("bomb"), 1048576, 3145728, 10, true), "accepts highly compressible data within the byte ceiling")
+testing.assert(!validateZipArchive(zipFixture("many"), 1048576, 1048576, 1, true), "rejects too many entries")
+testing.assert(!validateZipArchive(zipFixture("count-lie"), 1048576, 1048576, 10, true), "rejects forged central-directory counts")
+testing.assert(!validateZipArchive(zipFixture("file-parent"), 1048576, 1048576, 10, true), "rejects file and directory conflicts")
+testing.assert(!validateZipArchive(zipFixture("corrupt"), 1048576, 1048576, 10, true), "rejects corrupt entry data")
+testing.assert(!validateZipArchive(zipFixture("valid"), 1, 1048576, 10, true), "rejects oversized compressed input")
+testing.assert(!validateZipArchive(zipFixture("valid"), 1048576, 1, 10, true), "rejects oversized expanded input")
