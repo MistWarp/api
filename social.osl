@@ -97,6 +97,7 @@ def handleGetUser(*serve.Context c) (
         username: profile.username,
         bio: profile.bio,
         featuredProject: profile.featuredProject,
+        profileLayout: profile.contains("profileLayout") ? profile.profileLayout "classic",
         followerCount: followers.len,
         followingCount: following.len,
         isFollowing: followers.contains(viewer),
@@ -172,6 +173,18 @@ def handleUpdateProfile(*serve.Context c) (
         boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
         if currentCommentsOff != commentsOff (
             profile.commentsOff = commentsOff
+            changed = true
+        )
+    )
+
+    if body.contains("profileLayout") (
+        string layout = body.profileLayout.toStr()
+        if !unlockedProfileLayouts(profile).contains(layout) (
+            c.forbidden("unlock this profile layout first")
+            return
+        )
+        if (profile.profileLayout ?? "classic").toStr() != layout (
+            profile.profileLayout = layout
             changed = true
         )
     )

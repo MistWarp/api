@@ -231,6 +231,8 @@ def defaultProfile(string username) object (
         username: username,
         bio: "",
         featuredProject: "",
+        profileLayout: "classic",
+        unlockedLayouts: ["classic"],
         followers: [],
         following: [],
         created: timestamp
