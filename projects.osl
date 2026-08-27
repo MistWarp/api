@@ -1449,10 +1449,6 @@ def handleUpdateProject(*serve.Context c) (
     if body.contains("branding") (
         object incomingBranding = body.branding.assertElse(object, {})
         boolean clearingBranding = incomingBranding.getKeys().toArray().len == 0
-        if !clearingBranding and creatorBenefits.customProjectBranding != true (
-            c.forbidden("custom project branding requires Rotur Plus or Pro")
-            return
-        )
         string accentColor = (incomingBranding.accentColor ?? "").toStr().strip()
         string tagline = (incomingBranding.tagline ?? "").toStr().strip()
         if accentColor != "" and !regex.match("^#[0-9a-fA-F]{6}$", accentColor) (
@@ -1463,11 +1459,18 @@ def handleUpdateProject(*serve.Context c) (
             c.badRequest("branding tagline is too long")
             return
         )
-        project.branding = clearingBranding ? {} {accentColor: accentColor, tagline: tagline}
+        object nextBranding = clearingBranding ? {} {accentColor: accentColor, tagline: tagline}
+        object currentBranding = project.contains("branding") ? project.branding.assertElse(object, {}) {}
+        if creatorBenefits.customProjectBranding != true and json.stringify(nextBranding) != json.stringify(currentBranding) (
+            c.forbidden("custom project branding requires Rotur Plus or Pro")
+            return
+        )
+        project.branding = nextBranding
     )
     if body.contains("vanitySlug") (
         string slug = body.vanitySlug.toStr().toLower().strip()
-        if slug != "" and creatorBenefits.vanityProjectUrls != true (
+        string currentSlug = project.contains("vanitySlug") ? project.vanitySlug.toStr() ""
+        if slug != "" and slug != currentSlug and creatorBenefits.vanityProjectUrls != true (
             c.forbidden("vanity project URLs require Rotur Pro")
             return
         )

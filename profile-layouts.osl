@@ -45,7 +45,18 @@ def verifyProfileLayoutPayment(string paymentId, string buyer, string layoutId, 
         return false
     )
     object payment = parsed.unwrap().assert(object).payment.assert(object)
-    return payment.status.toStr() == "completed" and payment.source.toStr() == "mistwarp" and payment.kind.toStr() == "profile_layout" and payment.resource_type.toStr() == "profile_layout" and payment.resource_id.toStr() == layoutId and normalizeUsername(payment.payer.toStr()) == normalizeUsername(buyer) and payment.amount.toNum() + 0.001 >= amount
+    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "profile_layout" or payment.resource_type.toStr() != "profile_layout" or payment.resource_id.toStr() != layoutId or normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < amount (
+        return false
+    )
+    string recipient = normalizeUsername(mistwarpAccountUser())
+    array recipients = payment.recipients.assertElse(array, [])
+    for i recipients.len (
+        object paidRecipient = recipients[i].assert(object)
+        if normalizeUsername(paidRecipient.username.toStr()) == recipient and paidRecipient.basis_points.toNum().toInt() == 10000 (
+            return true
+        )
+    )
+    return false
 )
 
 def handleListProfileLayouts(*serve.Context c) (
