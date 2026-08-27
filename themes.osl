@@ -6,6 +6,31 @@ def themePreviewPath(string id) string (
     return themePreviewsDir ++ id ++ ".png"
 )
 
+def validatedThemeData(*serve.Context c, any rawTheme) object (
+    object data = rawTheme.assertElse(object, {})
+    string name = (data.name ?? "").toStr().strip()
+    string gui = (data.gui ?? "").toStr()
+    string blocks = (data.blocks ?? "").toStr()
+    string menuBarAlign = (data.menuBarAlign ?? "center").toStr()
+    if name == "" or name.len > 100 (
+        c.badRequest("theme data needs a name of 1 to 100 characters")
+        return {ok: false}
+    )
+    if gui != "light" and gui != "dark" and gui != "midnight" (
+        c.badRequest("theme gui must be light, dark, or midnight")
+        return {ok: false}
+    )
+    if blocks != "three" and blocks != "dark" and blocks != "high-contrast" and blocks != "custom" (
+        c.badRequest("theme blocks must be three, dark, high-contrast, or custom")
+        return {ok: false}
+    )
+    if menuBarAlign != "left" and menuBarAlign != "center" and menuBarAlign != "right" (
+        c.badRequest("theme menu bar alignment must be left, center, or right")
+        return {ok: false}
+    )
+    return {ok: true, data: data}
+)
+
 def loadTheme(string id) object (
     if !isSafePathPart(id) (
         return {ok: false, error: "invalid theme id"}
@@ -44,19 +69,15 @@ def hasBoughtTheme(object theme, string username) boolean (
     return false
 )
 
-def themePrice(object theme) number (
-    number price = 0
-    if theme.contains("price") and theme.price != null (
-        price = theme.price.toNum()
+def themePrice(object _) number (
+    return 0
+)
+
+def themeSavedBy(object theme) array (
+    if theme.contains("savedBy") and theme.savedBy != null (
+        return theme.savedBy.assert(array)
     )
-    number limit = mistwarpBenefitsForUserId((theme.ownerId ?? "").toStr()).maxProjectPrice.toNum()
-    if price < 0 (
-        return 0
-    )
-    if price > limit (
-        return limit
-    )
-    return price
+    return []
 )
 
 def themePreviewUrl(object theme) string (
@@ -66,10 +87,20 @@ def themePreviewUrl(object theme) string (
     return ""
 )
 
+def themeVisual(object theme) object (
+    object data = theme.theme.assertElse(object, {})
+    return {
+        gui: (data.gui ?? "light").toStr(),
+        blocks: (data.blocks ?? "three").toStr(),
+        menuBarAlign: (data.menuBarAlign ?? "center").toStr(),
+        accent: data.accent ?? {},
+        colors: data.colors ?? {}
+    }
+)
+
 def themeResponse(object theme, *serve.Context c, boolean includeData) object (
     string viewer = normalizeUsername(c.getString("username"))
     boolean owner = themeOwner(theme, c) or c.getBool("isAdmin")
-    boolean bought = hasBoughtTheme(theme, viewer)
     number price = themePrice(theme)
     array likes = []
     if theme.contains("likes") and theme.likes != null (
@@ -82,19 +113,18 @@ def themeResponse(object theme, *serve.Context c, boolean includeData) object (
         description: theme.description,
         price: price,
         previewUrl: themePreviewUrl(theme),
+        visual: themeVisual(theme),
         created: theme.created,
         edited: theme.edited,
         published: theme.published == true,
         likes: likes.len,
         liked: likes.contains(viewer),
         downloads: (theme.downloads ?? 0).toNum(),
-        revenue: owner ? (theme.revenue ?? 0).toNum() 0,
-        buyers: owner ? themeBuyers(theme) [],
         isOwner: owner,
-        bought: bought,
-        locked: price > 0 and !owner and !bought
+        saved: themeSavedBy(theme).contains(viewer),
+        locked: false
     }
-    if includeData and (price <= 0 or owner or bought) (
+    if includeData (
         response.theme = theme.theme
     )
     return response
@@ -159,13 +189,12 @@ def handleGetTheme(*serve.Context c) (
         c.notFound("theme not found")
         return
     )
-    c.json(200, {ok: true, theme: themeResponse(theme, c, false)})
+    c.json(200, {ok: true, theme: themeResponse(theme, c, true)})
 )
 
-def validateThemeFields(*serve.Context c, object body, number priceLimit) object (
+def validateThemeFields(*serve.Context c, object body) object (
     string name = (body.name ?? "").toStr().strip()
     string description = (body.description ?? "").toStr().strip()
-    number price = (body.price ?? 0).toNum()
     if name == "" or name.len > 100 (
         c.badRequest("theme names must contain 1 to 100 characters")
         return {ok: false}
@@ -174,11 +203,7 @@ def validateThemeFields(*serve.Context c, object body, number priceLimit) object
         c.badRequest("theme descriptions must be 1,000 characters or fewer")
         return {ok: false}
     )
-    if price < 0 or price > priceLimit (
-        c.badRequest("your Rotur plan allows theme prices up to " ++ priceLimit.toStr() ++ " credits")
-        return {ok: false}
-    )
-    return {ok: true, name: name, description: description, price: price}
+    return {ok: true, name: name, description: description}
 )
 
 def handleCreateTheme(*serve.Context c) (
@@ -187,18 +212,26 @@ def handleCreateTheme(*serve.Context c) (
         c.badRequest("theme data is required")
         return
     )
-    string encoded = json.stringify(body.theme)
+    object checkedTheme = validatedThemeData(c, body.theme)
+    if !checkedTheme.ok (
+        return
+    )
+    string encoded = json.stringify(checkedTheme.data)
     if encoded.len > 131072 (
         c.badRequest("theme data cannot exceed 128 KB")
         return
     )
     object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
-    boolean published = !body.contains("published") or body.published == true
+    boolean published = body.contains("published") and body.published == true
+    if published (
+        c.badRequest("create the theme as a draft, upload its preview, then publish it")
+        return
+    )
     if published and countPublishedThemes(c.getString("userId")) >= benefits.themeListingLimit.toNum() (
         c.json(403, {ok: false, code: "theme_limit", error: "your Rotur plan allows " ++ benefits.themeListingLimit.toStr() ++ " published themes"})
         return
     )
-    object fields = validateThemeFields(c, body, benefits.maxProjectPrice.toNum())
+    object fields = validateThemeFields(c, body)
     if !fields.ok (
         return
     )
@@ -209,15 +242,16 @@ def handleCreateTheme(*serve.Context c) (
         ownerId: c.getString("userId"),
         name: fields.name,
         description: fields.description,
-        price: fields.price,
-        theme: body.theme,
+        price: 0,
+        theme: checkedTheme.data,
         published: published,
         created: timestamp,
         edited: timestamp,
         likes: [],
         downloads: 0,
         revenue: 0,
-        buyers: []
+        buyers: [],
+        savedBy: []
     }
     if !saveTheme(theme) (
         c.internalError("failed to save the theme")
@@ -241,28 +275,35 @@ def handleUpdateTheme(*serve.Context c) (
     object benefits = mistwarpBenefitsForProject({ownerId: theme.ownerId, owner: theme.owner})
     object fields = validateThemeFields(c, {
         name: body.contains("name") ? body.name theme.name,
-        description: body.contains("description") ? body.description theme.description,
-        price: body.contains("price") ? body.price theme.price
-    }, benefits.maxProjectPrice.toNum())
+        description: body.contains("description") ? body.description theme.description
+    })
     if !fields.ok (
         return
     )
     boolean nextPublished = body.contains("published") ? body.published == true theme.published == true
+    if nextPublished and !fs.exists(themePreviewPath(theme.id.toStr())) (
+        c.badRequest("upload a preview image before publishing this theme")
+        return
+    )
     if nextPublished and theme.published != true and countPublishedThemes(theme.ownerId.toStr()) >= benefits.themeListingLimit.toNum() (
         c.json(403, {ok: false, code: "theme_limit", error: "this account has reached its published theme limit"})
         return
     )
     theme.name = fields.name
     theme.description = fields.description
-    theme.price = fields.price
+    theme.price = 0
     theme.published = nextPublished
     if body.contains("theme") and body.theme != null (
-        string encoded = json.stringify(body.theme)
+        object checkedTheme = validatedThemeData(c, body.theme)
+        if !checkedTheme.ok (
+            return
+        )
+        string encoded = json.stringify(checkedTheme.data)
         if encoded.len > 131072 (
             c.badRequest("theme data cannot exceed 128 KB")
             return
         )
-        theme.theme = body.theme
+        theme.theme = checkedTheme.data
     )
     theme.edited = timestamp
     saveTheme(theme)
@@ -338,6 +379,23 @@ def handleLikeTheme(*serve.Context c) (
     theme.likes = likes
     saveTheme(theme)
     c.json(200, {ok: true, liked: likes.contains(user), likes: likes.len})
+)
+
+def handleSaveTheme(*serve.Context c) (
+    auto result = loadTheme(c.param("id"))
+    if !result.ok or result.theme.published != true (
+        c.notFound("theme not found")
+        return
+    )
+    object theme = result.theme.assert(object)
+    array savedBy = themeSavedBy(theme)
+    string user = normalizeUsername(c.getString("username"))
+    if !savedBy.contains(user) (
+        savedBy.append(user)
+    )
+    theme.savedBy = savedBy
+    saveTheme(theme)
+    c.json(200, {ok: true, saved: true})
 )
 
 def themeCommerceSplits(object theme) array (
@@ -464,10 +522,6 @@ def handleDownloadTheme(*serve.Context c) (
         return
     )
     object theme = result.theme.assert(object)
-    if themePrice(theme) > 0 and !themeOwner(theme, c) and !hasBoughtTheme(theme, c.getString("username")) (
-        c.json(402, {ok: false, code: "purchase_required", error: "purchase this theme before downloading it"})
-        return
-    )
     theme.downloads = (theme.downloads ?? 0).toNum() + 1
     saveTheme(theme)
     c.json(200, {ok: true, id: theme.id, name: theme.name, author: theme.owner, theme: theme.theme})
