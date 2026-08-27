@@ -54,6 +54,8 @@ R2 bucket only needs public GET (through R2_PUBLIC_BASE). All writes go through 
 
 The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 1 GiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
 
+Before extraction, the API rejects archives with unsafe paths, duplicate entries, symlinks, unsupported compression methods, or more entries and expanded bytes than the endpoint allows. MistWarp history archives are capped at 128 MiB compressed and 20,000 entries. Their expanded-byte ceiling matches the account's maximum project size, including its tier-specific asset allowance. The API reads each history entry through that ceiling before storing it, so forged ZIP metadata cannot bypass the limit. Upload attempts count toward the weekly byte budget even when archive validation fails.
+
 - `assets/<md5ext>`: content addressed, shared across all projects and remixes, uploaded once ever
 - `projects/<id>/project.json`: the gzip-encoded playable snapshot
 - `projects/<id>/thumb.png`

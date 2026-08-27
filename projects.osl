@@ -550,6 +550,19 @@ def recordUploadBytes(string username, number bytes) (
     writeFile(quotaPath(username), {events: events})
 )
 
+def reserveUploadBytes(string username, number bytes, number limit, boolean enforceLimit) object (
+    string lockName = "upload-quota-" ++ normalizeUsername(username)
+    sync.lock(lockName)
+    number used = weeklyUploadedBytes(username)
+    if enforceLimit and used + bytes > limit (
+        sync.unlock(lockName)
+        return {ok: false, used: used}
+    )
+    recordUploadBytes(username, bytes)
+    sync.unlock(lockName)
+    return {ok: true, used: used}
+)
+
 def quotaDetails(string username) object (
     number uploadLimit = mistwarpBenefitsForUsername(username).weeklyUploadBytes.toNum()
     auto result = readFile(quotaPath(username))
@@ -888,15 +901,13 @@ def handleUploadProject(*serve.Context c) (
         object incomingWorkspace = workspaceResult.unwrap().assert(object)
         incomingBytes += incomingWorkspace.size.toNum()
     )
-    if !c.getBool("isAdmin") (
-        number usedBytes = weeklyUploadedBytes(uploader)
-        number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
-        if usedBytes + incomingBytes > uploadLimit (
-            number usedMb = (usedBytes / 1048576).toInt()
-            number limitMb = (uploadLimit / 1048576).toInt()
-            c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
-            return
-        )
+    number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
+    object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit, !c.getBool("isAdmin"))
+    if !reservation.ok (
+        number usedMb = (reservation.used.toNum() / 1048576).toInt()
+        number limitMb = (uploadLimit / 1048576).toInt()
+        c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
+        return
     )
 
     string id = project.id.toStr()
@@ -909,6 +920,11 @@ def handleUploadProject(*serve.Context c) (
     )
 
     number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
+    if !validateZipArchive(file.data, file.size.toNum(), extractedLimit, maxAssetCount + 1, false) (
+        fs.remove(zipPath)
+        c.badRequest("invalid or unsafe sb3 file")
+        return
+    )
     if !zip.decompressLimited(zipPath, extractDir, extractedLimit, maxAssetCount + 1) (
         fs.remove(zipPath)
         fs.remove(extractDir)
@@ -978,6 +994,12 @@ def handleUploadProject(*serve.Context c) (
             c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
             return
         )
+        if !validateZipArchive(workspace.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+            fs.remove(zipPath)
+            fs.remove(extractDir)
+            c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
+            return
+        )
         any workspaceBody = workspace.data
         string baseWorkspacePath = ""
         string deltaWorkspacePath = ""
@@ -989,7 +1011,7 @@ def handleUploadProject(*serve.Context c) (
             mergedWorkspacePath = tmpDir ++ workId ++ ".merged.mwp"
             boolean mergeOk = copyProjectWorkspaceToPath(project, baseWorkspacePath)
             mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, workspace.data)
-            mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, deltaWorkspacePath, mergedWorkspacePath)
+            mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, deltaWorkspacePath, mergedWorkspacePath, extractedLimit)
             if !mergeOk (
                 fs.remove(baseWorkspacePath)
                 fs.remove(deltaWorkspacePath)
@@ -1051,7 +1073,6 @@ def handleUploadProject(*serve.Context c) (
             )
         )
     )
-    recordUploadBytes(uploader, incomingBytes)
     boolean storedJson = false
     if r2Local (
         storedJson = pushProjectJsonToR2(project, gzipPath)
@@ -1140,6 +1161,22 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     object workspace = workspaceResult.unwrap().assert(object)
     if workspace.size.toNum() > maxWorkspaceBytes (
         c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit"})
+        return
+    )
+    string uploader = normalizeUsername(c.getString("username"))
+    number incomingBytes = workspace.size.toNum()
+    object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
+    number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
+    object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit, !c.getBool("isAdmin"))
+    if !reservation.ok (
+        number usedMb = (reservation.used.toNum() / 1048576).toInt()
+        number limitMb = (uploadLimit / 1048576).toInt()
+        c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
+        return
+    )
+    number workspaceExpandedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
+    if !validateZipArchive(workspace.data, maxWorkspaceBytes, workspaceExpandedLimit, maxWorkspaceFiles, true) (
+        c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
         return
     )
     auto parsedGit = json.parse(gitMetadata, {type: "object"})
