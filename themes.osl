@@ -137,24 +137,6 @@ def themeResponse(object theme, *serve.Context c, boolean includeData) object (
     return response
 )
 
-def countPublishedThemes(string userId) number (
-    number count = 0
-    array files = fs.readDir(themesDir).toArray()
-    for i files.len (
-        string file = files[i].toStr()
-        if file.endsWith(".json") (
-            auto result = readFile(themesDir ++ file)
-            if result.ok (
-                object theme = result.data.assert(object)
-                if (theme.ownerId ?? "").toStr() == userId and theme.published == true (
-                    count = count + 1
-                )
-            )
-        )
-    )
-    return count
-)
-
 def handleListThemes(*serve.Context c) (
     string owner = normalizeUsername(c.query("owner"))
     string viewer = normalizeUsername(c.getString("username"))
@@ -228,14 +210,9 @@ def handleCreateTheme(*serve.Context c) (
         c.badRequest("theme data cannot exceed 128 KB")
         return
     )
-    object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
     boolean published = body.contains("published") and body.published == true
     if published (
         c.badRequest("create the theme as a draft, upload its preview, then publish it")
-        return
-    )
-    if published and countPublishedThemes(c.getString("userId")) >= benefits.themeListingLimit.toNum() (
-        c.json(403, {ok: false, code: "theme_limit", error: "your Rotur plan allows " ++ benefits.themeListingLimit.toStr() ++ " published themes"})
         return
     )
     object fields = validateThemeFields(c, body)
@@ -279,7 +256,6 @@ def handleUpdateTheme(*serve.Context c) (
         return
     )
     object body = c.bodyJSON()
-    object benefits = mistwarpBenefitsForProject({ownerId: theme.ownerId, owner: theme.owner})
     object fields = validateThemeFields(c, {
         name: body.contains("name") ? body.name theme.name,
         description: body.contains("description") ? body.description theme.description
@@ -290,10 +266,6 @@ def handleUpdateTheme(*serve.Context c) (
     boolean nextPublished = body.contains("published") ? body.published == true theme.published == true
     if nextPublished and !fs.exists(themePreviewPath(theme.id.toStr())) (
         c.badRequest("upload a preview image before publishing this theme")
-        return
-    )
-    if nextPublished and theme.published != true and countPublishedThemes(theme.ownerId.toStr()) >= benefits.themeListingLimit.toNum() (
-        c.json(403, {ok: false, code: "theme_limit", error: "this account has reached its published theme limit"})
         return
     )
     theme.name = fields.name

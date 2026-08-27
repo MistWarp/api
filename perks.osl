@@ -47,10 +47,15 @@ def mistwarpBenefitsForTier(string rawTier) object (
         maxProjectAssetsBytes: 52428800,
         recoveryDays: 7,
         analyticsDays: 7,
+        advancedAnalytics: false,
+        analyticsExport: false,
+        advancedHistory: false,
+        historyCheckpoints: false,
+        customProjectBranding: false,
+        vanityProjectUrls: false,
         collaborationLimit: 3,
         salesFeeBasisPoints: 1000,
-        maxProjectPrice: 100,
-        themeListingLimit: 5
+        maxProjectPrice: 100
     }
     if tier == "Lite" (
         benefits.weeklyUploadBytes = 262144000
@@ -58,28 +63,37 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.maxProjectAssetsBytes = 104857600
         benefits.recoveryDays = 14
         benefits.analyticsDays = 30
+        benefits.historyCheckpoints = true
         benefits.collaborationLimit = 5
-        benefits.themeListingLimit = 10
     ) else if tier == "Plus" (
         benefits.weeklyUploadBytes = 1073741824
         benefits.maxProjectAssetBytes = 52428800
         benefits.maxProjectAssetsBytes = 262144000
         benefits.recoveryDays = 30
         benefits.analyticsDays = 365
+        benefits.advancedAnalytics = true
+        benefits.analyticsExport = true
+        benefits.advancedHistory = true
+        benefits.historyCheckpoints = true
+        benefits.customProjectBranding = true
         benefits.collaborationLimit = 10
         benefits.salesFeeBasisPoints = 700
         benefits.maxProjectPrice = 250
-        benefits.themeListingLimit = 25
     ) else if tier == "Pro" (
         benefits.weeklyUploadBytes = 5368709120
         benefits.maxProjectAssetBytes = 104857600
         benefits.maxProjectAssetsBytes = 1073741824
         benefits.recoveryDays = 90
         benefits.analyticsDays = 0
+        benefits.advancedAnalytics = true
+        benefits.analyticsExport = true
+        benefits.advancedHistory = true
+        benefits.historyCheckpoints = true
+        benefits.customProjectBranding = true
+        benefits.vanityProjectUrls = true
         benefits.collaborationLimit = 25
         benefits.salesFeeBasisPoints = 500
         benefits.maxProjectPrice = 500
-        benefits.themeListingLimit = 100
     )
     return benefits
 )

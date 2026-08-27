@@ -1,0 +1,135 @@
+def normalizeGroupTag(string value) string (
+    string tag = value.toLower().strip()
+    if tag.len < 2 or tag.len > 32 or !regex.matches(tag, "^[a-z0-9][a-z0-9_-]*$") (
+        return ""
+    )
+    return tag
+)
+
+def roturGroupSnapshot(string rawTag) object (
+    string tag = normalizeGroupTag(rawTag)
+    if tag == "" or commerceServiceKey == "" (
+        return {ok: false, error: "group integration is unavailable"}
+    )
+    if groupSnapshotCache.has(tag) (
+        return groupSnapshotCache.get(tag).assertElse(object, {ok: false})
+    )
+    object response = requests.get(
+        roturBase ++ "/groups/" ++ url.escape(tag) ++ "/integrations/mistwarp",
+        {headers: {"X-Commerce-Key": commerceServiceKey}}
+    )
+    if !response.success or response.status.toInt() != 200 (
+        return {ok: false, error: response.status.toInt() == 404 ? "group not found" "could not load group"}
+    )
+    auto parsed = json.parse(response.body, {type: "object"})
+    if parsed.isErr() (
+        return {ok: false, error: "invalid group response"}
+    )
+    object data = parsed.unwrap().assert(object)
+    object snapshot = {ok: true, group: data.group, members: data.members}
+    groupSnapshotCache.set(tag, snapshot)
+    return snapshot
+)
+
+def groupMemberNames(object snapshot) array (
+    array names = []
+    if !snapshot.ok or !snapshot.contains("members") or snapshot.members == null (
+        return names
+    )
+    array members = snapshot.members.assertElse(array, [])
+    for i members.len (
+        object member = members[i].assert(object)
+        string username = member.username.toStr().strip()
+        if username != "" and !stringArrayContainsUser(names, username) (
+            names.append(username)
+        )
+    )
+    return names
+)
+
+def groupHasMember(object snapshot, string userId, string username) boolean (
+    if !snapshot.ok (
+        return false
+    )
+    array members = snapshot.members.assertElse(array, [])
+    for i members.len (
+        object member = members[i].assert(object)
+        if identityMatches(member.user_id.toStr(), member.username.toStr(), userId, username) (
+            return true
+        )
+    )
+    return false
+)
+
+def groupMemberCanManage(object snapshot, string userId, string username) boolean (
+    if !snapshot.ok (
+        return false
+    )
+    object group = snapshot.group.assert(object)
+    if normalizeUsername(group.owner_user_id.toStr()) == normalizeUsername(username) (
+        return true
+    )
+    array members = snapshot.members.assertElse(array, [])
+    for i members.len (
+        object member = members[i].assert(object)
+        if identityMatches(member.user_id.toStr(), member.username.toStr(), userId, username) (
+            array permissions = member.permissions.assertElse(array, [])
+            return permissions.contains("groups.manage") or permissions.contains("groups.group.edit")
+        )
+    )
+    return false
+)
+
+def canManageGroupTag(string tag, *serve.Context c) boolean (
+    if c.getBool("isAdmin") (
+        return true
+    )
+    return groupMemberCanManage(roturGroupSnapshot(tag), c.getString("userId"), c.getString("username"))
+)
+
+def groupTagOf(object value) string (
+    if value.contains("groupTag") and value.groupTag != null (
+        return normalizeGroupTag(value.groupTag.toStr())
+    )
+    return ""
+)
+
+def canManageGroupContent(object value, *serve.Context c) boolean (
+    string tag = groupTagOf(value)
+    return tag != "" and canManageGroupTag(tag, c)
+)
+
+def handleGetMistWarpGroup(*serve.Context c) (
+    string tag = normalizeGroupTag(c.param("tag"))
+    object snapshot = roturGroupSnapshot(tag)
+    if !snapshot.ok (
+        c.notFound("group not found")
+        return
+    )
+    boolean canManage = c.getBool("authenticated") and groupMemberCanManage(snapshot, c.getString("userId"), c.getString("username"))
+    array projects = []
+    array projectEntries = projectSearchDocs.where("groupTag", db.equal, tag).sort("edited", db.desc).all()
+    for i projectEntries.len (
+        object project = projectEntries[i].assert(object)
+        if project.shared == true or project.visibility.toStr() == "unlisted" or canManage (
+            projects.append(project)
+        )
+    )
+    array spaces = []
+    array spaceEntries = spaceDocs.where("groupTag", db.equal, tag).sort("edited", db.desc).all()
+    for i spaceEntries.len (
+        object space = spaceEntries[i].assert(object)
+        if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" or canManage (
+            spaces.append(spaceListResponse(space, c))
+        )
+    )
+    c.json(200, {
+        ok: true,
+        group: snapshot.group,
+        members: groupMemberNames(snapshot),
+        projects: projects,
+        spaces: spaces,
+        canManage: canManage,
+        isMember: c.getBool("authenticated") and groupHasMember(snapshot, c.getString("userId"), c.getString("username"))
+    })
+)

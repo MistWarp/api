@@ -137,6 +137,7 @@ import "./gitea.osl"
 import "./auth.osl"
 import "./middleware.osl"
 import "./perks.osl"
+import "./groups.osl"
 import "./projects.osl"
 import "./extensions.osl"
 import "./monetize.osl"
@@ -164,6 +165,7 @@ auto bansCache = cache.create(2, 300)
 auto adminsCache = cache.create(2, 300)
 auto sharedProjectsCache = cache.create(2, 60)
 auto paidPerksCache = cache.create(10000, 300)
+auto groupSnapshotCache = cache.create(10000, 60)
 
 ensureDirectories()
 initCommunityDatabase()
@@ -249,6 +251,8 @@ api.GET("/agreement", handleGetAgreement)
 api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
 
 api.GET("/explore", handleExplore)
+api.GET("/vanity/:slug", handleResolveVanityProject)
+api.GET("/groups/:tag", handleGetMistWarpGroup)
 api.GET("/themes", handleListThemes)
 api.GET("/themes/:id", handleGetTheme)
 api.POST("/themes", requireAuth, handleCreateTheme)
