@@ -107,12 +107,28 @@ def handleRoturAuth(*serve.Context c) (
     object data = parsed.unwrap().assert(object)
 
     if data.contains("error") and data.error != null (
-        c.json(401, {ok: false, error: "rotur: " ++ data.error.toStr()})
+        string code = "error"
+        if data.contains("code") and data.code != null (
+            code = data.code.toStr()
+        )
+        string redirectUrl = "https://rotur.dev/me"
+        if data.contains("redirect_url") and data.redirect_url != null (
+            redirectUrl = data.redirect_url.toStr()
+        )
+        if data.contains("username") and data.username != null and data.username.toStr() != "" (
+            string uname = data.username.toStr()
+            string reason = "Account restricted on Rotur"
+            if data.contains("reason") and data.reason != null (
+                reason = data.reason.toStr()
+            )
+            banUser(uname, reason, "rotur_sync")
+        )
+        c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
         return
     )
 
     if !data.contains("valid") or data.valid == false (
-        c.json(401, {ok: false, error: "rotur rejected the login validator"})
+        c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
         return
     )
 
@@ -127,7 +143,7 @@ def handleRoturAuth(*serve.Context c) (
         if reason != "" (
             banError = "This account is banned from MistWarp: " ++ reason
         )
-        c.json(403, {ok: false, code: "banned", error: banError})
+        c.json(403, {ok: false, code: "banned", error: banError, redirectUrl: "https://rotur.dev/me"})
         return
     )
 

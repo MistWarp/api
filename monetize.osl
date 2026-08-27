@@ -15,6 +15,11 @@ def projectVisibility(object project) string (
 )
 
 def projectIsViewable(object project) boolean (
+    if project.contains("owner") and project.owner != null (
+        if isBannedUser(project.owner.toStr()) (
+            return false
+        )
+    )
     return projectVisibility(project) != "private"
 )
 
