@@ -767,6 +767,30 @@ def reconcileDeletedUsers() (
             )
         )
     )
+    array projectDirectories = [projectsDir, trashDir]
+    for d projectDirectories.len (
+        string directory = projectDirectories[d].toStr()
+        array projectFiles = fs.readDir(directory).toArray()
+        for i projectFiles.len (
+            string name = projectFiles[i].toStr()
+            if name.endsWith(".json") (
+                auto result = readFile(directory ++ name)
+                if result.ok (
+                    object project = result.data.assert(object)
+                    string uid = (project.ownerId ?? "").toStr()
+                    string uname = project.owner.toStr()
+                    if uid != "" (
+                        if !ids.contains(uid) (
+                            ids.append(uid)
+                        )
+                        if uname != "" (
+                            fallbackUsernames[uid] = uname
+                        )
+                    )
+                )
+            )
+        )
+    )
     if ids.len == 0 (
         return
     )
