@@ -559,7 +559,7 @@ def purgeUserFromProfiles(string key) (
     )
 )
 
-def purgeUserFromProjects(string key) (
+def purgeUserFromProjects(string key, string userId) (
     array files = fs.readDir(projectsDir).toArray()
     for i files.len (
         string name = files[i].toStr()
@@ -567,12 +567,11 @@ def purgeUserFromProjects(string key) (
             auto result = loadProject(name.replace(".json", ""))
             if result.ok (
                 object project = result.project.assert(object)
-                boolean changed = false
-                if normalizeUsername(project.owner.toStr()) == key (
-                    project.owner = "Deleted User"
-                    project.ownerId = ""
-                    changed = true
+                if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
+                    purgeProject(project)
+                    continue
                 )
+                boolean changed = false
                 array loves = project.loves.assert(array)
                 if stringArrayContainsUser(loves, key) (
                     project.loves = removeUserFromArray(loves, key)
@@ -622,6 +621,19 @@ def purgeUserFromProjects(string key) (
                 if changed (
                     saveProject(project)
                     upsertIndexEntry(project)
+                )
+            )
+        )
+    )
+    array trashFiles = fs.readDir(trashDir).toArray()
+    for i trashFiles.len (
+        string name = trashFiles[i].toStr()
+        if name.endsWith(".json") (
+            auto result = readFile(trashDir ++ name)
+            if result.ok (
+                object project = result.data.assert(object)
+                if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
+                    purgeProject(project)
                 )
             )
         )
@@ -702,7 +714,7 @@ def purgeUser(string userId, string username) (
         return
     )
     purgeUserFromProfiles(key)
-    purgeUserFromProjects(key)
+    purgeUserFromProjects(key, userId)
     purgeUserFromComments(key)
     purgeUserFromNotifications(key)
     purgeGameDataForUser(userId)

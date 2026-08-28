@@ -2112,6 +2112,7 @@ def purgeProject(object project) (
     purgeProjectStorage(project, true)
     fs.remove(trashDir ++ project.id.toStr() ++ ".json")
     deleteProjectCommunityRecords(project.id.toStr())
+    removeProjectFromSpaces(project.id.toStr())
 )
 
 def purgeProjects(array projects) (
