@@ -127,6 +127,52 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
     return {ok: true, removed: comments.len - next.len}
 )
 
+def editComment(string key, string cid, string requester, string content) object (
+    string trimmed = content.strip()
+    if trimmed == "" (
+        return {ok: false, error: "comment is empty", status: 400}
+    )
+    if trimmed.len > 500 (
+        return {ok: false, error: "comment too long", status: 400}
+    )
+
+    string lockName = "comments:" ++ key
+    sync.lock(lockName)
+    array comments = loadComments(key)
+    object target = {}
+    boolean found = false
+    for i comments.len (
+        object existing = comments[i]
+        if existing.id.toStr() == cid (
+            target = existing
+            found = true
+        )
+    )
+    if !found (
+        sync.unlock(lockName)
+        return {ok: false, error: "comment not found", status: 404}
+    )
+    if normalizeUsername(requester) != normalizeUsername(target.author.toStr()) (
+        sync.unlock(lockName)
+        return {ok: false, error: "not allowed", status: 403}
+    )
+    for i comments.len (
+        object existing = comments[i]
+        if existing.id.toStr() == cid (
+            existing.content = trimmed
+            existing.edited = timestamp
+            comments[i] = existing
+            target = existing
+        )
+    )
+    boolean saved = saveComments(key, comments)
+    sync.unlock(lockName)
+    if !saved (
+        return {ok: false, error: "could not edit comment", status: 500}
+    )
+    return {ok: true, comment: target}
+)
+
 def commentPage(array comments, *serve.Context c) object (
     array roots = []
     for i comments.len (
@@ -292,6 +338,25 @@ def handleDeleteProjectComment(*serve.Context c) (
     c.json(200, {ok: true})
 )
 
+def handleEditProjectComment(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment("project-" ++ c.param("id"), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    c.json(200, edited)
+)
+
 def profileCommentKey(string name) string (
     return "profile-" ++ normalizeUsername(name)
 )
@@ -364,6 +429,25 @@ def handleDeleteProfileComment(*serve.Context c) (
         return
     )
     c.json(200, {ok: true})
+)
+
+def handleEditProfileComment(*serve.Context c) (
+    string name = c.param("name")
+    if !profileExists(name) (
+        c.notFound("this user is not on MistWarp")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment(profileCommentKey(name), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    c.json(200, edited)
 )
 
 def reactToComment(*serve.Context c, string key) (

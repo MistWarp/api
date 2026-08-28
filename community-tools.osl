@@ -1918,6 +1918,25 @@ def handleDeleteSpaceComment(*serve.Context c) (
     c.json(200, {ok: true})
 )
 
+def handleEditSpaceComment(*serve.Context c) (
+    object space = spaceDocs.findById(c.param("id"))
+    if space.isEmpty() == true or !canViewSpace(space, c) (
+        c.notFound("space not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    c.json(200, edited)
+)
+
 def handleReactSpaceComment(*serve.Context c) (
     object space = spaceDocs.findById(c.param("id"))
     if space.isEmpty() == true or !canViewSpace(space, c) (
@@ -2667,6 +2686,25 @@ def handleDeleteIdeaComment(*serve.Context c) (
     )
     putDocument(ideaDocs, idea["_id"].toStr(), idea)
     c.json(200, {ok: true})
+)
+
+def handleEditIdeaComment(*serve.Context c) (
+    object idea = ideaDocs.findById(c.param("id"))
+    if idea.isEmpty() == true (
+        c.notFound("idea not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment("roadmap-" ++ idea["_id"].toStr(), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    c.json(200, edited)
 )
 
 def handleUpdateIdea(*serve.Context c) (
