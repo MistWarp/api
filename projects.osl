@@ -202,6 +202,18 @@ def projectResponse(object project, *serve.Context c) object (
     if !hasContent (
         jsonUrl = ""
     )
+    number myPlaytimeMs = 0
+    number myLastPlayed = 0
+    if c.getBool("authenticated") (
+        array playtime = userPlaytimeRecords(c.getString("username"))
+        for i playtime.len (
+            object record = playtime[i].assert(object)
+            if record.projectId.toStr() == project.id.toStr() (
+                myPlaytimeMs = (record.duration ?? 0).toNum()
+                myLastPlayed = (record.updated ?? 0).toNum()
+            )
+        )
+    )
     object response = {
         id: project.id,
         owner: project.owner,
@@ -230,6 +242,8 @@ def projectResponse(object project, *serve.Context c) object (
         locked: locked,
         bought: bought,
         saved: isInLibrary(viewer, project.id.toStr()),
+        myPlaytimeMs: myPlaytimeMs,
+        myLastPlayed: myLastPlayed,
         hasContent: hasContent,
         remixable: projectRemixable(project),
         canRemix: canRemixProject(project, c),
