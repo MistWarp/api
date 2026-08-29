@@ -16,6 +16,10 @@ import "std:db"
 import "std:ws"
 
 import "go:time"
+import "go:compress/gzip"
+import "go:compress/zlib"
+import "go:crypto/sha1"
+import "go:encoding/hex"
 
 def dotenvValue(string name) string (
     if !fs.exists(".env") (
@@ -166,6 +170,7 @@ import "./settings.osl"
 import "./agreement.osl"
 import "./account-controls.osl"
 import "./community-tools.osl"
+import "./history-migration.osl"
 
 auto viewDedup = cache.create(100000, 86400)
 auto viewIndexFlush = cache.create(100000, 600)
@@ -187,6 +192,10 @@ migrateSpaceMemberships()
 migrateExtensionUsage()
 refreshIndexUrls()
 fs.mkdirAll(localBlobsDir)
+object historyMigration = generateMissingProjectHistories()
+if historyMigration.generated.toNum() > 0 or historyMigration.failed.toNum() > 0 (
+    log "MistWarp history migration generated " ++ historyMigration.generated.toStr() ++ " histories; " ++ historyMigration.failed.toStr() ++ " failed"
+)
 if r2Local (
     log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )

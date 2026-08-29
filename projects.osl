@@ -1346,6 +1346,15 @@ def handleUploadProject(*serve.Context c) (
     fs.remove(zipPath)
     fs.remove(extractDir)
 
+    if !projectHasWorkspace(project) (
+        object generatedHistory = ensureGeneratedProjectHistory(project, {})
+        if generatedHistory.ok (
+            project = generatedHistory.project.assert(object)
+        ) else (
+            log "WARNING: project " ++ project.id.toStr() ++ " uploaded without history and fallback generation failed: " ++ generatedHistory.error.toStr()
+        )
+    )
+
     string pullId = c.formValue("pullId").strip()
     if pullId != "" (
         if !completeNativePull(project, pullId, expectedHead, c.getString("username")) (
