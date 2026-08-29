@@ -361,6 +361,7 @@ def handleGetMyQuota(*serve.Context c) (
         limit: details.limit,
         windowMs: quotaWindowMs,
         oldestEventMs: details.oldestEventMs,
+        nextExpiryInMs: details.nextExpiryInMs,
         eventCount: details.eventCount,
         daily: daily
     })
@@ -627,7 +628,7 @@ def quotaDetails(string username) object (
     number uploadLimit = mistwarpBenefitsForUsername(username).weeklyUploadBytes.toNum()
     auto result = readFile(quotaPath(username))
     if !result.ok (
-        return {used: 0, limit: uploadLimit, oldestEventMs: 0, eventCount: 0}
+        return {used: 0, limit: uploadLimit, oldestEventMs: 0, nextExpiryInMs: 0, eventCount: 0}
     )
     object data = result.data.assert(object)
     array events = data.events.assert(array)
@@ -653,7 +654,7 @@ def quotaDetails(string username) object (
             msUntilExpiry = 0
         )
     )
-    return {used: total, limit: uploadLimit, oldestEventMs: msUntilExpiry, eventCount: count}
+    return {used: total, limit: uploadLimit, oldestEventMs: oldest, nextExpiryInMs: msUntilExpiry, eventCount: count}
 )
 
 def inspectProjectJson(string path) object (
