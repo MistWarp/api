@@ -516,10 +516,10 @@ def addToLibrary(string userLower, string projectId) boolean (
     return true
 )
 
-def bumpProjectSaves(string projectId, number delta) (
+def bumpProjectSaves(string projectId, number delta) number (
     auto res = loadProject(projectId)
     if !res.ok (
-        return
+        return 0
     )
     object project = res.project.assert(object)
     number current = 0
@@ -532,6 +532,7 @@ def bumpProjectSaves(string projectId, number delta) (
     )
     project.saves = next
     saveProject(project)
+    return next
 )
 
 def handleSaveProject(*serve.Context c) (
@@ -546,11 +547,12 @@ def handleSaveProject(*serve.Context c) (
         return
     )
     boolean added = addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
+    number saves = projectSaves(project)
     if added (
-        bumpProjectSaves(project.id.toStr(), 1)
+        saves = bumpProjectSaves(project.id.toStr(), 1)
         addActivity(c.getString("username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
     )
-    c.json(200, {ok: true, saved: true})
+    c.json(200, {ok: true, saved: true, saves: saves})
 )
 
 def handleUnsaveProject(*serve.Context c) (
@@ -562,15 +564,20 @@ def handleUnsaveProject(*serve.Context c) (
     )
     string pid = c.param("id")
     boolean had = lib.contains(pid)
+    number saves = 0
+    auto result = loadProject(pid)
+    if result.ok (
+        saves = projectSaves(result.project.assert(object))
+    )
     if had (
         profile.library = removeString(lib, pid)
         if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
             profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), pid)
         )
         saveProfile(profile)
-        bumpProjectSaves(pid, -1)
+        saves = bumpProjectSaves(pid, -1)
     )
-    c.json(200, {ok: true, saved: false})
+    c.json(200, {ok: true, saved: false, saves: saves})
 )
 
 def addPurchaseRecord(string userLower, object entry) (

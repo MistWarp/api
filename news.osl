@@ -105,6 +105,30 @@ def toggleReactionMap(object reactions, string username, string reactionType) ob
     return reactions
 )
 
+def reactionSummary(object reactions, string username) object (
+    array hearts = []
+    if reactions.contains("heart") and reactions.heart != null (
+        hearts = reactions.heart.assert(array)
+    )
+    array brokenHearts = []
+    if reactions.contains("brokenheart") and reactions.brokenheart != null (
+        brokenHearts = reactions.brokenheart.assert(array)
+    )
+    string viewer = normalizeUsername(username)
+    string myReaction = ""
+    if stringArrayContainsUser(hearts, viewer) (
+        myReaction = "heart"
+    )
+    if stringArrayContainsUser(brokenHearts, viewer) (
+        myReaction = "brokenheart"
+    )
+    return {
+        counts: {heart: hearts.len, brokenheart: brokenHearts.len},
+        myReaction: myReaction,
+        users: {heart: hearts, brokenheart: brokenHearts}
+    }
+)
+
 def isValidReaction(string reactionType) boolean (
     return reactionType == "heart" or reactionType == "brokenheart"
 )
@@ -113,8 +137,23 @@ def isValidNewsCategory(string category) boolean (
     return category == "update" or category == "release" or category == "event" or category == "poll" or category == "general"
 )
 
-def newsResponse(object item, string username) object (
+def newsResponse(object item, string username, boolean includeReactionUsers) object (
     object response = item
+    object reactions = {}
+    if item.contains("reactions") and item.reactions != null (
+        reactions = item.reactions.assert(object)
+    )
+    object summary = reactionSummary(reactions, username)
+    response.reactionCounts = summary.counts
+    response.myReaction = summary.myReaction
+    if includeReactionUsers (
+        response.reactionUsers = summary.users
+    ) else if response.contains("reactionUsers") (
+        response.delete("reactionUsers")
+    )
+    if response.contains("reactions") (
+        response.delete("reactions")
+    )
     if item.contains("poll") and item.poll != null (
         object poll = item.poll.assert(object)
         array options = poll.options.assert(array)
@@ -138,7 +177,7 @@ def newsResponse(object item, string username) object (
 def handleGetNews(*serve.Context c) (
     array items = loadNews()
     for i items.len (
-        items[i] = newsResponse(items[i].assert(object), c.getString("username"))
+        items[i] = newsResponse(items[i].assert(object), c.getString("username"), c.getBool("isAdmin"))
     )
     c.json(200, {ok: true, news: items})
 )
@@ -213,7 +252,7 @@ def handleCreateNews(*serve.Context c) (
             addNotification(f.replace(".json", ""), item.author.toStr(), "news", {newsId: item.id, title: item.title})
         )
     )
-    c.json(201, {ok: true, item: item})
+    c.json(201, {ok: true, item: newsResponse(item, c.getString("username"), c.getBool("isAdmin"))})
 )
 
 def handleDeleteNews(*serve.Context c) (
@@ -241,6 +280,7 @@ def handleReactNews(*serve.Context c) (
     string username = normalizeUsername(c.getString("username"))
     array items = loadNews()
     boolean found = false
+    object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
     for i items.len (
         object item = items[i]
         if item.id.toStr() == id (
@@ -249,6 +289,7 @@ def handleReactNews(*serve.Context c) (
                 reactions = item.reactions.assert(object)
             )
             item.reactions = toggleReactionMap(reactions, username, reactionType)
+            summary = reactionSummary(item.reactions.assert(object), username)
             found = true
         )
     )
@@ -257,7 +298,7 @@ def handleReactNews(*serve.Context c) (
         return
     )
     saveNews(items)
-    c.json(200, {ok: true})
+    c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
 )
 
 def handleVoteNewsPoll(*serve.Context c) (

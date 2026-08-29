@@ -236,6 +236,7 @@ def projectResponse(object project, *serve.Context c) object (
         locked: locked,
         bought: bought,
         saved: isInLibrary(viewer, project.id.toStr()),
+        saveCount: projectSaves(project),
         myPlaytimeMs: myPlaytimeMs,
         myLastPlayed: myLastPlayed,
         hasContent: hasContent,
