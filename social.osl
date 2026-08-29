@@ -201,24 +201,23 @@ def userPlaytimeLibrary(string name, *serve.Context c) array (
         hiddenProjects = profile.hiddenLibraryProjects.assert(array)
     )
     boolean ownsProfile = isViewerOwner(c, name)
-    array records = userPlaytimeRecords(name)
     array library = []
-    for i records.len (
-        object record = records[i].assert(object)
-        string projectId = record.projectId.toStr()
+    for i savedProjects.len (
+        string projectId = savedProjects[i].toStr()
         object project = projectSearchDocs.findById(projectId)
         boolean libraryPublic = !hiddenProjects.contains(projectId)
-        boolean include = savedProjects.contains(projectId) and libraryPublic and !project.isEmpty() and projectVisibility(project) == "public"
+        boolean include = libraryPublic and !project.isEmpty() and projectVisibility(project) == "public"
         if !include and !project.isEmpty() (
-            include = savedProjects.contains(projectId) and ownsProfile
+            include = ownsProfile
         )
         if include (
-            project.duration = record.duration
-            project.lastPlayed = record.updated
+            project.duration = projectPlaytime(projectId, name)
+            project.lastPlayed = projectLastPlayed(projectId, name)
             project.libraryPublic = libraryPublic
             library.append(project)
         )
     )
+    library.sortBy("duration", "descending")
     return library
 )
 
@@ -601,7 +600,7 @@ def handleGetMyPurchases(*serve.Context c) (
 
 def handleGetMyLibrary(*serve.Context c) (
     object profile = loadProfile(normalizeUsername(c.getString("username")))
-    array playtime = userPlaytimeRecords(profile.username.toStr())
+    string username = profile.username.toStr()
     array ids = []
     if profile.contains("library") and profile.library != null (
         ids = profile.library.assert(array)
@@ -622,15 +621,8 @@ def handleGetMyLibrary(*serve.Context c) (
                 validIds.append(id)
                 object entry = indexEntryFromProject(loaded.project.assert(object))
                 entry.libraryPublic = !hiddenIds.contains(id)
-                entry.duration = 0
-                entry.lastPlayed = 0
-                for j playtime.len (
-                    object record = playtime[j].assert(object)
-                    if record.projectId.toStr() == id (
-                        entry.duration = (record.duration ?? 0).toNum()
-                        entry.lastPlayed = (record.updated ?? 0).toNum()
-                    )
-                )
+                entry.duration = projectPlaytime(id, username)
+                entry.lastPlayed = projectLastPlayed(id, username)
                 entries.append(entry)
             )
         )

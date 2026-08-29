@@ -193,9 +193,9 @@ def validPreviewKey(string projectId, string key) boolean (
     return preview.expiresAt.toNum() > timestamp
 )
 
-def projectPlaytime(string projectId, string username) number (
+def projectPlaytimeRecord(string projectId, string username) object (
     if username == "" (
-        return 0
+        return {}
     )
     string identityKey = userIdForUsername(username)
     if identityKey == "" (
@@ -205,10 +205,17 @@ def projectPlaytime(string projectId, string username) number (
     if entry.isEmpty() == true and identityKey != normalizeUsername(username) (
         entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
     )
-    if entry.isEmpty() == true (
-        return 0
-    )
-    return entry.duration.toNum()
+    return entry
+)
+
+def projectPlaytime(string projectId, string username) number (
+    object entry = projectPlaytimeRecord(projectId, username)
+    return entry.isEmpty() == true ? 0 (entry.duration ?? 0).toNum()
+)
+
+def projectLastPlayed(string projectId, string username) number (
+    object entry = projectPlaytimeRecord(projectId, username)
+    return entry.isEmpty() == true ? 0 (entry.updated ?? 0).toNum()
 )
 
 def projectTotalPlaytime(string projectId) number (
