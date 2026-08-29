@@ -173,7 +173,24 @@ def editComment(string key, string cid, string requester, string content) object
     return {ok: true, comment: target}
 )
 
+def commentResponse(object comment, string username) object (
+    object reactions = {}
+    if comment.contains("reactions") and comment.reactions != null (
+        reactions = comment.reactions.assert(object)
+    )
+    object summary = reactionSummary(reactions, username)
+    comment.reactionCounts = summary.counts
+    comment.myReaction = summary.myReaction
+    if comment.contains("reactions") (
+        comment.delete("reactions")
+    )
+    return comment
+)
+
 def commentPage(array comments, *serve.Context c) object (
+    for i comments.len (
+        comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+    )
     array roots = []
     for i comments.len (
         object comment = comments[i].assert(object)
@@ -354,6 +371,7 @@ def handleEditProjectComment(*serve.Context c) (
         c.json(edited.status.toInt(), {ok: false, error: edited.error})
         return
     )
+    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
     c.json(200, edited)
 )
 
@@ -447,6 +465,7 @@ def handleEditProfileComment(*serve.Context c) (
         c.json(edited.status.toInt(), {ok: false, error: edited.error})
         return
     )
+    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
     c.json(200, edited)
 )
 
@@ -463,6 +482,7 @@ def reactToComment(*serve.Context c, string key) (
     sync.lock(lockName)
     array comments = loadComments(key)
     boolean found = false
+    object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
     for i comments.len (
         object comment = comments[i]
         if comment.id.toStr() == cid (
@@ -471,6 +491,7 @@ def reactToComment(*serve.Context c, string key) (
                 reactions = comment.reactions.assert(object)
             )
             comment.reactions = toggleReactionMap(reactions, username, reactionType)
+            summary = reactionSummary(comment.reactions.assert(object), username)
             comments[i] = comment
             found = true
         )
@@ -486,7 +507,7 @@ def reactToComment(*serve.Context c, string key) (
         c.internalError("could not save reaction")
         return
     )
-    c.json(200, {ok: true})
+    c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
 )
 
 def handleReactProjectComment(*serve.Context c) (
