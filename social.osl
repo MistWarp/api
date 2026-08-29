@@ -112,6 +112,18 @@ def userPlaytimeRecords(string name) array (
                 records.append(record)
             )
         )
+        array legacyIdRecords = playtimeDocs.where("_id", db.contains, ":" ++ userId).all()
+        for i legacyIdRecords.len (
+            object record = legacyIdRecords[i].assert(object)
+            string recordId = record["_id"].toStr()
+            if recordId.endsWith(":" ++ userId) and !seen.contains(recordId) (
+                record.userId = userId
+                record.username = name
+                putDocument(playtimeDocs, recordId, record)
+                seen[recordId] = true
+                records.append(record)
+            )
+        )
     )
     array nameRecords = playtimeDocs.where("username", db.equal, name).all()
     for i nameRecords.len (
@@ -134,31 +146,45 @@ def userPlaytimeRecords(string name) array (
             )
         )
     )
-    object byProject = {}
+    array legacyNameRecords = playtimeDocs.where("_id", db.contains, ":" ++ normalized).all()
+    for i legacyNameRecords.len (
+        object record = legacyNameRecords[i].assert(object)
+        string recordId = record["_id"].toStr()
+        if recordId.endsWith(":" ++ normalized) and !seen.contains(recordId) (
+            record.username = name
+            if userId != "" (
+                record.userId = userId
+            )
+            putDocument(playtimeDocs, recordId, record)
+            seen[recordId] = true
+            records.append(record)
+        )
+    )
+    array merged = []
     for i records.len (
         object record = records[i].assert(object)
         string projectId = (record.projectId ?? "").toStr()
         if projectId != "" (
             number duration = (record.duration ?? 0).toNum()
             number updated = (record.updated ?? 0).toNum()
-            if byProject.contains(projectId) (
-                object existing = byProject[projectId].assert(object)
-                existing.duration = (existing.duration ?? 0).toNum() + duration
-                if updated > (existing.updated ?? 0).toNum() (
-                    existing.updated = updated
+            boolean combined = false
+            for j merged.len (
+                object existing = merged[j].assert(object)
+                if existing.projectId.toStr() == projectId (
+                    existing.duration = (existing.duration ?? 0).toNum() + duration
+                    if updated > (existing.updated ?? 0).toNum() (
+                        existing.updated = updated
+                    )
+                    merged[j] = existing
+                    combined = true
                 )
-                byProject[projectId] = existing
-            ) else (
+            )
+            if !combined (
                 record.duration = duration
                 record.updated = updated
-                byProject[projectId] = record
+                merged.append(record)
             )
         )
-    )
-    array merged = []
-    array projectIds = byProject.getKeys().toArray()
-    for i projectIds.len (
-        merged.append(byProject[projectIds[i].toStr()])
     )
     merged.sortBy("duration", "descending")
     return merged
@@ -170,40 +196,21 @@ def userPlaytimeLibrary(string name, *serve.Context c) array (
     for i records.len (
         object record = records[i].assert(object)
         object project = projectSearchDocs.findById(record.projectId.toStr())
-        if project.isEmpty() == false (
-            if projectVisibility(project) == "public" or isViewerOwner(c, name) (
-                object entry = project
-                entry.duration = record.duration
-                entry.lastPlayed = record.updated
-                library.append(entry)
-            )
+        boolean include = !project.isEmpty() and projectVisibility(project) == "public"
+        if !include and !project.isEmpty() (
+            include = isViewerOwner(c, name)
+        )
+        if include (
+            project.duration = record.duration
+            project.lastPlayed = record.updated
+            library.append(project)
         )
     )
     return library
 )
 
 def mostPlayedProjectActivity(string name, *serve.Context c, number limit) array (
-    string userId = userIdForUsername(name)
-    array records = []
-    if userId != "" (
-        records = playtimeDocs.where("userId", db.equal, userId).sort("duration", db.desc).limit(limit * 3).all()
-    )
-    if records.len == 0 (
-        records = playtimeDocs.where("username", db.equal, name).sort("duration", db.desc).limit(limit * 3).all()
-    )
-    array activity = []
-    for i records.len (
-        if activity.len < limit (
-            object record = records[i].assert(object)
-            object project = projectSearchDocs.findById((record.projectId ?? "").toStr())
-            if project.isEmpty() == false and projectVisibility(project) == "public" (
-                project.duration = (record.duration ?? 0).toNum()
-                project.lastPlayed = (record.updated ?? 0).toNum()
-                activity.append(project)
-            )
-        )
-    )
-    return activity
+    return paginate(userPlaytimeLibrary(name, c), 0, limit)
 )
 
 def handleGetUser(*serve.Context c) (
