@@ -205,11 +205,11 @@ def projectResponse(object project, *serve.Context c) object (
     number myPlaytimeMs = 0
     number myLastPlayed = 0
     if c.getBool("authenticated") (
+        myPlaytimeMs = projectPlaytime(project.id.toStr(), c.getString("username"))
         array playtime = userPlaytimeRecords(c.getString("username"))
         for i playtime.len (
             object record = playtime[i].assert(object)
             if record.projectId.toStr() == project.id.toStr() (
-                myPlaytimeMs = (record.duration ?? 0).toNum()
                 myLastPlayed = (record.updated ?? 0).toNum()
             )
         )
