@@ -206,6 +206,28 @@ def userPlaytimeLibrary(string name, *serve.Context c) array (
             library.append(project)
         )
     )
+    if library.len == 0 (
+        string identityKey = userIdForUsername(name)
+        if identityKey == "" (
+            identityKey = normalizeUsername(name)
+        )
+        array publicProjects = projectSearchDocs.where("shared", db.equal, true).all()
+        for i publicProjects.len (
+            object project = publicProjects[i].assert(object)
+            if projectVisibility(project) == "public" (
+                object record = playtimeDocs.findById(project.id.toStr() ++ ":" ++ identityKey)
+                if record.isEmpty() and identityKey != normalizeUsername(name) (
+                    record = playtimeDocs.findById(project.id.toStr() ++ ":" ++ normalizeUsername(name))
+                )
+                if !record.isEmpty() and (record.duration ?? 0).toNum() > 0 (
+                    project.duration = record.duration.toNum()
+                    project.lastPlayed = (record.updated ?? 0).toNum()
+                    library.append(project)
+                )
+            )
+        )
+        library.sortBy("duration", "descending")
+    )
     return library
 )
 
