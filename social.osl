@@ -98,33 +98,87 @@ def isViewerOwner(*serve.Context c, string name) boolean (
     return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
 )
 
-def recentProjectActivity(string name, number limit) array (
+def userPlaytimeRecords(string name) array (
     string userId = userIdForUsername(name)
     array records = []
+    object seen = {}
     if userId != "" (
-        records = playtimeDocs.where("userId", db.equal, userId).sort("updated", db.desc).limit(limit * 3).all()
-    )
-    if records.len == 0 (
-        records = playtimeDocs.where("username", db.equal, name).sort("updated", db.desc).limit(limit * 3).all()
-    )
-    array activity = []
-    for i records.len (
-        if activity.len < limit (
-            object record = records[i].assert(object)
-            object project = projectSearchDocs.findById(record.projectId.toStr())
-            if project.isEmpty() == false and projectVisibility(project) == "public" (
-                activity.append({
-                    projectId: project.id,
-                    title: project.title,
-                    owner: project.owner,
-                    thumbUrl: project.thumbUrl,
-                    duration: record.duration,
-                    lastPlayed: record.updated
-                })
+        array idRecords = playtimeDocs.where("userId", db.equal, userId).all()
+        for i idRecords.len (
+            object record = idRecords[i].assert(object)
+            string recordId = record["_id"].toStr()
+            if !seen.contains(recordId) (
+                seen[recordId] = true
+                records.append(record)
             )
         )
     )
-    return activity
+    array nameRecords = playtimeDocs.where("username", db.equal, name).all()
+    for i nameRecords.len (
+        object record = nameRecords[i].assert(object)
+        string recordId = record["_id"].toStr()
+        if !seen.contains(recordId) (
+            seen[recordId] = true
+            records.append(record)
+        )
+    )
+    string normalized = normalizeUsername(name)
+    if normalized != name (
+        array normalizedRecords = playtimeDocs.where("username", db.equal, normalized).all()
+        for i normalizedRecords.len (
+            object record = normalizedRecords[i].assert(object)
+            string recordId = record["_id"].toStr()
+            if !seen.contains(recordId) (
+                seen[recordId] = true
+                records.append(record)
+            )
+        )
+    )
+    object byProject = {}
+    for i records.len (
+        object record = records[i].assert(object)
+        string projectId = record.projectId.toStr()
+        if byProject.contains(projectId) (
+            object existing = byProject[projectId].assert(object)
+            existing.duration = existing.duration.toNum() + record.duration.toNum()
+            if record.updated.toNum() > existing.updated.toNum() (
+                existing.updated = record.updated
+            )
+            byProject[projectId] = existing
+        ) else (
+            byProject[projectId] = record
+        )
+    )
+    array merged = []
+    array projectIds = byProject.getKeys().toArray()
+    for i projectIds.len (
+        merged.append(byProject[projectIds[i].toStr()])
+    )
+    merged.sortBy("duration", "descending")
+    return merged
+)
+
+def userPlaytimeLibrary(string name, *serve.Context c) array (
+    array records = userPlaytimeRecords(name)
+    array library = []
+    for i records.len (
+        object record = records[i].assert(object)
+        auto loaded = loadProject(record.projectId.toStr())
+        if loaded.ok and canViewProject(loaded.project.assert(object), c) (
+            object project = loaded.project.assert(object)
+            if projectVisibility(project) == "public" or isViewerOwner(c, name) (
+                object entry = indexEntryFromProject(project)
+                entry.duration = record.duration
+                entry.lastPlayed = record.updated
+                library.append(entry)
+            )
+        )
+    )
+    return library
+)
+
+def mostPlayedProjectActivity(string name, *serve.Context c, number limit) array (
+    return paginate(userPlaytimeLibrary(name, c), 0, limit)
 )
 
 def handleGetUser(*serve.Context c) (
@@ -169,7 +223,7 @@ def handleGetUser(*serve.Context c) (
     boolean ownsProfile = isViewerOwner(c, name)
     array recentActivity = []
     if recentActivityVisible or ownsProfile (
-        recentActivity = recentProjectActivity(profile.username.toStr(), 6)
+        recentActivity = mostPlayedProjectActivity(profile.username.toStr(), c, 6)
     )
     c.json(200, {
         ok: true,
@@ -188,6 +242,28 @@ def handleGetUser(*serve.Context c) (
         projects: projects,
         projectTotal: projectTotal,
         projectOffset: projectLimit
+    })
+)
+
+def handleGetUserPlaytimeLibrary(*serve.Context c) (
+    string name = c.param("name")
+    object profile = loadProfile(name)
+    boolean visible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+    boolean ownsProfile = isViewerOwner(c, name)
+    if !visible and !ownsProfile (
+        c.json(200, {ok: true, visible: false, projects: [], total: 0, nextOffset: 0})
+        return
+    )
+    array entries = userPlaytimeLibrary(profile.username.toStr(), c)
+    number total = entries.len
+    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+    number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+    c.json(200, {
+        ok: true,
+        visible: visible,
+        projects: paginate(entries, offset, limit),
+        total: total,
+        nextOffset: clampNumber(offset + limit, 0, total)
     })
 )
 

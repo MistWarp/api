@@ -746,11 +746,7 @@ def challengeProjects(object space, *serve.Context c) array (
 def spaceTotalPlaytime(array ids) number (
     number total = 0
     for i ids.len (
-        array records = playtimeDocs.where("projectId", db.equal, ids[i].toStr()).all()
-        for j records.len (
-            object record = records[j].assert(object)
-            total = total + record.duration.toNum()
-        )
+        total = total + projectTotalPlaytime(ids[i].toStr())
     )
     return total
 )
@@ -803,7 +799,7 @@ def spaceResponse(object space, *serve.Context c) object (
     response.brokenHearts = []
     response.curatorInvites = []
     response.thumbnailUrl = spaceThumbnailUrl(space)
-    if space.kind.toStr() == "studio" (
+    if space.kind.toStr() != "challenge" (
         response.totalPlaytimeMs = spaceTotalPlaytime(ids)
     )
     if space.kind.toStr() == "challenge" (
@@ -877,6 +873,8 @@ def spaceListResponse(object space, *serve.Context c) object (
     }
     if space.kind.toStr() == "challenge" (
         response.participantCount = challengeArray(space, "participants").len
+    ) else (
+        response.totalPlaytimeMs = spaceTotalPlaytime(ids)
     )
     return response
 )

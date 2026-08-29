@@ -379,6 +379,7 @@ api.POST("/projects/:id/pulls/:index/merge", requireAuth, handleMergePull)
 
 api.GET("/search/users", handleSearchUsers)
 api.GET("/users/:name", handleGetUser)
+api.GET("/users/:name/library", handleGetUserPlaytimeLibrary)
 api.GET("/users/:name/reviews", handleListUserReviews)
 api.PUT("/me/profile", requireAuth, handleUpdateProfile)
 api.POST("/users/:name/follow", requireAuth, handleFollowUser)
