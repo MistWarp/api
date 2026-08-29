@@ -1,0 +1,6 @@
+def gameDataPlayAccessAllowed(boolean canView, number price, boolean hasPaidAccess) boolean (
+    if !canView (
+        return false
+    )
+    return price <= 0 or hasPaidAccess
+)

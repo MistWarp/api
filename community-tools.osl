@@ -1867,7 +1867,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
+    object created = createComment(spaceCommentKey(space["_id"].toStr()), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return
@@ -2138,7 +2138,11 @@ def handleCreateContribution(*serve.Context c) (
     if body.contains("body") (
         description = body.body.toStr()
     )
-    object created = createNativePull(c, parent, remix, title, description, "")
+    string bountyId = ""
+    if body.contains("bountyId") and body.bountyId != null (
+        bountyId = body.bountyId.toStr().strip()
+    )
+    object created = createNativePull(c, parent, remix, title, description, bountyId)
     if !created.ok (
         c.json(created.status.toInt(), {ok: false, error: created.error})
         return
@@ -2639,7 +2643,7 @@ def handleCreateIdeaComment(*serve.Context c) (
     if body.contains("parent") and body.parent != null (
         parentId = body.parent.toStr()
     )
-    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
+    object created = createComment("roadmap-" ++ idea["_id"].toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return

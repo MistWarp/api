@@ -146,6 +146,7 @@ import "./middleware.osl"
 import "./perks.osl"
 import "./groups.osl"
 import "./projects.osl"
+import "./game-data-access.osl"
 import "./game-data.osl"
 import "./game-realtime.osl"
 import "./extensions.osl"
@@ -363,6 +364,7 @@ api.PUT("/projects/:id/reviews/me", requireAuth, requireGoodStanding, handleSave
 api.DELETE("/projects/:id/reviews/me", requireAuth, handleDeleteProjectReview)
 
 api.GET("/projects/:id/comments", handleGetProjectComments)
+api.POST("/projects/:id/comments/donation/intent", requireAuth, requireGoodStanding, serve.rateLimit(30, 60), handleProjectCommentDonationIntent)
 api.POST("/projects/:id/comments", requireAuth, requireGoodStanding, serve.rateLimit(30, 60), handleCreateProjectComment)
 api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
 api.PUT("/projects/:id/comments/:cid", requireAuth, handleEditProjectComment)

@@ -1,4 +1,4 @@
-def createComment(string key, string author, string authorId, string content, string parentId, string kind) object (
+def createComment(string key, string author, string authorId, string content, string parentId, string kind, number donationAmount, string donationPaymentId) object (
     string trimmed = content.strip()
     if trimmed == "" (
         return {ok: false, error: "comment is empty"}
@@ -16,8 +16,18 @@ def createComment(string key, string author, string authorId, string content, st
     )
     boolean hasJsonLines = fs.exists(commentsPath)
     array comments = []
-    if parentId != "" or !hasJsonLines (
+    if parentId != "" or donationPaymentId != "" or !hasJsonLines (
         comments = loadComments(key)
+    )
+
+    if donationPaymentId != "" (
+        for i comments.len (
+            object existing = comments[i]
+            if existing.contains("donationPaymentId") and existing.donationPaymentId.toStr() == donationPaymentId (
+                sync.unlock(lockName)
+                return {ok: true, comment: existing, parentAuthor: "", duplicate: true}
+            )
+        )
     )
 
     string parentAuthor = ""
@@ -45,6 +55,10 @@ def createComment(string key, string author, string authorId, string content, st
         parent: parentId,
         kind: kind
     }
+    if donationAmount > 0 and donationPaymentId != "" (
+        comment.donationAmount = donationAmount
+        comment.donationPaymentId = donationPaymentId
+    )
     boolean saved = false
     if hasJsonLines (
         saved = appendComment(key, comment)
@@ -184,6 +198,9 @@ def commentResponse(object comment, string username) object (
     if comment.contains("reactions") (
         comment.delete("reactions")
     )
+    if comment.contains("donationPaymentId") (
+        comment.delete("donationPaymentId")
+    )
     return comment
 )
 
@@ -198,7 +215,18 @@ def commentPage(array comments, *serve.Context c) object (
             roots.append(comment)
         )
     )
-    roots.sortBy("created", "descending")
+    if c.query("sort") == "donations" (
+        for i roots.len (
+            object root = roots[i].assert(object)
+            if !root.contains("donationAmount") or root.donationAmount == null (
+                root.donationAmount = 0
+                roots[i] = root
+            )
+        )
+        roots.sortBy("donationAmount", "descending")
+    ) else (
+        roots.sortBy("created", "descending")
+    )
     number totalRoots = roots.len
     number requestedLimit = c.queryInt("limit", 0)
     if requestedLimit <= 0 or c.queryBool("all", false) (
@@ -276,6 +304,65 @@ def handleGetProjectComments(*serve.Context c) (
     c.json(200, page)
 )
 
+def handleProjectCommentDonationIntent(*serve.Context c) (
+    if commerceServiceKey == "" (
+        c.json(503, {ok: false, error: "donations are not available right now"})
+        return
+    )
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+        c.forbidden("you cannot comment on this project")
+        return
+    )
+    if !canViewProject(project, c) (
+        c.notFound("project not found")
+        return
+    )
+    if !canInteractProject(project, c) (
+        c.json(403, {ok: false, error: "buy this project before donating with a comment"})
+        return
+    )
+    if project.contains("commentsOff") and project.commentsOff == true (
+        c.json(403, {ok: false, error: "comments are disabled on this project"})
+        return
+    )
+    string donor = normalizeUsername(c.getString("username"))
+    if donor == normalizeUsername(project.owner.toStr()) (
+        c.badRequest("you cannot donate to your own project")
+        return
+    )
+    object body = c.bodyJSON()
+    number amount = 0
+    if body.contains("amount") and body.amount != null (
+        amount = (body.amount.toNum() * 100).toInt() / 100
+    )
+    if amount < 0.01 or amount > 100000 (
+        c.badRequest("donation must be between 0.01 and 100000 credits")
+        return
+    )
+
+    string key = "mwdonate_" ++ randomString(16)
+    object store = prunePurchaseKeys(loadPurchaseKeys())
+    object keys = store.keys
+    keys[key] = {kind: "comment_donation", projectId: project.id.toStr(), buyer: donor, amount: amount, at: timestamp}
+    store.keys = keys
+    savePurchaseKeys(store)
+    c.json(200, {
+        ok: true,
+        key: key,
+        amount: amount,
+        projectId: project.id,
+        title: project.title,
+        recipient: project.owner,
+        splits: [{username: project.owner, basis_points: 10000}]
+    })
+)
+
 def handleCreateProjectComment(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok (
@@ -320,9 +407,68 @@ def handleCreateProjectComment(*serve.Context c) (
         )
     )
 
-    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind)
+    number donationAmount = 0
+    string donationPaymentId = ""
+    string donationKey = ""
+    if body.contains("donation") and body.donation != null (
+        if parentId != "" (
+            c.badRequest("donations can only be attached to top-level comments")
+            return
+        )
+        object donation = body.donation.assertElse(object, {})
+        if donation.contains("key") and donation.key != null (
+            donationKey = donation.key.toStr().strip()
+        )
+        if donation.contains("paymentId") and donation.paymentId != null (
+            donationPaymentId = donation.paymentId.toStr().strip()
+        )
+        if donationKey == "" or donationPaymentId == "" (
+            c.badRequest("missing donation confirmation")
+            return
+        )
+
+        array existingComments = loadComments("project-" ++ project.id.toStr())
+        for i existingComments.len (
+            object existingComment = existingComments[i].assert(object)
+            if existingComment.contains("donationPaymentId") and existingComment.donationPaymentId.toStr() == donationPaymentId (
+                c.json(200, {ok: true, comment: commentResponse(existingComment, c.getString("username")), duplicate: true})
+                return
+            )
+        )
+
+        object donationStore = loadPurchaseKeys()
+        object donationKeys = donationStore.keys
+        if !donationKeys.contains(donationKey) (
+            c.badRequest("this donation expired, start again")
+            return
+        )
+        object pendingDonation = donationKeys[donationKey].assert(object)
+        if !pendingDonation.contains("kind") or pendingDonation.kind.toStr() != "comment_donation" or pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
+            c.badRequest("this donation key does not match")
+            return
+        )
+        donationAmount = pendingDonation.amount.toNum()
+        if !verifyCommerceCommentDonation(donationPaymentId, c.getString("username"), project, donationAmount) (
+            c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
+            return
+        )
+    )
+
+    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
     if !created.ok (
         c.badRequest(created.error.toStr())
+        return
+    )
+    if donationKey != "" (
+        object donationStore = loadPurchaseKeys()
+        object donationKeys = donationStore.keys
+        donationKeys.delete(donationKey)
+        donationStore.keys = donationKeys
+        savePurchaseKeys(donationStore)
+    )
+    if created.contains("duplicate") and created.duplicate == true (
+        created.comment = commentResponse(created.comment.assert(object), c.getString("username"))
+        c.json(200, created)
         return
     )
     string commenter = c.getString("username")
@@ -332,9 +478,14 @@ def handleCreateProjectComment(*serve.Context c) (
         addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     )
     if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
-        addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+        if donationAmount > 0 (
+            addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount})
+        ) else (
+            addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+        )
     )
     notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+    created.comment = commentResponse(created.comment.assert(object), commenter)
     c.json(201, created)
 )
 
@@ -421,7 +572,7 @@ def handleCreateProfileComment(*serve.Context c) (
         parentId = body.parent.toStr()
     )
 
-    object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment")
+    object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
     if !created.ok (
         c.badRequest(created.error.toStr())
         return

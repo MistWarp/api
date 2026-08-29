@@ -1,0 +1,7 @@
+import "std:testing"
+import "./game-data-access.osl"
+
+testing.assert(gameDataPlayAccessAllowed(true, 0, false), "allows any viewer to play a free project")
+testing.assert(gameDataPlayAccessAllowed(true, 10, true), "allows a paid project after access is granted")
+testing.assert(!gameDataPlayAccessAllowed(true, 10, false), "rejects a paid project without access")
+testing.assert(!gameDataPlayAccessAllowed(false, 0, true), "rejects a user who cannot view the project")

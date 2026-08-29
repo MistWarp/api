@@ -100,6 +100,15 @@ def validMultiplayerRoom(string room) boolean (
     return room.len >= 1 and room.len <= 40 and regex.match("^[A-Za-z0-9_-]+$", room)
 )
 
+def canPlayProjectWithAccountData(object project, *serve.Context c) boolean (
+    number price = projectPrice(project)
+    return gameDataPlayAccessAllowed(
+        canViewProject(project, c),
+        price,
+        price <= 0 or canAccessPaidJson(project, c)
+    )
+)
+
 def handleCreateMultiplayerTicket(*serve.Context c) (
     if !multiplayerEnabled (
         c.json(503, {ok: false, error: "multiplayer is disabled"})
@@ -128,7 +137,7 @@ def handleCreateMultiplayerTicket(*serve.Context c) (
         c.forbidden("project editor access required")
         return
     )
-    if context == "play" and (!projectIsViewable(project) or (projectPrice(project) > 0 and !canAccessPaidJson(project, c))) (
+    if context == "play" and !canPlayProjectWithAccountData(project, c) (
         c.forbidden("project access required")
         return
     )
@@ -167,12 +176,8 @@ def handleCreateGameDataCapability(*serve.Context c) (
         c.forbidden("project editor access required")
         return
     )
-    if context == "play" and !projectIsViewable(project) (
-        c.forbidden("project is not playable")
-        return
-    )
-    if context == "play" and projectPrice(project) > 0 and !canAccessPaidJson(project, c) (
-        c.forbidden("purchase this project before using account saves")
+    if context == "play" and !canPlayProjectWithAccountData(project, c) (
+        c.forbidden("project access required")
         return
     )
 
