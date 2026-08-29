@@ -18,7 +18,6 @@ def ensureDirectories() boolean (
     result = result and fs.mkdirAll(trashDir)
     result = result and fs.mkdirAll(gameSavesDir)
     result = result and fs.mkdirAll(gameSaveUsageDir)
-    result = result and fs.mkdirAll(accountGameDataDir)
     result = result and fs.mkdirAll(gameEntitlementsDir)
     result = result and fs.mkdirAll(gameInventoryDir)
     return result

@@ -191,42 +191,33 @@ def userPlaytimeRecords(string name) array (
 )
 
 def userPlaytimeLibrary(string name, *serve.Context c) array (
+    object profile = loadProfile(name)
+    array savedProjects = []
+    if profile.contains("library") and profile.library != null (
+        savedProjects = profile.library.assert(array)
+    )
+    array hiddenProjects = []
+    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+        hiddenProjects = profile.hiddenLibraryProjects.assert(array)
+    )
+    boolean ownsProfile = isViewerOwner(c, name)
     array records = userPlaytimeRecords(name)
     array library = []
     for i records.len (
         object record = records[i].assert(object)
-        object project = projectSearchDocs.findById(record.projectId.toStr())
-        boolean include = !project.isEmpty() and projectVisibility(project) == "public"
+        string projectId = record.projectId.toStr()
+        object project = projectSearchDocs.findById(projectId)
+        boolean libraryPublic = !hiddenProjects.contains(projectId)
+        boolean include = savedProjects.contains(projectId) and libraryPublic and !project.isEmpty() and projectVisibility(project) == "public"
         if !include and !project.isEmpty() (
-            include = isViewerOwner(c, name)
+            include = savedProjects.contains(projectId) and ownsProfile
         )
         if include (
             project.duration = record.duration
             project.lastPlayed = record.updated
+            project.libraryPublic = libraryPublic
             library.append(project)
         )
-    )
-    if library.len == 0 (
-        string identityKey = userIdForUsername(name)
-        if identityKey == "" (
-            identityKey = normalizeUsername(name)
-        )
-        array publicProjects = projectSearchDocs.where("shared", db.equal, true).all()
-        for i publicProjects.len (
-            object project = publicProjects[i].assert(object)
-            if projectVisibility(project) == "public" (
-                object record = playtimeDocs.findById(project.id.toStr() ++ ":" ++ identityKey)
-                if record.isEmpty() and identityKey != normalizeUsername(name) (
-                    record = playtimeDocs.findById(project.id.toStr() ++ ":" ++ normalizeUsername(name))
-                )
-                if !record.isEmpty() and (record.duration ?? 0).toNum() > 0 (
-                    project.duration = record.duration.toNum()
-                    project.lastPlayed = (record.updated ?? 0).toNum()
-                    library.append(project)
-                )
-            )
-        )
-        library.sortBy("duration", "descending")
     )
     return library
 )
@@ -519,6 +510,9 @@ def addToLibrary(string userLower, string projectId) boolean (
     )
     lib.append(projectId)
     profile.library = lib
+    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+        profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), projectId)
+    )
     saveProfile(profile)
     return true
 )
@@ -571,6 +565,9 @@ def handleUnsaveProject(*serve.Context c) (
     boolean had = lib.contains(pid)
     if had (
         profile.library = removeString(lib, pid)
+        if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+            profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), pid)
+        )
         saveProfile(profile)
         bumpProjectSaves(pid, -1)
     )
@@ -610,6 +607,10 @@ def handleGetMyLibrary(*serve.Context c) (
     )
     array entries = []
     array validIds = []
+    array hiddenIds = []
+    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+        hiddenIds = profile.hiddenLibraryProjects.assert(array)
+    )
     object seen = {}
     for i ids.len (
         string id = ids[i].toStr()
@@ -618,7 +619,9 @@ def handleGetMyLibrary(*serve.Context c) (
             if loaded.ok and canViewProject(loaded.project.assert(object), c) (
                 seen[id] = true
                 validIds.append(id)
-                entries.append(indexEntryFromProject(loaded.project.assert(object)))
+                object entry = indexEntryFromProject(loaded.project.assert(object))
+                entry.libraryPublic = !hiddenIds.contains(id)
+                entries.append(entry)
             )
         )
     )
@@ -636,6 +639,38 @@ def handleGetMyLibrary(*serve.Context c) (
         total: total,
         nextOffset: clampNumber(offset + limit, 0, total)
     })
+)
+
+def handleSetLibraryProjectVisibility(*serve.Context c) (
+    string username = normalizeUsername(c.getString("username"))
+    object profile = loadProfile(username)
+    string projectId = c.param("project")
+    array library = []
+    if profile.contains("library") and profile.library != null (
+        library = profile.library.assert(array)
+    )
+    if !library.contains(projectId) (
+        c.notFound("project is not in your library")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("public") (
+        c.badRequest("public must be true or false")
+        return
+    )
+    boolean libraryPublic = body.public == true
+    array hidden = []
+    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+        hidden = profile.hiddenLibraryProjects.assert(array)
+    )
+    if libraryPublic (
+        hidden = removeString(hidden, projectId)
+    ) else if !hidden.contains(projectId) (
+        hidden.append(projectId)
+    )
+    profile.hiddenLibraryProjects = hidden
+    saveProfile(profile)
+    c.json(200, {ok: true, projectId: projectId, public: libraryPublic})
 )
 
 def handleGetActivity(*serve.Context c) (

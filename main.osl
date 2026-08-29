@@ -81,7 +81,7 @@ string safetyDir = "data/safety/"
 string trashDir = "data/trash/"
 string gameSavesDir = "data/game-saves/"
 string gameSaveUsageDir = "data/game-save-usage/"
-string accountGameDataDir = "data/account-game-data/"
+string legacyAccountGameDataDir = "data/account-game-data/"
 string gameEntitlementsDir = "data/game-entitlements/"
 string gameInventoryDir = "data/game-inventory/"
 
@@ -251,11 +251,11 @@ api.POST("/me/quota/reset", requireAuth, handleQuotaReset)
 api.POST("/me/quota/reset/confirm", requireAuth, handleQuotaResetConfirm)
 api.GET("/me/stats", requireAuth, handleGetMyStats)
 api.GET("/me/library", requireAuth, handleGetMyLibrary)
+api.PUT("/me/library/:project/visibility", requireAuth, handleSetLibraryProjectVisibility)
 api.GET("/me/trash", requireAuth, handleGetMyTrash)
 api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 api.GET("/me/settings", requireAuth, handleGetMySettings)
 api.PUT("/me/settings", requireAuth, handlePutMySettings)
-api.GET("/me/game-data/global", requireAuth, handleGetMyGlobalGameData)
 api.GET("/me/game-saves", requireAuth, handleListMyGameSaves)
 api.GET("/me/game-inventory", requireAuth, handleGetMyGameInventory)
 api.DELETE("/me/game-saves/:project", requireAuth, handleDeleteMyGameSave)
@@ -330,8 +330,6 @@ api.GET("/projects/:id/me/inventory", requireAuth, handleGetProjectInventory)
 api.POST("/projects/:id/me/inventory/grant", requireAuth, handleGrantProjectItem)
 api.GET("/projects/:id/me/save", requireAuth, handleGetMyProjectSave)
 api.PUT("/projects/:id/me/save", requireAuth, handlePutMyProjectSave)
-api.GET("/projects/:id/me/global-data", requireAuth, handleGetProjectGlobalGameData)
-api.PUT("/projects/:id/me/global-data", requireAuth, handlePutProjectGlobalGameData)
 api.GET("/projects/:id/card.svg", handleProjectCard)
 api.PUT("/projects/:id", requireAuth, handleUpdateProject)
 api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
