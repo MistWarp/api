@@ -1,5 +1,4 @@
 number gameSaveMaxBytes = 65536
-number globalGameDataMaxBytes = 16384
 number gameDataCapabilityTtlMs = 300000
 number multiplayerTicketTtlMs = 60000
 boolean multiplayerEnabled = false
@@ -62,10 +61,6 @@ def saveGameSaveUsage(string userId, number bytes) boolean (
         safeBytes = 0
     )
     return writeFile(gameSaveUsagePath(userId), {bytes: safeBytes})
-)
-
-def globalGameDataPath(string userId) string (
-    return accountGameDataDir ++ gameDataUserKey(userId) ++ ".json"
 )
 
 def emptyGameSave(string projectId, string userId, string context) object (
@@ -253,7 +248,7 @@ def validGameSaveRequestId(string requestId) boolean (
     return requestId.len >= 8 and requestId.len <= 100 and regex.match("^[A-Za-z0-9_-]+$", requestId)
 )
 
-def validAccountDataKeys(object value) boolean (
+def validGameSaveKeys(object value) boolean (
     array keys = value.getKeys().toArray()
     if keys.len > 128 (
         return false
@@ -278,7 +273,7 @@ def handlePutMyProjectSave(*serve.Context c) (
         c.badRequest("save value must be a JSON object")
         return
     )
-    if !validAccountDataKeys(value) (
+    if !validGameSaveKeys(value) (
         c.badRequest("save keys must be safe 1 to 64 character names")
         return
     )
@@ -341,74 +336,6 @@ def handlePutMyProjectSave(*serve.Context c) (
     )
     sync.unlock(lockName)
     c.json(200, {ok: true, save: gameSaveResponse(current)})
-)
-
-def loadGlobalGameData(string userId) object (
-    auto loaded = readFile(globalGameDataPath(userId))
-    if !loaded.ok (
-        return {revision: 0, value: {}, updatedAt: 0}
-    )
-    return loaded.data.assert(object)
-)
-
-def handleGetMyGlobalGameData(*serve.Context c) (
-    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId"))})
-)
-
-def handlePutProjectGlobalGameData(*serve.Context c) (
-    object access = loadGameDataProject(c)
-    if rejectGameDataCapability(c, access) (
-        return
-    )
-    object capability = access.capability.assert(object)
-    object project = access.project.assert(object)
-    if capability.context.toStr() != "editor" or !canEditProject(project, c) (
-        c.forbidden("account game data can only be changed while editing a project you own or collaborate on")
-        return
-    )
-    object body = c.bodyJSON()
-    object value = body.value.assertElse(object, {})
-    if !body.contains("value") or body.value == null (
-        c.badRequest("global game data must be a JSON object")
-        return
-    )
-    if !validAccountDataKeys(value) (
-        c.badRequest("global game data keys must be safe 1 to 64 character names")
-        return
-    )
-    if json.stringify(value).len > globalGameDataMaxBytes (
-        c.badRequest("global game data exceeds 16 KiB")
-        return
-    )
-    string userId = c.getString("userId")
-    string lockName = "global-game-data-" ++ gameDataUserKey(userId)
-    sync.lock(lockName)
-    object current = loadGlobalGameData(userId)
-    number revision = body.revision.toNum().toInt()
-    if revision != current.revision.toNum().toInt() (
-        sync.unlock(lockName)
-        c.json(409, {ok: false, error: "global data revision is stale", data: current})
-        return
-    )
-    object next = {revision: revision + 1, value: value, updatedAt: timestamp}
-    if !writeFile(globalGameDataPath(userId), next) (
-        sync.unlock(lockName)
-        c.internalError("failed to store global game data")
-        return
-    )
-    sync.unlock(lockName)
-    c.json(200, {ok: true, data: next})
-)
-
-def handleGetProjectGlobalGameData(*serve.Context c) (
-    object access = loadGameDataProject(c)
-    if rejectGameDataCapability(c, access) (
-        return
-    )
-    object capability = access.capability.assert(object)
-    object project = access.project.assert(object)
-    boolean readOnly = capability.context.toStr() != "editor" or !canEditProject(project, c)
-    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId")), readOnly: readOnly})
 )
 
 def handleListMyGameSaves(*serve.Context c) (
@@ -495,7 +422,7 @@ def collectGameDataForUser(string userId) object (
             )
         )
     )
-    return {global: loadGlobalGameData(userId), saves: saves, entitlements: entitlements, inventory: loadGameInventory(userId)}
+    return {saves: saves, entitlements: entitlements, inventory: loadGameInventory(userId)}
 )
 
 def purgeGameDataForProject(string projectId) (
@@ -547,7 +474,7 @@ def purgeGameDataForUser(string userId) (
             fs.remove(gameEntitlementsDir ++ projectId ++ "/" ++ filename)
         )
     )
-    fs.remove(globalGameDataPath(userId))
+    fs.remove(legacyAccountGameDataDir ++ gameDataUserKey(userId) ++ ".json")
     fs.remove(gameInventoryPath(userId))
     fs.remove(gameSaveUsagePath(userId))
 )
