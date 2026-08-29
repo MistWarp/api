@@ -302,6 +302,45 @@ def verifyCommerceProjectPayment(string paymentId, string buyer, object project,
     return true
 )
 
+def verifyCommerceCommentDonation(string paymentId, string donor, object project, number amount) boolean (
+    if commerceServiceKey == "" or paymentId == "" (
+        return false
+    )
+    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+    if !resp.success or resp.status.toInt() != 200 (
+        return false
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        return false
+    )
+    object payload = parsed.unwrap().assert(object)
+    if !payload.contains("payment") or payload.payment == null (
+        return false
+    )
+    object payment = payload.payment.assert(object)
+    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "comment_donation" (
+        return false
+    )
+    if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
+        return false
+    )
+    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(donor) (
+        return false
+    )
+    number paidAmount = payment.amount.toNum()
+    if paidAmount + 0.001 < amount or paidAmount - 0.001 > amount (
+        return false
+    )
+    array recipients = payment.recipients.assert(array)
+    if recipients.len != 1 (
+        return false
+    )
+    object recipient = recipients[1].assert(object)
+    return normalizeUsername(recipient.username.toStr()) == normalizeUsername(project.owner.toStr()) and recipient.basis_points.toNum().toInt() == 10000
+)
+
 def awardContributionBounty(string bountyId, string projectId, string recipient) boolean (
     if bountyId == "" or commerceServiceKey == "" (
         return false

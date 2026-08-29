@@ -2480,6 +2480,14 @@ def handleReactProject(*serve.Context c) (
     })
 )
 
+def snapshotIndexList(array values) array (
+    array snapshot = []
+    for i values.len (
+        snapshot.append(values[i])
+    )
+    return snapshot
+)
+
 def sharedIndexEntries() array (
     if sharedProjectsCache.has("projects") (
         return sharedProjectsCache.get("projects").assert(array)
@@ -2499,7 +2507,7 @@ def sharedIndexEntries() array (
 )
 
 def handleExplore(*serve.Context c) (
-    array entries = sharedIndexEntries()
+    array entries = snapshotIndexList(sharedIndexEntries())
 
     string q = c.query("q").toLower().strip()
     string tag = c.query("tag").toLower().strip()
@@ -2546,15 +2554,7 @@ def handleExplore(*serve.Context c) (
     ) else if sort == "undiscovered" (
         entries.sortBy("views", "ascending")
     ) else if sort == "trending" (
-        for i entries.len (
-            object entry = entries[i]
-            number weekViews = 0
-            if entry.contains("weekViews") and entry.weekViews != null (
-                weekViews = entry.weekViews.toNum()
-            )
-            entry.score = weekViews
-        )
-        entries.sortBy("score", "descending")
+        entries.sortBy("weekViews", "descending")
     ) else (
         entries.sortBy("sharedAt", "descending")
     )
