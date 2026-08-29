@@ -355,7 +355,17 @@ def handleGetMyGlobalGameData(*serve.Context c) (
     c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId"))})
 )
 
-def handlePutMyGlobalGameData(*serve.Context c) (
+def handlePutProjectGlobalGameData(*serve.Context c) (
+    object access = loadGameDataProject(c)
+    if rejectGameDataCapability(c, access) (
+        return
+    )
+    object capability = access.capability.assert(object)
+    object project = access.project.assert(object)
+    if capability.context.toStr() != "editor" or !canEditProject(project, c) (
+        c.forbidden("account game data can only be changed while editing a project you own or collaborate on")
+        return
+    )
     object body = c.bodyJSON()
     object value = body.value.assertElse(object, {})
     if !body.contains("value") or body.value == null (
@@ -395,7 +405,10 @@ def handleGetProjectGlobalGameData(*serve.Context c) (
     if rejectGameDataCapability(c, access) (
         return
     )
-    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId")), readOnly: true})
+    object capability = access.capability.assert(object)
+    object project = access.project.assert(object)
+    boolean readOnly = capability.context.toStr() != "editor" or !canEditProject(project, c)
+    c.json(200, {ok: true, data: loadGlobalGameData(c.getString("userId")), readOnly: readOnly})
 )
 
 def handleListMyGameSaves(*serve.Context c) (
