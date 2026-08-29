@@ -1,0 +1,124 @@
+def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead) string (
+    return raw("func() string { jsonFile, err := OSLos.Open(projectJsonPath); if err != nil { return \"\" }; jsonReader, err := gzip.NewReader(jsonFile); if err != nil { jsonFile.Close(); return \"\" }; projectJSON, err := OSLio.ReadAll(jsonReader); closeErr := jsonReader.Close(); jsonFile.Close(); if err != nil || closeErr != nil { return \"\" }; var sb3Buffer OSLbytes.Buffer; sb3Writer := OSLgozip.NewWriter(&sb3Buffer); addZipBytes := func(writer *OSLgozip.Writer, name string, data []byte) bool { header := &OSLgozip.FileHeader{Name: name, Method: OSLgozip.Deflate}; header.SetMode(0644); entry, createErr := writer.CreateHeader(header); if createErr != nil { return false }; _, writeErr := entry.Write(data); return writeErr == nil }; if !addZipBytes(sb3Writer, \"project.json\", projectJSON) { return \"\" }; assets, err := OSLos.ReadDir(assetsPath); if err != nil && !OSLos.IsNotExist(err) { return \"\" }; for _, asset := range assets { if asset.IsDir() { return \"\" }; data, readErr := OSLos.ReadFile(assetsPath + \"/\" + asset.Name()); if readErr != nil || !addZipBytes(sb3Writer, asset.Name(), data) { return \"\" } }; if sb3Writer.Close() != nil { return \"\" }; objectFiles := map[string][]byte{}; if parentArchivePath != \"\" { parentArchive, openErr := OSLgozip.OpenReader(parentArchivePath); if openErr != nil { return \"\" }; for _, item := range parentArchive.File { if !OSLstrings.HasPrefix(item.Name, \".git/objects/\") || item.FileInfo().IsDir() { continue }; source, itemErr := item.Open(); if itemErr != nil { parentArchive.Close(); return \"\" }; data, readErr := OSLio.ReadAll(source); source.Close(); if readErr != nil { parentArchive.Close(); return \"\" }; objectFiles[item.Name] = data }; parentArchive.Close() }; makeObject := func(kind string, data []byte) (string, []byte) { header := []byte(fmt.Sprintf(\"%s %d\\x00\", kind, len(data))); rawObject := append(header, data...); sum := sha1.Sum(rawObject); oid := hex.EncodeToString(sum[:]); var compressed OSLbytes.Buffer; compressor := zlib.NewWriter(&compressed); compressor.Write(rawObject); compressor.Close(); return oid, compressed.Bytes() }; blobOID, blobObject := makeObject(\"blob\", sb3Buffer.Bytes()); blobHash, err := hex.DecodeString(blobOID); if err != nil { return \"\" }; treeBody := append([]byte(\"100644 project.sb3\\x00\"), blobHash...); treeOID, treeObject := makeObject(\"tree\", treeBody); createdSeconds := int64(createdAt / 1000); if createdSeconds <= 0 { createdSeconds = time.Now().Unix() }; identity := fmt.Sprintf(\"MistWarp <%s@mistwarp.local> %d +0000\", OSLstrings.ReplaceAll(owner, \" \", \"-\"), createdSeconds); commitText := \"tree \" + treeOID + \"\\n\"; if parentHead != \"\" { commitText += \"parent \" + parentHead + \"\\n\" }; commitText += \"author \" + identity + \"\\ncommitter \" + identity + \"\\n\\nInitial version\\n\"; head, commitObject := makeObject(\"commit\", []byte(commitText)); objectFiles[\".git/objects/\" + blobOID[:2] + \"/\" + blobOID[2:]] = blobObject; objectFiles[\".git/objects/\" + treeOID[:2] + \"/\" + treeOID[2:]] = treeObject; objectFiles[\".git/objects/\" + head[:2] + \"/\" + head[2:]] = commitObject; parentsJSON := \"[]\"; if parentHead != \"\" { parentsJSON = fmt.Sprintf(\"[%q]\", parentHead) }; manifestJSON := []byte(fmt.Sprintf(\"{\\\"format\\\":\\\"mistwarp-project\\\",\\\"version\\\":1,\\\"createdWith\\\":\\\"MistWarp API\\\",\\\"projectId\\\":%q,\\\"remixParent\\\":null,\\\"baseCommit\\\":%s,\\\"branch\\\":\\\"main\\\",\\\"head\\\":%q,\\\"worktree\\\":false,\\\"baseHead\\\":null,\\\"delta\\\":false,\\\"commits\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g}],\\\"graph\\\":{\\\"branches\\\":[\\\"main\\\"],\\\"branchLogs\\\":[{\\\"branch\\\":\\\"main\\\",\\\"oids\\\":[%q]}],\\\"nodes\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g,\\\"parents\\\":%s,\\\"branches\\\":[\\\"main\\\"]}]}}\", projectId, func() string { if parentHead != \"\" { return fmt.Sprintf(\"%q\", parentHead) }; return \"null\" }(), head, head, owner, createdAt, head, head, owner, createdAt, parentsJSON)); output, err := OSLos.Create(outputPath); if err != nil { return \"\" }; writer := OSLgozip.NewWriter(output); ok := addZipBytes(writer, \"mwp.json\", manifestJSON) && addZipBytes(writer, \".git/HEAD\", []byte(\"ref: refs/heads/main\\n\")) && addZipBytes(writer, \".git/refs/heads/main\", []byte(head+\"\\n\")) && addZipBytes(writer, \".git/config\", []byte(\"[core]\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\")); for name, data := range objectFiles { if ok { ok = addZipBytes(writer, name, data) } }; writerErr := writer.Close(); outputErr := output.Close(); if !ok || writerErr != nil || outputErr != nil { OSLos.Remove(outputPath); return \"\" }; return head }()")
+)
+
+def projectHasStoredContent(object project) boolean (
+    boolean hasContent = project.lastUploadAt.toNum() > 0
+    hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
+    return hasContent and project.jsonKey.toStr() != ""
+)
+
+def ensureGeneratedProjectHistory(object project, object visiting) object (
+    if projectHasWorkspace(project) (
+        return {ok: true, project: project, generated: false}
+    )
+    if !projectHasStoredContent(project) (
+        return {ok: true, project: project, generated: false}
+    )
+    string id = project.id.toStr()
+    if visiting.contains(id) (
+        return {ok: false, error: "remix cycle"}
+    )
+    visiting[id] = true
+
+    object parent = {}
+    string parentPath = ""
+    string parentHead = ""
+    string parentId = project.remixParent.toStr()
+    if parentId != "" (
+        auto parentResult = loadProject(parentId)
+        if parentResult.ok (
+            object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting)
+            if ensuredParent.ok (
+                parent = ensuredParent.project.assert(object)
+                if projectHasWorkspace(parent) (
+                    parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
+                    if !copyProjectWorkspaceToPath(parent, parentPath) (
+                        parentPath = ""
+                    ) else (
+                        parentHead = projectGitHead(parent)
+                    )
+                )
+            )
+        )
+    )
+
+    string workId = id ++ "." ++ randomString(8)
+    string jsonPath = tmpDir ++ workId ++ ".json.gz"
+    string assetsPath = tmpDir ++ workId ++ ".assets"
+    string workspacePath = tmpDir ++ workId ++ ".mwp"
+    fs.mkdirAll(assetsPath)
+    if !copyStoredProjectJsonToPath(project, jsonPath) (
+        fs.remove(parentPath)
+        fs.remove(assetsPath)
+        return {ok: false, error: "could not read project JSON"}
+    )
+    array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
+    boolean assetsReady = true
+    for i assets.len (
+        string name = assets[i].toStr()
+        if !isValidMd5Ext(name) or !copyStorageKeyToPath(assetObjectKey(name), assetsPath ++ "/" ++ name) (
+            assetsReady = false
+        )
+    )
+    if !assetsReady (
+        fs.remove(parentPath)
+        fs.remove(jsonPath)
+        fs.remove(assetsPath)
+        return {ok: false, error: "could not read project assets"}
+    )
+
+    string head = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead)
+    fs.remove(parentPath)
+    fs.remove(jsonPath)
+    fs.remove(assetsPath)
+    if head == "" or !fs.exists(workspacePath) (
+        fs.remove(workspacePath)
+        return {ok: false, error: "could not generate history archive"}
+    )
+    byte[] workspace = fs.readFileBytes(workspacePath)
+    fs.remove(workspacePath)
+    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
+    if !r2Put(workspaceKey, workspace, "application/x-mistwarp-project") (
+        return {ok: false, error: "could not store generated history"}
+    )
+    project.workspaceKey = workspaceKey
+    project.workspaceLayers = [workspaceKey]
+    project.gitHead = head
+    project.gitBranch = "main"
+    project.gitCommits = [{sha: head, message: "Initial version", author: project.owner, date: project.created}]
+    array parents = parentHead == "" ? [] [parentHead]
+    project.gitGraph = {branches: ["main"], branchLogs: [{branch: "main", oids: [head]}], nodes: [{sha: head, message: "Initial version", author: project.owner, date: project.created, parents: parents, branches: ["main"]}]}
+    if parentHead != "" (
+        project.remixBaseCommit = parentHead
+    )
+    if !saveProject(project) (
+        removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+        return {ok: false, error: "could not save generated history"}
+    )
+    upsertIndexEntry(project)
+    return {ok: true, project: project, generated: true}
+)
+
+def generateMissingProjectHistories() object (
+    number generated = 0
+    number failed = 0
+    array files = fs.readDir(projectsDir).toArray()
+    for i files.len (
+        string name = files[i].toStr()
+        if name.endsWith(".json") (
+            auto result = loadProject(name.replace(".json", ""))
+            if result.ok (
+                object ensured = ensureGeneratedProjectHistory(result.project.assert(object), {})
+                if ensured.generated == true (
+                    generated = generated + 1
+                )
+                if !ensured.ok (
+                    failed = failed + 1
+                    log "WARNING: could not generate MistWarp history for " ++ name ++ ": " ++ ensured.error.toStr()
+                )
+            )
+        )
+    )
+    return {generated: generated, failed: failed}
+)
