@@ -211,6 +211,7 @@ def userPlaytimeLibrary(string name, *serve.Context c) array (
             include = ownsProfile
         )
         if include (
+            project.projectId = projectId
             project.duration = projectPlaytime(projectId, name)
             project.lastPlayed = projectLastPlayed(projectId, name)
             project.libraryPublic = libraryPublic
