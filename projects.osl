@@ -302,6 +302,7 @@ def projectResponse(object project, *serve.Context c) object (
             revenue: projectRevenue(project),
             buyers: trimTimedEntries(projectBuyers(project), analyticsDays),
             saves: projectSaves(project),
+            totalPlaytimeMs: projectTotalPlaytime(project.id.toStr()),
             viewHistory: trimDayHistory(viewHistory, analyticsDays),
             saleHistory: trimDayHistory(saleHistory, analyticsDays),
             historyDays: analyticsDays

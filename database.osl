@@ -210,3 +210,13 @@ def projectPlaytime(string projectId, string username) number (
     )
     return entry.duration.toNum()
 )
+
+def projectTotalPlaytime(string projectId) number (
+    number total = 0
+    array records = playtimeDocs.where("projectId", db.equal, projectId).all()
+    for i records.len (
+        object record = records[i].assert(object)
+        total = total + record.duration.toNum()
+    )
+    return total
+)
