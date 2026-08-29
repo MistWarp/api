@@ -601,6 +601,7 @@ def handleGetMyPurchases(*serve.Context c) (
 
 def handleGetMyLibrary(*serve.Context c) (
     object profile = loadProfile(normalizeUsername(c.getString("username")))
+    array playtime = userPlaytimeRecords(profile.username.toStr())
     array ids = []
     if profile.contains("library") and profile.library != null (
         ids = profile.library.assert(array)
@@ -621,6 +622,15 @@ def handleGetMyLibrary(*serve.Context c) (
                 validIds.append(id)
                 object entry = indexEntryFromProject(loaded.project.assert(object))
                 entry.libraryPublic = !hiddenIds.contains(id)
+                entry.duration = 0
+                entry.lastPlayed = 0
+                for j playtime.len (
+                    object record = playtime[j].assert(object)
+                    if record.projectId.toStr() == id (
+                        entry.duration = (record.duration ?? 0).toNum()
+                        entry.lastPlayed = (record.updated ?? 0).toNum()
+                    )
+                )
                 entries.append(entry)
             )
         )
