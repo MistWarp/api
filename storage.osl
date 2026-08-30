@@ -162,6 +162,7 @@ def indexEntryFromProject(object project) object (
         brokenHeartCount: broken.len,
         remixParent: project.remixParent,
         remixRoot: remixRoot,
+        contributionOnly: projectContributionOnlyFlag(project),
         shared: project.shared,
         visibility: projectVisibility(project),
         price: projectPrice(project),

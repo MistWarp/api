@@ -97,6 +97,20 @@ def ensureViewKey(object project) (
     )
 )
 
+def projectMustStayPrivate(object project) boolean (
+    if projectContributionOnlyFlag(project) (
+        return true
+    )
+    if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
+        auto parentResult = loadProject(project.remixParent.toStr())
+        if parentResult.ok (
+            object parent = parentResult.project.assert(object)
+            return remixIsContributionOnly(parent, projectPrice(parent))
+        )
+    )
+    return false
+)
+
 def projectVersionHistory(object project) object (
     string branch = "main"
     if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
@@ -246,6 +260,7 @@ def projectResponse(object project, *serve.Context c) object (
         canSeeInside: canSeeInsideProject(project, c),
         lastUploadAt: project.lastUploadAt,
         remixParent: project.remixParent,
+        contributionOnly: projectMustStayPrivate(project),
         scratchOrigin: project.scratchOrigin,
         views: project.views,
         loveCount: loves.len,
@@ -477,6 +492,7 @@ def handleCreateProject(*serve.Context c) (
     )
 
     string remixParent = ""
+    boolean contributionOnly = false
     if body.contains("remixParent") and body.remixParent != null (
         remixParent = body.remixParent.toStr()
         auto parentResult = loadProject(remixParent)
@@ -488,6 +504,8 @@ def handleCreateProject(*serve.Context c) (
             c.forbidden("this project cannot be remixed")
             return
         )
+        object remixParentProject = parentResult.project.assert(object)
+        contributionOnly = remixIsContributionOnly(remixParentProject, projectPrice(remixParentProject))
     )
 
     string scratchOrigin = ""
@@ -520,6 +538,7 @@ def handleCreateProject(*serve.Context c) (
         shared: false,
         lastUploadAt: 0,
         remixParent: remixParent,
+        contributionOnly: contributionOnly,
         remixShare: remixParent == "" ? 0 10,
         remixNotified: false,
         scratchOrigin: scratchOrigin,
@@ -2305,6 +2324,10 @@ def handlePublishProject(*serve.Context c) (
         c.forbidden("not your project")
         return
     )
+    if projectMustStayPrivate(project) (
+        c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
+        return
+    )
     if project.shared == true and projectVisibility(project) == "public" (
         c.json(200, {ok: true, project: projectResponse(project, c)})
         return
@@ -2752,6 +2775,7 @@ def handleRemixProject(*serve.Context c) (
         inheritedJson: true,
         storedJsonBytes: parent.contains("storedJsonBytes") ? parent.storedJsonBytes 0,
         remixParent: parent.id,
+        contributionOnly: remixIsContributionOnly(parent, projectPrice(parent)),
         remixRoot: parent.id,
         remixShare: 10,
         remixNotified: false,

@@ -1,0 +1,7 @@
+def projectContributionOnlyFlag(object project) boolean (
+    return project.contains("contributionOnly") and project.contributionOnly == true
+)
+
+def remixIsContributionOnly(object parent, number parentPrice) boolean (
+    return parentPrice > 0 or projectContributionOnlyFlag(parent)
+)

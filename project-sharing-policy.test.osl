@@ -1,0 +1,6 @@
+import "std:testing"
+import "./project-sharing-policy.osl"
+
+testing.assert(remixIsContributionOnly({}, 10), "paid project remixes are contribution-only")
+testing.assert(remixIsContributionOnly({contributionOnly: true}, 0), "the restriction follows later remixes")
+testing.assert(!remixIsContributionOnly({}, 0), "free project remixes can still be shared")
