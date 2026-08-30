@@ -13,6 +13,30 @@ def pullDocument(string targetId, string index) object (
     return pullDocs.findById(targetId ++ ":" ++ index)
 )
 
+def pullCommentKey(object pull) string (
+    return "pull-" ++ pull.targetProjectId.toStr() ++ "-" ++ pull.index.toStr()
+)
+
+def commitsAfter(array commits, string stopSha, number created) array (
+    array newer = []
+    boolean reachedStop = false
+    for i commits.len (
+        object commit = commits[i].assert(object)
+        if stopSha != "" and commit.sha.toStr() == stopSha (
+            reachedStop = true
+        ) else if !reachedStop (
+            boolean include = stopSha != ""
+            if !include and commit.contains("date") and commit.date != null (
+                include = commit.date.toNum() >= created
+            )
+            if include (
+                newer.append(commit)
+            )
+        )
+    )
+    return newer
+)
+
 def pullResponse(object pull) object (
     return {
         id: pull["_id"],
@@ -167,6 +191,113 @@ def handleGetPull(*serve.Context c) (
         return
     )
     c.json(200, {ok: true, pull: pullResponse(pull)})
+)
+
+def handleGetPullTimeline(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
+        c.notFound("pull request not found")
+        return
+    )
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !targetResult.ok or !sourceResult.ok or !canViewProject(targetResult.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object target = targetResult.project.assert(object)
+    object source = sourceResult.project.assert(object)
+    array comments = loadComments(pullCommentKey(pull))
+    for i comments.len (
+        comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+    )
+    array sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
+    array targetCommits = commitsAfter(projectVersionHistory(target).commits.assert(array), pull.targetHead.toStr(), pull.created.toNum())
+    c.json(200, {
+        ok: true,
+        comments: comments,
+        commits: sourceCommits,
+        targetCommits: targetCommits
+    })
+)
+
+def handleCreatePullComment(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
+        c.notFound("pull request not found")
+        return
+    )
+    auto result = loadProject(pull.targetProjectId.toStr())
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+        c.forbidden("you cannot comment on this pull request")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object created = createComment(pullCommentKey(pull), c.getString("username"), c.getString("userId"), body.content.toStr(), "", "comment", 0, "")
+    if !created.ok (
+        c.badRequest(created.error.toStr())
+        return
+    )
+    string commenter = c.getString("username")
+    object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id}
+    if normalizeUsername(pull.author.toStr()) != normalizeUsername(commenter) (
+        addNotification(pull.author.toStr(), commenter, "comment", notificationData)
+    )
+    if normalizeUsername(project.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(project.owner.toStr()) != normalizeUsername(pull.author.toStr()) (
+        addNotification(project.owner.toStr(), commenter, "comment", notificationData)
+    )
+    notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), pull.author.toStr()], notificationData)
+    created.comment = commentResponse(created.comment.assert(object), commenter)
+    c.json(201, created)
+)
+
+def handleDeletePullComment(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
+        c.notFound("pull request not found")
+        return
+    )
+    auto result = loadProject(pull.targetProjectId.toStr())
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin") == true)
+    if !deleted.ok (
+        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleEditPullComment(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true (
+        c.notFound("pull request not found")
+        return
+    )
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+    c.json(200, edited)
 )
 
 def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) boolean (
