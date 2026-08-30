@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	maxObjectBytes = 256 << 20
-	maxTreeDepth   = 64
-	maxTreeFiles   = 20_000
-	maxReachable   = 10_000
+	maxObjectBytes          = 256 << 20
+	maxTreeDepth            = 64
+	maxTreeFiles            = 20_000
+	maxReachable            = 10_000
+	maxInlineDiffFileBytes  = 1 << 20
+	maxInlineDiffTotalBytes = 8 << 20
 )
 
 type gitFile struct {
@@ -334,6 +336,67 @@ func (a archive) inspectCommit(sha string, commit gitCommit) string {
 	return compareCommitTrees(archive{objects: map[string]*zip.File{}}, "", gitCommit{}, a, sha, commit)
 }
 
+func textDiffPath(name string) bool {
+	lower := strings.ToLower(name)
+	base := lower
+	if slash := strings.LastIndexByte(base, '/'); slash >= 0 {
+		base = base[slash+1:]
+	}
+	if base == ".gitignore" || base == "readme" || strings.HasPrefix(base, "readme.") {
+		return true
+	}
+	for _, extension := range []string{
+		".fractch", ".json", ".txt", ".md", ".js", ".jsx", ".ts", ".tsx",
+		".css", ".html", ".xml", ".yaml", ".yml", ".osl", ".oip",
+	} {
+		if strings.HasSuffix(lower, extension) {
+			return true
+		}
+	}
+	return false
+}
+
+func inlineDiffContent(changes []map[string]any, baseArchive archive, parentFiles map[string]gitFile, headArchive archive, currentFiles map[string]gitFile) {
+	total := 0
+	for _, change := range changes {
+		name, _ := change["path"].(string)
+		if !textDiffPath(name) {
+			continue
+		}
+		before, hasBefore := parentFiles[name]
+		after, hasAfter := currentFiles[name]
+		if (hasBefore && before.Binary) || (hasAfter && after.Binary) {
+			continue
+		}
+		bytesNeeded := 0
+		if hasBefore {
+			bytesNeeded += before.Size
+		}
+		if hasAfter {
+			bytesNeeded += after.Size
+		}
+		if bytesNeeded > maxInlineDiffFileBytes || total+bytesNeeded > maxInlineDiffTotalBytes {
+			continue
+		}
+		if hasBefore {
+			kind, content, ok := baseArchive.readObject(before.OID)
+			if !ok || kind != "blob" {
+				continue
+			}
+			change["oldData"] = content
+		}
+		if hasAfter {
+			kind, content, ok := headArchive.readObject(after.OID)
+			if !ok || kind != "blob" {
+				delete(change, "oldData")
+				continue
+			}
+			change["newData"] = content
+		}
+		total += bytesNeeded
+	}
+}
+
 func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
 	parentFiles := make(map[string]gitFile)
 	parentTree := ""
@@ -382,6 +445,7 @@ func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommi
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[i]["path"].(string) < changes[j]["path"].(string)
 	})
+	inlineDiffContent(changes, baseArchive, parentFiles, headArchive, current)
 	return encode(map[string]any{
 		"ok": true, "sha": headSHA, "parent": baseSHA, "tree": headCommit.Tree, "parentTree": parentTree, "commit": headCommit, "files": changes,
 		"additions": additions, "deletions": deletions, "legacy": legacy,

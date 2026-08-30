@@ -99,6 +99,10 @@ func TestInspectCommitReportsModifiedFile(t *testing.T) {
 	if len(files) != 1 || files[0].(map[string]any)["status"] != "modified" {
 		t.Fatalf("expected one modified file, got %#v", files)
 	}
+	change := files[0].(map[string]any)
+	if change["oldData"] != "b2xkCg==" || change["newData"] != "bmV3Cg==" {
+		t.Fatalf("expected inline text content, got %#v", change)
+	}
 }
 
 func TestInspectInitialCommitReportsAddedFile(t *testing.T) {
