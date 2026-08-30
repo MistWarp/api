@@ -314,7 +314,7 @@ def handleUpdateNews(*serve.Context c) (
             item.format = "markdown"
             item.category = category
             item.updated = timestamp
-            if link.isEmpty() (
+            if link.isEmpty() == true (
                 if item.contains("link") (
                     item.delete("link")
                 )
