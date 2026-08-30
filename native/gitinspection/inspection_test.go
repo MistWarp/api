@@ -91,7 +91,8 @@ func TestInspectCommitReportsModifiedFile(t *testing.T) {
 	newTree := repository.tree("main.fractch", newBlob)
 	head := repository.commit(newTree, parent, "Change code")
 
-	result := decodeResult(t, Inspect(repository.write(t), head, "commit", "", head))
+	path := repository.write(t)
+	result := decodeResult(t, Inspect(path, head, "commit-inline", "", head))
 	if result["ok"] != true || result["parent"] != parent || result["tree"] != newTree || result["parentTree"] != oldTree {
 		t.Fatalf("unexpected result: %#v", result)
 	}
@@ -102,6 +103,11 @@ func TestInspectCommitReportsModifiedFile(t *testing.T) {
 	change := files[0].(map[string]any)
 	if change["oldData"] != "b2xkCg==" || change["newData"] != "bmV3Cg==" {
 		t.Fatalf("expected inline text content, got %#v", change)
+	}
+	compatibilityResult := decodeResult(t, Inspect(path, head, "commit", "", head))
+	compatibilityChange := compatibilityResult["files"].([]any)[0].(map[string]any)
+	if _, exists := compatibilityChange["newData"]; exists {
+		t.Fatalf("default inspection should remain compatible with old clients: %#v", compatibilityChange)
 	}
 }
 

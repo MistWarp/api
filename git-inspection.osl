@@ -241,7 +241,8 @@ def handleGetCommitInspection(*serve.Context c) (
         c.notFound("project not found")
         return
     )
-    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "commit", "")
+    string operation = c.query("inline") == "1" ? "commit-inline" "commit"
+    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), operation, "")
 )
 
 def handleGetCommitTree(*serve.Context c) (

@@ -288,8 +288,10 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 			return encode(map[string]any{"ok": true, "sha": sha, "file": file, "content": content}, "could not encode file")
 		}
 		return failure("file was not found at this commit")
+	case "commit-inline":
+		return archive.inspectCommit(sha, commit, true)
 	default:
-		return archive.inspectCommit(sha, commit)
+		return archive.inspectCommit(sha, commit, false)
 	}
 }
 
@@ -297,6 +299,10 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 // the browser. The commits may live in separate archives, as they do for pull
 // requests between a project and its remix.
 func CompareArchives(basePath, baseSHA, headPath, headSHA string) string {
+	return compareArchives(basePath, baseSHA, headPath, headSHA, false)
+}
+
+func compareArchives(basePath, baseSHA, headPath, headSHA string, inlineContent bool) string {
 	baseReader, baseArchive, err := openArchive(basePath)
 	if err != nil {
 		return failure("base workspace archive is unavailable")
@@ -316,14 +322,18 @@ func CompareArchives(basePath, baseSHA, headPath, headSHA string) string {
 	if !ok {
 		return failure("head commit is unavailable")
 	}
-	return compareCommitTrees(baseArchive, baseSHA, baseCommit, headArchive, headSHA, headCommit)
+	return compareCommitTrees(baseArchive, baseSHA, baseCommit, headArchive, headSHA, headCommit, inlineContent)
 }
 
 func CompareArchivesJSON(basePath, baseSHA, headPath, headSHA string) string {
 	return CompareArchives(basePath, baseSHA, headPath, headSHA)
 }
 
-func (a archive) inspectCommit(sha string, commit gitCommit) string {
+func CompareArchivesInlineJSON(basePath, baseSHA, headPath, headSHA string) string {
+	return compareArchives(basePath, baseSHA, headPath, headSHA, true)
+}
+
+func (a archive) inspectCommit(sha string, commit gitCommit, inlineContent bool) string {
 	parent := ""
 	if len(commit.Parents) > 0 {
 		parent = commit.Parents[0]
@@ -331,9 +341,9 @@ func (a archive) inspectCommit(sha string, commit gitCommit) string {
 		if !ok {
 			return failure("parent commit is unavailable")
 		}
-		return compareCommitTrees(a, parent, parentCommit, a, sha, commit)
+		return compareCommitTrees(a, parent, parentCommit, a, sha, commit, inlineContent)
 	}
-	return compareCommitTrees(archive{objects: map[string]*zip.File{}}, "", gitCommit{}, a, sha, commit)
+	return compareCommitTrees(archive{objects: map[string]*zip.File{}}, "", gitCommit{}, a, sha, commit, inlineContent)
 }
 
 func textDiffPath(name string) bool {
@@ -397,7 +407,7 @@ func inlineDiffContent(changes []map[string]any, baseArchive archive, parentFile
 	}
 }
 
-func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
+func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit, inlineContent bool) string {
 	parentFiles := make(map[string]gitFile)
 	parentTree := ""
 	if baseSHA != "" {
@@ -445,7 +455,9 @@ func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommi
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[i]["path"].(string) < changes[j]["path"].(string)
 	})
-	inlineDiffContent(changes, baseArchive, parentFiles, headArchive, current)
+	if inlineContent {
+		inlineDiffContent(changes, baseArchive, parentFiles, headArchive, current)
+	}
 	return encode(map[string]any{
 		"ok": true, "sha": headSHA, "parent": baseSHA, "tree": headCommit.Tree, "parentTree": parentTree, "commit": headCommit, "files": changes,
 		"additions": additions, "deletions": deletions, "legacy": legacy,
