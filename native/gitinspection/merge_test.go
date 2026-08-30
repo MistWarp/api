@@ -1,0 +1,87 @@
+package gitinspection
+
+import (
+	"archive/zip"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestPrepareMergeMergesTextWithoutArchivesInTheClient(t *testing.T) {
+	baseRepository := newTestRepository()
+	baseBlob := baseRepository.object("blob", []byte("one\ntwo\nthree\n"))
+	baseTree := baseRepository.tree("main.fractch", baseBlob)
+	base := baseRepository.commit(baseTree, "", "Base")
+	oursBlob := baseRepository.object("blob", []byte("ONE\ntwo\nthree\n"))
+	oursTree := baseRepository.tree("main.fractch", oursBlob)
+	ours := baseRepository.commit(oursTree, base, "Ours")
+
+	sourceRepository := newTestRepository()
+	for oid, object := range baseRepository.objects {
+		sourceRepository.objects[oid] = object
+	}
+	theirsBlob := sourceRepository.object("blob", []byte("one\ntwo\nTHREE\n"))
+	theirsTree := sourceRepository.tree("main.fractch", theirsBlob)
+	theirs := sourceRepository.commit(theirsTree, base, "Theirs")
+
+	result := PrepareMerge(baseRepository.write(t), ours, sourceRepository.write(t), theirs, base)
+	if !result.OK || len(result.Conflicts) != 0 || len(result.Changes) != 1 {
+		t.Fatalf("unexpected merge result: %#v", result)
+	}
+	content := string(result.Changes[0].Content)
+	if !strings.Contains(content, "ONE") || !strings.Contains(content, "THREE") {
+		t.Fatalf("both edits were not merged: %q", content)
+	}
+}
+
+func writeTreeZip(t *testing.T, files map[string]string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tree.zip")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	for name, content := range files {
+		entry, createErr := writer.Create(name)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		_, _ = entry.Write([]byte(content))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCreateMergeArchiveWritesTwoParentCommit(t *testing.T) {
+	target := newTestRepository()
+	baseBlob := target.object("blob", []byte("base\n"))
+	baseTree := target.tree("main.fractch", baseBlob)
+	base := target.commit(baseTree, "", "Base")
+	ours := target.commit(baseTree, base, "Ours")
+	source := newTestRepository()
+	for oid, object := range target.objects {
+		source.objects[oid] = object
+	}
+	theirs := source.commit(baseTree, base, "Theirs")
+	output := filepath.Join(t.TempDir(), "merge.mwp")
+	result := CreateMergeArchive(target.write(t), ours, source.write(t), theirs, writeTreeZip(t, map[string]string{"main.fractch": "merged\n"}), output, "project", "", "", "main", "Mist", "Merge", 1724977000)
+	if !result.OK {
+		t.Fatalf("merge commit failed: %#v", result)
+	}
+	reader, archive, err := openArchive(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	commit, ok := archive.parseCommit(result.Head)
+	if !ok || len(commit.Parents) != 2 || commit.Parents[0] != ours || commit.Parents[1] != theirs {
+		t.Fatalf("unexpected merge commit: %#v", commit)
+	}
+}
