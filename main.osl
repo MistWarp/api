@@ -399,6 +399,8 @@ api.POST("/bounties/:id/workers/me", requireAuth, requireGoodStanding, handleJoi
 api.DELETE("/bounties/:id/workers/me", requireAuth, handleLeaveBounty)
 
 api.GET("/projects/:id/commits", handleGetCommits)
+api.GET("/projects/:id/branches", handleListProjectBranches)
+api.POST("/projects/:id/branches/merge", requireAuth, handlePrepareBranchMerge)
 api.GET("/projects/:id/commits/:sha", handleGetCommitInspection)
 api.PATCH("/projects/:id/commits/:sha", requireAuth, handlePatchCommit)
 api.GET("/projects/:id/commits/:sha/co-authors", handleGetCommitCollaborators)

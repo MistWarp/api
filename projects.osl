@@ -1119,6 +1119,10 @@ def handleUploadProject(*serve.Context c) (
   string restoreCommit = c.formValue("restoreCommit").strip()
   string restoreMessage = c.formValue("restoreMessage").strip()
   string pullId = c.formValue("pullId").strip()
+  string mergeSourceBranch = c.formValue("mergeSourceBranch").strip()
+  string mergeTargetBranch = c.formValue("mergeTargetBranch").strip()
+  string requestedMergeSourceHead = c.formValue("mergeSourceHead").strip()
+  string requestedMergeTargetHead = c.formValue("mergeTargetHead").strip()
   string currentHead = projectGitHead(project)
   if expectedHead != "" and expectedHead != currentHead (
     c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
@@ -1259,23 +1263,49 @@ def handleUploadProject(*serve.Context c) (
 
   boolean generatedWorkspace = false
   byte[] generatedWorkspaceBody = []
+  string historyBaseHead = currentHead
   if !mergeTreeResult.isErr() and workspaceResult.isErr() and restoreCommit == "" (
     object mergeTree = mergeTreeResult.unwrap().assert(object)
-    object mergePull = pullDocument(project.id.toStr(), pullId)
-    if pullId == "" or mergePull.isEmpty() == true or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
-      c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
-      return
+    boolean branchMerge = pullId == "" and mergeSourceBranch != "" and mergeTargetBranch != "" and requestedMergeSourceHead != "" and requestedMergeTargetHead != ""
+    object mergePull = {}
+    object mergeSource = project
+    string mergeSourceHead = requestedMergeSourceHead
+    string mergeTargetHead = requestedMergeTargetHead
+    if branchMerge (
+      string latestSourceHead = projectBranchHead(project, mergeSourceBranch)
+      string latestTargetHead = projectBranchHead(project, mergeTargetBranch)
+      if mergeSourceBranch == mergeTargetBranch or latestSourceHead == "" or latestTargetHead == "" or latestSourceHead != requestedMergeSourceHead or latestTargetHead != requestedMergeTargetHead (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.json(409, {ok: false, error: "a branch changed while this merge was processing", code: "branch_head_changed"})
+        return
+      )
+      historyBaseHead = mergeTargetHead
+    ) else (
+      mergePull = pullDocument(project.id.toStr(), pullId)
+      if pullId == "" or mergePull.isEmpty() == true or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+        return
+      )
+      auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
+      if !mergeSourceResult.ok (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.notFound("merge source project not found")
+        return
+      )
+      mergeSource = mergeSourceResult.project.assert(object)
+      mergeSourceHead = mergePull.headCommit.toStr()
+      mergeTargetHead = currentHead
     )
-    auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
-    if !mergeSourceResult.ok or !validateZipArchive(mergeTree.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+    if !validateZipArchive(mergeTree.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
       fs.remove(zipPath)
       fs.remove(extractDir)
       c.badRequest("invalid merged project tree")
       return
     )
-    object mergeSource = mergeSourceResult.project.assert(object)
     string mergeTargetPath = tmpDir ++ workId ++ ".merge-target.mwp"
     string mergeSourcePath = tmpDir ++ workId ++ ".merge-source.mwp"
     string mergeTreePath = tmpDir ++ workId ++ ".merge-tree.zip"
@@ -1283,16 +1313,15 @@ def handleUploadProject(*serve.Context c) (
     boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
     mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
     mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, mergeTree.data)
-    string mergeBranch = project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main"
+    string mergeBranch = branchMerge ? mergeTargetBranch (project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main")
     string mergeRemixParent = project.contains("remixParent") and project.remixParent != null ? project.remixParent.toStr() ""
     string mergeBaseCommit = project.contains("remixBaseCommit") and project.remixBaseCommit != null ? project.remixBaseCommit.toStr() ""
-    string mergeSourceHead = mergePull.headCommit.toStr()
     string mergeProjectId = project.id.toStr()
-    string mergeMessage = "Merge pull request #" ++ pullId
+    string mergeMessage = branchMerge ? "Merge branch '" ++ mergeSourceBranch ++ "' into '" ++ mergeTargetBranch ++ "'" "Merge pull request #" ++ pullId
     number mergeTimestamp = timestamp
     string mergeJson = ""
     if mergeReady (
-      mergeJson = raw("gitinspection.CreateMergeArchiveJSON(mergeTargetPath, currentHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, mergeProjectId, mergeRemixParent, mergeBaseCommit, mergeBranch, uploader, mergeMessage, int64(mergeTimestamp / 1000))")
+      mergeJson = raw("gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, mergeProjectId, mergeRemixParent, mergeBaseCommit, mergeBranch, uploader, mergeMessage, int64(mergeTimestamp / 1000))")
     )
     auto parsedMerge = json.parse(mergeJson, {type: "object"})
     if !mergeReady or parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
@@ -1457,7 +1486,7 @@ def handleUploadProject(*serve.Context c) (
       project.gitHead = canonicalHistoryHead(gitInfo)
       project.gitBranch = gitInfo.branch.toStr()
       if workspaceDelta (
-        object mergedHistory = mergeDeltaHistory(project, gitInfo, currentHead)
+        object mergedHistory = mergeDeltaHistory(project, gitInfo, historyBaseHead)
         project.gitCommits = mergedHistory.commits
         project.gitGraph = mergedHistory.graph
       ) else (

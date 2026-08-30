@@ -22,10 +22,51 @@ type mergeChange struct {
 }
 
 type prepareMergeResult struct {
-	OK        bool          `json:"ok"`
-	Error     string        `json:"error,omitempty"`
-	Changes   []mergeChange `json:"changes,omitempty"`
-	Conflicts []string      `json:"conflicts,omitempty"`
+	OK            bool          `json:"ok"`
+	Error         string        `json:"error,omitempty"`
+	BaseHead      string        `json:"baseHead,omitempty"`
+	AlreadyMerged bool          `json:"alreadyMerged,omitempty"`
+	Changes       []mergeChange `json:"changes,omitempty"`
+	Conflicts     []string      `json:"conflicts,omitempty"`
+}
+
+func ancestorDistances(repository archive, head string) map[string]int {
+	distances := map[string]int{}
+	type queuedCommit struct {
+		oid      string
+		distance int
+	}
+	queue := []queuedCommit{{oid: head}}
+	for len(queue) > 0 && len(distances) <= maxReachable {
+		candidate := queue[0]
+		queue = queue[1:]
+		if previous, seen := distances[candidate.oid]; seen && previous <= candidate.distance {
+			continue
+		}
+		commit, ok := repository.parseCommit(candidate.oid)
+		if !ok {
+			continue
+		}
+		distances[candidate.oid] = candidate.distance
+		for _, parent := range commit.Parents {
+			queue = append(queue, queuedCommit{oid: parent, distance: candidate.distance + 1})
+		}
+	}
+	return distances
+}
+
+func mergeBase(repository archive, targetHead, sourceHead string) (string, bool) {
+	targetAncestors := ancestorDistances(repository, targetHead)
+	sourceAncestors := ancestorDistances(repository, sourceHead)
+	best := ""
+	bestDistance := int(^uint(0) >> 1)
+	for oid, targetDistance := range targetAncestors {
+		if sourceDistance, common := sourceAncestors[oid]; common && targetDistance+sourceDistance < bestDistance {
+			best = oid
+			bestDistance = targetDistance + sourceDistance
+		}
+	}
+	return best, best != ""
 }
 
 func filesAtCommit(repository archive, sha string) (map[string]gitFile, bool) {
@@ -145,5 +186,30 @@ func PrepareMerge(targetPath, targetHead, sourcePath, sourceHead, baseHead strin
 
 func PrepareMergeJSON(targetPath, targetHead, sourcePath, sourceHead, baseHead string) string {
 	encoded, _ := json.Marshal(PrepareMerge(targetPath, targetHead, sourcePath, sourceHead, baseHead))
+	return string(encoded)
+}
+
+// PrepareBranchMerge finds the common ancestor of two branch tips in one
+// repository and prepares a regular three-way merge against it.
+func PrepareBranchMerge(path, targetHead, sourceHead string) prepareMergeResult {
+	reader, repository, err := openArchive(path)
+	if err != nil {
+		return prepareMergeResult{Error: "project workspace archive is unavailable"}
+	}
+	defer reader.Close()
+	baseHead, ok := mergeBase(repository, targetHead, sourceHead)
+	if !ok {
+		return prepareMergeResult{Error: "the branches do not share a common commit"}
+	}
+	if baseHead == sourceHead {
+		return prepareMergeResult{OK: true, BaseHead: baseHead, AlreadyMerged: true, Changes: []mergeChange{}, Conflicts: []string{}}
+	}
+	result := PrepareMerge(path, targetHead, path, sourceHead, baseHead)
+	result.BaseHead = baseHead
+	return result
+}
+
+func PrepareBranchMergeJSON(path, targetHead, sourceHead string) string {
+	encoded, _ := json.Marshal(PrepareBranchMerge(path, targetHead, sourceHead))
 	return string(encoded)
 }

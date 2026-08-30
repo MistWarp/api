@@ -35,6 +35,35 @@ func TestPrepareMergeMergesTextWithoutArchivesInTheClient(t *testing.T) {
 	}
 }
 
+func TestPrepareBranchMergeFindsCommonAncestor(t *testing.T) {
+	repository := newTestRepository()
+	baseBlob := repository.object("blob", []byte("one\ntwo\nthree\n"))
+	baseTree := repository.tree("main.fractch", baseBlob)
+	base := repository.commit(baseTree, "", "Base")
+	targetBlob := repository.object("blob", []byte("ONE\ntwo\nthree\n"))
+	target := repository.commit(repository.tree("main.fractch", targetBlob), base, "Target")
+	sourceBlob := repository.object("blob", []byte("one\ntwo\nTHREE\n"))
+	source := repository.commit(repository.tree("main.fractch", sourceBlob), base, "Source")
+
+	result := PrepareBranchMerge(repository.write(t), target, source)
+	if !result.OK || result.BaseHead != base || result.AlreadyMerged || len(result.Changes) != 1 {
+		t.Fatalf("unexpected branch merge result: %#v", result)
+	}
+}
+
+func TestPrepareBranchMergeDetectsAlreadyMerged(t *testing.T) {
+	repository := newTestRepository()
+	blob := repository.object("blob", []byte("project\n"))
+	tree := repository.tree("main.fractch", blob)
+	base := repository.commit(tree, "", "Base")
+	target := repository.commit(tree, base, "Target")
+
+	result := PrepareBranchMerge(repository.write(t), target, base)
+	if !result.OK || !result.AlreadyMerged || result.BaseHead != base {
+		t.Fatalf("expected an already-merged result: %#v", result)
+	}
+}
+
 func writeTreeZip(t *testing.T, files map[string]string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tree.zip")
