@@ -81,6 +81,26 @@ def pullResponse(object pull) object (
     }
 )
 
+def isPullSourceOwner(object pull, *serve.Context c) boolean (
+    if !c.getBool("authenticated") (
+        return false
+    )
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if sourceResult.ok and projectRole(sourceResult.project.assert(object), c.getString("username")) == "owner" (
+        return true
+    )
+    return identityMatches(
+        (pull.sourceOwnerId ?? "").toStr(),
+        pull.sourceOwner.toStr(),
+        c.getString("userId"),
+        c.getString("username")
+    )
+)
+
+def canClosePull(object pull, object target, *serve.Context c) boolean (
+    return canEditProject(target, c) or isPullSourceOwner(pull, c)
+)
+
 def createNativePull(*serve.Context c, object target, object source, string title, string description, string bountyId) object (
     if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
         return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
@@ -233,7 +253,11 @@ def handleGetPull(*serve.Context c) (
         c.notFound("pull request not found")
         return
     )
-    c.json(200, {ok: true, pull: pullResponse(pull)})
+    object response = pullResponse(pull)
+    object target = targetResult.project.assert(object)
+    response.canClose = canClosePull(pull, target, c)
+    response.canMerge = canEditProject(target, c)
+    c.json(200, {ok: true, pull: response})
 )
 
 def handleGetPullTimeline(*serve.Context c) (
@@ -395,8 +419,7 @@ def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) b
                 if !c.getBool("authenticated") (
                     continue
                 )
-                string viewer = normalizeUsername(c.getString("username"))
-                if canEditProject(target, c) or viewer == normalizeUsername(pull.sourceOwner.toStr()) (
+                if canEditProject(target, c) or isPullSourceOwner(pull, c) (
                     return true
                 )
             )
@@ -426,8 +449,7 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
     if !c.getBool("authenticated") (
         return false
     )
-    string viewer = normalizeUsername(c.getString("username"))
-    return canEditProject(target, c) or viewer == normalizeUsername(pull.sourceOwner.toStr())
+    return canEditProject(target, c) or isPullSourceOwner(pull, c)
 )
 
 def handleGetPullDiff(*serve.Context c) (
@@ -492,6 +514,34 @@ def handleMergePull(*serve.Context c) (
         return
     )
     handleGetPullDiff(c)
+)
+
+def handleClosePull(*serve.Context c) (
+    object pull = pullDocument(c.param("id"), c.param("index"))
+    if pull.isEmpty() == true or pull.state.toStr() != "open" (
+        c.notFound("open pull request not found")
+        return
+    )
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    if !targetResult.ok (
+        c.notFound("project not found")
+        return
+    )
+    object target = targetResult.project.assert(object)
+    if !canClosePull(pull, target, c) (
+        c.forbidden("only the fork owner and project maintainers can close this pull request")
+        return
+    )
+    pull.state = "closed"
+    pull.updated = timestamp
+    if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
+        c.internalError("could not close pull request")
+        return
+    )
+    object response = pullResponse(pull)
+    response.canClose = true
+    response.canMerge = canEditProject(target, c)
+    c.json(200, {ok: true, pull: response})
 )
 
 def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
