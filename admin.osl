@@ -457,6 +457,86 @@ def handleAdminStats(*serve.Context c) (
     })
 )
 
+def handlePublicStats(*serve.Context c) (
+    number days = 30
+    if c.query("days") != "" (
+        days = c.query("days").toNum().toInt()
+        if days < 7 (
+            days = 7
+        )
+        if days > 365 (
+            days = 365
+        )
+    )
+    number since = timestamp - (days * 86400000)
+    array projects = projectSearchDocs.all()
+    number sharedProjects = 0
+    number totalViews = 0
+    number totalLoves = 0
+    number totalRemixes = 0
+    object projectsByDay = {}
+    for i projects.len (
+        object project = projects[i].assert(object)
+        if project.shared == true (
+            sharedProjects = sharedProjects + 1
+            totalViews = totalViews + project.views.toNum()
+            totalLoves = totalLoves + project.loveCount.toNum()
+            if project.remixParent.toStr() != "" (
+                totalRemixes = totalRemixes + 1
+            )
+            string day = (project.created.toNum() / 86400000).toInt().toStr()
+            projectsByDay[day] = projectsByDay[day].toNum() + 1
+        )
+    )
+    number totalUsers = 0
+    object usersByDay = {}
+    array userFiles = fs.readDir(usersDir).toArray()
+    for i userFiles.len (
+        string filename = userFiles[i].toStr()
+        if filename.endsWith(".json") (
+            totalUsers = totalUsers + 1
+            object profile = loadProfile(filename.replace(".json", ""))
+            if profile.created.toNum() > 0 (
+                string day = (profile.created.toNum() / 86400000).toInt().toStr()
+                usersByDay[day] = usersByDay[day].toNum() + 1
+            )
+        )
+    )
+    object loadsByDay = {}
+    object startsByDay = {}
+    number totalLoads = 0
+    number totalStarts = 0
+    array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+    for i diagnostics.len (
+        object diagnostic = diagnostics[i].assert(object)
+        string day = (diagnostic.created.toNum() / 86400000).toInt().toStr()
+        if diagnostic.type.toStr() == "load" (
+            totalLoads = totalLoads + 1
+            loadsByDay[day] = loadsByDay[day].toNum() + 1
+        ) else if diagnostic.type.toStr() == "start" (
+            totalStarts = totalStarts + 1
+            startsByDay[day] = startsByDay[day].toNum() + 1
+        )
+    )
+    c.setHeader("Cache-Control", "public, max-age=300, s-maxage=600, stale-while-revalidate=3600")
+    c.setHeader("CDN-Cache-Control", "public, max-age=600, stale-while-revalidate=3600")
+    c.json(200, {
+        ok: true,
+        days: days,
+        sharedProjects: sharedProjects,
+        totalUsers: totalUsers,
+        totalViews: totalViews,
+        totalLoves: totalLoves,
+        totalRemixes: totalRemixes,
+        totalLoads: totalLoads,
+        totalStarts: totalStarts,
+        projectsByDay: projectsByDay,
+        usersByDay: usersByDay,
+        loadsByDay: loadsByDay,
+        startsByDay: startsByDay
+    })
+)
+
 def handleAdminSearchProjects(*serve.Context c) (
     string q = c.query("q").toLower().strip()
     array projects = projectSearchDocs.all()

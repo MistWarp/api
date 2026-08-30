@@ -148,8 +148,13 @@ def newsResponse(object item, string username, boolean includeReactionUsers) obj
     response.myReaction = summary.myReaction
     if includeReactionUsers (
         response.reactionUsers = summary.users
-    ) else if response.contains("reactionUsers") (
-        response.delete("reactionUsers")
+    ) else (
+        if response.contains("reactionUsers") (
+            response.delete("reactionUsers")
+        )
+        if response.contains("viewHistory") (
+            response.delete("viewHistory")
+        )
     )
     if response.contains("reactions") (
         response.delete("reactions")
@@ -254,7 +259,18 @@ def handleCreateNews(*serve.Context c) (
         )
         poll = {options: options}
     )
-    object item = {id: "nw" ++ randomString(12), title: title, body: content, format: "markdown", category: category, author: c.getString("username"), created: timestamp, reactions: {}}
+    object item = {
+        id: "nw" ++ randomString(12),
+        title: title,
+        body: content,
+        format: "markdown",
+        category: category,
+        author: c.getString("username"),
+        created: timestamp,
+        views: 0,
+        viewHistory: {},
+        reactions: {}
+    }
     if link.isEmpty() == false (
         item.link = link
     )
@@ -369,12 +385,42 @@ def handleUpdateNews(*serve.Context c) (
     c.notFound("news post not found")
 )
 
+def handleViewNews(*serve.Context c) (
+    string id = c.param("id")
+    array items = loadNews()
+    for i items.len (
+        object item = items[i].assert(object)
+        if item.id.toStr() == id and !(item.contains("archived") and item.archived == true) (
+            item.views = item.views.toNum() + 1
+            object viewHistory = {}
+            if item.contains("viewHistory") and item.viewHistory != null (
+                viewHistory = item.viewHistory.assert(object)
+            )
+            string day = (timestamp / 86400000).toInt().toStr()
+            viewHistory[day] = viewHistory[day].toNum() + 1
+            item.viewHistory = viewHistory
+            items[i] = item
+            if !saveNews(items) (
+                c.internalError("could not record news view")
+                return
+            )
+            c.json(200, {ok: true})
+            return
+        )
+    )
+    c.notFound("news post not found")
+)
+
 def migratePolicyNewsPosts() boolean (
-    string migrationId = "migration:news-policy-posts-v1"
+    string migrationId = "migration:news-policy-posts-v2"
     if diagnosticDocs.findById(migrationId).isEmpty() == false (
         return true
     )
-    array titles = ["please do not make iframe projects.", "this website is 13+"]
+    array titles = [
+        "please do not make iframe projects.",
+        "this website is 13+",
+        "its crazy that i have to say this"
+    ]
     array items = loadNews()
     boolean changed = false
     for i items.len (

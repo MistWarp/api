@@ -434,6 +434,7 @@ api.POST("/users/:name/comments/:cid/react", requireAuth, handleReactProfileComm
 
 api.GET("/news", handleGetNews)
 api.GET("/news/:id", handleGetNewsItem)
+api.POST("/news/:id/view", serve.rateLimit(120, 3600), handleViewNews)
 api.POST("/news", requireAdmin, handleCreateNews)
 api.PUT("/news/:id", requireAdmin, handleUpdateNews)
 api.DELETE("/news/:id", requireAdmin, handleDeleteNews)
@@ -443,6 +444,7 @@ api.POST("/news/:id/poll", requireAuth, handleVoteNewsPoll)
 api.POST("/report", requireAuth, serve.rateLimit(10, 3600), handleCreateReport)
 api.POST("/reports", requireAuth, serve.rateLimit(10, 3600), handleCreateReport)
 api.POST("/support", serve.rateLimit(5, 3600), handleCreateSupportRequest)
+api.GET("/stats", handlePublicStats)
 
 api.GET("/admin/reports", requireAdmin, handleGetReports)
 api.GET("/admin/reports/evidence/:id", requireAdmin, handleGetReportEvidence)
