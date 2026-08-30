@@ -1,0 +1,7 @@
+number maxAppRequestBytes = 50331648
+number maxStandardRequestBytes = 262144
+number maxProjectUploadRequestBytes = 50331648
+number maxUploadChunkRequestBytes = 9437184
+number maxWorkspaceBootstrapRequestBytes = 50331648
+number maxThumbnailRequestBytes = 2097152
+number maxExtensionIndexRequestBytes = 12582912

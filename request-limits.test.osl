@@ -1,0 +1,10 @@
+import "std:testing"
+import "./request-limits.osl"
+
+testing.assert(maxStandardRequestBytes > 0, "standard requests have a positive body limit")
+testing.assert(maxStandardRequestBytes <= maxThumbnailRequestBytes, "standard requests are no larger than thumbnail uploads")
+testing.assert(maxThumbnailRequestBytes <= maxExtensionIndexRequestBytes, "thumbnail uploads are no larger than extension indexing requests")
+testing.assert(maxExtensionIndexRequestBytes <= maxProjectUploadRequestBytes, "extension indexing requests are no larger than final project uploads")
+testing.assert(maxUploadChunkRequestBytes <= maxProjectUploadRequestBytes, "upload chunks are smaller than final project uploads")
+testing.assert(maxWorkspaceBootstrapRequestBytes <= maxAppRequestBytes, "history bootstraps fit inside the application ceiling")
+testing.assert(maxProjectUploadRequestBytes <= maxAppRequestBytes, "every route limit fits inside the application ceiling")

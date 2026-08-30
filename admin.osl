@@ -194,29 +194,47 @@ def handleListBans(*serve.Context c) (
 )
 
 def handleListUsers(*serve.Context c) (
-    array userFiles = fs.readDir(usersDir).toArray()
-    array projects = projectSearchDocs.all()
-    object ownerCounts = {}
-    for i projects.len (
-        object entry = projects[i].assert(object)
-        string owner = normalizeUsername(entry.owner.toStr())
-        number prev = 0
-        if ownerCounts.contains(owner) (
-            prev = ownerCounts[owner].toNum()
+    string q = normalizeUsername(c.query("q"))
+    string sort = c.query("sort").toLower().strip()
+    number offset = c.query("offset") == "" ? 0 c.query("offset").toNum().toInt()
+    number limit = c.query("limit") == "" ? 30 c.query("limit").toNum().toInt()
+    if offset < 0 (
+        offset = 0
+    )
+    if limit < 1 (
+        limit = 1
+    ) else if limit > 50 (
+        limit = 50
+    )
+    number total = 0
+    array stored = []
+    if q != "" (
+        total = profileSearchDocs.where("usernameKey", db.contains, q).count()
+        if sort == "followers" (
+            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("followers", db.desc).limit(offset + limit).all()
+        ) else if sort == "recent" (
+            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("created", db.desc).limit(offset + limit).all()
+        ) else (
+            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("usernameKey", db.asc).limit(offset + limit).all()
         )
-        ownerCounts[owner] = prev + 1
+    ) else (
+        total = profileSearchDocs.count({})
+        if sort == "followers" (
+            stored = profileSearchDocs.sort("followers", db.desc).limit(offset + limit).all()
+        ) else if sort == "recent" (
+            stored = profileSearchDocs.sort("created", db.desc).limit(offset + limit).all()
+        ) else (
+            stored = profileSearchDocs.sort("usernameKey", db.asc).limit(offset + limit).all()
+        )
     )
     array out = []
-    for i userFiles.len (
-        string f = userFiles[i].toStr()
-        if f.endsWith(".json") (
-            string key = f.replace(".json", "")
+    for i stored.len (
+        if i >= offset (
+            object entry = stored[i].assert(object)
+            string key = entry.usernameKey.toStr()
             object profile = loadProfile(key)
             object quota = quotaDetails(key)
-            number projectCount = 0
-            if ownerCounts.contains(key) (
-                projectCount = ownerCounts[key].toNum()
-            )
+            number projectCount = projectSearchDocs.where("ownerKey", db.equal, key).count()
             out.append({
                 username: profile.username,
                 created: profile.created,
@@ -230,8 +248,48 @@ def handleListUsers(*serve.Context c) (
             })
         )
     )
-    out.sortBy("quotaUsed", "descending")
-    c.json(200, {ok: true, users: out})
+    c.json(200, {ok: true, users: out, total: total, offset: offset, limit: limit})
+)
+
+def localRuntimeStorageStats() object (
+    return raw("func() map[string]any { types := map[string]int64{\"assets\": 0, \"history\": 0, \"projectData\": 0, \"database\": 0, \"cache\": 0, \"thumbnails\": 0, \"other\": 0}; var total int64; _ = OSLfilepath.Walk(\"data\", func(path string, info OSLos.FileInfo, err error) error { if err != nil || info == nil || info.IsDir() { return nil }; size := info.Size(); total += size; clean := OSLfilepath.ToSlash(path); kind := \"other\"; switch { case OSLstrings.Contains(clean, \"/blobs/assets/\"): kind = \"assets\"; case OSLstrings.Contains(clean, \"/blobs/project-workspaces/\") || OSLstrings.Contains(clean, \"/git-inspection/\"): kind = \"history\"; case OSLstrings.Contains(clean, \"/staging/\") || OSLstrings.Contains(clean, \"/projects/\"): kind = \"projectData\"; case OSLstrings.HasSuffix(clean, \".db\") || OSLstrings.Contains(clean, \"/users/\") || OSLstrings.Contains(clean, \"/comments/\"): kind = \"database\"; case OSLstrings.Contains(clean, \"/tmp/\"): kind = \"cache\"; case OSLstrings.Contains(clean, \"/thumbnails/\"): kind = \"thumbnails\" }; types[kind] += size; return nil }); var disk OSLsyscall.Statfs_t; _ = OSLsyscall.Statfs(\"data\", &disk); diskTotal := int64(disk.Blocks) * int64(disk.Bsize); diskFree := int64(disk.Bavail) * int64(disk.Bsize); var memory OSLruntime.MemStats; OSLruntime.ReadMemStats(&memory); typeValues := map[string]any{}; for key, value := range types { typeValues[key] = value }; return map[string]any{\"bytes\": total, \"diskTotalBytes\": diskTotal, \"diskFreeBytes\": diskFree, \"types\": typeValues, \"memory\": map[string]any{\"heapBytes\": int64(memory.HeapAlloc), \"systemBytes\": int64(memory.Sys), \"stackBytes\": int64(memory.StackInuse), \"goroutines\": OSLruntime.NumGoroutine()}} }()")
+)
+
+def aggregateStorageObjects(object objects) object (
+    object types = {assets: 0, history: 0, projectData: 0, database: 0, cache: 0, thumbnails: 0, other: 0}
+    number total = 0
+    array keys = objects.getKeys().toArray()
+    for i keys.len (
+        object item = objects[keys[i].toStr()].assertElse(object, {})
+        string kind = item.type.toStr()
+        if !types.contains(kind) (
+            kind = "other"
+        )
+        number size = item.size.toNum()
+        types[kind] = types[kind].toNum() + size
+        total = total + size
+    )
+    return {bytes: total, objects: keys.len, types: types}
+)
+
+def adminStorageStats() object (
+    object local = localRuntimeStorageStats()
+    auto r2Loaded = readFile(r2StorageIndexFile)
+    object r2Data = r2Loaded.ok ? r2Loaded.data.assertElse(object, {}) {}
+    object r2Objects = r2Data.contains("objects") ? r2Data.objects.assertElse(object, {}) {}
+    object r2 = aggregateStorageObjects(r2Objects)
+    array queuedItems = loadR2UploadQueue()
+    object queuedObjects = {}
+    for i queuedItems.len (
+        object item = queuedItems[i].assertElse(object, {})
+        queuedObjects[item.key.toStr()] = item
+    )
+    object queued = aggregateStorageObjects(queuedObjects)
+    return {local: local, r2: r2, queued: queued, r2Configured: !r2Local}
+)
+
+def handleAdminStorageStats(*serve.Context c) (
+    c.json(200, {ok: true, storage: adminStorageStats()})
 )
 
 def handleAdminStats(*serve.Context c) (

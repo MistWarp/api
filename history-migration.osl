@@ -98,7 +98,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   byte[] workspace = fs.readFileBytes(workspacePath)
   fs.remove(workspacePath)
   string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
-  if !r2Put(workspaceKey, workspace, "application/x-mistwarp-project") (
+  if !stageR2Blob(workspaceKey, workspace, "application/x-mistwarp-project", "") (
     return {ok: false, error: "could not store generated history"}
   )
 
