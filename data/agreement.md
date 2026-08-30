@@ -1,6 +1,12 @@
-These guidelines apply to any content uploaded to the MistWarp website, including projects and comments, and to your conduct on the platform generally. They may be changed at any time according to moderator discretion. Additionally, moderators may take action against any content according to their discretion; these guidelines serve as a list of rules moderators should enforce, but circumstances may lead to exceptions of these rules.
+# MistWarp community guidelines
 
-1. **Content should be reasonably appropriate.** 
+These guidelines apply to projects, comments, profiles and anything else you put on MistWarp. Moderators may remove content or restrict accounts when needed to keep the site safe.
+
+## Accounts and age
+
+You must be at least 13 years old to create or use a Rotur account. If you are under 13, you can still use the MistWarp editor while logged out, but you cannot upload projects or use the community.
+
+## Content should be reasonably appropriate
 
 MistWarp is open to users of many ages and backgrounds. To keep this platform safe for everyone, we ask you don’t include any of the following in your content:
 
@@ -15,13 +21,13 @@ Additionally, we ask any projects including the following have a content warning
 - Triggering topics (such as abuse, self harm, or addiction).  
 - Horror content of any kind.
 
-2. **Content should be legal.**
+## Content should be legal
 
 You are responsible for any content you upload to MistWarp. As such, we do not tolerate using the platform for any sort of illegal activities. This includes threats of illegal activities, or encouraging others to participate in illegal acts. 
 
 This extends to copyright law. We ask that you do not upload projects featuring content you do not have the rights to. Projects that violate this may be taken down, and we will respond to takedown requests from copyright holders.
 
-3. **Content should be safe.**
+## Content should be safe
 
 MistWarp has security features to ensure projects do not misuse the tools they have access to, but this does not mean a user consents to unsafe activity by allowing your project more permissions. Projects should be safe for any user, and should not perform malicious actions such as:
 
@@ -36,17 +42,17 @@ Additionally, content should not attempt to deceive users through false informat
 
 Currently, we allow content to link to off-site websites. This content cannot be as easily moderated. Please use best judgement when uploading links. External websites that violate the rules outlined on this page are disallowed, and the user who uploaded the link may face repercussions depending on circumstance. 
 
-4. **Content should be purposeful.**
+## Projects should be purposeful
 
 MistWarp is a small website, and we ask you respect our limited storage and resources. We ask you keep the following in mind when uploading a project:
 
 - Projects should be used specifically to show content. Please do not upload projects as “chat rooms” or as a method to post text announcements. Use comments instead when applicable.  
-- Projects that serve only as i-frames or redirects to other websites will be removed. This includes any form of “browser” project.  
+- Projects that only embed, frame or redirect to another website will be removed. This includes browser projects.  
 - Only upload one copy of a project. This includes minor edits to a project, and also extends to remixed projects.  
 - Keep in mind how many projects you upload. Uploading an excessive amount of projects in a row will count as spam, regardless of the content of those projects.  
 - Optimize your project assets. If a project contains overly large files, we may take it down and/or remove the large assets.
 
-5. **Content should be respected and respectful.**
+## Respect other people and their work
 
 When uploading a project to MistWarp, you grant MistWarp and other users a non-exclusive, royalty-free license to view, run, and interact with your project on the platform. Where remixing is enabled, this license also covers remixing. However, these projects are not explicitly open-source; this license covers MistWarp and its services only. While we don’t currently have a license of which we distribute this content, we ask you follow these guidelines when accessing projects on MistWarp:
 
@@ -60,4 +66,8 @@ When uploading a project to MistWarp, you grant MistWarp and other users a non-e
 
 ---
 
-*Last updated: July 2026*
+## Before you upload
+
+You must accept the current version of these guidelines before uploading or updating a project. If the guidelines change, MistWarp will ask you to read and accept the new version before your next upload.
+
+*Last updated: August 2026*

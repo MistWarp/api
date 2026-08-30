@@ -176,10 +176,32 @@ def newsResponse(object item, string username, boolean includeReactionUsers) obj
 
 def handleGetNews(*serve.Context c) (
     array items = loadNews()
+    array visible = []
     for i items.len (
-        items[i] = newsResponse(items[i].assert(object), c.getString("username"), c.getBool("isAdmin"))
+        object item = items[i].assert(object)
+        boolean archived = item.contains("archived") and item.archived == true
+        if !archived or c.getBool("isAdmin") (
+            visible.append(newsResponse(item, c.getString("username"), c.getBool("isAdmin")))
+        )
     )
-    c.json(200, {ok: true, news: items})
+    c.json(200, {ok: true, news: visible})
+)
+
+def handleGetNewsItem(*serve.Context c) (
+    string id = c.param("id")
+    array items = loadNews()
+    for i items.len (
+        object item = items[i].assert(object)
+        if item.id.toStr() == id (
+            if item.contains("archived") and item.archived == true and !c.getBool("isAdmin") (
+                c.notFound("news post not found")
+                return
+            )
+            c.json(200, {ok: true, item: newsResponse(item, c.getString("username"), c.getBool("isAdmin"))})
+            return
+        )
+    )
+    c.notFound("news post not found")
 )
 
 def handleCreateNews(*serve.Context c) (
@@ -190,7 +212,7 @@ def handleCreateNews(*serve.Context c) (
         c.badRequest("invalid title")
         return
     )
-    if content == "" or content.len > 5000 (
+    if content == "" or content.len > 20000 (
         c.badRequest("invalid body")
         return
     )
@@ -232,7 +254,7 @@ def handleCreateNews(*serve.Context c) (
         )
         poll = {options: options}
     )
-    object item = {id: "nw" ++ randomString(12), title: title, body: content, category: category, author: c.getString("username"), created: timestamp, reactions: {}}
+    object item = {id: "nw" ++ randomString(12), title: title, body: content, format: "markdown", category: category, author: c.getString("username"), created: timestamp, reactions: {}}
     if link.isEmpty() == false (
         item.link = link
     )
@@ -253,6 +275,120 @@ def handleCreateNews(*serve.Context c) (
         )
     )
     c.json(201, {ok: true, item: newsResponse(item, c.getString("username"), c.getBool("isAdmin"))})
+)
+
+def handleUpdateNews(*serve.Context c) (
+    string id = c.param("id")
+    object body = c.bodyJSON()
+    string title = body.title.toStr().strip()
+    string content = body.body.toStr().strip()
+    if title == "" or title.len > 120 (
+        c.badRequest("invalid title")
+        return
+    )
+    if content == "" or content.len > 20000 (
+        c.badRequest("invalid body")
+        return
+    )
+    string category = (body.category ?? "update").toStr().toLower().strip()
+    if !isValidNewsCategory(category) (
+        c.badRequest("invalid post type")
+        return
+    )
+    object link = {}
+    if body.contains("linkUrl") and body.linkUrl.toStr().strip() != "" (
+        string linkUrl = body.linkUrl.toStr().strip()
+        string linkLabel = body.linkLabel.toStr().strip()
+        if (!linkUrl.startsWith("https://") and !linkUrl.startsWith("/")) or linkLabel == "" or linkLabel.len > 60 or linkUrl.len > 500 (
+            c.badRequest("invalid post link")
+            return
+        )
+        link = {label: linkLabel, url: linkUrl}
+    )
+    array items = loadNews()
+    for i items.len (
+        object item = items[i].assert(object)
+        if item.id.toStr() == id (
+            item.title = title
+            item.body = content
+            item.format = "markdown"
+            item.category = category
+            item.updated = timestamp
+            if link.isEmpty() (
+                if item.contains("link") (
+                    item.delete("link")
+                )
+            ) else (
+                item.link = link
+            )
+            if body.contains("archived") and body.archived != null (
+                item.archived = body.archived == true
+            )
+            if category != "poll" and item.contains("poll") (
+                item.delete("poll")
+            )
+            if category == "poll" (
+                if !body.contains("options") or body.options == null (
+                    c.badRequest("polls need at least two options")
+                    return
+                )
+                array oldOptions = []
+                if item.contains("poll") and item.poll != null (
+                    oldOptions = item.poll.assert(object).options.assertElse(array, [])
+                )
+                array rawOptions = body.options.assert(array)
+                array options = []
+                for p rawOptions.len (
+                    string optionText = rawOptions[p].toStr().strip()
+                    if optionText != "" and optionText.len <= 120 and options.len < 6 (
+                        object option = {id: "po" ++ randomString(8), text: optionText, voters: []}
+                        if p < oldOptions.len (
+                            object oldOption = oldOptions[p].assert(object)
+                            if oldOption.text.toStr() == optionText (
+                                option = oldOption
+                            )
+                        )
+                        options.append(option)
+                    )
+                )
+                if options.len < 2 (
+                    c.badRequest("polls need at least two options")
+                    return
+                )
+                item.poll = {options: options}
+            )
+            items[i] = item
+            if !saveNews(items) (
+                c.internalError("could not save news post")
+                return
+            )
+            c.json(200, {ok: true, item: newsResponse(item, c.getString("username"), true)})
+            return
+        )
+    )
+    c.notFound("news post not found")
+)
+
+def migratePolicyNewsPosts() boolean (
+    string migrationId = "migration:news-policy-posts-v1"
+    if diagnosticDocs.findById(migrationId).isEmpty() == false (
+        return true
+    )
+    array titles = ["please do not make iframe projects.", "this website is 13+"]
+    array items = loadNews()
+    boolean changed = false
+    for i items.len (
+        object item = items[i].assert(object)
+        if titles.contains(item.title.toStr().toLower().strip()) (
+            item.archived = true
+            items[i] = item
+            changed = true
+        )
+    )
+    if changed and !saveNews(items) (
+        return false
+    )
+    return putDocument(diagnosticDocs, migrationId, {_id: migrationId, completedAt: timestamp})
 )
 
 def handleDeleteNews(*serve.Context c) (
