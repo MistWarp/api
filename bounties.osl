@@ -1,0 +1,84 @@
+def bountyCommentKey(string bountyId) string (
+    return "bounty-" ++ bountyId
+)
+
+def bountyWorkerId(string bountyId, string userId) string (
+    return bountyId ++ ":" ++ userId
+)
+
+def bountyWorkers(string bountyId, string viewer) array (
+    array stored = bountyWorkerDocs.where("bountyId", db.equal, bountyId).sort("created", db.asc).limit(200).all()
+    array workers = []
+    for i stored.len (
+        object item = stored[i].assert(object)
+        workers.append({username: item.username, created: item.created, isViewer: normalizeUsername(item.username.toStr()) == normalizeUsername(viewer)})
+    )
+    return workers
+)
+
+def handleGetBountyActivity(*serve.Context c) (
+    string bountyId = c.param("id")
+    array comments = loadComments(bountyCommentKey(bountyId))
+    for i comments.len (
+        comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+    )
+    c.json(200, {ok: true, comments: comments, workers: bountyWorkers(bountyId, c.getString("username"))})
+)
+
+def handleCreateBountyComment(*serve.Context c) (
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object created = createComment(bountyCommentKey(c.param("id")), c.getString("username"), c.getString("userId"), body.content.toStr(), "", "comment", 0, "")
+    if !created.ok (
+        c.badRequest(created.error.toStr())
+        return
+    )
+    created.comment = commentResponse(created.comment.assert(object), c.getString("username"))
+    c.json(201, created)
+)
+
+def handleEditBountyComment(*serve.Context c) (
+    object body = c.bodyJSON()
+    if !body.contains("content") or body.content == null (
+        c.badRequest("comment content is required")
+        return
+    )
+    object edited = editComment(bountyCommentKey(c.param("id")), c.param("cid"), c.getString("username"), body.content.toStr())
+    if !edited.ok (
+        c.json(edited.status.toInt(), {ok: false, error: edited.error})
+        return
+    )
+    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+    c.json(200, edited)
+)
+
+def handleDeleteBountyComment(*serve.Context c) (
+    object deleted = deleteComment(bountyCommentKey(c.param("id")), c.param("cid"), c.getString("username"), "", c.getBool("isAdmin") == true)
+    if !deleted.ok (
+        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+        return
+    )
+    c.json(200, {ok: true})
+)
+
+def handleJoinBounty(*serve.Context c) (
+    string bountyId = c.param("id")
+    string userId = c.getString("userId")
+    object worker = {bountyId: bountyId, username: c.getString("username"), userId: userId, created: timestamp}
+    if !putDocument(bountyWorkerDocs, bountyWorkerId(bountyId, userId), worker) (
+        c.json(500, {ok: false, error: "could not register for this bounty"})
+        return
+    )
+    c.json(200, {ok: true, workers: bountyWorkers(bountyId, c.getString("username"))})
+)
+
+def handleLeaveBounty(*serve.Context c) (
+    string id = bountyWorkerId(c.param("id"), c.getString("userId"))
+    if bountyWorkerDocs.exists({_id: id}) (
+        bountyWorkerDocs.deleteOne({_id: id})
+    )
+    c.json(200, {ok: true, workers: bountyWorkers(c.param("id"), c.getString("username"))})
+)

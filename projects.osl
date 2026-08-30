@@ -278,10 +278,11 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("gitHead") and project.gitHead != null (
     response.gitHead = project.gitHead
   )
-  response.gitBranch = "main"
+    response.gitBranch = "main"
   if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
-    response.gitBranch = project.gitBranch
-  )
+        response.gitBranch = project.gitBranch
+    )
+    response.commitCount = projectVersionHistory(project).commits.assert(array).len
   response.remixBaseCommit = ""
   if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
     response.remixBaseCommit = project.remixBaseCommit

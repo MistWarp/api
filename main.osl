@@ -167,6 +167,7 @@ import "./game-inventory.osl"
 import "./game-marketplace.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
+import "./bounties.osl"
 import "./social.osl"
 import "./pulls.osl"
 import "./reports.osl"
@@ -384,6 +385,13 @@ api.POST("/projects/:id/comments", requireAuth, requireGoodStanding, serve.rateL
 api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
 api.PUT("/projects/:id/comments/:cid", requireAuth, handleEditProjectComment)
 api.POST("/projects/:id/comments/:cid/react", requireAuth, handleReactProjectComment)
+
+api.GET("/bounties/:id/activity", handleGetBountyActivity)
+api.POST("/bounties/:id/comments", requireAuth, requireGoodStanding, serve.rateLimit(30, 60), handleCreateBountyComment)
+api.PUT("/bounties/:id/comments/:cid", requireAuth, handleEditBountyComment)
+api.DELETE("/bounties/:id/comments/:cid", requireAuth, handleDeleteBountyComment)
+api.POST("/bounties/:id/workers/me", requireAuth, requireGoodStanding, handleJoinBounty)
+api.DELETE("/bounties/:id/workers/me", requireAuth, handleLeaveBounty)
 
 api.GET("/projects/:id/commits", handleGetCommits)
 api.GET("/projects/:id/pulls", handleListPulls)
