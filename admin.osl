@@ -477,6 +477,9 @@ def handleAdminSearchProjects(*serve.Context c) (
 
 def reportTargetUser(object found) string (
     string name = found.target.toStr()
+    if found.contains("targetUser") and found.targetUser != null and found.targetUser.toStr() != "" (
+        return found.targetUser.toStr()
+    )
     if found.type.toStr() == "project" (
         auto result = loadProject(found.target.toStr())
         if result.ok (
