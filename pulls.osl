@@ -37,6 +37,21 @@ def commitsAfter(array commits, string stopSha, number created) array (
     return newer
 )
 
+def commitsNotIn(array commits, array excluded) array (
+    array excludedShas = []
+    for i excluded.len (
+        excludedShas.append(excluded[i].assert(object).sha.toStr())
+    )
+    array unique = []
+    for i commits.len (
+        object commit = commits[i].assert(object)
+        if !excludedShas.contains(commit.sha.toStr()) (
+            unique.append(commit)
+        )
+    )
+    return unique
+)
+
 def pullResponse(object pull) object (
     return {
         id: pull["_id"],
@@ -57,7 +72,8 @@ def pullResponse(object pull) object (
         created: pull.created,
         updated: pull.updated,
         merged: pull.state.toStr() == "merged",
-        mergedCommit: pull.mergedCommit
+        mergedCommit: pull.mergedCommit,
+        commentCount: loadComments(pullCommentKey(pull)).len
     }
 )
 
@@ -211,8 +227,10 @@ def handleGetPullTimeline(*serve.Context c) (
     for i comments.len (
         comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
     )
+    array targetHistory = projectVersionHistory(target).commits.assert(array)
     array sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
-    array targetCommits = commitsAfter(projectVersionHistory(target).commits.assert(array), pull.targetHead.toStr(), pull.created.toNum())
+    sourceCommits = commitsNotIn(sourceCommits, targetHistory)
+    array targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
     c.json(200, {
         ok: true,
         comments: comments,
