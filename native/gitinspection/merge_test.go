@@ -114,3 +114,41 @@ func TestCreateMergeArchiveWritesTwoParentCommit(t *testing.T) {
 		t.Fatalf("unexpected merge commit: %#v", commit)
 	}
 }
+
+func TestCreateFastForwardMergeArchiveStillWritesMergeCommit(t *testing.T) {
+	target := newTestRepository()
+	baseBlob := target.object("blob", []byte("base\n"))
+	baseTree := target.tree("main.fractch", baseBlob)
+	base := target.commit(baseTree, "", "Base")
+
+	source := newTestRepository()
+	for oid, object := range target.objects {
+		source.objects[oid] = object
+	}
+	sourceBlob := source.object("blob", []byte("pull request\n"))
+	sourceTree := source.tree("main.fractch", sourceBlob)
+	sourceHead := source.commit(sourceTree, base, "Pull request change")
+	output := filepath.Join(t.TempDir(), "pull-merge.mwp")
+
+	result := CreateFastForwardMergeArchive(
+		target.write(t), base, source.write(t), sourceHead, output,
+		"project", "", "", "main", "Mist", "Merge pull request #1", 1724977000,
+	)
+	if !result.OK {
+		t.Fatalf("merge commit failed: %#v", result)
+	}
+	reader, archive, err := openArchive(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	commit, ok := archive.parseCommit(result.Head)
+	if !ok || commit.Tree != sourceTree || len(commit.Parents) != 2 || commit.Parents[0] != base || commit.Parents[1] != sourceHead {
+		t.Fatalf("unexpected merge commit: %#v", commit)
+	}
+	graph := result.Manifest["graph"].(map[string]any)
+	branches := graph["branches"].([]string)
+	if len(branches) != 1 || branches[0] != "main" {
+		t.Fatalf("unexpected target branches: %#v", branches)
+	}
+}
