@@ -211,6 +211,97 @@ def handleGetCommits(*serve.Context c) (
     })
 )
 
+def projectBranchHead(object project, string branch) string (
+    object history = projectVersionHistory(project)
+    object graph = history.graph.assertElse(object, {})
+    array oids = graphBranchLog(graph, branch)
+    if oids.len > 0 and validGitObjectId(oids[1].toStr()) (
+        return oids[1].toStr()
+    )
+    return ""
+)
+
+def projectBranchResponse(object project) array (
+    object history = projectVersionHistory(project)
+    object graph = history.graph.assertElse(object, {})
+    array names = graph.contains("branches") ? graph.branches.assertElse(array, []) []
+    array branches = []
+    string active = history.branch.toStr()
+    for i names.len (
+        string name = names[i].toStr()
+        string head = projectBranchHead(project, name)
+        if name != "" and head != "" (
+            object branch = {name: name, head: head, current: name == active}
+            array nodes = graph.contains("nodes") ? graph.nodes.assertElse(array, []) []
+            for j nodes.len (
+                object node = nodes[j].assertElse(object, {})
+                if node.sha.toStr() == head (
+                    branch.message = (node.message ?? "").toStr()
+                    branch.author = (node.author ?? "").toStr()
+                    branch.date = node.contains("date") ? node.date 0
+                )
+            )
+            branches.append(branch)
+        )
+    )
+    return branches
+)
+
+def handleListProjectBranches(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    c.json(200, {ok: true, current: projectVersionHistory(project).branch, branches: projectBranchResponse(project)})
+)
+
+def handlePrepareBranchMerge(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok or !canEditProject(result.project.assert(object), c) (
+        c.forbidden("only project maintainers can merge branches")
+        return
+    )
+    object project = result.project.assert(object)
+    object body = c.bodyJSON()
+    string sourceBranch = (body.source ?? "").toStr().strip()
+    string targetBranch = (body.target ?? "").toStr().strip()
+    if sourceBranch == "" or targetBranch == "" or sourceBranch == targetBranch (
+        c.badRequest("choose two different branches")
+        return
+    )
+    string sourceHead = projectBranchHead(project, sourceBranch)
+    string targetHead = projectBranchHead(project, targetBranch)
+    if sourceHead == "" or targetHead == "" (
+        c.notFound("branch not found")
+        return
+    )
+    string workspacePath = cachedProjectWorkspacePath(project)
+    if workspacePath == "" (
+        c.internalError("could not assemble project history")
+        return
+    )
+    string mergeJson = raw("gitinspection.PrepareBranchMergeJSON(workspacePath, targetHead, sourceHead)")
+    auto parsedMerge = json.parse(mergeJson, {type: "object"})
+    if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
+        string message = parsedMerge.isErr() ? "could not prepare the branch merge" (parsedMerge.unwrap().assert(object).error ?? "could not prepare the branch merge").toStr()
+        c.json(409, {ok: false, error: message, code: "branch_merge_unavailable"})
+        return
+    )
+    object merge = parsedMerge.unwrap().assert(object)
+    c.json(200, {
+        ok: true,
+        merge: merge,
+        targetProjectId: project.id,
+        sourceBranch: sourceBranch,
+        targetBranch: targetBranch,
+        sourceHead: sourceHead,
+        targetHead: targetHead,
+        expectedHead: targetHead
+    })
+)
+
 def handleListPulls(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok or !canViewProject(result.project.assert(object), c) (
