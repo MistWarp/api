@@ -307,7 +307,20 @@ def renameUserInComments(string oldKey, string newKey, string newName, string us
     )
 )
 
-def renameUserInNotifications(string oldKey, string newKey, string newName) (
+def rewriteNotificationIdentityFields(object data, string oldKey, string newName) boolean (
+    boolean changed = false
+    array identityFields = ["actor", "from", "author", "user", "follower", "buyer", "seller", "kicked_by", "banned_by"]
+    for i identityFields.len (
+        string field = identityFields[i].toStr()
+        if data.contains(field) and data[field] != null and normalizeUsername(data[field].toStr()) == oldKey (
+            data[field] = newName
+            changed = true
+        )
+    )
+    return changed
+)
+
+def renameUserInNotifications(string userId, string oldKey, string newKey, string newName) (
     renameUserFile(notificationsDir, oldKey, newKey)
     array files = fs.readDir(notificationsDir).toArray()
     for i files.len (
@@ -320,9 +333,17 @@ def renameUserInNotifications(string oldKey, string newKey, string newName) (
                 boolean changed = false
                 for j items.len (
                     object item = items[j]
-                    if item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == oldKey (
+                    boolean sameActorId = item.contains("actorId") and item.actorId != null and item.actorId.toStr() == userId
+                    boolean sameActorName = item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == oldKey
+                    if sameActorId or sameActorName (
                         item.actor = newName
+                        item.actorId = userId
                         changed = true
+                    )
+                    if item.contains("platform_data") and item.platform_data != null and typeof(item.platform_data) == "object" (
+                        if rewriteNotificationIdentityFields(item.platform_data, oldKey, newName) (
+                            changed = true
+                        )
                     )
                 )
                 if changed (
@@ -359,7 +380,7 @@ def renameUser(string userId, string oldName, string newName) (
     renameUserInProfiles(oldKey, newKey, newName)
     renameUserInProjects(oldKey, newKey, newName, userId)
     renameUserInComments(oldKey, newKey, newName, userId)
-    renameUserInNotifications(oldKey, newKey, newName)
+    renameUserInNotifications(userId, oldKey, newKey, newName)
     renameUserInActivity(oldKey, newKey, newName)
     renameUserInCommunityDatabase(oldKey, newName, userId)
     renameUserSafety(oldKey, newKey)

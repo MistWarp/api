@@ -1,124 +1,257 @@
 def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead) string (
-    return raw("func() string { jsonFile, err := OSLos.Open(projectJsonPath); if err != nil { return \"\" }; jsonReader, err := gzip.NewReader(jsonFile); if err != nil { jsonFile.Close(); return \"\" }; projectJSON, err := OSLio.ReadAll(jsonReader); closeErr := jsonReader.Close(); jsonFile.Close(); if err != nil || closeErr != nil { return \"\" }; var sb3Buffer OSLbytes.Buffer; sb3Writer := OSLgozip.NewWriter(&sb3Buffer); addZipBytes := func(writer *OSLgozip.Writer, name string, data []byte) bool { header := &OSLgozip.FileHeader{Name: name, Method: OSLgozip.Deflate}; header.SetMode(0644); entry, createErr := writer.CreateHeader(header); if createErr != nil { return false }; _, writeErr := entry.Write(data); return writeErr == nil }; if !addZipBytes(sb3Writer, \"project.json\", projectJSON) { return \"\" }; assets, err := OSLos.ReadDir(assetsPath); if err != nil && !OSLos.IsNotExist(err) { return \"\" }; for _, asset := range assets { if asset.IsDir() { return \"\" }; data, readErr := OSLos.ReadFile(assetsPath + \"/\" + asset.Name()); if readErr != nil || !addZipBytes(sb3Writer, asset.Name(), data) { return \"\" } }; if sb3Writer.Close() != nil { return \"\" }; objectFiles := map[string][]byte{}; if parentArchivePath != \"\" { parentArchive, openErr := OSLgozip.OpenReader(parentArchivePath); if openErr != nil { return \"\" }; for _, item := range parentArchive.File { if !OSLstrings.HasPrefix(item.Name, \".git/objects/\") || item.FileInfo().IsDir() { continue }; source, itemErr := item.Open(); if itemErr != nil { parentArchive.Close(); return \"\" }; data, readErr := OSLio.ReadAll(source); source.Close(); if readErr != nil { parentArchive.Close(); return \"\" }; objectFiles[item.Name] = data }; parentArchive.Close() }; makeObject := func(kind string, data []byte) (string, []byte) { header := []byte(fmt.Sprintf(\"%s %d\\x00\", kind, len(data))); rawObject := append(header, data...); sum := sha1.Sum(rawObject); oid := hex.EncodeToString(sum[:]); var compressed OSLbytes.Buffer; compressor := zlib.NewWriter(&compressed); compressor.Write(rawObject); compressor.Close(); return oid, compressed.Bytes() }; blobOID, blobObject := makeObject(\"blob\", sb3Buffer.Bytes()); blobHash, err := hex.DecodeString(blobOID); if err != nil { return \"\" }; treeBody := append([]byte(\"100644 project.sb3\\x00\"), blobHash...); treeOID, treeObject := makeObject(\"tree\", treeBody); createdSeconds := int64(createdAt / 1000); if createdSeconds <= 0 { createdSeconds = time.Now().Unix() }; identity := fmt.Sprintf(\"MistWarp <%s@mistwarp.local> %d +0000\", OSLstrings.ReplaceAll(owner, \" \", \"-\"), createdSeconds); commitText := \"tree \" + treeOID + \"\\n\"; if parentHead != \"\" { commitText += \"parent \" + parentHead + \"\\n\" }; commitText += \"author \" + identity + \"\\ncommitter \" + identity + \"\\n\\nInitial version\\n\"; head, commitObject := makeObject(\"commit\", []byte(commitText)); objectFiles[\".git/objects/\" + blobOID[:2] + \"/\" + blobOID[2:]] = blobObject; objectFiles[\".git/objects/\" + treeOID[:2] + \"/\" + treeOID[2:]] = treeObject; objectFiles[\".git/objects/\" + head[:2] + \"/\" + head[2:]] = commitObject; parentsJSON := \"[]\"; if parentHead != \"\" { parentsJSON = fmt.Sprintf(\"[%q]\", parentHead) }; manifestJSON := []byte(fmt.Sprintf(\"{\\\"format\\\":\\\"mistwarp-project\\\",\\\"version\\\":1,\\\"createdWith\\\":\\\"MistWarp API\\\",\\\"projectId\\\":%q,\\\"remixParent\\\":null,\\\"baseCommit\\\":%s,\\\"branch\\\":\\\"main\\\",\\\"head\\\":%q,\\\"worktree\\\":false,\\\"baseHead\\\":null,\\\"delta\\\":false,\\\"commits\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g}],\\\"graph\\\":{\\\"branches\\\":[\\\"main\\\"],\\\"branchLogs\\\":[{\\\"branch\\\":\\\"main\\\",\\\"oids\\\":[%q]}],\\\"nodes\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g,\\\"parents\\\":%s,\\\"branches\\\":[\\\"main\\\"]}]}}\", projectId, func() string { if parentHead != \"\" { return fmt.Sprintf(\"%q\", parentHead) }; return \"null\" }(), head, head, owner, createdAt, head, head, owner, createdAt, parentsJSON)); output, err := OSLos.Create(outputPath); if err != nil { return \"\" }; writer := OSLgozip.NewWriter(output); ok := addZipBytes(writer, \"mwp.json\", manifestJSON) && addZipBytes(writer, \".git/HEAD\", []byte(\"ref: refs/heads/main\\n\")) && addZipBytes(writer, \".git/refs/heads/main\", []byte(head+\"\\n\")) && addZipBytes(writer, \".git/config\", []byte(\"[core]\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\")); for name, data := range objectFiles { if ok { ok = addZipBytes(writer, name, data) } }; writerErr := writer.Close(); outputErr := output.Close(); if !ok || writerErr != nil || outputErr != nil { OSLos.Remove(outputPath); return \"\" }; return head }()")
+  return raw("func() string { jsonFile, err := OSLos.Open(projectJsonPath); if err != nil { return \"\" }; jsonReader, err := gzip.NewReader(jsonFile); if err != nil { jsonFile.Close(); return \"\" }; projectJSON, err := OSLio.ReadAll(jsonReader); closeErr := jsonReader.Close(); jsonFile.Close(); if err != nil || closeErr != nil { return \"\" }; var sb3Buffer OSLbytes.Buffer; sb3Writer := OSLgozip.NewWriter(&sb3Buffer); addZipBytes := func(writer *OSLgozip.Writer, name string, data []byte) bool { header := &OSLgozip.FileHeader{Name: name, Method: OSLgozip.Deflate}; header.SetMode(0644); entry, createErr := writer.CreateHeader(header); if createErr != nil { return false }; _, writeErr := entry.Write(data); return writeErr == nil }; if !addZipBytes(sb3Writer, \"project.json\", projectJSON) { return \"\" }; assets, err := OSLos.ReadDir(assetsPath); if err != nil && !OSLos.IsNotExist(err) { return \"\" }; for _, asset := range assets { if asset.IsDir() { return \"\" }; data, readErr := OSLos.ReadFile(assetsPath + \"/\" + asset.Name()); if readErr != nil || !addZipBytes(sb3Writer, asset.Name(), data) { return \"\" } }; if sb3Writer.Close() != nil { return \"\" }; objectFiles := map[string][]byte{}; if parentArchivePath != \"\" { parentArchive, openErr := OSLgozip.OpenReader(parentArchivePath); if openErr != nil { return \"\" }; for _, item := range parentArchive.File { if !OSLstrings.HasPrefix(item.Name, \".git/objects/\") || item.FileInfo().IsDir() { continue }; source, itemErr := item.Open(); if itemErr != nil { parentArchive.Close(); return \"\" }; data, readErr := OSLio.ReadAll(source); source.Close(); if readErr != nil { parentArchive.Close(); return \"\" }; objectFiles[item.Name] = data }; parentArchive.Close() }; makeObject := func(kind string, data []byte) (string, []byte) { header := []byte(fmt.Sprintf(\"%s %d\\x00\", kind, len(data))); rawObject := append(header, data...); sum := sha1.Sum(rawObject); oid := hex.EncodeToString(sum[:]); var compressed OSLbytes.Buffer; compressor := zlib.NewWriter(&compressed); compressor.Write(rawObject); compressor.Close(); return oid, compressed.Bytes() }; blobOID, blobObject := makeObject(\"blob\", sb3Buffer.Bytes()); blobHash, err := hex.DecodeString(blobOID); if err != nil { return \"\" }; treeBody := append([]byte(\"100644 project.sb3\\x00\"), blobHash...); treeOID, treeObject := makeObject(\"tree\", treeBody); createdSeconds := int64(createdAt / 1000); if createdSeconds <= 0 { createdSeconds = time.Now().Unix() }; identity := fmt.Sprintf(\"MistWarp <%s@mistwarp.local> %d +0000\", OSLstrings.ReplaceAll(owner, \" \", \"-\"), createdSeconds); commitText := \"tree \" + treeOID + \"\\n\"; if parentHead != \"\" { commitText += \"parent \" + parentHead + \"\\n\" }; commitText += \"author \" + identity + \"\\ncommitter \" + identity + \"\\n\\nInitial version\\n\"; head, commitObject := makeObject(\"commit\", []byte(commitText)); objectFiles[\".git/objects/\" + blobOID[:2] + \"/\" + blobOID[2:]] = blobObject; objectFiles[\".git/objects/\" + treeOID[:2] + \"/\" + treeOID[2:]] = treeObject; objectFiles[\".git/objects/\" + head[:2] + \"/\" + head[2:]] = commitObject; parentsJSON := \"[]\"; if parentHead != \"\" { parentsJSON = fmt.Sprintf(\"[%q]\", parentHead) }; manifestJSON := []byte(fmt.Sprintf(\"{\\\"format\\\":\\\"mistwarp-project\\\",\\\"version\\\":1,\\\"createdWith\\\":\\\"MistWarp API\\\",\\\"projectId\\\":%q,\\\"remixParent\\\":null,\\\"baseCommit\\\":%s,\\\"branch\\\":\\\"main\\\",\\\"head\\\":%q,\\\"worktree\\\":false,\\\"baseHead\\\":null,\\\"delta\\\":false,\\\"commits\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g}],\\\"graph\\\":{\\\"branches\\\":[\\\"main\\\"],\\\"branchLogs\\\":[{\\\"branch\\\":\\\"main\\\",\\\"oids\\\":[%q]}],\\\"nodes\\\":[{\\\"sha\\\":%q,\\\"message\\\":\\\"Initial version\\\",\\\"author\\\":%q,\\\"date\\\":%g,\\\"parents\\\":%s,\\\"branches\\\":[\\\"main\\\"]}]}}\", projectId, func() string { if parentHead != \"\" { return fmt.Sprintf(\"%q\", parentHead) }; return \"null\" }(), head, head, owner, createdAt, head, head, owner, createdAt, parentsJSON)); output, err := OSLos.Create(outputPath); if err != nil { return \"\" }; writer := OSLgozip.NewWriter(output); ok := addZipBytes(writer, \"mwp.json\", manifestJSON) && addZipBytes(writer, \".git/HEAD\", []byte(\"ref: refs/heads/main\\n\")) && addZipBytes(writer, \".git/refs/heads/main\", []byte(head+\"\\n\")) && addZipBytes(writer, \".git/config\", []byte(\"[core]\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\")); for name, data := range objectFiles { if ok { ok = addZipBytes(writer, name, data) } }; writerErr := writer.Close(); outputErr := output.Close(); if !ok || writerErr != nil || outputErr != nil { OSLos.Remove(outputPath); return \"\" }; return head }()")
 )
 
 def projectHasStoredContent(object project) boolean (
-    boolean hasContent = project.lastUploadAt.toNum() > 0
-    hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
-    return hasContent and project.jsonKey.toStr() != ""
+  boolean hasContent = project.lastUploadAt.toNum() > 0
+  hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
+  return hasContent and project.jsonKey.toStr() != ""
+)
+
+def projectHistorySourceVersion(object project) string (
+  array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
+  return project.jsonKey.toStr() ++ "\n" ++ project.lastUploadAt.toStr() ++ "\n" ++ project.pendingJson.toStr() ++ "\n" ++ project.remixParent.toStr() ++ "\n" ++ json.stringify(assets)
+)
+
+def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
+  if project.contains("pendingJson") and project.pendingJson == true (
+    return copyStoredProjectJsonToPath(project, outputPath)
+  )
+  string cacheDir = tmpDir ++ "history-migration-json/"
+  string cachePath = cacheDir ++ project.jsonKey.toStr().hashSHA256() ++ ".json.gz"
+  string lockName = "history-migration-json-" ++ project.jsonKey.toStr().hashSHA256()
+  sync.lock(lockName)
+  fs.mkdirAll(cacheDir)
+  boolean ready = fs.exists(cachePath) or copyStoredProjectJsonToPath(project, cachePath)
+  boolean copied = ready and zip.copyFile(cachePath, outputPath)
+  sync.unlock(lockName)
+  return copied
+)
+
+def copyHistoryAssetToPath(string name, string outputPath) boolean (
+  string cacheDir = tmpDir ++ "history-migration-assets/"
+  string cachePath = cacheDir ++ name
+  string lockName = "history-migration-asset-" ++ name
+  sync.lock(lockName)
+  fs.mkdirAll(cacheDir)
+  boolean ready = fs.exists(cachePath) or copyStorageKeyToPath(assetObjectKey(name), cachePath)
+  boolean copied = ready and zip.copyFile(cachePath, outputPath)
+  sync.unlock(lockName)
+  return copied
+)
+
+def generateProjectHistory(object project, string parentPath, string parentHead) object (
+  string id = project.id.toStr()
+  string sourceVersion = projectHistorySourceVersion(project)
+  string workId = id ++ "." ++ randomString(8)
+  string jsonPath = tmpDir ++ workId ++ ".json.gz"
+  string assetsPath = tmpDir ++ workId ++ ".assets"
+  string workspacePath = tmpDir ++ workId ++ ".mwp"
+  fs.mkdirAll(assetsPath)
+  if !copyHistoryProjectJsonToPath(project, jsonPath) (
+    fs.remove(assetsPath)
+    return {ok: false, error: "could not read project JSON"}
+  )
+  array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
+  boolean assetsReady = true
+  for i assets.len (
+    string name = assets[i].toStr()
+    if !isValidMd5Ext(name) or !copyHistoryAssetToPath(name, assetsPath ++ "/" ++ name) (
+      assetsReady = false
+    )
+  )
+  if !assetsReady (
+    fs.remove(jsonPath)
+    fs.remove(assetsPath)
+    return {ok: false, error: "could not read project assets"}
+  )
+
+  string head = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead)
+  fs.remove(jsonPath)
+  fs.remove(assetsPath)
+  if head == "" or !fs.exists(workspacePath) (
+    fs.remove(workspacePath)
+    return {ok: false, error: "could not generate history archive"}
+  )
+
+  auto currentResult = loadProject(id)
+  if !currentResult.ok (
+    fs.remove(workspacePath)
+    return {ok: false, error: "project disappeared during migration"}
+  )
+  object current = currentResult.project.assert(object)
+  if projectHasWorkspace(current) (
+    fs.remove(workspacePath)
+    return {ok: true, project: current, generated: false}
+  )
+  if projectHistorySourceVersion(current) != sourceVersion (
+    fs.remove(workspacePath)
+    return {ok: false, error: "project changed during migration; will retry later"}
+  )
+
+  byte[] workspace = fs.readFileBytes(workspacePath)
+  fs.remove(workspacePath)
+  string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
+  if !r2Put(workspaceKey, workspace, "application/x-mistwarp-project") (
+    return {ok: false, error: "could not store generated history"}
+  )
+
+  currentResult = loadProject(id)
+  if !currentResult.ok (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "project disappeared during migration"}
+  )
+  current = currentResult.project.assert(object)
+  if projectHasWorkspace(current) (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: true, project: current, generated: false}
+  )
+  if projectHistorySourceVersion(current) != sourceVersion (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "project changed during migration; will retry later"}
+  )
+
+  current.workspaceKey = workspaceKey
+  current.workspaceLayers = [workspaceKey]
+  current.gitHead = head
+  current.gitBranch = "main"
+  current.gitCommits = [{sha: head, message: "Initial version", author: current.owner, date: current.created}]
+  array parents = parentHead == "" ? [] [parentHead]
+  current.gitGraph = {branches: ["main"], branchLogs: [{branch: "main", oids: [head]}], nodes: [{sha: head, message: "Initial version", author: current.owner, date: current.created, parents: parents, branches: ["main"]}]}
+  if parentHead != "" (
+    current.remixBaseCommit = parentHead
+  )
+  if !saveProject(current) (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "could not save generated history"}
+  )
+  upsertIndexEntry(current)
+  return {ok: true, project: current, generated: true}
 )
 
 def ensureGeneratedProjectHistory(object project, object visiting) object (
-    if projectHasWorkspace(project) (
-        return {ok: true, project: project, generated: false}
-    )
-    if !projectHasStoredContent(project) (
-        return {ok: true, project: project, generated: false}
-    )
-    string id = project.id.toStr()
-    if visiting.contains(id) (
-        return {ok: false, error: "remix cycle"}
-    )
-    visiting[id] = true
+  if projectHasWorkspace(project) (
+    return {ok: true, project: project, generated: false}
+  )
+  if !projectHasStoredContent(project) (
+    return {ok: true, project: project, generated: false}
+  )
+  string id = project.id.toStr()
+  if visiting.contains(id) (
+    return {ok: false, error: "remix cycle"}
+  )
+  visiting[id] = true
 
-    object parent = {}
-    string parentPath = ""
-    string parentHead = ""
-    string parentId = project.remixParent.toStr()
-    if parentId != "" (
-        auto parentResult = loadProject(parentId)
-        if parentResult.ok (
-            object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting)
-            if ensuredParent.ok (
-                parent = ensuredParent.project.assert(object)
-                if projectHasWorkspace(parent) (
-                    parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
-                    if !copyProjectWorkspaceToPath(parent, parentPath) (
-                        parentPath = ""
-                    ) else (
-                        parentHead = projectGitHead(parent)
-                    )
-                )
-            )
+  string parentPath = ""
+  string parentHead = ""
+  string parentId = project.remixParent.toStr()
+  if parentId != "" (
+    auto parentResult = loadProject(parentId)
+    if parentResult.ok (
+      object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting)
+      if ensuredParent.ok (
+        object parent = ensuredParent.project.assert(object)
+        if projectHasWorkspace(parent) (
+          parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
+          if !copyProjectWorkspaceToPath(parent, parentPath) (
+            parentPath = ""
+          ) else (
+            parentHead = projectGitHead(parent)
+          )
         )
+      )
     )
+  )
 
-    string workId = id ++ "." ++ randomString(8)
-    string jsonPath = tmpDir ++ workId ++ ".json.gz"
-    string assetsPath = tmpDir ++ workId ++ ".assets"
-    string workspacePath = tmpDir ++ workId ++ ".mwp"
-    fs.mkdirAll(assetsPath)
-    if !copyStoredProjectJsonToPath(project, jsonPath) (
-        fs.remove(parentPath)
-        fs.remove(assetsPath)
-        return {ok: false, error: "could not read project JSON"}
+  sync.lock("history-migration-project-" ++ id)
+  auto currentResult = loadProject(id)
+  object result = {ok: false, error: "project disappeared during migration"}
+  if currentResult.ok (
+    object current = currentResult.project.assert(object)
+    if projectHasWorkspace(current) (
+      result = {ok: true, project: current, generated: false}
+    ) else if current.remixParent.toStr() != parentId (
+      result = {ok: false, error: "project changed during migration; will retry later"}
+    ) else (
+      result = generateProjectHistory(current, parentPath, parentHead)
     )
-    array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
-    boolean assetsReady = true
-    for i assets.len (
-        string name = assets[i].toStr()
-        if !isValidMd5Ext(name) or !copyStorageKeyToPath(assetObjectKey(name), assetsPath ++ "/" ++ name) (
-            assetsReady = false
+  )
+  sync.unlock("history-migration-project-" ++ id)
+  fs.remove(parentPath)
+  return result
+)
+
+def missingProjectHistoryFiles() array (
+  array missing = []
+  array files = fs.readDir(projectsDir).toArray()
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto loaded = readFile(projectsDir ++ name)
+      if loaded.ok (
+        object project = loaded.data.assert(object)
+        if !projectHasWorkspace(project) and projectHasStoredContent(project) (
+          missing.append(name)
         )
+      )
     )
-    if !assetsReady (
-        fs.remove(parentPath)
-        fs.remove(jsonPath)
-        fs.remove(assetsPath)
-        return {ok: false, error: "could not read project assets"}
-    )
+  )
+  return missing
+)
 
-    string head = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead)
-    fs.remove(parentPath)
-    fs.remove(jsonPath)
-    fs.remove(assetsPath)
-    if head == "" or !fs.exists(workspacePath) (
-        fs.remove(workspacePath)
-        return {ok: false, error: "could not generate history archive"}
+def logHistoryMigrationProgress(object stats, string name, object result) (
+  sync.lock("history-migration-progress")
+  stats.processed = stats.processed.toNum() + 1
+  string status = "skipped"
+  if !result.ok (
+    stats.failed = stats.failed.toNum() + 1
+    status = "failed: " ++ result.error.toStr()
+  ) else if result.generated == true (
+    stats.generated = stats.generated.toNum() + 1
+    status = "generated"
+  ) else (
+    stats.skipped = stats.skipped.toNum() + 1
+  )
+  string message = "MistWarp history migration " ++ stats.processed.toStr() ++ "/" ++ stats.total.toStr() ++ " (generated " ++ stats.generated.toStr() ++ ", skipped " ++ stats.skipped.toStr() ++ ", failed " ++ stats.failed.toStr() ++ "): " ++ name ++ " " ++ status
+  sync.unlock("history-migration-progress")
+  log message
+)
+
+def generateMissingProjectHistoriesWorker(number workerIndex, number workerCount, array files, object stats,*sync.WaitGroup jobs) (
+  for i files.len (
+    if ((i - 1) % workerCount) == workerIndex (
+      string name = files[i].toStr()
+      auto loaded = loadProject(name.replace(".json", ""))
+      object result = {ok: false, error: "project disappeared during migration"}
+      if loaded.ok (
+        result = ensureGeneratedProjectHistory(loaded.project.assert(object), {})
+      )
+      logHistoryMigrationProgress(stats, name, result)
     )
-    byte[] workspace = fs.readFileBytes(workspacePath)
-    fs.remove(workspacePath)
-    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
-    if !r2Put(workspaceKey, workspace, "application/x-mistwarp-project") (
-        return {ok: false, error: "could not store generated history"}
-    )
-    project.workspaceKey = workspaceKey
-    project.workspaceLayers = [workspaceKey]
-    project.gitHead = head
-    project.gitBranch = "main"
-    project.gitCommits = [{sha: head, message: "Initial version", author: project.owner, date: project.created}]
-    array parents = parentHead == "" ? [] [parentHead]
-    project.gitGraph = {branches: ["main"], branchLogs: [{branch: "main", oids: [head]}], nodes: [{sha: head, message: "Initial version", author: project.owner, date: project.created, parents: parents, branches: ["main"]}]}
-    if parentHead != "" (
-        project.remixBaseCommit = parentHead
-    )
-    if !saveProject(project) (
-        removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
-        return {ok: false, error: "could not save generated history"}
-    )
-    upsertIndexEntry(project)
-    return {ok: true, project: project, generated: true}
+  )
+  jobs.done()
 )
 
 def generateMissingProjectHistories() object (
-    number generated = 0
-    number failed = 0
-    array files = fs.readDir(projectsDir).toArray()
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = loadProject(name.replace(".json", ""))
-            if result.ok (
-                object ensured = ensureGeneratedProjectHistory(result.project.assert(object), {})
-                if ensured.generated == true (
-                    generated = generated + 1
-                )
-                if !ensured.ok (
-                    failed = failed + 1
-                    log "WARNING: could not generate MistWarp history for " ++ name ++ ": " ++ ensured.error.toStr()
-                )
-            )
-        )
-    )
-    return {generated: generated, failed: failed}
+  array files = missingProjectHistoryFiles()
+  object stats = {total: files.len, processed: 0, generated: 0, skipped: 0, failed: 0}
+  if files.len == 0 (
+    log "MistWarp history migration: no projects require backfill"
+    return stats
+  )
+  number workerCount = historyMigrationWorkers
+  if workerCount > files.len (
+    workerCount = files.len
+  )
+  log "MistWarp history migration starting asynchronously: " ++ files.len.toStr() ++ " projects with " ++ workerCount.toStr() ++ " workers"
+  *sync.WaitGroup jobs = sync.waitGroup()
+  for i workerCount (
+    jobs.add()
+    thread.new(generateMissingProjectHistoriesWorker, i - 1, workerCount, files, stats, jobs)
+  )
+  jobs.wait()
+  fs.remove(tmpDir ++ "history-migration-json/")
+  fs.remove(tmpDir ++ "history-migration-assets/")
+  log "MistWarp history migration complete: " ++ stats.generated.toStr() ++ " generated, " ++ stats.skipped.toStr() ++ " skipped, " ++ stats.failed.toStr() ++ " failed out of " ++ stats.total.toStr()
+  return stats
 )

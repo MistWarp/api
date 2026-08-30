@@ -218,14 +218,21 @@ def notifyHeaders() object (
 )
 
 
-def postRoturNotification(string target, string actor, string notifType, object extra) boolean (
+def postRoturNotification(string target, string targetId, string actor, string actorId, string notifType, object extra) boolean (
     if mistwarpRoturToken == "" (
         return false
     )
     object payload = sanitizeNotificationPayload(extra, notifType, actor)
+    object requestBody = {target: target, actor: actor, type: notifType, data: payload, platform: "mistwarp", platform_data: payload}
+    if targetId != "" (
+        requestBody.target_id = targetId
+    )
+    if actorId != "" (
+        requestBody.actor_id = actorId
+    )
     object resp = requests.post(roturBase ++ "/v2/notifications", {
         headers: notifyHeaders(),
-        body: json.stringify({target: target, actor: actor, type: notifType, data: payload, platform: "mistwarp", platform_data: payload})
+        body: json.stringify(requestBody)
     })
     return resp.success and resp.status.toInt() == 200
 )
@@ -237,6 +244,8 @@ def addNotification(string target, string actor, string notifType, object extra)
     if targetKey == "" or targetKey == actorKey (
         return
     )
+    string targetId = userIdForUsername(target)
+    string actorId = userIdForUsername(actor)
     object targetSafety = loadSafety(target)
     if targetSafety.blocked.assert(array).contains(actorKey) or targetSafety.muted.assert(array).contains(actorKey) (
         return
@@ -250,13 +259,14 @@ def addNotification(string target, string actor, string notifType, object extra)
         id: "n" ++ randomString(12),
         type: notifType,
         actor: actor,
+        actorId: actorId,
         created: timestamp,
         platform: "mistwarp",
         platform_data: payload,
         read: false
     }
 
-    if postRoturNotification(targetKey, actor, notifType, payload) (
+    if postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
         return
     )
 
@@ -292,6 +302,24 @@ def addNotification(string target, string actor, string notifType, object extra)
 def handleGetNotifications(*serve.Context c) (
     string username = c.getString("username")
     array local = loadNotifications(username)
+    boolean changed = false
+    for i local.len (
+        object item = local[i]
+        if item.contains("actorId") and item.actorId != null and item.actorId.toStr() != "" (
+            string currentActor = usernameForId(item.actorId.toStr())
+            string storedActor = item.actor.toStr()
+            if currentActor != "" and currentActor != storedActor (
+                item.actor = currentActor
+                if item.contains("platform_data") and item.platform_data != null and typeof(item.platform_data) == "object" (
+                    rewriteNotificationIdentityFields(item.platform_data, normalizeUsername(storedActor), currentActor)
+                )
+                changed = true
+            )
+        )
+    )
+    if changed (
+        saveNotifications(username, local)
+    )
     c.json(200, {ok: true, notifications: local})
 )
 
