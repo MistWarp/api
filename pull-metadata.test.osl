@@ -12,3 +12,14 @@ testing.assert(pullCommentCountAfterDelete({}, 2, 6) == 6, "legacy deletes backf
 testing.assert(nextPullSequence(4, []) == 5, "legacy sequence metadata remains usable")
 testing.assert(nextPullSequence(4, [{index: 9}]) == 10, "stored pull documents repair a stale legacy sequence")
 testing.assert(nextPullSequence(12, [{index: 9}]) == 13, "a newer legacy sequence is preserved")
+
+string staleHead = "84223eef0258932ae0bf0bcb885ecb252431f6ec"
+string branchHead = "ef2bedd84c4a6403078ab088c795fae166ea9baf"
+object staleProject = {
+    gitHead: staleHead,
+    gitBranch: "main",
+    gitGraph: {branchLogs: [{branch: "main", oids: [branchHead, staleHead]}]}
+}
+testing.assert(canonicalHistoryHead(staleProject) == branchHead, "the current branch tip wins over a stale stored head")
+testing.assert(canonicalHistoryHead({head: staleHead, branch: "main", graph: {branchLogs: [{branch: "main", oids: [branchHead]}]}}) == branchHead, "uploaded history uses its branch tip")
+testing.assert(canonicalHistoryHead({gitHead: staleHead}) == staleHead, "stored heads remain the fallback without branch metadata")

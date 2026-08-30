@@ -1,8 +1,5 @@
 def projectGitHead(object project) string (
-    if project.contains("gitHead") and project.gitHead != null (
-        return project.gitHead.toStr()
-    )
-    return ""
+    return canonicalHistoryHead(project)
 )
 
 def projectHasWorkspace(object project) boolean (
@@ -98,6 +95,16 @@ def isPullSourceOwner(object pull, *serve.Context c) boolean (
 )
 
 def canClosePull(object pull, object target, *serve.Context c) boolean (
+    return canEditProject(target, c) or isPullSourceOwner(pull, c)
+)
+
+def canInspectPull(object pull, object target, *serve.Context c) boolean (
+    if canSeeInsideProject(target, c) (
+        return true
+    )
+    if !c.getBool("authenticated") (
+        return false
+    )
     return canEditProject(target, c) or isPullSourceOwner(pull, c)
 )
 
@@ -413,13 +420,7 @@ def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) b
             auto targetResult = loadProject(pull.targetProjectId.toStr())
             if targetResult.ok (
                 object target = targetResult.project.assert(object)
-                if canSeeInsideProject(target, c) (
-                    return true
-                )
-                if !c.getBool("authenticated") (
-                    continue
-                )
-                if canEditProject(target, c) or isPullSourceOwner(pull, c) (
+                if canInspectPull(pull, target, c) (
                     return true
                 )
             )
@@ -466,7 +467,7 @@ def handleGetPullDiff(*serve.Context c) (
     )
     object target = targetResult.project.assert(object)
     object source = sourceResult.project.assert(object)
-    if !canAccessPullWorkspace(target, pull.index.toStr(), c) (
+    if !canInspectPull(pull, target, c) (
         c.forbidden("only the fork owner and project maintainers can inspect this pull request")
         return
     )
