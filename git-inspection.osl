@@ -8,7 +8,7 @@ def projectWorkspaceFingerprint(object project) string (
 )
 
 def gitInspectionCacheVersion() string (
-    return "v2"
+    return "v3"
 )
 
 def pruneGitInspectionCache(string cacheDir, string preserveName) (
