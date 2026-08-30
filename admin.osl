@@ -252,7 +252,12 @@ def handleListUsers(*serve.Context c) (
 )
 
 def localRuntimeStorageStats() object (
-    return raw("func() map[string]any { types := map[string]int64{\"assets\": 0, \"history\": 0, \"projectData\": 0, \"database\": 0, \"cache\": 0, \"thumbnails\": 0, \"other\": 0}; var total int64; _ = OSLfilepath.Walk(\"data\", func(path string, info OSLos.FileInfo, err error) error { if err != nil || info == nil || info.IsDir() { return nil }; size := info.Size(); total += size; clean := OSLfilepath.ToSlash(path); kind := \"other\"; switch { case OSLstrings.Contains(clean, \"/blobs/assets/\"): kind = \"assets\"; case OSLstrings.Contains(clean, \"/blobs/project-workspaces/\") || OSLstrings.Contains(clean, \"/git-inspection/\"): kind = \"history\"; case OSLstrings.Contains(clean, \"/staging/\") || OSLstrings.Contains(clean, \"/projects/\"): kind = \"projectData\"; case OSLstrings.HasSuffix(clean, \".db\") || OSLstrings.Contains(clean, \"/users/\") || OSLstrings.Contains(clean, \"/comments/\"): kind = \"database\"; case OSLstrings.Contains(clean, \"/tmp/\"): kind = \"cache\"; case OSLstrings.Contains(clean, \"/thumbnails/\"): kind = \"thumbnails\" }; types[kind] += size; return nil }); var disk OSLsyscall.Statfs_t; _ = OSLsyscall.Statfs(\"data\", &disk); diskTotal := int64(disk.Blocks) * int64(disk.Bsize); diskFree := int64(disk.Bavail) * int64(disk.Bsize); var memory OSLruntime.MemStats; OSLruntime.ReadMemStats(&memory); typeValues := map[string]any{}; for key, typeBytes := range types { typeValues[key] = typeBytes }; return map[string]any{\"bytes\": total, \"diskTotalBytes\": diskTotal, \"diskFreeBytes\": diskFree, \"types\": typeValues, \"memory\": map[string]any{\"heapBytes\": int64(memory.HeapAlloc), \"systemBytes\": int64(memory.Sys), \"stackBytes\": int64(memory.StackInuse), \"goroutines\": OSLruntime.NumGoroutine()}} }()")
+    string encoded = raw("runtimeinfo.StatsJSON(\"data\")")
+    auto parsed = json.parse(encoded, {type: "object"})
+    if parsed.isErr() (
+        return {bytes: 0, diskTotalBytes: 0, diskFreeBytes: 0, types: {}, memory: {heapBytes: 0, systemBytes: 0, stackBytes: 0, goroutines: 0}}
+    )
+    return parsed.unwrap().assert(object)
 )
 
 def aggregateStorageObjects(object objects) object (
