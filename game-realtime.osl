@@ -46,9 +46,9 @@ def realtimeError(*ws.Connection conn, string message) (
 
 def realtimeAllow(*ws.Connection conn, string field, number maximum, number windowMs) boolean (
     array recent = []
-    for value in conn.Get(field).assertElse(array, []) (
-        if timestamp - value.toNum() < windowMs (
-            recent.append(value.toNum())
+    for entryTime in conn.Get(field).assertElse(array, []) (
+        if timestamp - entryTime.toNum() < windowMs (
+            recent.append(entryTime.toNum())
         )
     )
     if recent.len >= maximum (
