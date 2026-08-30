@@ -675,11 +675,11 @@ def handleMergePull(*serve.Context c) (
         fs.remove(mergeArchivePath)
         if mergeArchiveBody.len > maxWorkspaceBytes (
             sync.unlock("project-history-" ++ target.id.toStr())
-            c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
+            c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit", code: "workspace_too_large"})
             return
         )
         string mergeArchiveKey = projectWorkspaceSnapshotKey(contentHash(mergeArchiveBody))
-        if !r2Put(mergeArchiveKey, mergeArchiveBody, "application/x-mistwarp-project") (
+        if !stageR2Blob(mergeArchiveKey, mergeArchiveBody, "application/x-mistwarp-project", "") (
             sync.unlock("project-history-" ++ target.id.toStr())
             c.internalError("could not store the pull request merge history")
             return

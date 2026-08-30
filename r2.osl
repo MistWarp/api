@@ -224,12 +224,142 @@ def r2Put(string key, any body, string contentType) boolean (
     return r2PutEncoded(key, body, contentType, "")
 )
 
-def r2Remove(string key) boolean (
+string r2UploadQueueFile = "data/r2-upload-queue.json"
+string r2StorageIndexFile = "data/r2-storage-index.json"
+
+def r2ObjectType(string key) string (
+    if key.startsWith("assets/") (
+        return "assets"
+    )
+    if key.startsWith("project-workspaces/") (
+        return "history"
+    )
+    if key.contains("project.json") or key.startsWith("project-json/") (
+        return "projectData"
+    )
+    return "other"
+)
+
+def loadR2UploadQueue() array (
+    auto loaded = readFile(r2UploadQueueFile)
+    if loaded.ok (
+        object data = loaded.data.assertElse(object, {})
+        if data.contains("items") (
+            return data.items.assertElse(array, [])
+        )
+    )
+    return []
+)
+
+def queueR2Upload(string key, string contentType, string contentEncoding) boolean (
     if r2Local (
-        return fs.remove(localBlobPath(key))
+        return true
+    )
+    sync.lock("r2-upload-queue")
+    array items = loadR2UploadQueue()
+    for i items.len (
+        if items[i].assertElse(object, {}).key.toStr() == key (
+            sync.unlock("r2-upload-queue")
+            return true
+        )
+    )
+    string path = localBlobPath(key)
+    number size = fs.exists(path) ? fs.getSize(path) 0
+    items.append({key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp})
+    boolean saved = writeFile(r2UploadQueueFile, {items: items})
+    sync.unlock("r2-upload-queue")
+    return saved
+)
+
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+    if !isSafeBlobKey(key) (
+        return false
+    )
+    string path = localBlobPath(key)
+    if !fs.exists(path) (
+        fs.mkdirAll(parentDirOf(path))
+        if !fs.writeFileBytes(path, body) (
+            return false
+        )
+    )
+    return queueR2Upload(key, contentType, contentEncoding)
+)
+
+def recordR2Stored(object item) (
+    auto loaded = readFile(r2StorageIndexFile)
+    object data = loaded.ok ? loaded.data.assertElse(object, {}) {}
+    if !data.contains("objects") (
+        data.objects = {}
+    )
+    object objects = data.objects
+    objects[item.key.toStr()] = {
+        type: item.type.toStr() == "" ? r2ObjectType(item.key.toStr()) item.type,
+        size: item.size.toNum(),
+        storedAt: timestamp
+    }
+    writeFile(r2StorageIndexFile, data)
+)
+
+def flushR2UploadQueue() (
+    if r2Local (
+        return
+    )
+    sync.lock("r2-upload-queue")
+    array items = loadR2UploadQueue()
+    array remaining = []
+    number uploadedBytes = 0
+    number uploadedItems = 0
+    for i items.len (
+        object item = items[i].assertElse(object, {})
+        string key = item.key.toStr()
+        string path = localBlobPath(key)
+        boolean uploaded = false
+        if uploadedItems < 64 and uploadedBytes < 268435456 and isSafeBlobKey(key) and fs.exists(path) (
+            byte[] body = fs.readFileBytes(path)
+            object input = {key: key, body: body, content_type: item.contentType.toStr()}
+            if item.contentEncoding.toStr() != "" (
+                input.content_encoding = item.contentEncoding
+            )
+            auto result = r2Client.put(input)
+            uploaded = result.ok == true
+            if uploaded (
+                uploadedItems = uploadedItems + 1
+                uploadedBytes = uploadedBytes + body.len
+                item.size = body.len
+                item.type = r2ObjectType(key)
+                recordR2Stored(item)
+            )
+        )
+        if !uploaded (
+            remaining.append(item)
+        )
+    )
+    writeFile(r2UploadQueueFile, {items: remaining})
+    sync.unlock("r2-upload-queue")
+)
+
+def removeQueuedR2Upload(string key) (
+    sync.lock("r2-upload-queue")
+    array items = loadR2UploadQueue()
+    array remaining = []
+    for i items.len (
+        object item = items[i].assertElse(object, {})
+        if item.key.toStr() != key (
+            remaining.append(item)
+        )
+    )
+    writeFile(r2UploadQueueFile, {items: remaining})
+    sync.unlock("r2-upload-queue")
+)
+
+def r2Remove(string key) boolean (
+    fs.remove(localBlobPath(key))
+    removeQueuedR2Upload(key)
+    if r2Local (
+        return true
     )
     auto result = r2Client.remove({"key": key})
-    return result.ok == true
+    return result.ok == true or result.status.toNum() == 404
 )
 
 def copyStorageKeyToPath(string key, string outputPath) boolean (

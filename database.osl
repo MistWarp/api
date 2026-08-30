@@ -95,7 +95,8 @@ def syncSearchProfile(object profile) boolean (
     if profile.contains("userId") and profile.userId != null (
         userId = profile.userId.toStr()
     )
-    object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, edited: timestamp}
+    number created = profile.contains("created") ? profile.created.toNum() 0
+    object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, edited: timestamp}
     return putDocument(profileSearchDocs, key, entry)
 )
 
@@ -146,6 +147,15 @@ def initCommunityDatabase() boolean (
             if file.endsWith(".json") (
                 syncSearchProfile(loadProfile(file.replace(".json", "")))
             )
+        )
+    )
+    array profileEntries = profileSearchDocs.all()
+    for i profileEntries.len (
+        object entry = profileEntries[i].assert(object)
+        if !entry.contains("created") (
+            object profile = loadProfile(entry.usernameKey.toStr())
+            entry.created = profile.contains("created") ? profile.created.toNum() 0
+            putDocument(profileSearchDocs, entry["_id"].toStr(), entry)
         )
     )
     array projectEntries = projectSearchDocs.all()

@@ -729,6 +729,399 @@ def quotaDetails(string username) object (
   return {used: total, limit: uploadLimit, oldestEventMs: oldest, nextExpiryInMs: msUntilExpiry, eventCount: count}
 )
 
+number stagedUploadPartTtlMs = 900000
+
+def stagedUploadPartMetaPath(string token) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".json"
+)
+
+def stagedUploadPartDataPath(string token) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".bin"
+)
+
+def validStagedUploadPartKind(string kind) boolean (
+  return kind == "workspace" or kind == "mergeTree"
+)
+
+def removeStagedUploadPart(string token, object metadata) (
+  fs.remove(stagedUploadPartDataPath(token))
+  fs.remove(stagedUploadPartMetaPath(token))
+)
+
+def consumeStagedUploadPart(string token, string projectId, string kind, string userId) object (
+  if token == "" or token.len > 64 or !regex.match("^[A-Za-z0-9]+$", token) (
+    return {ok: false, error: "invalid staged upload token"}
+  )
+  auto loaded = readFile(stagedUploadPartMetaPath(token))
+  if !loaded.ok (
+    return {ok: false, error: "staged upload expired; upload it again"}
+  )
+  object metadata = loaded.data.assert(object)
+  if metadata.projectId.toStr() != projectId or metadata.kind.toStr() != kind or metadata.userId.toStr() != userId (
+    return {ok: false, error: "staged upload does not match this project"}
+  )
+  if metadata.expires.toNum() < timestamp or !fs.exists(stagedUploadPartDataPath(token)) (
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "staged upload expired; upload it again"}
+  )
+  if metadata.contains("complete") and metadata.complete != true (
+    return {ok: false, error: "staged upload is incomplete"}
+  )
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token))
+  if data.len != metadata.size.toNum() (
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "staged upload is incomplete"}
+  )
+  removeStagedUploadPart(token, metadata)
+  return {ok: true, file: {data: data, size: data.len}}
+)
+
+def cleanupExpiredStagedUploadParts() (
+  array files = fs.readDir(tmpDir).toArray()
+  for i files.len (
+    string filename = files[i].toStr()
+    if filename.startsWith("upload-part-") and filename.endsWith(".json") (
+      string token = filename.replace("upload-part-", "").replace(".json", "")
+      auto loaded = readFile(tmpDir ++ filename)
+      if !loaded.ok or loaded.data.expires.toNum() < timestamp (
+        object metadata = loaded.ok ? loaded.data.assert(object) {}
+        if metadata.contains("chunks") (
+          removeUploadPartChunks(token, metadata.chunks.toNum())
+        )
+        removeStagedUploadPart(token, metadata)
+      )
+    )
+  )
+)
+
+def handleUploadProjectAsset(*serve.Context c) (
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  string name = c.param("name")
+  if !isValidMd5Ext(name) (
+    c.badRequest("invalid asset name")
+    return
+  )
+  auto fileResult = c.formFile("asset")
+  if fileResult.isErr() (
+    c.badRequest("missing asset file")
+    return
+  )
+  object file = fileResult.unwrap().assert(object)
+  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  number assetLimit = benefits.maxProjectAssetBytes.toNum()
+  if assetLimit > maxWorkspaceBytes (
+    assetLimit = maxWorkspaceBytes
+  )
+  if file.size.toNum() > assetLimit (
+    c.json(413, {ok: false, error: "asset exceeds the 90 MB upload limit", code: "asset_too_large"})
+    return
+  )
+  string content = file.data.toStr()
+  if content.hashMD5() != md5PartOf(name) (
+    c.badRequest("asset filename does not match its content")
+    return
+  )
+
+  string assetLock = "asset-upload-" ++ name
+  sync.lock(assetLock)
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  if knownAssets.contains(name) (
+    sync.unlock(assetLock)
+    c.json(200, {ok: true, uploaded: false, name: name})
+    return
+  )
+  number uploadLimit = benefits.weeklyUploadBytes.toNum()
+  object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum(), uploadLimit,!c.getBool("isAdmin"))
+  if !reservation.ok (
+    sync.unlock(assetLock)
+    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    return
+  )
+  if !stageR2Blob(assetObjectKey(name), file.data, contentTypeForExt(extPartOf(name)), "") (
+    sync.unlock(assetLock)
+    c.internalError("asset upload failed")
+    return
+  )
+  knownAssets[name] = file.size
+  if !saveAssetsIndex(assetsIndex) (
+    r2Remove(assetObjectKey(name))
+    sync.unlock(assetLock)
+    c.internalError("asset index update failed")
+    return
+  )
+  sync.unlock(assetLock)
+  c.json(201, {ok: true, uploaded: true, name: name})
+)
+
+def handleStageProjectUploadPart(*serve.Context c) (
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  string kind = c.param("kind")
+  if !validStagedUploadPartKind(kind) (
+    c.badRequest("invalid upload part")
+    return
+  )
+  auto fileResult = c.formFile("file")
+  if fileResult.isErr() (
+    c.badRequest("missing upload part")
+    return
+  )
+  object file = fileResult.unwrap().assert(object)
+  if file.size.toNum() > maxWorkspaceBytes (
+    c.json(413, {ok: false, error: "upload part exceeds the 90 MB limit", code: "upload_part_too_large"})
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
+  boolean readContents = kind == "workspace"
+  if !validateZipArchive(file.data, maxWorkspaceBytes, expandedLimit, maxWorkspaceFiles, readContents) (
+    c.badRequest("invalid or unsafe upload part")
+    return
+  )
+  number uploadLimit = benefits.weeklyUploadBytes.toNum()
+  object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum(), uploadLimit,!c.getBool("isAdmin"))
+  if !reservation.ok (
+    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    return
+  )
+  string token = randomString(32)
+  if !fs.writeFileBytes(stagedUploadPartDataPath(token), file.data) or !writeFile(stagedUploadPartMetaPath(token), {
+    projectId: project.id,
+    kind: kind,
+    userId: c.getString("userId"),
+    size: file.size,
+    expires: timestamp + stagedUploadPartTtlMs
+  }) (
+    removeStagedUploadPart(token, {})
+    c.internalError("could not stage upload part")
+    return
+  )
+  c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
+)
+
+def uploadPartChunkPath(string token, number index) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".chunk." ++ index.toInt().toStr()
+)
+
+def removeUploadPartChunks(string token, number count) (
+  for i count (
+    fs.remove(uploadPartChunkPath(token, i))
+  )
+)
+
+def assembleUploadPart(string token, number count, number expectedBytes) boolean (
+  string outputPath = stagedUploadPartDataPath(token)
+  return raw("func() bool { output, err := OSLos.Create(outputPath); if err != nil { return false }; var written int64; ok := true; for index := 0; index < int(count); index++ { input, openErr := OSLos.Open(uploadPartChunkPath(token, float64(index))); if openErr != nil { ok = false; break }; copied, copyErr := OSLio.Copy(output, input); closeErr := input.Close(); if copyErr != nil || closeErr != nil { ok = false; break }; written += copied }; closeErr := output.Close(); if !ok || closeErr != nil || written != int64(expectedBytes) { OSLos.Remove(outputPath); return false }; return true }()")
+)
+
+def handleCreateProjectUploadPart(*serve.Context c) (
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object body = c.bodyJSON()
+  string kind = body.kind.toStr()
+  string name = body.name.toStr()
+  number size = body.size.toNum().toInt()
+  number chunks = body.chunks.toNum().toInt()
+  if kind != "asset" and kind != "workspace" and kind != "mergeTree" (
+    c.badRequest("invalid upload part")
+    return
+  )
+  if size < 1 or size > maxWorkspaceBytes or chunks < 1 or chunks > 64 or chunks * maxUploadChunkBytes < size (
+    c.badRequest("invalid upload size")
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  if kind == "asset" (
+    if !isValidMd5Ext(name) or size > benefits.maxProjectAssetBytes.toNum() (
+      c.badRequest("invalid or oversized asset")
+      return
+    )
+    object knownAssets = loadAssetsIndex().assets
+    if knownAssets.contains(name) (
+      c.json(200, {ok: true, alreadyPresent: true, name: name})
+      return
+    )
+  )
+  number uploadLimit = benefits.weeklyUploadBytes.toNum()
+  object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), size, uploadLimit,!c.getBool("isAdmin"))
+  if !reservation.ok (
+    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    return
+  )
+  string token = randomString(32)
+  object metadata = {
+    projectId: project.id,
+    kind: kind,
+    name: name,
+    userId: c.getString("userId"),
+    size: size,
+    chunks: chunks,
+    nextChunk: 0,
+    received: 0,
+    complete: false,
+    expires: timestamp + stagedUploadPartTtlMs
+  }
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    c.internalError("could not start upload")
+    return
+  )
+  c.json(201, {ok: true, token: token, chunkBytes: maxUploadChunkBytes, expiresInMs: stagedUploadPartTtlMs})
+)
+
+def loadOwnedUploadPart(*serve.Context c) object (
+  string token = c.param("token")
+  if token == "" or token.len > 64 or !regex.match("^[A-Za-z0-9]+$", token) (
+    return {ok: false, error: "invalid upload token"}
+  )
+  auto loaded = readFile(stagedUploadPartMetaPath(token))
+  if !loaded.ok (
+    return {ok: false, error: "upload expired; start it again"}
+  )
+  object metadata = loaded.data.assert(object)
+  if metadata.projectId.toStr() != c.param("id") or metadata.userId.toStr() != c.getString("userId") (
+    return {ok: false, error: "upload token does not match this project"}
+  )
+  if metadata.expires.toNum() < timestamp (
+    removeUploadPartChunks(token, metadata.chunks.toNum())
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "upload expired; start it again"}
+  )
+  return {ok: true, token: token, metadata: metadata}
+)
+
+def handleUploadProjectPartChunk(*serve.Context c) (
+  object loaded = loadOwnedUploadPart(c)
+  if !loaded.ok (
+    c.badRequest(loaded.error.toStr())
+    return
+  )
+  string token = loaded.token.toStr()
+  object metadata = loaded.metadata.assert(object)
+  if metadata.complete == true (
+    c.badRequest("upload is already complete")
+    return
+  )
+  auto chunkResult = c.formFile("chunk")
+  if chunkResult.isErr() (
+    c.badRequest("missing upload chunk")
+    return
+  )
+  object chunk = chunkResult.unwrap().assert(object)
+  number index = c.formValue("index").toNum().toInt()
+  if index != metadata.nextChunk.toNum() or chunk.size.toNum() < 1 or chunk.size.toNum() > maxUploadChunkBytes (
+    c.badRequest("unexpected upload chunk")
+    return
+  )
+  if metadata.received.toNum() + chunk.size.toNum() > metadata.size.toNum() (
+    c.badRequest("upload exceeds its declared size")
+    return
+  )
+  if !fs.writeFileBytes(uploadPartChunkPath(token, index), chunk.data) (
+    c.internalError("could not store upload chunk")
+    return
+  )
+  metadata.nextChunk = index + 1
+  metadata.received = metadata.received.toNum() + chunk.size.toNum()
+  metadata.expires = timestamp + stagedUploadPartTtlMs
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    fs.remove(uploadPartChunkPath(token, index))
+    c.internalError("could not update upload")
+    return
+  )
+  c.json(200, {ok: true, received: metadata.received, size: metadata.size})
+)
+
+def handleCompleteProjectUploadPart(*serve.Context c) (
+  object loaded = loadOwnedUploadPart(c)
+  if !loaded.ok (
+    c.badRequest(loaded.error.toStr())
+    return
+  )
+  string token = loaded.token.toStr()
+  object metadata = loaded.metadata.assert(object)
+  if metadata.received.toNum() != metadata.size.toNum() or metadata.nextChunk.toNum() != metadata.chunks.toNum() (
+    c.badRequest("upload is incomplete")
+    return
+  )
+  if !assembleUploadPart(token, metadata.chunks.toNum(), metadata.size.toNum()) (
+    c.internalError("could not assemble upload")
+    return
+  )
+  removeUploadPartChunks(token, metadata.chunks.toNum())
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token))
+  string kind = metadata.kind.toStr()
+  if kind == "asset" (
+    string name = metadata.name.toStr()
+    if data.toStr().hashMD5() != md5PartOf(name) (
+      removeStagedUploadPart(token, metadata)
+      c.badRequest("asset filename does not match its content")
+      return
+    )
+    string assetLock = "asset-upload-" ++ name
+    sync.lock(assetLock)
+    object assetsIndex = loadAssetsIndex()
+    object knownAssets = assetsIndex.assets
+    boolean stored = knownAssets.contains(name)
+    if !stored (
+      stored = stageR2Blob(assetObjectKey(name), data, contentTypeForExt(extPartOf(name)), "")
+      if stored (
+        knownAssets[name] = metadata.size
+        stored = saveAssetsIndex(assetsIndex)
+      )
+    )
+    sync.unlock(assetLock)
+    removeStagedUploadPart(token, metadata)
+    if !stored (
+      c.internalError("could not store asset")
+      return
+    )
+    c.json(201, {ok: true, complete: true, kind: kind, name: name})
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
+  boolean readContents = kind == "workspace"
+  if !validateZipArchive(data, metadata.size.toNum(), expandedLimit, maxWorkspaceFiles, readContents) (
+    removeStagedUploadPart(token, metadata)
+    c.badRequest("invalid or unsafe upload part")
+    return
+  )
+  metadata.complete = true
+  metadata.expires = timestamp + stagedUploadPartTtlMs
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    removeStagedUploadPart(token, metadata)
+    c.internalError("could not finish upload")
+    return
+  )
+  c.json(201, {ok: true, complete: true, token: token, kind: kind})
+)
+
 def inspectProjectJson(string path) object (
   *json.Stream stream = json.open(path, maxProjectJsonBytes)
   if !stream.ok() or !stream.more() (
@@ -876,11 +1269,8 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
     string path = upload.path.toStr()
     string name = upload.name.toStr()
     string content = fs.readFile(path)
-    if !r2Put(assetObjectKey(name), content, contentTypeForExt(extPartOf(name))) (
+    if !stageR2Blob(assetObjectKey(name), content, contentTypeForExt(extPartOf(name)), "") (
       return {ok: false, error: "asset upload failed", status: 502}
-    )
-    if !removeLocalAssetAfterUpload(localBlobPath(assetObjectKey(name)),!r2Local) (
-      return {ok: false, error: "local asset cleanup failed", status: 500}
     )
     knownAssets[name] = content.len
     uploaded = uploaded + 1
@@ -1008,7 +1398,7 @@ def ensureProjectWorkspaceSnapshots(object project) object (
   )
   byte[] workspaceBody = fs.readFileBytes(tempPath)
   string key = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
-  if !r2Put(key, workspaceBody, "application/x-mistwarp-project") (
+  if !stageR2Blob(key, workspaceBody, "application/x-mistwarp-project", "") (
     fs.remove(tempPath)
     return {ok: false}
   )
@@ -1164,12 +1554,33 @@ def handleUploadProject(*serve.Context c) (
   number incomingBytes = file.size.toNum()
   auto workspaceResult = c.formFile("workspace")
   auto mergeTreeResult = c.formFile("mergeTree")
-  if !workspaceResult.isErr() (
-    object incomingWorkspace = workspaceResult.unwrap().assert(object)
-    incomingBytes += incomingWorkspace.size.toNum()
+  boolean hasWorkspace = !workspaceResult.isErr()
+  boolean hasMergeTree = !mergeTreeResult.isErr()
+  object workspaceFile = {}
+  object mergeTreeFile = {}
+  if hasWorkspace (
+    workspaceFile = workspaceResult.unwrap().assert(object)
+    incomingBytes += workspaceFile.size.toNum()
+  ) else if c.formValue("workspaceToken") != "" (
+    object stagedWorkspace = consumeStagedUploadPart(c.formValue("workspaceToken"), project.id.toStr(), "workspace", c.getString("userId"))
+    if !stagedWorkspace.ok (
+      c.badRequest(stagedWorkspace.error.toStr())
+      return
+    )
+    workspaceFile = stagedWorkspace.file.assert(object)
+    hasWorkspace = true
   )
-  if !mergeTreeResult.isErr() (
-    incomingBytes += mergeTreeResult.unwrap().assert(object).size.toNum()
+  if hasMergeTree (
+    mergeTreeFile = mergeTreeResult.unwrap().assert(object)
+    incomingBytes += mergeTreeFile.size.toNum()
+  ) else if c.formValue("mergeTreeToken") != "" (
+    object stagedMergeTree = consumeStagedUploadPart(c.formValue("mergeTreeToken"), project.id.toStr(), "mergeTree", c.getString("userId"))
+    if !stagedMergeTree.ok (
+      c.badRequest(stagedMergeTree.error.toStr())
+      return
+    )
+    mergeTreeFile = stagedMergeTree.file.assert(object)
+    hasMergeTree = true
   )
   number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
   object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
@@ -1190,7 +1601,7 @@ def handleUploadProject(*serve.Context c) (
   )
 
   number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
-  if !validateZipArchive(file.data, file.size.toNum(), extractedLimit, maxAssetCount + 1, false) (
+  if !validateZipArchive(file.data, maxProjectUploadRequestBytes, extractedLimit, maxAssetCount + 1, false) (
     fs.remove(zipPath)
     c.badRequest("invalid or unsafe sb3 file")
     return
@@ -1264,8 +1675,8 @@ def handleUploadProject(*serve.Context c) (
   boolean generatedWorkspace = false
   byte[] generatedWorkspaceBody = []
   string historyBaseHead = currentHead
-  if !mergeTreeResult.isErr() and workspaceResult.isErr() and restoreCommit == "" (
-    object mergeTree = mergeTreeResult.unwrap().assert(object)
+  if hasMergeTree and !hasWorkspace and restoreCommit == "" (
+    object mergeTree = mergeTreeFile
     boolean branchMerge = pullId == "" and mergeSourceBranch != "" and mergeTargetBranch != "" and requestedMergeSourceHead != "" and requestedMergeTargetHead != ""
     object mergePull = {}
     object mergeSource = project
@@ -1344,7 +1755,7 @@ def handleUploadProject(*serve.Context c) (
     fs.remove(mergeTreePath)
     fs.remove(mergeDeltaPath)
   )
-  if restoreCommit != "" and workspaceResult.isErr() (
+  if restoreCommit != "" and !hasWorkspace (
     string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
     string restoreDeltaPath = tmpDir ++ workId ++ ".restore-delta.mwp"
     string restoreBranch = project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main"
@@ -1375,18 +1786,17 @@ def handleUploadProject(*serve.Context c) (
   )
 
   array previousWorkspaceKeys = []
-  if !workspaceResult.isErr() or generatedWorkspace (
+  if hasWorkspace or generatedWorkspace (
     any incomingWorkspaceBody = generatedWorkspaceBody
     number incomingWorkspaceSize = generatedWorkspaceBody.len
-    if !workspaceResult.isErr() (
-      object workspace = workspaceResult.unwrap().assert(object)
-      incomingWorkspaceBody = workspace.data
-      incomingWorkspaceSize = workspace.size.toNum()
+    if hasWorkspace (
+      incomingWorkspaceBody = workspaceFile.data
+      incomingWorkspaceSize = workspaceFile.size.toNum()
     )
     if incomingWorkspaceSize > maxWorkspaceBytes (
       fs.remove(zipPath)
       fs.remove(extractDir)
-      c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
+      c.json(413, {ok: false, error: "one history update exceeds the 512 MB safety limit", code: "workspace_update_too_large"})
       return
     )
     if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
@@ -1395,85 +1805,19 @@ def handleUploadProject(*serve.Context c) (
       c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
       return
     )
-    any workspaceBody = incomingWorkspaceBody
-    any deltaStorageBody = incomingWorkspaceBody
-    string baseWorkspacePath = ""
-    string deltaWorkspacePath = ""
-    string prunedDeltaPath = ""
-    string mergedWorkspacePath = ""
     boolean workspaceDelta = gitInfo.contains("delta") and gitInfo.delta == true
-    if workspaceDelta (
-      baseWorkspacePath = tmpDir ++ workId ++ ".base.mwp"
-      deltaWorkspacePath = tmpDir ++ workId ++ ".delta.mwp"
-      prunedDeltaPath = tmpDir ++ workId ++ ".pruned-delta.mwp"
-      mergedWorkspacePath = tmpDir ++ workId ++ ".merged.mwp"
-      boolean mergeOk = copyProjectWorkspaceToPath(project, baseWorkspacePath)
-      mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, incomingWorkspaceBody)
-      if mergeOk (
-        string pruneJson = raw("rewrite.PruneDeltaArchiveJSON(baseWorkspacePath, deltaWorkspacePath, prunedDeltaPath)")
-        auto parsedPrune = json.parse(pruneJson, {type: "object"})
-        mergeOk = !parsedPrune.isErr() and parsedPrune.unwrap().assert(object).ok == true
-      )
-      mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, prunedDeltaPath, mergedWorkspacePath, extractedLimit)
-      if !mergeOk (
-        fs.remove(baseWorkspacePath)
-        fs.remove(deltaWorkspacePath)
-        fs.remove(prunedDeltaPath)
-        fs.remove(mergedWorkspacePath)
-        fs.remove(zipPath)
-        fs.remove(extractDir)
-        c.internalError("failed to apply project history update")
-        return
-      )
-      if fs.getSize(mergedWorkspacePath) > maxWorkspaceBytes (
-        fs.remove(baseWorkspacePath)
-        fs.remove(deltaWorkspacePath)
-        fs.remove(prunedDeltaPath)
-        fs.remove(mergedWorkspacePath)
-        fs.remove(zipPath)
-        fs.remove(extractDir)
-        c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
-        return
-      )
-      workspaceBody = fs.readFileBytes(mergedWorkspacePath)
-      deltaStorageBody = fs.readFileBytes(prunedDeltaPath)
-    )
     previousWorkspaceKeys = projectWorkspaceKeys(project)
-    boolean compactWorkspace = !workspaceDelta or previousWorkspaceKeys.len >= 8
-    any storedWorkspaceBody = compactWorkspace ? workspaceBody deltaStorageBody
+    boolean replaceWorkspace = !workspaceDelta
+    any storedWorkspaceBody = incomingWorkspaceBody
     string workspaceKey = projectWorkspaceSnapshotKey(contentHash(storedWorkspaceBody))
-    if !r2Put(workspaceKey, storedWorkspaceBody, "application/x-mistwarp-project") (
-      if baseWorkspacePath != "" (
-        fs.remove(baseWorkspacePath)
-      )
-      if deltaWorkspacePath != "" (
-        fs.remove(deltaWorkspacePath)
-      )
-      if prunedDeltaPath != "" (
-        fs.remove(prunedDeltaPath)
-      )
-      if mergedWorkspacePath != "" (
-        fs.remove(mergedWorkspacePath)
-      )
+    if !stageR2Blob(workspaceKey, storedWorkspaceBody, "application/x-mistwarp-project", "") (
       fs.remove(zipPath)
       fs.remove(extractDir)
       c.internalError("failed to store MistWarp project history")
       return
     )
-    if baseWorkspacePath != "" (
-      fs.remove(baseWorkspacePath)
-    )
-    if deltaWorkspacePath != "" (
-      fs.remove(deltaWorkspacePath)
-    )
-    if prunedDeltaPath != "" (
-      fs.remove(prunedDeltaPath)
-    )
-    if mergedWorkspacePath != "" (
-      fs.remove(mergedWorkspacePath)
-    )
     array nextWorkspaceLayers = [workspaceKey]
-    if !compactWorkspace (
+    if !replaceWorkspace (
       nextWorkspaceLayers = []
       for i previousWorkspaceKeys.len (
         nextWorkspaceLayers.append(previousWorkspaceKeys[i])
@@ -1539,7 +1883,7 @@ def handleUploadProject(*serve.Context c) (
   )
 
   boolean historyMutationLocked = false
-  if !workspaceResult.isErr() (
+  if hasWorkspace (
     sync.lock("project-history-" ++ project.id.toStr())
     historyMutationLocked = true
     auto latestResult = loadProject(project.id.toStr())
@@ -1663,25 +2007,39 @@ def handleBootstrapProjectHistory(*serve.Context c) (
 
   auto workspaceResult = c.formFile("workspace")
   string gitMetadata = c.formValue("git")
-  if workspaceResult.isErr() or gitMetadata == "" (
+  boolean stagedWorkspace = false
+  object workspace = {}
+  if !workspaceResult.isErr() (
+    workspace = workspaceResult.unwrap().assert(object)
+  ) else if c.formValue("workspaceToken") != "" (
+    object staged = consumeStagedUploadPart(c.formValue("workspaceToken"), project.id.toStr(), "workspace", c.getString("userId"))
+    if !staged.ok (
+      c.badRequest(staged.error.toStr())
+      return
+    )
+    workspace = staged.file.assert(object)
+    stagedWorkspace = true
+  )
+  if workspace.getKeys().toArray().len == 0 or gitMetadata == "" (
     c.badRequest("missing MistWarp history")
     return
   )
-  object workspace = workspaceResult.unwrap().assert(object)
   if workspace.size.toNum() > maxWorkspaceBytes (
-    c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit"})
+    c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit"})
     return
   )
   string uploader = normalizeUsername(c.getString("username"))
   number incomingBytes = workspace.size.toNum()
   object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
   number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
-  object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
-  if !reservation.ok (
-    number usedMb = (reservation.used.toNum() / 1048576).toInt()
-    number limitMb = (uploadLimit / 1048576).toInt()
-    c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
-    return
+  if !stagedWorkspace (
+    object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
+    if !reservation.ok (
+      number usedMb = (reservation.used.toNum() / 1048576).toInt()
+      number limitMb = (uploadLimit / 1048576).toInt()
+      c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
+      return
+    )
   )
   number workspaceExpandedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
   if !validateZipArchive(workspace.data, maxWorkspaceBytes, workspaceExpandedLimit, maxWorkspaceFiles, true) (
@@ -1746,7 +2104,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
   )
 
   string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace.data))
-  if !r2Put(workspaceKey, workspace.data, "application/x-mistwarp-project") (
+  if !stageR2Blob(workspaceKey, workspace.data, "application/x-mistwarp-project", "") (
     c.internalError("could not store MistWarp history")
     return
   )

@@ -16,6 +16,8 @@ import "std:db"
 import "std:ws"
 
 import "go:time"
+import "go:runtime"
+import "go:syscall"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/gitinspection/rewrite"
 
@@ -87,8 +89,9 @@ string legacyAccountGameDataDir = "data/account-game-data/"
 string gameEntitlementsDir = "data/game-entitlements/"
 string gameInventoryDir = "data/game-inventory/"
 
-number maxWorkspaceBytes = 134217728
-number maxWorkspaceFiles = 20000
+number maxWorkspaceBytes = 536870912
+number maxWorkspaceFiles = 1000000
+number maxUploadChunkBytes = 8388608
 
 number maxProjectJsonBytes = 268435456
 number maxStoredProjectJsonBytes = 20971520
@@ -142,6 +145,7 @@ auto r2Client = s3.new({
 fs.mkdirAll("data/")
 
 import "./utils.osl"
+import "./request-limits.osl"
 import "./project-sharing-policy.osl"
 import "./archive-security.osl"
 import "./storage-addressing.osl"
@@ -217,11 +221,14 @@ def stagedFlushLoop() (
   while true (
     process.sleep(300)
     sweepStagedProjects()
+    cleanupExpiredStagedUploadParts()
+    flushR2UploadQueue()
     cleanupExpiredCommunityRecords()
   )
 )
 
 sweepStagedProjects()
+cleanupExpiredStagedUploadParts()
 cleanupExpiredSessions()
 cleanupExpiredCommunityRecords()
 thread.new(reconcileLoop)
@@ -231,6 +238,7 @@ thread.new(generateMissingProjectHistories)
 *serve.Router app = serve.new()
 *ws.Server gameRealtimeSocket = ws.New()
 
+app.bodyLimit(maxAppRequestBytes)
 app.use(realtimeUpgradeGuard)
 app.use(corsMiddleware)
 app.use(serve.logger())
@@ -248,15 +256,15 @@ app.use(authMiddleware)
 setupGameRealtime()
 
 *serve.Router uploads = app.group("/api")
-uploads.use(serve.maxBodySize(268435456))
-uploads.POST("/projects/:id/upload", requireAuth, requireCurrentAgreement, handleUploadProject)
-uploads.POST("/projects/:id/history/bootstrap", requireAuth, requireCurrentAgreement, handleBootstrapProjectHistory)
-uploads.POST("/projects/:id/thumbnail", requireAuth, handleSetThumbnail)
-uploads.POST("/spaces/:id/thumbnail", requireAuth, handleSetSpaceThumbnail)
-uploads.POST("/admin/projects/:id/extensions/index", requireAdmin, handleAdminIndexProjectExtensions)
+uploads.POST("/projects/:id/upload", serve.maxBodySize(maxProjectUploadRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProject)
+uploads.POST("/projects/:id/upload-parts/:token/chunk", serve.maxBodySize(maxUploadChunkRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProjectPartChunk)
+uploads.POST("/projects/:id/history/bootstrap", serve.maxBodySize(maxWorkspaceBootstrapRequestBytes), requireAuth, requireCurrentAgreement, handleBootstrapProjectHistory)
+uploads.POST("/projects/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetThumbnail)
+uploads.POST("/spaces/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetSpaceThumbnail)
+uploads.POST("/admin/projects/:id/extensions/index", serve.maxBodySize(maxExtensionIndexRequestBytes), requireAdmin, handleAdminIndexProjectExtensions)
 
 *serve.Router api = app.group("/api")
-api.use(serve.maxBodySize(262144))
+api.use(serve.maxBodySize(maxStandardRequestBytes))
 
 api.GET("/health", handleHealth)
 api.GET("/health/dependencies", handleDependencyHealth)
@@ -336,6 +344,8 @@ api.GET("/me/spaces", requireAuth, handleMySpaces)
 
 api.POST("/projects", requireAuth, serve.rateLimit(30, 3600), handleCreateProject)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
+api.POST("/projects/:id/upload-parts", requireAuth, requireCurrentAgreement, handleCreateProjectUploadPart)
+api.POST("/projects/:id/upload-parts/:token/complete", requireAuth, requireCurrentAgreement, handleCompleteProjectUploadPart)
 api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
 api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
@@ -465,6 +475,7 @@ api.POST("/admin/user/message", requireAdmin, handleMessageUser)
 api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
 api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
 api.GET("/admin/stats", requireAdmin, handleAdminStats)
+api.GET("/admin/storage", requireAdmin, handleAdminStorageStats)
 api.GET("/admin/payouts", requireAdmin, handleListPendingPayouts)
 api.POST("/admin/payouts/retry", requireAdmin, handleRetryPendingPayouts)
 api.GET("/admin/users", requireAdmin, handleListUsers)
