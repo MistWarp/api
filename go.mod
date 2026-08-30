@@ -8,6 +8,9 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.50 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	mistwarp.local/gitinspection v0.0.0-00010101000000-000000000000 // indirect
+	mistwarp.local/runtimeinfo v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace mistwarp.local/gitinspection => ./native/gitinspection
+
+replace mistwarp.local/runtimeinfo => ./native/runtimeinfo

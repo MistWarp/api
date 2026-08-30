@@ -16,10 +16,9 @@ import "std:db"
 import "std:ws"
 
 import "go:time"
-import "go:runtime"
-import "go:syscall"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/gitinspection/rewrite"
+import "go:mistwarp.local/runtimeinfo"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
