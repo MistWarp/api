@@ -22,39 +22,39 @@ import "go:crypto/sha1"
 import "go:encoding/hex"
 
 def dotenvValue(string name) string (
-    if !fs.exists(".env") (
-        return ""
-    )
-    array lines = fs.readFile(".env").split("\n")
-    for i lines.len (
-        string line = lines[i].toStr().strip()
-        if line != "" and !line.startsWith("#") and line.contains("=") (
-            array parts = line.split("=")
-            string key = parts[1].toStr().strip()
-            if key == name (
-                string value = parts[2].toStr().strip()
-                for p parts.len (
-                    if p > 2 (
-                        value = value ++ "=" ++ parts[p].toStr()
-                    )
-                )
-                return value.replace("\"", "").replace("'", "")
-            )
-        )
-    )
+  if !fs.exists(".env") (
     return ""
+  )
+  array lines = fs.readFile(".env").split("\n")
+  for i lines.len (
+    string line = lines[i].toStr().strip()
+    if line != "" and !line.startsWith("#") and line.contains("=") (
+      array parts = line.split("=")
+      string key = parts[1].toStr().strip()
+      if key == name (
+        string value = parts[2].toStr().strip()
+        for p parts.len (
+          if p > 2 (
+            value = value ++ "=" ++ parts[p].toStr()
+          )
+        )
+        return value.replace("\"", "").replace("'", "")
+      )
+    )
+  )
+  return ""
 )
 
 def configValue(string name, string defaultValue) string (
-    string value = env.getDefault(name, "")
-    if value != "" (
-        return value
-    )
-    value = dotenvValue(name)
-    if value != "" (
-        return value
-    )
-    return defaultValue
+  string value = env.getDefault(name, "")
+  if value != "" (
+    return value
+  )
+  value = dotenvValue(name)
+  if value != "" (
+    return value
+  )
+  return defaultValue
 )
 
 string projectsDir = "data/projects/"
@@ -120,6 +120,13 @@ string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
 string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
 string realtimeURL = configValue("REALTIME_URL", "wss://mwapi.mistium.com/v1/connect")
+number historyMigrationWorkers = configValue("HISTORY_MIGRATION_WORKERS", "4").toNum().toInt()
+if historyMigrationWorkers < 1 (
+  historyMigrationWorkers = 1
+)
+if historyMigrationWorkers > 8 (
+  historyMigrationWorkers = 8
+)
 string purchaseKeysFile = "data/purchase-keys.json"
 string pendingPayoutsFile = "data/pending-payouts.json"
 
@@ -127,11 +134,11 @@ boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
 string localBlobsDir = "data/blobs/"
 
 auto r2Client = s3.new({
-    "endpoint": r2Endpoint,
-    "bucket": r2Bucket,
-    "access_key_id": r2AccessKeyId,
-    "secret_access_key": r2SecretAccessKey,
-    "region": "auto"
+  "endpoint": r2Endpoint,
+  "bucket": r2Bucket,
+  "access_key_id": r2AccessKeyId,
+  "secret_access_key": r2SecretAccessKey,
+  "region": "auto"
 })
 
 fs.mkdirAll("data/")
@@ -192,22 +199,19 @@ migrateSpaceMemberships()
 migrateExtensionUsage()
 refreshIndexUrls()
 fs.mkdirAll(localBlobsDir)
-object historyMigration = generateMissingProjectHistories()
-if historyMigration.generated.toNum() > 0 or historyMigration.failed.toNum() > 0 (
-    log "MistWarp history migration generated " ++ historyMigration.generated.toStr() ++ " histories; " ++ historyMigration.failed.toStr() ++ " failed"
-)
 if r2Local (
-    log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
+  log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )
 if !r2Local and appURL == "http://localhost:5627" (
-    log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
+  log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
 )
+
 def stagedFlushLoop() (
-    while true (
-        process.sleep(300)
-        sweepStagedProjects()
-        cleanupExpiredCommunityRecords()
-    )
+  while true (
+    process.sleep(300)
+    sweepStagedProjects()
+    cleanupExpiredCommunityRecords()
+  )
 )
 
 sweepStagedProjects()
@@ -215,6 +219,7 @@ cleanupExpiredSessions()
 cleanupExpiredCommunityRecords()
 thread.new(reconcileLoop)
 thread.new(stagedFlushLoop)
+thread.new(generateMissingProjectHistories)
 
 *serve.Router app = serve.new()
 *ws.Server gameRealtimeSocket = ws.New()
@@ -229,7 +234,7 @@ app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
 app.GET("/blobs/evidence/:id/project.json", handleGetEvidenceJson)
 app.GET("/blobs/evidence/:id/assets/:name", handleGetEvidenceAsset)
 if r2Local (
-    app.static("/blobs", "./data/blobs")
+  app.static("/blobs", "./data/blobs")
 )
 
 app.use(authMiddleware)

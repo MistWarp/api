@@ -17,6 +17,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | PORT | 5627 | Listen port |
+| HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
 | APP_URL | https://mwapi.mistium.com | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
