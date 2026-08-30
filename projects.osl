@@ -1118,6 +1118,7 @@ def handleUploadProject(*serve.Context c) (
   string expectedHead = c.formValue("expectedHead").strip()
   string restoreCommit = c.formValue("restoreCommit").strip()
   string restoreMessage = c.formValue("restoreMessage").strip()
+  string pullId = c.formValue("pullId").strip()
   string currentHead = projectGitHead(project)
   if expectedHead != "" and expectedHead != currentHead (
     c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
@@ -1158,9 +1159,13 @@ def handleUploadProject(*serve.Context c) (
   string uploader = normalizeUsername(c.getString("username"))
   number incomingBytes = file.size.toNum()
   auto workspaceResult = c.formFile("workspace")
+  auto mergeTreeResult = c.formFile("mergeTree")
   if !workspaceResult.isErr() (
     object incomingWorkspace = workspaceResult.unwrap().assert(object)
     incomingBytes += incomingWorkspace.size.toNum()
+  )
+  if !mergeTreeResult.isErr() (
+    incomingBytes += mergeTreeResult.unwrap().assert(object).size.toNum()
   )
   number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
   object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
@@ -1254,6 +1259,62 @@ def handleUploadProject(*serve.Context c) (
 
   boolean generatedWorkspace = false
   byte[] generatedWorkspaceBody = []
+  if !mergeTreeResult.isErr() and workspaceResult.isErr() and restoreCommit == "" (
+    object mergeTree = mergeTreeResult.unwrap().assert(object)
+    object mergePull = pullDocument(project.id.toStr(), pullId)
+    if pullId == "" or mergePull.isEmpty() == true or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+      return
+    )
+    auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
+    if !mergeSourceResult.ok or !validateZipArchive(mergeTree.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.badRequest("invalid merged project tree")
+      return
+    )
+    object mergeSource = mergeSourceResult.project.assert(object)
+    string mergeTargetPath = tmpDir ++ workId ++ ".merge-target.mwp"
+    string mergeSourcePath = tmpDir ++ workId ++ ".merge-source.mwp"
+    string mergeTreePath = tmpDir ++ workId ++ ".merge-tree.zip"
+    string mergeDeltaPath = tmpDir ++ workId ++ ".merge-delta.mwp"
+    boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
+    mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
+    mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, mergeTree.data)
+    string mergeBranch = project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main"
+    string mergeRemixParent = project.contains("remixParent") and project.remixParent != null ? project.remixParent.toStr() ""
+    string mergeBaseCommit = project.contains("remixBaseCommit") and project.remixBaseCommit != null ? project.remixBaseCommit.toStr() ""
+    string mergeSourceHead = mergePull.headCommit.toStr()
+    string mergeProjectId = project.id.toStr()
+    string mergeMessage = "Merge pull request #" ++ pullId
+    number mergeTimestamp = timestamp
+    string mergeJson = ""
+    if mergeReady (
+      mergeJson = raw("gitinspection.CreateMergeArchiveJSON(mergeTargetPath, currentHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, mergeProjectId, mergeRemixParent, mergeBaseCommit, mergeBranch, uploader, mergeMessage, int64(mergeTimestamp / 1000))")
+    )
+    auto parsedMerge = json.parse(mergeJson, {type: "object"})
+    if !mergeReady or parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
+      fs.remove(mergeTargetPath)
+      fs.remove(mergeSourcePath)
+      fs.remove(mergeTreePath)
+      fs.remove(mergeDeltaPath)
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, error: "could not create the merge commit", code: "merge_unavailable"})
+      return
+    )
+    object mergeResult = parsedMerge.unwrap().assert(object)
+    gitInfo = mergeResult.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+    generatedWorkspaceBody = fs.readFileBytes(mergeDeltaPath)
+    generatedWorkspace = true
+    fs.remove(mergeTargetPath)
+    fs.remove(mergeSourcePath)
+    fs.remove(mergeTreePath)
+    fs.remove(mergeDeltaPath)
+  )
   if restoreCommit != "" and workspaceResult.isErr() (
     string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
     string restoreDeltaPath = tmpDir ++ workId ++ ".restore-delta.mwp"
@@ -1524,7 +1585,6 @@ def handleUploadProject(*serve.Context c) (
     )
   )
 
-  string pullId = c.formValue("pullId").strip()
   if pullId != "" (
     if !completeNativePull(project, pullId, expectedHead, c.getString("username")) (
       c.json(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})

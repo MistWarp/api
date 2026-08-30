@@ -646,7 +646,29 @@ def handleMergePull(*serve.Context c) (
         c.json(200, {ok: true, merged: true, fastForward: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
         return
     )
-    handleGetPullDiff(c)
+    string targetWorkspacePath = cachedProjectWorkspacePath(target)
+    string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+    if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+        c.internalError("could not assemble pull request history")
+        return
+    )
+    string sourceHead = pull.headCommit.toStr()
+    string baseHead = pull.baseCommit.toStr()
+    string mergeJson = raw("gitinspection.PrepareMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead, baseHead)")
+    auto parsedMerge = json.parse(mergeJson, {type: "object"})
+    if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
+        c.json(409, {ok: false, error: "the pull request could not be merged on the server", code: "pull_merge_unavailable"})
+        return
+    )
+    c.json(200, {
+        ok: true,
+        merged: false,
+        pull: pullResponse(pull),
+        merge: parsedMerge.unwrap(),
+        expectedHead: currentTargetHead,
+        targetProjectId: target.id,
+        sourceProjectId: source.id
+    })
 )
 
 def handleClosePull(*serve.Context c) (
@@ -686,7 +708,7 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
     if role != "owner" and role != "maintainer" (
         return false
     )
-    if expectedHead == "" or pull.targetHead.toStr() != expectedHead (
+    if expectedHead == "" (
         return false
     )
     pull.state = "merged"
