@@ -327,10 +327,7 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
     response.workspaceUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
   )
-  response.gitHead = ""
-  if project.contains("gitHead") and project.gitHead != null (
-    response.gitHead = project.gitHead
-  )
+  response.gitHead = projectGitHead(project)
     response.gitBranch = "main"
   if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
         response.gitBranch = project.gitBranch
@@ -1119,10 +1116,7 @@ def handleUploadProject(*serve.Context c) (
   )
 
   string expectedHead = c.formValue("expectedHead").strip()
-  string currentHead = ""
-  if project.contains("gitHead") and project.gitHead != null (
-    currentHead = project.gitHead.toStr()
-  )
+  string currentHead = projectGitHead(project)
   if expectedHead != "" and expectedHead != currentHead (
     c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
     return
@@ -1354,7 +1348,7 @@ def handleUploadProject(*serve.Context c) (
     project.workspaceKey = workspaceKey
     project.workspaceLayers = nextWorkspaceLayers
     if gitMetadata != "" (
-      project.gitHead = gitInfo.head.toStr()
+      project.gitHead = canonicalHistoryHead(gitInfo)
       project.gitBranch = gitInfo.branch.toStr()
       if workspaceDelta (
         object mergedHistory = mergeDeltaHistory(project, gitInfo, currentHead)
@@ -1566,7 +1560,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     return
   )
   object gitInfo = parsedGit.unwrap().assert(object)
-  string head = gitInfo.head.toStr()
+  string head = canonicalHistoryHead(gitInfo)
   string baseBranch = gitInfo.branch.toStr()
   if head == "" or baseBranch == "" (
     c.badRequest("incomplete MistWarp history metadata")

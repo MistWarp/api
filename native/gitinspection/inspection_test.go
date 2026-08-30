@@ -170,7 +170,7 @@ func TestCompareArchivesReportsChangesWithoutCombiningRepositories(t *testing.T)
 	}
 }
 
-func TestCompareArchivesRejectsUnrelatedHistories(t *testing.T) {
+func TestCompareArchivesSupportsIndependentForkHistories(t *testing.T) {
 	baseRepository := newTestRepository()
 	baseBlob := baseRepository.object("blob", []byte("base\n"))
 	baseTree := baseRepository.tree("main.fractch", baseBlob)
@@ -184,7 +184,11 @@ func TestCompareArchivesRejectsUnrelatedHistories(t *testing.T) {
 	result := decodeResult(t, CompareArchives(
 		baseRepository.write(t), base, headRepository.write(t), head,
 	))
-	if result["ok"] != false || result["error"] != "head commit does not descend from the pull request base" {
+	if result["ok"] != true || result["parent"] != base || result["sha"] != head {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+	files := result["files"].([]any)
+	if len(files) != 1 || files[0].(map[string]any)["status"] != "modified" {
+		t.Fatalf("expected the independent fork tree to be compared, got %#v", files)
 	}
 }

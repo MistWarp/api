@@ -48,3 +48,52 @@ def nextPullSequence(number legacySequence, array latestPulls) number (
     )
     return sequence + 1
 )
+
+def canonicalHistoryHead(object metadata) string (
+    string branch = "main"
+    if metadata.contains("gitBranch") and metadata.gitBranch != null and metadata.gitBranch.toStr() != "" (
+        branch = metadata.gitBranch.toStr()
+    ) else if metadata.contains("branch") and metadata.branch != null and metadata.branch.toStr() != "" (
+        branch = metadata.branch.toStr()
+    )
+
+    object graph = {}
+    if metadata.contains("gitGraph") and metadata.gitGraph != null (
+        graph = metadata.gitGraph.assertElse(object, {})
+    ) else if metadata.contains("graph") and metadata.graph != null (
+        graph = metadata.graph.assertElse(object, {})
+    )
+    if graph.contains("branchLogs") and graph.branchLogs != null (
+        array logs = graph.branchLogs.assertElse(array, [])
+        for i logs.len (
+            object branchLog = logs[i].assertElse(object, {})
+            if branchLog.contains("branch") and branchLog.branch.toStr() == branch and branchLog.contains("oids") and branchLog.oids != null (
+                array oids = branchLog.oids.assertElse(array, [])
+                if oids.len > 0 and oids[1].toStr() != "" (
+                    return oids[1].toStr()
+                )
+            )
+        )
+    )
+
+    if metadata.contains("gitHead") and metadata.gitHead != null and metadata.gitHead.toStr() != "" (
+        return metadata.gitHead.toStr()
+    )
+    if metadata.contains("head") and metadata.head != null and metadata.head.toStr() != "" (
+        return metadata.head.toStr()
+    )
+
+    array commits = []
+    if metadata.contains("gitCommits") and metadata.gitCommits != null (
+        commits = metadata.gitCommits.assertElse(array, [])
+    ) else if metadata.contains("commits") and metadata.commits != null (
+        commits = metadata.commits.assertElse(array, [])
+    )
+    if commits.len > 0 (
+        object commit = commits[1].assertElse(object, {})
+        if commit.contains("sha") and commit.sha.toStr() != "" (
+            return commit.sha.toStr()
+        )
+    )
+    return ""
+)
