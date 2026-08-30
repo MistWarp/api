@@ -66,7 +66,7 @@ def handleCreateReport(*serve.Context c) (
     string target = body.target.toStr()
     string reason = body.reason.toStr().strip()
 
-    if reportType != "project" and reportType != "user" and reportType != "comment" (
+    if reportType != "project" and reportType != "user" and reportType != "comment" and reportType != "bounty" (
         c.badRequest("invalid report type")
         return
     )
@@ -91,6 +91,12 @@ def handleCreateReport(*serve.Context c) (
     }
     if body.contains("context") and body.context != null (
         report.context = body.context.toStr().trim(1, 5000)
+    )
+    if body.contains("targetUser") and body.targetUser != null (
+        string targetUser = body.targetUser.toStr().trim(1, 80)
+        if targetUser != "" (
+            report.targetUser = targetUser
+        )
     )
     sync.lock("reports-storage")
     array reports = loadReports()

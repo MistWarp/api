@@ -152,6 +152,59 @@ def projectVersionHistory(object project) object (
   return {branch: branch, commits: commits, graph: graph, virtual: virtual}
 )
 
+def projectCommentDonationAnalytics(object project) object (
+  array comments = loadComments("project-" ++ project.id.toStr())
+  array donors = []
+  array recent = []
+  number total = 0
+  number count = 0
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    if comment.contains("donationAmount") and comment.donationAmount != null and comment.donationAmount.toNum() > 0 (
+      number amount = comment.donationAmount.toNum()
+      number donatedAt = comment.created.toNum()
+      string username = comment.author.toStr()
+      string donorKey = normalizeUsername(username)
+      number donorIndex = -1
+      for d donors.len (
+        object existingDonor = donors[d].assert(object)
+        if normalizeUsername(existingDonor.username.toStr()) == donorKey (
+          donorIndex = d
+        )
+      )
+      if donorIndex >= 0 (
+        object donor = donors[donorIndex].assert(object)
+        donor.amount = donor.amount.toNum() + amount
+        donor.count = donor.count.toNum() + 1
+        if donatedAt > donor.lastDonatedAt.toNum() (
+          donor.lastDonatedAt = donatedAt
+          donor.username = username
+        )
+        donors[donorIndex] = donor
+      ) else (
+        donors.append({username: username, amount: amount, count: 1, lastDonatedAt: donatedAt})
+      )
+      recent.append({
+        commentId: comment.id,
+        username: username,
+        amount: amount,
+        at: donatedAt
+      })
+      total = total + amount
+      count = count + 1
+    )
+  )
+  donors.sortBy("amount", "descending")
+  recent.sortBy("at", "descending")
+  return {
+    total: (total * 100).toInt() / 100,
+    count: count,
+    uniqueDonors: donors.len,
+    donors: paginate(donors, 0, 25),
+    recent: paginate(recent, 0, 50)
+  }
+)
+
 def projectResponse(object project,*serve.Context c) object (
   array loves = project.loves.assert(array)
   array broken = []
@@ -326,6 +379,7 @@ def projectResponse(object project,*serve.Context c) object (
     response.analytics = {
       revenue: projectRevenue(project),
       buyers: trimTimedEntries(projectBuyers(project), analyticsDays),
+      donations: projectCommentDonationAnalytics(project),
       saves: projectSaves(project),
       totalPlaytimeMs: projectTotalPlaytime(project.id.toStr()),
       viewHistory: trimDayHistory(viewHistory, analyticsDays),
