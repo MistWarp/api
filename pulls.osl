@@ -513,6 +513,138 @@ def handleMergePull(*serve.Context c) (
         c.forbidden("only the project owner can merge")
         return
     )
+    object target = result.project.assert(object)
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !sourceResult.ok (
+        c.notFound("source project not found")
+        return
+    )
+    object source = sourceResult.project.assert(object)
+    string currentTargetHead = projectGitHead(target)
+    string currentSourceHead = projectGitHead(source)
+    if currentTargetHead == pull.baseCommit.toStr() and currentSourceHead == pull.headCommit.toStr() (
+        string targetWorkspacePath = cachedProjectWorkspacePath(target)
+        string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+        if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+            c.internalError("could not assemble pull request history")
+            return
+        )
+        string baseCommit = pull.baseCommit.toStr()
+        string headCommit = pull.headCommit.toStr()
+        string inspectionJson = raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
+        auto parsedInspection = json.parse(inspectionJson, {type: "object"})
+        if parsedInspection.isErr() or parsedInspection.unwrap().assert(object).ok != true (
+            c.json(409, {ok: false, error: "the pull request history is unavailable", code: "pull_history_unavailable"})
+            return
+        )
+        sync.lock("project-history-" ++ target.id.toStr())
+        auto latestTargetResult = loadProject(target.id.toStr())
+        auto latestSourceResult = loadProject(source.id.toStr())
+        if !latestTargetResult.ok or !latestSourceResult.ok or projectGitHead(latestTargetResult.project.assert(object)) != currentTargetHead or projectGitHead(latestSourceResult.project.assert(object)) != currentSourceHead (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.json(409, {ok: false, error: "a project changed while this merge was processing", code: "head_changed"})
+            return
+        )
+        target = latestTargetResult.project.assert(object)
+        source = latestSourceResult.project.assert(object)
+        object sourceJsonSnapshot = ensureProjectJsonSnapshot(source)
+        if !sourceJsonSnapshot.ok (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("could not prepare the source project")
+            return
+        )
+        source = sourceJsonSnapshot.project.assert(object)
+        object sourceWorkspaceSnapshots = ensureProjectWorkspaceSnapshots(source)
+        if !sourceWorkspaceSnapshots.ok (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("could not prepare the source project history")
+            return
+        )
+        source = sourceWorkspaceSnapshots.project.assert(object)
+        string fastForwardPath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".fast-forward.mwp"
+        string targetBranch = target.contains("gitBranch") and target.gitBranch != null ? target.gitBranch.toStr() "main"
+        string targetRemixParent = target.contains("remixParent") and target.remixParent != null ? target.remixParent.toStr() ""
+        string targetBaseCommit = target.contains("remixBaseCommit") and target.remixBaseCommit != null ? target.remixBaseCommit.toStr() ""
+        string targetId = target.id.toStr()
+        string fastForwardJson = raw("gitinspection.FastForwardArchiveJSON(sourceWorkspacePath, currentSourceHead, fastForwardPath, targetId, targetRemixParent, targetBaseCommit, targetBranch)")
+        auto parsedFastForward = json.parse(fastForwardJson, {type: "object"})
+        if parsedFastForward.isErr() or parsedFastForward.unwrap().assert(object).ok != true or !fs.exists(fastForwardPath) (
+            fs.remove(fastForwardPath)
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("could not create the fast-forward history")
+            return
+        )
+        object fastForwardResult = parsedFastForward.unwrap().assert(object)
+        object fastForwardGit = fastForwardResult.manifest.assert(object)
+        byte[] fastForwardBody = fs.readFileBytes(fastForwardPath)
+        fs.remove(fastForwardPath)
+        if fastForwardBody.len > maxWorkspaceBytes (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
+            return
+        )
+        string fastForwardKey = projectWorkspaceSnapshotKey(contentHash(fastForwardBody))
+        if !r2Put(fastForwardKey, fastForwardBody, "application/x-mistwarp-project") (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("could not store the fast-forward history")
+            return
+        )
+        string previousJsonKey = target.jsonKey.toStr()
+        array previousWorkspaceKeys = projectWorkspaceKeys(target)
+        array previousExtensions = storedProjectExtensions(target)
+        target.jsonKey = source.jsonKey
+        target.jsonGzip = true
+        target.inheritedJson = true
+        target.pendingJson = false
+        target.workspaceKey = fastForwardKey
+        target.workspaceLayers = [fastForwardKey]
+        target.gitHead = fastForwardGit.head
+        target.gitCommits = fastForwardGit.commits
+        target.gitGraph = fastForwardGit.graph
+        target.assets = source.assets
+        target.sizeBytes = projectSizeBytes(source)
+        target.edited = timestamp
+        if source.contains("jsonBytes") (
+            target.jsonBytes = source.jsonBytes
+        )
+        if source.contains("storedJsonBytes") (
+            target.storedJsonBytes = source.storedJsonBytes
+        )
+        if source.contains("assetBytes") (
+            target.assetBytes = source.assetBytes
+        )
+        if source.contains("extensions") (
+            target.extensions = source.extensions
+        ) else (
+            target.extensions = []
+        )
+        target.extensionsIndexed = source.contains("extensionsIndexed") and source.extensionsIndexed == true
+        if !storeProjectExtensions(target.id.toStr(), previousExtensions, storedProjectExtensions(target), {}) or !saveProject(target) (
+            removeProjectStorageKeyIfOrphaned(fastForwardKey, target.id.toStr(), true)
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("could not save the merged project")
+            return
+        )
+        upsertIndexEntry(target)
+        if !completeNativePull(target, pull.index.toStr(), currentTargetHead, c.getString("username")) (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.internalError("the project merged, but the pull request could not be closed")
+            return
+        )
+        sync.unlock("project-history-" ++ target.id.toStr())
+        if previousJsonKey != target.jsonKey.toStr() (
+            removeProjectStorageKeyIfOrphaned(previousJsonKey, target.id.toStr(), false)
+        )
+        array keptWorkspaceKeys = projectWorkspaceKeys(target)
+        for i previousWorkspaceKeys.len (
+            string previousWorkspaceKey = previousWorkspaceKeys[i].toStr()
+            if !keptWorkspaceKeys.contains(previousWorkspaceKey) (
+                removeProjectStorageKeyIfOrphaned(previousWorkspaceKey, target.id.toStr(), true)
+            )
+        )
+        c.json(200, {ok: true, merged: true, fastForward: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
+        return
+    )
     handleGetPullDiff(c)
 )
 

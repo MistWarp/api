@@ -1119,6 +1119,8 @@ def handleUploadProject(*serve.Context c) (
   )
 
   string expectedHead = c.formValue("expectedHead").strip()
+  string restoreCommit = c.formValue("restoreCommit").strip()
+  string restoreMessage = c.formValue("restoreMessage").strip()
   string currentHead = ""
   if project.contains("gitHead") and project.gitHead != null (
     currentHead = project.gitHead.toStr()
@@ -1144,6 +1146,11 @@ def handleUploadProject(*serve.Context c) (
         return
       )
     )
+  )
+
+  if restoreCommit != "" and !validGitObjectId(restoreCommit) (
+    c.badRequest("invalid restore commit")
+    return
   )
 
   auto fileResult = c.formFile("project")
@@ -1251,23 +1258,61 @@ def handleUploadProject(*serve.Context c) (
   project.extensionsIndexed = true
   project.delete("pendingExtensionUrls")
 
+  boolean generatedWorkspace = false
+  byte[] generatedWorkspaceBody = []
+  if restoreCommit != "" and workspaceResult.isErr() (
+    string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
+    string restoreDeltaPath = tmpDir ++ workId ++ ".restore-delta.mwp"
+    string restoreBranch = project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main"
+    string restoreRemixParent = project.contains("remixParent") and project.remixParent != null ? project.remixParent.toStr() ""
+    string restoreBaseCommit = project.contains("remixBaseCommit") and project.remixBaseCommit != null ? project.remixBaseCommit.toStr() ""
+    number restoreTimestamp = timestamp
+    boolean restoreReady = copyProjectWorkspaceToPath(project, restoreBasePath)
+    string restoreJson = ""
+    if restoreReady (
+      restoreJson = raw("gitinspection.RestoreArchiveJSON(restoreBasePath, currentHead, restoreCommit, restoreDeltaPath, id, restoreRemixParent, restoreBaseCommit, restoreBranch, uploader, restoreMessage, int64(restoreTimestamp / 1000))")
+    )
+    auto parsedRestore = json.parse(restoreJson, {type: "object"})
+    if !restoreReady or parsedRestore.isErr() or parsedRestore.unwrap().assert(object).ok != true (
+      fs.remove(restoreBasePath)
+      fs.remove(restoreDeltaPath)
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, error: "could not restore that project version", code: "restore_unavailable"})
+      return
+    )
+    object restoreResult = parsedRestore.unwrap().assert(object)
+    gitInfo = restoreResult.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+    generatedWorkspaceBody = fs.readFileBytes(restoreDeltaPath)
+    generatedWorkspace = true
+    fs.remove(restoreBasePath)
+    fs.remove(restoreDeltaPath)
+  )
+
   array previousWorkspaceKeys = []
-  if !workspaceResult.isErr() (
-    object workspace = workspaceResult.unwrap().assert(object)
-    if workspace.size.toNum() > maxWorkspaceBytes (
+  if !workspaceResult.isErr() or generatedWorkspace (
+    any incomingWorkspaceBody = generatedWorkspaceBody
+    number incomingWorkspaceSize = generatedWorkspaceBody.len
+    if !workspaceResult.isErr() (
+      object workspace = workspaceResult.unwrap().assert(object)
+      incomingWorkspaceBody = workspace.data
+      incomingWorkspaceSize = workspace.size.toNum()
+    )
+    if incomingWorkspaceSize > maxWorkspaceBytes (
       fs.remove(zipPath)
       fs.remove(extractDir)
       c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
       return
     )
-    if !validateZipArchive(workspace.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+    if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
       fs.remove(zipPath)
       fs.remove(extractDir)
       c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
       return
     )
-    any workspaceBody = workspace.data
-    any deltaStorageBody = workspace.data
+    any workspaceBody = incomingWorkspaceBody
+    any deltaStorageBody = incomingWorkspaceBody
     string baseWorkspacePath = ""
     string deltaWorkspacePath = ""
     string prunedDeltaPath = ""
@@ -1279,7 +1324,7 @@ def handleUploadProject(*serve.Context c) (
       prunedDeltaPath = tmpDir ++ workId ++ ".pruned-delta.mwp"
       mergedWorkspacePath = tmpDir ++ workId ++ ".merged.mwp"
       boolean mergeOk = copyProjectWorkspaceToPath(project, baseWorkspacePath)
-      mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, workspace.data)
+      mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, incomingWorkspaceBody)
       if mergeOk (
         string pruneJson = raw("rewrite.PruneDeltaArchiveJSON(baseWorkspacePath, deltaWorkspacePath, prunedDeltaPath)")
         auto parsedPrune = json.parse(pruneJson, {type: "object"})
