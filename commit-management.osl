@@ -5,10 +5,13 @@ def projectCommitMetadata(object project) object (
     return {}
 )
 
-def commitCollaborators(object project, string sha) array (
+def commitCoAuthors(object project, string sha) array (
     object metadata = projectCommitMetadata(project)
     if metadata.contains(sha) and metadata[sha] != null (
         object entry = metadata[sha].assertElse(object, {})
+        if entry.contains("coAuthors") and entry.coAuthors != null (
+            return entry.coAuthors.assertElse(array, [])
+        )
         if entry.contains("collaborators") and entry.collaborators != null (
             return entry.collaborators.assertElse(array, [])
         )
@@ -16,142 +19,25 @@ def commitCollaborators(object project, string sha) array (
     return []
 )
 
-def normalizedCommitCollaborators(array incoming) object (
+def normalizedCommitCoAuthors(array incoming) object (
     if incoming.len > 25 (
-        return {ok: false, error: "a commit can credit at most 25 collaborators"}
+        return {ok: false, error: "a commit can credit at most 25 co-authors"}
     )
-    array collaborators = []
+    array coAuthors = []
     array identities = []
     for i incoming.len (
         string username = incoming[i].toStr().strip()
         string normalized = normalizeUsername(username)
         string userId = userIdForUsername(username)
         if normalized == "" or userId == "" (
-            return {ok: false, error: "commit collaborators must be existing Rotur users"}
+            return {ok: false, error: "commit co-authors must be existing Rotur users"}
         )
         if !identities.contains(userId) (
             identities.append(userId)
-            collaborators.append({username: username, userId: userId})
+            coAuthors.append({username: username, userId: userId})
         )
     )
-    return {ok: true, collaborators: collaborators}
-)
-
-def remapCommitMetadata(object project, object rewritten) (
-    object previous = projectCommitMetadata(project)
-    object next = {}
-    array keys = previous.getKeys().toArray()
-    for i keys.len (
-        string oldSha = keys[i].toStr()
-        string newSha = oldSha
-        if rewritten.contains(oldSha) (
-            newSha = rewritten[oldSha].toStr()
-        )
-        next[newSha] = previous[oldSha]
-    )
-    project.commitMetadata = next
-)
-
-def remapProjectHistory(object project, object rewritten, string newHead, string renamedSha, string message) (
-    project.gitHead = newHead
-    if project.contains("gitCommits") and project.gitCommits != null (
-        array commits = project.gitCommits.assertElse(array, [])
-        for i commits.len (
-            object commit = commits[i].assertElse(object, {})
-            string oldSha = commit.sha.toStr()
-            if rewritten.contains(oldSha) (
-                commit.sha = rewritten[oldSha]
-            )
-            if oldSha == renamedSha (
-                commit.message = message
-            )
-            commits[i] = commit
-        )
-        project.gitCommits = commits
-    )
-    if project.contains("gitGraph") and project.gitGraph != null (
-        object graph = project.gitGraph.assertElse(object, {})
-        if graph.contains("nodes") and graph.nodes != null (
-            array nodes = graph.nodes.assertElse(array, [])
-            for i nodes.len (
-                object node = nodes[i].assertElse(object, {})
-                string oldSha = node.sha.toStr()
-                if rewritten.contains(oldSha) (
-                    node.sha = rewritten[oldSha]
-                )
-                if oldSha == renamedSha (
-                    node.message = message
-                )
-                if node.contains("parents") and node.parents != null (
-                    array parents = node.parents.assertElse(array, [])
-                    for j parents.len (
-                        string oldParent = parents[j].toStr()
-                        if rewritten.contains(oldParent) (
-                            parents[j] = rewritten[oldParent]
-                        )
-                    )
-                    node.parents = parents
-                )
-                nodes[i] = node
-            )
-            graph.nodes = nodes
-        )
-        if graph.contains("branchLogs") and graph.branchLogs != null (
-            array logs = graph.branchLogs.assertElse(array, [])
-            for i logs.len (
-                object log = logs[i].assertElse(object, {})
-                if log.contains("oids") and log.oids != null (
-                    array oids = log.oids.assertElse(array, [])
-                    for j oids.len (
-                        string oldOid = oids[j].toStr()
-                        if rewritten.contains(oldOid) (
-                            oids[j] = rewritten[oldOid]
-                        )
-                    )
-                    log.oids = oids
-                )
-                logs[i] = log
-            )
-            graph.branchLogs = logs
-        )
-        project.gitGraph = graph
-    )
-    remapCommitMetadata(project, rewritten)
-)
-
-def rewriteProjectCommit(object project, string sha, string message) object (
-    string workspacePath = cachedProjectWorkspacePath(project)
-    if workspacePath == "" (
-        return {ok: false, error: "project history is unavailable"}
-    )
-    string outputPath = tmpDir ++ "commit-rewrite-" ++ project.id.toStr() ++ "-" ++ randomString(10) ++ ".mwp"
-    string branch = "main"
-    if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
-        branch = project.gitBranch.toStr()
-    )
-    string rewriteJson = raw("gitmanagement.RewriteFirstParent(workspacePath, outputPath, sha, projectGitHead(project), branch, message)")
-    auto parsed = json.parse(rewriteJson, {type: "object"})
-    if parsed.isErr() (
-        fs.remove(outputPath)
-        return {ok: false, error: "could not rewrite commit history"}
-    )
-    object result = parsed.unwrap().assert(object)
-    if !result.contains("ok") or result.ok != true (
-        fs.remove(outputPath)
-        return {ok: false, error: (result.error ?? "could not rewrite commit history").toStr()}
-    )
-    if !fs.exists(outputPath) or fs.getSize(outputPath) > maxWorkspaceBytes (
-        fs.remove(outputPath)
-        return {ok: false, error: "rewritten project history is too large"}
-    )
-    byte[] workspace = fs.readFileBytes(outputPath)
-    fs.remove(outputPath)
-    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
-    if !r2Put(workspaceKey, workspace, "application/x-mistwarp-project") (
-        return {ok: false, error: "could not store rewritten project history"}
-    )
-    result.workspaceKey = workspaceKey
-    return result
+    return {ok: true, coAuthors: coAuthors}
 )
 
 def applyCommitPatch(string id, string sha, object body, string username, boolean isAdmin) object (
@@ -167,66 +53,36 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
     if !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
         return {status: 404, error: "commit not found"}
     )
-    if !body.contains("message") and !body.contains("collaborators") (
-        return {status: 400, error: "provide a message or collaborators"}
+    if !body.contains("coAuthors") and !body.contains("collaborators") (
+        return {status: 400, error: "provide coAuthors"}
     )
-    object collaboratorResult = {ok: true, collaborators: commitCollaborators(project, sha)}
-    if body.contains("collaborators") (
-        collaboratorResult = normalizedCommitCollaborators(body.collaborators.assertElse(array, []))
-        if !collaboratorResult.ok (
-            return {status: 400, error: collaboratorResult.error}
-        )
-    )
-    object rewritten = {}
-    string resultingSha = sha
-    array previousWorkspaceKeys = []
-    string newWorkspaceKey = ""
-    if body.contains("message") (
-        string message = body.message.toStr().strip()
-        if message == "" or message.len > 500 (
-            return {status: 400, error: "commit message must be between 1 and 500 characters"}
-        )
-        object rewrite = rewriteProjectCommit(project, sha, message)
-        if !rewrite.ok (
-            return {status: 409, error: rewrite.error}
-        )
-        rewritten = rewrite.rewritten.assertElse(object, {})
-        resultingSha = rewritten[sha].toStr()
-        newWorkspaceKey = rewrite.workspaceKey.toStr()
-        previousWorkspaceKeys = projectWorkspaceKeys(project)
-        project.workspaceKey = newWorkspaceKey
-        project.workspaceLayers = [newWorkspaceKey]
-        remapProjectHistory(project, rewritten, rewrite.head.toStr(), sha, message)
+    array incoming = body.contains("coAuthors") ? body.coAuthors.assertElse(array, []) body.collaborators.assertElse(array, [])
+    object coAuthorResult = normalizedCommitCoAuthors(incoming)
+    if !coAuthorResult.ok (
+        return {status: 400, error: coAuthorResult.error}
     )
     object metadata = projectCommitMetadata(project)
     object commitMeta = {}
-    if metadata.contains(resultingSha) and metadata[resultingSha] != null (
-        commitMeta = metadata[resultingSha].assertElse(object, {})
+    if metadata.contains(sha) and metadata[sha] != null (
+        commitMeta = metadata[sha].assertElse(object, {})
     )
-    if body.contains("collaborators") (
-        commitMeta.collaborators = collaboratorResult.collaborators
-        metadata[resultingSha] = commitMeta
-        project.commitMetadata = metadata
+    commitMeta.coAuthors = coAuthorResult.coAuthors
+    if commitMeta.contains("collaborators") (
+        commitMeta.delete("collaborators")
     )
+    metadata[sha] = commitMeta
+    project.commitMetadata = metadata
     project.edited = timestamp
     if !saveProject(project) (
-        if newWorkspaceKey != "" (
-            removeProjectStorageKeyIfOrphaned(newWorkspaceKey, project.id.toStr(), true)
-        )
-        return {status: 500, error: "could not save rewritten project"}
+        return {status: 500, error: "could not save commit co-authors"}
     )
     upsertIndexEntry(project)
-    for i previousWorkspaceKeys.len (
-        removeProjectStorageKeyIfOrphaned(previousWorkspaceKeys[i].toStr(), project.id.toStr(), true)
-    )
     return {
         status: 200,
         ok: true,
-        oldSha: sha,
-        sha: resultingSha,
-        head: projectGitHead(project),
-        rewritten: rewritten,
-        collaborators: commitCollaborators(project, resultingSha)
+        sha: sha,
+        coAuthors: commitCoAuthors(project, sha),
+        collaborators: commitCoAuthors(project, sha)
     }
 )
 
@@ -241,8 +97,6 @@ def handlePatchCommit(*serve.Context c) (
         c.forbidden(result.error.toStr())
     ) else if result.status.toInt() == 400 (
         c.badRequest(result.error.toStr())
-    ) else if result.status.toInt() == 409 (
-        c.json(409, {ok: false, error: result.error})
     ) else if result.status.toInt() != 200 (
         c.internalError(result.error.toStr())
     ) else (
@@ -262,5 +116,6 @@ def handleGetCommitCollaborators(*serve.Context c) (
         c.notFound("commit not found")
         return
     )
-    c.json(200, {ok: true, sha: sha, collaborators: commitCollaborators(project, sha)})
+    array coAuthors = commitCoAuthors(project, sha)
+    c.json(200, {ok: true, sha: sha, coAuthors: coAuthors, collaborators: coAuthors})
 )

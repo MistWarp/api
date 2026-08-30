@@ -1,0 +1,182 @@
+def appendUniqueCommit(array target, object seen, object commit, number limit) array (
+    string sha = commit.sha.toStr()
+    if sha != "" and !seen.contains(sha) and target.len < limit (
+        seen[sha] = true
+        target.append(commit)
+    )
+    return target
+)
+
+def deltaNewOids(object gitInfo, string branch, string baseHead) array (
+    array newOids = []
+    if gitInfo.contains("graph") and gitInfo.graph != null (
+        object graph = gitInfo.graph.assertElse(object, {})
+        array logs = graph.contains("branchLogs") ? graph.branchLogs.assertElse(array, []) []
+        for i logs.len (
+            object log = logs[i].assertElse(object, {})
+            if log.branch.toStr() == branch (
+                array oids = log.oids.assertElse(array, [])
+                for j oids.len (
+                    string oid = oids[j].toStr()
+                    if oid == baseHead (
+                        return newOids
+                    )
+                    if validGitObjectId(oid) and !newOids.contains(oid) (
+                        newOids.append(oid)
+                    )
+                )
+            )
+        )
+    )
+    if gitInfo.contains("commits") and gitInfo.commits != null (
+        array commits = gitInfo.commits.assertElse(array, [])
+        for i commits.len (
+            string sha = commits[i].assertElse(object, {}).sha.toStr()
+            if sha == baseHead (
+                return newOids
+            )
+            if validGitObjectId(sha) and !newOids.contains(sha) (
+                newOids.append(sha)
+            )
+        )
+    )
+    return newOids
+)
+
+def mergeDeltaCommits(object project, object gitInfo, array newOids) array (
+    array merged = []
+    object seen = {}
+    array incoming = gitInfo.contains("commits") ? gitInfo.commits.assertElse(array, []) []
+    for i incoming.len (
+        object commit = incoming[i].assertElse(object, {})
+        if newOids.contains(commit.sha.toStr()) (
+            merged = appendUniqueCommit(merged, seen, commit, 50)
+        )
+    )
+    array existing = project.contains("gitCommits") ? project.gitCommits.assertElse(array, []) []
+    for i existing.len (
+        merged = appendUniqueCommit(merged, seen, existing[i].assertElse(object, {}), 50)
+    )
+    return merged
+)
+
+def mergeDeltaNodes(object project, object gitInfo, array newOids) array (
+    array merged = []
+    object seen = {}
+    object incomingGraph = gitInfo.graph.assertElse(object, {})
+    array incoming = incomingGraph.contains("nodes") ? incomingGraph.nodes.assertElse(array, []) []
+    for i incoming.len (
+        object node = incoming[i].assertElse(object, {})
+        string sha = node.sha.toStr()
+        if newOids.contains(sha) and !seen.contains(sha) and merged.len < 200 (
+            seen[sha] = true
+            merged.append(node)
+        )
+    )
+    object existingGraph = project.contains("gitGraph") ? project.gitGraph.assertElse(object, {}) {}
+    array existing = existingGraph.contains("nodes") ? existingGraph.nodes.assertElse(array, []) []
+    for i existing.len (
+        object node = existing[i].assertElse(object, {})
+        string sha = node.sha.toStr()
+        if sha != "" and !seen.contains(sha) and merged.len < 200 (
+            seen[sha] = true
+            merged.append(node)
+        )
+    )
+    return merged
+)
+
+def graphBranchLog(object graph, string branch) array (
+    if graph.contains("branchLogs") and graph.branchLogs != null (
+        array logs = graph.branchLogs.assertElse(array, [])
+        for i logs.len (
+            object log = logs[i].assertElse(object, {})
+            if log.branch.toStr() == branch (
+                return log.oids.assertElse(array, [])
+            )
+        )
+    )
+    return []
+)
+
+def mergeDeltaBranchLogs(object project, object gitInfo, string activeBranch, array newOids) array (
+    object incomingGraph = gitInfo.graph.assertElse(object, {})
+    object existingGraph = project.contains("gitGraph") ? project.gitGraph.assertElse(object, {}) {}
+    array branches = []
+    array incomingBranches = incomingGraph.contains("branches") ? incomingGraph.branches.assertElse(array, []) []
+    array existingBranches = existingGraph.contains("branches") ? existingGraph.branches.assertElse(array, []) []
+    for i incomingBranches.len (
+        string branch = incomingBranches[i].toStr()
+        if branch != "" and !branches.contains(branch) (
+            branches.append(branch)
+        )
+    )
+    for i existingBranches.len (
+        string branch = existingBranches[i].toStr()
+        if branch != "" and !branches.contains(branch) (
+            branches.append(branch)
+        )
+    )
+    if !branches.contains(activeBranch) (
+        branches.append(activeBranch)
+    )
+    array logs = []
+    for i branches.len (
+        string branch = branches[i].toStr()
+        array oids = []
+        if branch == activeBranch (
+            for j newOids.len (
+                if oids.len < 200 and !oids.contains(newOids[j]) (
+                    oids.append(newOids[j])
+                )
+            )
+        ) else (
+            array incomingOids = graphBranchLog(incomingGraph, branch)
+            for j incomingOids.len (
+                if oids.len < 200 and !oids.contains(incomingOids[j]) (
+                    oids.append(incomingOids[j])
+                )
+            )
+        )
+        array inheritedOids = graphBranchLog(existingGraph, branch)
+        for j inheritedOids.len (
+            if oids.len < 200 and !oids.contains(inheritedOids[j]) (
+                oids.append(inheritedOids[j])
+            )
+        )
+        logs.append({branch: branch, oids: oids})
+    )
+    return logs
+)
+
+def mergeDeltaHistory(object project, object gitInfo, string baseHead) object (
+    string branch = gitInfo.branch.toStr()
+    array newOids = deltaNewOids(gitInfo, branch, baseHead)
+    object incomingGraph = gitInfo.graph.assertElse(object, {})
+    object existingGraph = project.contains("gitGraph") ? project.gitGraph.assertElse(object, {}) {}
+    array branches = []
+    array incomingBranches = incomingGraph.contains("branches") ? incomingGraph.branches.assertElse(array, []) []
+    array existingBranches = existingGraph.contains("branches") ? existingGraph.branches.assertElse(array, []) []
+    for i incomingBranches.len (
+        if !branches.contains(incomingBranches[i]) (
+            branches.append(incomingBranches[i])
+        )
+    )
+    for i existingBranches.len (
+        if !branches.contains(existingBranches[i]) (
+            branches.append(existingBranches[i])
+        )
+    )
+    if !branches.contains(branch) (
+        branches.append(branch)
+    )
+    return {
+        commits: mergeDeltaCommits(project, gitInfo, newOids),
+        graph: {
+            branches: branches,
+            branchLogs: mergeDeltaBranchLogs(project, gitInfo, branch, newOids),
+            nodes: mergeDeltaNodes(project, gitInfo, newOids)
+        },
+        newOids: newOids
+    }
+)

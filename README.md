@@ -67,8 +67,8 @@ The read-only commit endpoints inspect the stored `.mwp` on the server. Clients 
 - `GET /api/projects/:id/commits/:sha` returns commit metadata, its first parent, and changed-file records. Each record has `path`, `status`, `oldOid`, `newOid`, `oldSize`, and `newSize`. Root commits report every file as added. `legacy: true` means the change includes an old `project.sb3`; clients that need the expanded Fractch diff should use their legacy conversion fallback.
 - `GET /api/projects/:id/commits/:sha/tree` returns `commit` and a flat `files` array. Each file has `path`, `oid`, `mode`, `size`, and `binary`.
 - `GET /api/projects/:id/commits/:sha/file?path=<path>` returns one file record and `content`, encoded as base64 by JSON.
-- `GET /api/projects/:id/commits/:sha/collaborators` returns the Rotur users credited on that commit.
-- `PATCH /api/projects/:id/commits/:sha` accepts `message` and/or `collaborators`. `message` is 1–500 characters; `collaborators` is an array of at most 25 existing Rotur usernames. Renaming rewrites that commit and each first-parent descendant through the current branch head, then returns `oldSha`, the selected commit's new `sha`, the new `head`, and an old-to-new `rewritten` SHA map. It preserves file trees, authors, timestamps, and secondary merge parents. Only the project owner, a maintainer, or an administrator may patch commits.
+- `GET /api/projects/:id/commits/:sha/co-authors` returns the Rotur users credited on that commit. The older `/collaborators` path remains an alias.
+- `PATCH /api/projects/:id/commits/:sha` accepts `{coAuthors: string[]}` with at most 25 existing Rotur usernames. `{collaborators: string[]}` remains an input alias. It replaces the commit's co-author metadata without rewriting Git objects or changing any SHA. Responses expose canonical `coAuthors` records as `{username, userId}` and a compatibility `collaborators` alias. Only the project owner, a maintainer, or an administrator may patch commit credits.
 
 These routes use the same see-inside policy as workspace downloads. The server caches materialized workspace layers and computed JSON by the ordered content-addressed layer keys. Public, free projects may be cached by the CDN for one hour; private, unlisted, and paid responses use `private, no-store`. Stable ETags let browsers revalidate without reparsing Git objects. The local inspection cache keeps at most 256 files or 2 GiB and removes entries older than 24 hours.
 
@@ -81,6 +81,8 @@ Before extraction, the API rejects archives with unsafe paths, duplicate entries
 Project JSON is staged on local disk before the upload request returns. The API serves that staged copy immediately, then the background flush loop writes at most one R2 snapshot per project every 24 hours. Git carries every save. `data/assets-index.json` tracks known assets so duplicates are never re-uploaded.
 
 The first editor save uploads a compact MWP archive containing the Git repository without a duplicate worktree. Later saves compare the local HEAD with the server HEAD and send only new Git objects plus updated refs. The API stores those archives as content-addressed layers, so remixes share their parent's history instead of copying it. It compacts a chain after eight layers. If the user saves without making a commit, the editor sends a full archive with the worktree so uncommitted changes are not lost.
+
+For a delta whose `baseHead` still matches the stored head, the API removes loose Git objects already present in the materialized base before storing the new layer. It retains the delta manifest and refs, verifies the combined archive, and stitches only the new commits and graph nodes ahead of `baseHead` onto the inherited metadata. A final locked head comparison rejects concurrent history changes before project metadata is saved.
 
 ## Auth flow
 

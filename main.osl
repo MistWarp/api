@@ -18,7 +18,6 @@ import "std:ws"
 import "go:time"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/gitinspection/rewrite"
-import "go:mistwarp.local/gitmanagement"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
@@ -158,6 +157,7 @@ import "./middleware.osl"
 import "./perks.osl"
 import "./groups.osl"
 import "./projects.osl"
+import "./history-delta.osl"
 import "./commit-management.osl"
 import "./game-data-access.osl"
 import "./game-data.osl"
@@ -397,6 +397,7 @@ api.DELETE("/bounties/:id/workers/me", requireAuth, handleLeaveBounty)
 api.GET("/projects/:id/commits", handleGetCommits)
 api.GET("/projects/:id/commits/:sha", handleGetCommitInspection)
 api.PATCH("/projects/:id/commits/:sha", requireAuth, handlePatchCommit)
+api.GET("/projects/:id/commits/:sha/co-authors", handleGetCommitCollaborators)
 api.GET("/projects/:id/commits/:sha/collaborators", handleGetCommitCollaborators)
 api.GET("/projects/:id/commits/:sha/tree", handleGetCommitTree)
 api.GET("/projects/:id/commits/:sha/file", handleGetCommitFile)

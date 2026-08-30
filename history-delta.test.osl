@@ -1,0 +1,66 @@
+import "std:regex"
+import "std:testing"
+
+def validGitObjectId(string oid) boolean (
+    return regex.match("^[a-f0-9]{40}$", oid)
+)
+
+import "./history-delta.osl"
+
+string base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+string first = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+string second = "cccccccccccccccccccccccccccccccccccccccc"
+string older = "dddddddddddddddddddddddddddddddddddddddd"
+
+object project = {
+    gitCommits: [
+        {sha: base, message: "Base"},
+        {sha: older, message: "Older"}
+    ],
+    gitGraph: {
+        branches: ["main", "release"],
+        branchLogs: [
+            {branch: "main", oids: [base, older]},
+            {branch: "release", oids: [older]}
+        ],
+        nodes: [
+            {sha: base, message: "Base", parents: [older]},
+            {sha: older, message: "Older", parents: []}
+        ]
+    }
+}
+
+object delta = {
+    branch: "main",
+    commits: [
+        {sha: second, message: "Second"},
+        {sha: first, message: "First"},
+        {sha: base, message: "Client copy of base"}
+    ],
+    graph: {
+        branches: ["main"],
+        branchLogs: [{branch: "main", oids: [second, first, base, older]}],
+        nodes: [
+            {sha: second, message: "Second", parents: [first]},
+            {sha: first, message: "First", parents: [base]},
+            {sha: base, message: "Client copy of base", parents: [older]}
+        ]
+    }
+}
+
+object merged = mergeDeltaHistory(project, delta, base)
+array commits = merged.commits.assert(array)
+testing.assert(commits.len == 4, "delta and inherited commits are combined")
+testing.assert(commits[1].sha == second and commits[2].sha == first, "new commits stay newest first")
+testing.assert(commits[3].sha == base and commits[3].message == "Base", "the inherited base metadata wins")
+testing.assert(commits[4].sha == older, "history before the base is preserved")
+
+array nodes = merged.graph.assert(object).nodes.assert(array)
+testing.assert(nodes.len == 4, "graph nodes are deduplicated")
+testing.assert(nodes[3].message == "Base", "the incoming base node does not replace inherited metadata")
+
+array mainLog = graphBranchLog(merged.graph.assert(object), "main")
+testing.assert(mainLog.len == 4, "branch log is stitched without duplicates")
+testing.assert(mainLog[1] == second and mainLog[2] == first and mainLog[3] == base and mainLog[4] == older, "branch log spans delta and base")
+array releaseLog = graphBranchLog(merged.graph.assert(object), "release")
+testing.assert(releaseLog.len == 1 and releaseLog[1] == older, "unrelated inherited branch logs are preserved")
