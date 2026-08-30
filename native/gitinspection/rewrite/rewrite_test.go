@@ -148,3 +148,58 @@ func TestWriteGeneratedHistoryArchive(t *testing.T) {
 		t.Fatalf("unexpected manifest: %#v", manifest)
 	}
 }
+
+func writeTestArchive(t *testing.T, path string, entries map[string]string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	for name, value := range entries {
+		entry, createErr := writer.Create(name)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, createErr = entry.Write([]byte(value)); createErr != nil {
+			t.Fatal(createErr)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPruneDeltaArchiveRemovesInheritedObjectsOnly(t *testing.T) {
+	directory := t.TempDir()
+	basePath := filepath.Join(directory, "base.mwp")
+	deltaPath := filepath.Join(directory, "delta.mwp")
+	outputPath := filepath.Join(directory, "pruned.mwp")
+	inherited := ".git/objects/aa/old"
+	added := ".git/objects/bb/new"
+	writeTestArchive(t, basePath, map[string]string{inherited: "old"})
+	writeTestArchive(t, deltaPath, map[string]string{
+		inherited: "old", added: "new", "mwp.json": "manifest",
+		".git/refs/heads/main": "head\n",
+	})
+
+	result := PruneDeltaArchive(basePath, deltaPath, outputPath)
+	if !result.OK || result.RemovedObjects != 1 || result.KeptObjects != 1 {
+		t.Fatalf("unexpected prune result: %#v", result)
+	}
+	archive, err := zip.OpenReader(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Close()
+	names := map[string]bool{}
+	for _, entry := range archive.File {
+		names[entry.Name] = true
+	}
+	if names[inherited] || !names[added] || !names["mwp.json"] || !names[".git/refs/heads/main"] {
+		t.Fatalf("wrong pruned entries: %#v", names)
+	}
+}

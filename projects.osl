@@ -1267,20 +1267,29 @@ def handleUploadProject(*serve.Context c) (
       return
     )
     any workspaceBody = workspace.data
+    any deltaStorageBody = workspace.data
     string baseWorkspacePath = ""
     string deltaWorkspacePath = ""
+    string prunedDeltaPath = ""
     string mergedWorkspacePath = ""
     boolean workspaceDelta = gitInfo.contains("delta") and gitInfo.delta == true
     if workspaceDelta (
       baseWorkspacePath = tmpDir ++ workId ++ ".base.mwp"
       deltaWorkspacePath = tmpDir ++ workId ++ ".delta.mwp"
+      prunedDeltaPath = tmpDir ++ workId ++ ".pruned-delta.mwp"
       mergedWorkspacePath = tmpDir ++ workId ++ ".merged.mwp"
       boolean mergeOk = copyProjectWorkspaceToPath(project, baseWorkspacePath)
       mergeOk = mergeOk and fs.writeFileBytes(deltaWorkspacePath, workspace.data)
-      mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, deltaWorkspacePath, mergedWorkspacePath, extractedLimit)
+      if mergeOk (
+        string pruneJson = raw("rewrite.PruneDeltaArchiveJSON(baseWorkspacePath, deltaWorkspacePath, prunedDeltaPath)")
+        auto parsedPrune = json.parse(pruneJson, {type: "object"})
+        mergeOk = !parsedPrune.isErr() and parsedPrune.unwrap().assert(object).ok == true
+      )
+      mergeOk = mergeOk and mergeWorkspaceArchives(baseWorkspacePath, prunedDeltaPath, mergedWorkspacePath, extractedLimit)
       if !mergeOk (
         fs.remove(baseWorkspacePath)
         fs.remove(deltaWorkspacePath)
+        fs.remove(prunedDeltaPath)
         fs.remove(mergedWorkspacePath)
         fs.remove(zipPath)
         fs.remove(extractDir)
@@ -1290,6 +1299,7 @@ def handleUploadProject(*serve.Context c) (
       if fs.getSize(mergedWorkspacePath) > maxWorkspaceBytes (
         fs.remove(baseWorkspacePath)
         fs.remove(deltaWorkspacePath)
+        fs.remove(prunedDeltaPath)
         fs.remove(mergedWorkspacePath)
         fs.remove(zipPath)
         fs.remove(extractDir)
@@ -1297,10 +1307,11 @@ def handleUploadProject(*serve.Context c) (
         return
       )
       workspaceBody = fs.readFileBytes(mergedWorkspacePath)
+      deltaStorageBody = fs.readFileBytes(prunedDeltaPath)
     )
     previousWorkspaceKeys = projectWorkspaceKeys(project)
     boolean compactWorkspace = !workspaceDelta or previousWorkspaceKeys.len >= 8
-    any storedWorkspaceBody = compactWorkspace ? workspaceBody workspace.data
+    any storedWorkspaceBody = compactWorkspace ? workspaceBody deltaStorageBody
     string workspaceKey = projectWorkspaceSnapshotKey(contentHash(storedWorkspaceBody))
     if !r2Put(workspaceKey, storedWorkspaceBody, "application/x-mistwarp-project") (
       if baseWorkspacePath != "" (
@@ -1308,6 +1319,9 @@ def handleUploadProject(*serve.Context c) (
       )
       if deltaWorkspacePath != "" (
         fs.remove(deltaWorkspacePath)
+      )
+      if prunedDeltaPath != "" (
+        fs.remove(prunedDeltaPath)
       )
       if mergedWorkspacePath != "" (
         fs.remove(mergedWorkspacePath)
@@ -1322,6 +1336,9 @@ def handleUploadProject(*serve.Context c) (
     )
     if deltaWorkspacePath != "" (
       fs.remove(deltaWorkspacePath)
+    )
+    if prunedDeltaPath != "" (
+      fs.remove(prunedDeltaPath)
     )
     if mergedWorkspacePath != "" (
       fs.remove(mergedWorkspacePath)
@@ -1339,15 +1356,21 @@ def handleUploadProject(*serve.Context c) (
     if gitMetadata != "" (
       project.gitHead = gitInfo.head.toStr()
       project.gitBranch = gitInfo.branch.toStr()
-      if gitInfo.contains("commits") and gitInfo.commits != null (
-        project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
-      )
-      if gitInfo.contains("graph") and gitInfo.graph != null (
-        object graph = gitInfo.graph.assert(object)
-        if graph.contains("nodes") and graph.nodes != null (
-          graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
+      if workspaceDelta (
+        object mergedHistory = mergeDeltaHistory(project, gitInfo, currentHead)
+        project.gitCommits = mergedHistory.commits
+        project.gitGraph = mergedHistory.graph
+      ) else (
+        if gitInfo.contains("commits") and gitInfo.commits != null (
+          project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
         )
-        project.gitGraph = graph
+        if gitInfo.contains("graph") and gitInfo.graph != null (
+          object graph = gitInfo.graph.assert(object)
+          if graph.contains("nodes") and graph.nodes != null (
+            graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
+          )
+          project.gitGraph = graph
+        )
       )
     )
   )
@@ -1386,7 +1409,39 @@ def handleUploadProject(*serve.Context c) (
     return
   )
 
-  if !saveProject(project) (
+  boolean historyMutationLocked = false
+  if !workspaceResult.isErr() (
+    sync.lock("project-history-" ++ project.id.toStr())
+    historyMutationLocked = true
+    auto latestResult = loadProject(project.id.toStr())
+    string latestHead = latestResult.ok ? projectGitHead(latestResult.project.assert(object)) ""
+    if !latestResult.ok or latestHead != currentHead (
+      sync.unlock("project-history-" ++ project.id.toStr())
+      historyMutationLocked = false
+      fs.remove(stagingJsonPath(project.id.toStr()))
+      if project.jsonKey.toStr() != previousJsonKey (
+        removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
+      )
+      if project.contains("workspaceLayers") and project.workspaceLayers != null (
+        array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+        for i failedWorkspaceKeys.len (
+          string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+          if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+            removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+          )
+        )
+      )
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, error: "the project history changed while this save was processing", code: "head_changed", currentHead: latestHead})
+      return
+    )
+  )
+  boolean savedProject = saveProject(project)
+  if historyMutationLocked (
+    sync.unlock("project-history-" ++ project.id.toStr())
+  )
+  if !savedProject (
     fs.remove(stagingJsonPath(project.id.toStr()))
     if project.jsonKey.toStr() != previousJsonKey (
       removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)

@@ -48,6 +48,13 @@ type GeneratedHistoryOptions struct {
 	ParentHead        string
 }
 
+type PruneDeltaResult struct {
+	OK             bool   `json:"ok"`
+	Error          string `json:"error,omitempty"`
+	RemovedObjects int    `json:"removedObjects"`
+	KeptObjects    int    `json:"keptObjects"`
+}
+
 func validOID(oid string) bool {
 	if len(oid) != 40 {
 		return false
@@ -212,6 +219,87 @@ func addZipBytes(writer *zip.Writer, name string, data []byte) error {
 	}
 	_, err = entry.Write(data)
 	return err
+}
+
+// PruneDeltaArchive removes loose Git objects already available in the
+// materialized base. Non-object entries such as mwp.json, HEAD, and refs are
+// copied unchanged so the result remains a standalone delta layer.
+func PruneDeltaArchive(basePath, deltaPath, outputPath string) PruneDeltaResult {
+	base, err := zip.OpenReader(basePath)
+	if err != nil {
+		return PruneDeltaResult{Error: "base archive is unavailable"}
+	}
+	defer base.Close()
+	existing := make(map[string]struct{})
+	for _, item := range base.File {
+		if strings.HasPrefix(item.Name, ".git/objects/") && !item.FileInfo().IsDir() {
+			existing[item.Name] = struct{}{}
+		}
+	}
+	delta, err := zip.OpenReader(deltaPath)
+	if err != nil {
+		return PruneDeltaResult{Error: "delta archive is unavailable"}
+	}
+	defer delta.Close()
+	output, err := os.Create(outputPath)
+	if err != nil {
+		return PruneDeltaResult{Error: "could not create pruned delta"}
+	}
+	writer := zip.NewWriter(output)
+	result := PruneDeltaResult{}
+	seen := make(map[string]struct{})
+	for _, item := range delta.File {
+		if _, duplicate := seen[item.Name]; duplicate {
+			err = errors.New("delta archive contains duplicate paths")
+			break
+		}
+		seen[item.Name] = struct{}{}
+		isObject := strings.HasPrefix(item.Name, ".git/objects/") && !item.FileInfo().IsDir()
+		if isObject {
+			if _, inherited := existing[item.Name]; inherited {
+				result.RemovedObjects++
+				continue
+			}
+			result.KeptObjects++
+		}
+		source, openErr := item.Open()
+		if openErr != nil {
+			err = openErr
+			break
+		}
+		header := item.FileHeader
+		destination, createErr := writer.CreateHeader(&header)
+		if createErr == nil {
+			_, createErr = io.Copy(destination, source)
+		}
+		closeErr := source.Close()
+		if createErr != nil {
+			err = createErr
+			break
+		}
+		if closeErr != nil {
+			err = closeErr
+			break
+		}
+	}
+	if closeErr := writer.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := output.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(outputPath)
+		result.Error = "could not prune delta archive"
+		return result
+	}
+	result.OK = true
+	return result
+}
+
+func PruneDeltaArchiveJSON(basePath, deltaPath, outputPath string) string {
+	encoded, _ := json.Marshal(PruneDeltaArchive(basePath, deltaPath, outputPath))
+	return string(encoded)
 }
 
 func readLegacyProject(path string) ([]byte, error) {
