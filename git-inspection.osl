@@ -1,0 +1,132 @@
+def projectWorkspaceFingerprint(object project) string (
+    array keys = projectWorkspaceKeys(project)
+    string identity = ""
+    for i keys.len (
+        identity = identity ++ keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
+    )
+    return identity.hashSHA256()
+)
+
+def cachedProjectWorkspacePath(object project) string (
+    array keys = projectWorkspaceKeys(project)
+    if keys.len == 0 (
+        return ""
+    )
+    if keys.len == 1 (
+        string localPath = localBlobPath(keys[1].toStr())
+        if fs.exists(localPath) (
+            return localPath
+        )
+    )
+    string cacheDir = tmpDir ++ "git-inspection/"
+    fs.mkdirAll(cacheDir)
+    string cachedPath = cacheDir ++ projectWorkspaceFingerprint(project) ++ ".mwp"
+    if fs.exists(cachedPath) (
+        return cachedPath
+    )
+    string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
+    if !copyProjectWorkspaceToPath(project, temporaryPath) (
+        fs.remove(temporaryPath)
+        return ""
+    )
+    if !fs.rename(temporaryPath, cachedPath) (
+        fs.remove(temporaryPath)
+        if !fs.exists(cachedPath) (
+            return ""
+        )
+    )
+    return cachedPath
+)
+
+def validGitObjectId(string oid) boolean (
+    return regex.match("^[a-f0-9]{40}$", oid)
+)
+
+def validGitFilePath(string path) boolean (
+    if path == "" or path.len > 1024 or path.startsWith("/") or path.contains("\\") or path.contains("\x00") (
+        return false
+    )
+    array parts = path.split("/")
+    for i parts.len (
+        string part = parts[i].toStr()
+        if part == "" or part == "." or part == ".." (
+            return false
+        )
+    )
+    return true
+)
+
+def workspaceGitInspectionJSON(string workspacePath, string sha, string operation, string requestedPath) string (
+    return raw("func() string { type gitFile struct { Path string `json:\"path\"`; OID string `json:\"oid\"`; Mode string `json:\"mode\"`; Size int `json:\"size\"`; Binary bool `json:\"binary\"` }; type gitCommit struct { Tree string `json:\"tree\"`; Parents []string `json:\"parents\"`; Author string `json:\"author\"`; Date int64 `json:\"date\"`; Message string `json:\"message\"` }; fail := func(message string) string { encoded, _ := json.Marshal(map[string]interface{}{\"ok\": false, \"error\": message}); return string(encoded) }; archive, err := OSLgozip.OpenReader(workspacePath); if err != nil { return fail(\"workspace archive is unavailable\") }; defer archive.Close(); entries := map[string]*OSLgozip.File{}; for _, item := range archive.File { if OSLstrings.HasPrefix(item.Name, \".git/objects/\") && !item.FileInfo().IsDir() { entries[item.Name] = item } }; readObject := func(oid string) (string, []byte, bool) { if len(oid) != 40 { return \"\", nil, false }; item := entries[\".git/objects/\"+oid[:2]+\"/\"+oid[2:]]; if item == nil || item.UncompressedSize64 > 268435456 { return \"\", nil, false }; source, openErr := item.Open(); if openErr != nil { return \"\", nil, false }; compressed, readErr := OSLio.ReadAll(OSLio.LimitReader(source, 268435457)); closeErr := source.Close(); if readErr != nil || closeErr != nil || len(compressed) > 268435456 { return \"\", nil, false }; inflater, inflateErr := zlib.NewReader(OSLbytes.NewReader(compressed)); if inflateErr != nil { return \"\", nil, false }; objectData, objectErr := OSLio.ReadAll(OSLio.LimitReader(inflater, 268435457)); inflateCloseErr := inflater.Close(); if objectErr != nil || inflateCloseErr != nil || len(objectData) > 268435456 { return \"\", nil, false }; separator := OSLbytes.IndexByte(objectData, 0); if separator < 1 { return \"\", nil, false }; header := string(objectData[:separator]); space := OSLstrings.IndexByte(header, ' '); if space < 1 { return \"\", nil, false }; kind := header[:space]; declared, sizeErr := strconv.ParseInt(header[space+1:], 10, 64); body := objectData[separator+1:]; if sizeErr != nil || declared != int64(len(body)) { return \"\", nil, false }; digest := sha1.Sum(objectData); if hex.EncodeToString(digest[:]) != oid { return \"\", nil, false }; return kind, body, true }; parseCommit := func(oid string) (gitCommit, bool) { kind, body, ok := readObject(oid); if !ok || kind != \"commit\" { return gitCommit{}, false }; text := string(body); split := OSLstrings.Index(text, \"\\n\\n\"); headers := text; message := \"\"; if split >= 0 { headers = text[:split]; message = text[split+2:] }; result := gitCommit{Parents: []string{}, Message: OSLstrings.TrimSuffix(message, \"\\n\")}; for _, line := range OSLstrings.Split(headers, \"\\n\") { if OSLstrings.HasPrefix(line, \"tree \") { result.Tree = line[5:] } else if OSLstrings.HasPrefix(line, \"parent \") { result.Parents = append(result.Parents, line[7:]) } else if OSLstrings.HasPrefix(line, \"author \") { author := line[7:]; end := OSLstrings.LastIndex(author, \" <\"); if end > 0 { result.Author = author[:end] } else { result.Author = author }; fields := OSLstrings.Fields(author); if len(fields) >= 2 { if parsed, parseErr := strconv.ParseInt(fields[len(fields)-2], 10, 64); parseErr == nil { result.Date = parsed * 1000 } } } }; if len(result.Tree) != 40 { return gitCommit{}, false }; return result, true }; walkTree := func(rootOID string) ([]gitFile, bool) { files := []gitFile{}; active := map[string]bool{}; var walk func(string, string, int) bool; walk = func(treeOID string, prefix string, depth int) bool { if depth > 64 || active[treeOID] { return false }; active[treeOID] = true; defer delete(active, treeOID); kind, body, ok := readObject(treeOID); if !ok || kind != \"tree\" { return false }; position := 0; for position < len(body) { space := OSLbytes.IndexByte(body[position:], ' '); if space < 1 { return false }; space += position; nul := OSLbytes.IndexByte(body[space+1:], 0); if nul < 1 { return false }; nul += space+1; if nul+21 > len(body) { return false }; mode := string(body[position:space]); name := string(body[space+1:nul]); if name == \"\" || name == \".\" || name == \"..\" || OSLstrings.Contains(name, \"/\") || OSLstrings.Contains(name, \"\\\\\") { return false }; childOID := hex.EncodeToString(body[nul+1:nul+21]); fullPath := name; if prefix != \"\" { fullPath = prefix+\"/\"+name }; position = nul+21; if mode == \"40000\" || mode == \"040000\" { if !walk(childOID, fullPath, depth+1) { return false } } else { blobKind, blob, blobOK := readObject(childOID); if !blobOK || blobKind != \"blob\" { return false }; binary := OSLbytes.IndexByte(blob[:func() int { if len(blob) < 8000 { return len(blob) }; return 8000 }()], 0) >= 0; files = append(files, gitFile{Path: fullPath, OID: childOID, Mode: mode, Size: len(blob), Binary: binary}); if len(files) > 20000 { return false } } }; return position == len(body) }; return files, walk(rootOID, \"\", 0) }; commit, ok := parseCommit(sha); if !ok { return fail(\"commit was not found in this workspace\") }; if operation == \"tree\" { files, treeOK := walkTree(commit.Tree); if !treeOK { return fail(\"commit tree is invalid\") }; encoded, marshalErr := json.Marshal(map[string]interface{}{\"ok\": true, \"sha\": sha, \"commit\": commit, \"files\": files}); if marshalErr != nil { return fail(\"could not encode commit tree\") }; return string(encoded) }; if operation == \"file\" { files, treeOK := walkTree(commit.Tree); if !treeOK { return fail(\"commit tree is invalid\") }; for _, file := range files { if file.Path == requestedPath { kind, content, found := readObject(file.OID); if !found || kind != \"blob\" { return fail(\"file object is unavailable\") }; encoded, marshalErr := json.Marshal(map[string]interface{}{\"ok\": true, \"sha\": sha, \"file\": file, \"content\": content}); if marshalErr != nil { return fail(\"could not encode file\") }; return string(encoded) } }; return fail(\"file was not found at this commit\") }; parentFiles := map[string]gitFile{}; parent := \"\"; if len(commit.Parents) > 0 { parent = commit.Parents[0]; parentCommit, parentOK := parseCommit(parent); if !parentOK { return fail(\"parent commit is unavailable\") }; listed, listOK := walkTree(parentCommit.Tree); if !listOK { return fail(\"parent commit tree is invalid\") }; for _, file := range listed { parentFiles[file.Path] = file } }; currentFiles, currentOK := walkTree(commit.Tree); if !currentOK { return fail(\"commit tree is invalid\") }; currentMap := map[string]gitFile{}; for _, file := range currentFiles { currentMap[file.Path] = file }; changes := []map[string]interface{}{}; additions := 0; deletions := 0; legacy := false; for path, before := range parentFiles { after, exists := currentMap[path]; if !exists { changes = append(changes, map[string]interface{}{\"path\": path, \"status\": \"removed\", \"oldOid\": before.OID, \"newOid\": nil, \"oldSize\": before.Size, \"newSize\": 0}); deletions++; if path == \"project.sb3\" { legacy = true } } else if before.OID != after.OID { changes = append(changes, map[string]interface{}{\"path\": path, \"status\": \"modified\", \"oldOid\": before.OID, \"newOid\": after.OID, \"oldSize\": before.Size, \"newSize\": after.Size}); additions++; deletions++; if path == \"project.sb3\" { legacy = true } } }; for path, after := range currentMap { if _, exists := parentFiles[path]; !exists { changes = append(changes, map[string]interface{}{\"path\": path, \"status\": \"added\", \"oldOid\": nil, \"newOid\": after.OID, \"oldSize\": 0, \"newSize\": after.Size}); additions++; if path == \"project.sb3\" { legacy = true } } }; sort.Slice(changes, func(i, j int) bool { return changes[i][\"path\"].(string) < changes[j][\"path\"].(string) }); encoded, marshalErr := json.Marshal(map[string]interface{}{\"ok\": true, \"sha\": sha, \"parent\": parent, \"commit\": commit, \"files\": changes, \"additions\": additions, \"deletions\": deletions, \"legacy\": legacy}); if marshalErr != nil { return fail(\"could not encode commit inspection\") }; return string(encoded) }()")
+)
+
+def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
+    if !canSeeInsideProject(project, c) (
+        c.notFound("commit not found")
+        return
+    )
+    if !validGitObjectId(sha) (
+        c.notFound("commit not found")
+        return
+    )
+    if operation == "file" and !validGitFilePath(requestedPath) (
+        c.badRequest("invalid file path")
+        return
+    )
+    string workspacePath = cachedProjectWorkspacePath(project)
+    if workspacePath == "" (
+        c.notFound("workspace not found")
+        return
+    )
+    string resultJson = workspaceGitInspectionJSON(workspacePath, sha, operation, requestedPath)
+    auto parsed = json.parse(resultJson, {type: "object"})
+    if parsed.isErr() (
+        c.internalError("could not inspect project history")
+        return
+    )
+    object result = parsed.unwrap().assert(object)
+    if !result.contains("ok") or result.ok != true (
+        c.notFound((result.error ?? "commit not found").toStr())
+        return
+    )
+    string fingerprint = projectWorkspaceFingerprint(project)
+    string etag = "\"git-" ++ fingerprint ++ "-" ++ sha ++ "-" ++ operation ++ "-" ++ requestedPath.hashSHA256() ++ "\""
+    c.setHeader("ETag", etag)
+    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
+        c.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+    ) else (
+        c.setHeader("Cache-Control", "private, no-cache")
+    )
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
+        return
+    )
+    c.json(200, result)
+)
+
+def handleGetCommitInspection(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "commit", "")
+)
+
+def handleGetCommitTree(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "tree", "")
+)
+
+def handleGetCommitFile(*serve.Context c) (
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        c.notFound("project not found")
+        return
+    )
+    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", c.query("path"))
+)
