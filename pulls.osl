@@ -479,7 +479,7 @@ def handleGetPullDiff(*serve.Context c) (
     )
     string baseCommit = pull.baseCommit.toStr()
     string headCommit = pull.headCommit.toStr()
-    string inspectionJson = raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
+    string inspectionJson = c.query("inline") == "1" ? raw("gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)") raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
     auto parsedInspection = json.parse(inspectionJson, {type: "object"})
     if parsedInspection.isErr() (
         c.internalError("could not inspect pull request changes")
