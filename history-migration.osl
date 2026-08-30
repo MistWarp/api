@@ -40,7 +40,7 @@ def copyHistoryAssetToPath(string name, string outputPath) boolean (
   return copied
 )
 
-def generateProjectHistory(object project, string parentPath, string parentHead) object (
+def generateProjectHistory(object project, string parentPath, string parentHead, boolean allowMissingAssets) object (
   string id = project.id.toStr()
   string sourceVersion = projectHistorySourceVersion(project)
   string workId = id ++ "." ++ randomString(8)
@@ -54,16 +54,22 @@ def generateProjectHistory(object project, string parentPath, string parentHead)
   )
   array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
   boolean assetsReady = true
+  number missingAssets = 0
   for i assets.len (
     string name = assets[i].toStr()
-    if !isValidMd5Ext(name) or !copyHistoryAssetToPath(name, assetsPath ++ "/" ++ name) (
+    if !isValidMd5Ext(name) (
       assetsReady = false
+    ) else if !copyHistoryAssetToPath(name, assetsPath ++ "/" ++ name) (
+      missingAssets = missingAssets + 1
     )
   )
-  if !assetsReady (
+  if !assetsReady or (missingAssets > 0 and !allowMissingAssets) (
     fs.remove(jsonPath)
     fs.remove(assetsPath)
     return {ok: false, error: "could not read project assets"}
+  )
+  if missingAssets > 0 (
+    log "WARNING: salvaging MistWarp history for " ++ id ++ " without " ++ missingAssets.toStr() ++ " missing legacy assets"
   )
 
   string head = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead)
@@ -129,7 +135,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead)
   return {ok: true, project: current, generated: true}
 )
 
-def ensureGeneratedProjectHistory(object project, object visiting) object (
+def ensureGeneratedProjectHistory(object project, object visiting, boolean allowMissingAssets) object (
   if projectHasWorkspace(project) (
     return {ok: true, project: project, generated: false}
   )
@@ -148,7 +154,7 @@ def ensureGeneratedProjectHistory(object project, object visiting) object (
   if parentId != "" (
     auto parentResult = loadProject(parentId)
     if parentResult.ok (
-      object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting)
+      object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting, allowMissingAssets)
       if ensuredParent.ok (
         object parent = ensuredParent.project.assert(object)
         if projectHasWorkspace(parent) (
@@ -173,7 +179,7 @@ def ensureGeneratedProjectHistory(object project, object visiting) object (
     ) else if current.remixParent.toStr() != parentId (
       result = {ok: false, error: "project changed during migration; will retry later"}
     ) else (
-      result = generateProjectHistory(current, parentPath, parentHead)
+      result = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
     )
   )
   sync.unlock("history-migration-project-" ++ id)
@@ -224,7 +230,7 @@ def generateMissingProjectHistoriesWorker(number workerIndex, number workerCount
       auto loaded = loadProject(name.replace(".json", ""))
       object result = {ok: false, error: "project disappeared during migration"}
       if loaded.ok (
-        result = ensureGeneratedProjectHistory(loaded.project.assert(object), {})
+        result = ensureGeneratedProjectHistory(loaded.project.assert(object), {}, true)
       )
       logHistoryMigrationProgress(stats, name, result)
     )
