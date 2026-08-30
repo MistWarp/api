@@ -414,6 +414,7 @@ api.PUT("/projects/:id/pulls/:index/comments/:cid", requireAuth, handleEditPullC
 api.DELETE("/projects/:id/pulls/:index/comments/:cid", requireAuth, handleDeletePullComment)
 api.GET("/projects/:id/pulls/:index/diff", requireAuth, handleGetPullDiff)
 api.POST("/projects/:id/pulls/:index/merge", requireAuth, handleMergePull)
+api.POST("/projects/:id/pulls/:index/close", requireAuth, handleClosePull)
 
 api.GET("/search/users", handleSearchUsers)
 api.GET("/users/:name", handleGetUser)
