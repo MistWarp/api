@@ -37,15 +37,21 @@ def userIdForUsername(string username) string (
     if wanted == "" (
         return ""
     )
+    string cacheKey = "username:" ++ wanted
+    if userIdsCache.has(cacheKey) (
+        return userIdsCache.get(cacheKey).toStr()
+    )
     object data = loadUserIds()
     object users = data.users
     array ids = users.getKeys().toArray()
     for i ids.len (
         string userId = ids[i].toStr()
         if normalizeUsername(users[userId].toStr()) == wanted (
+            userIdsCache.set(cacheKey, userId)
             return userId
         )
     )
+    userIdsCache.set(cacheKey, "")
     return ""
 )
 
@@ -378,6 +384,8 @@ def renameUser(string userId, string oldName, string newName) (
     if !isSafePathPart(oldKey) or !isSafePathPart(newKey) (
         return
     )
+    userIdsCache.delete("username:" ++ oldKey)
+    userIdsCache.set("username:" ++ newKey, userId)
     renameUserInProfiles(oldKey, newKey, newName)
     renameUserInProjects(oldKey, newKey, newName, userId)
     renameUserInComments(oldKey, newKey, newName, userId)
@@ -446,6 +454,7 @@ def ensureUserIdentity(string userId, string username) (
         saveUserIds(data)
         userIdsCache.set(userId, username)
     )
+    userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
 def refreshUsernameForId(string userId) string (
@@ -767,6 +776,7 @@ def purgeUser(string userId, string username) (
         saveUserIds(idData)
     )
     userIdsCache.set(userId, "")
+    userIdsCache.set("username:" ++ key, "")
     identityRefreshCache.set(userId, "")
 )
 

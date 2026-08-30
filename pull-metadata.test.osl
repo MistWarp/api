@@ -1,0 +1,14 @@
+import "std:testing"
+import "./pull-metadata.osl"
+
+testing.assert(storedPullCommentCount({commentCount: 4}) == 4, "stored comment counts are used directly")
+testing.assert(storedPullCommentCount({}) == -1, "legacy pulls report missing count metadata")
+testing.assert(storedPullCommentCount({commentCount: -2}) == 0, "corrupt negative counts are clamped")
+testing.assert(pullCommentCountAfterCreate({commentCount: 4}, 99) == 5, "new comments increment stored metadata")
+testing.assert(pullCommentCountAfterCreate({}, 7) == 7, "legacy pulls backfill from the comment thread")
+testing.assert(pullCommentCountAfterDelete({commentCount: 4}, 2, 99) == 2, "deleting a thread decrements by every removed comment")
+testing.assert(pullCommentCountAfterDelete({commentCount: 1}, 3, 99) == 0, "deletes cannot make the count negative")
+testing.assert(pullCommentCountAfterDelete({}, 2, 6) == 6, "legacy deletes backfill the remaining count")
+testing.assert(nextPullSequence(4, []) == 5, "legacy sequence metadata remains usable")
+testing.assert(nextPullSequence(4, [{index: 9}]) == 10, "stored pull documents repair a stale legacy sequence")
+testing.assert(nextPullSequence(12, [{index: 9}]) == 13, "a newer legacy sequence is preserved")

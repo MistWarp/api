@@ -291,26 +291,66 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 	}
 }
 
+// CompareArchives compares two commits without sending either repository to
+// the browser. The commits may live in separate archives, as they do for pull
+// requests between a project and its remix.
+func CompareArchives(basePath, baseSHA, headPath, headSHA string) string {
+	baseReader, baseArchive, err := openArchive(basePath)
+	if err != nil {
+		return failure("base workspace archive is unavailable")
+	}
+	defer baseReader.Close()
+	headReader, headArchive, err := openArchive(headPath)
+	if err != nil {
+		return failure("head workspace archive is unavailable")
+	}
+	defer headReader.Close()
+
+	baseCommit, ok := baseArchive.parseCommit(baseSHA)
+	if !ok {
+		return failure("base commit is unavailable")
+	}
+	headCommit, ok := headArchive.parseCommit(headSHA)
+	if !ok {
+		return failure("head commit is unavailable")
+	}
+	if !headArchive.reachable(baseSHA, headSHA) {
+		return failure("head commit does not descend from the pull request base")
+	}
+	return compareCommitTrees(baseArchive, baseSHA, baseCommit, headArchive, headSHA, headCommit)
+}
+
+func CompareArchivesJSON(basePath, baseSHA, headPath, headSHA string) string {
+	return CompareArchives(basePath, baseSHA, headPath, headSHA)
+}
+
 func (a archive) inspectCommit(sha string, commit gitCommit) string {
-	parentFiles := make(map[string]gitFile)
 	parent := ""
-	parentTree := ""
 	if len(commit.Parents) > 0 {
 		parent = commit.Parents[0]
 		parentCommit, ok := a.parseCommit(parent)
 		if !ok {
 			return failure("parent commit is unavailable")
 		}
-		listed, ok := a.walkTree(parentCommit.Tree)
+		return compareCommitTrees(a, parent, parentCommit, a, sha, commit)
+	}
+	return compareCommitTrees(archive{objects: map[string]*zip.File{}}, "", gitCommit{}, a, sha, commit)
+}
+
+func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
+	parentFiles := make(map[string]gitFile)
+	parentTree := ""
+	if baseSHA != "" {
+		listed, ok := baseArchive.walkTree(baseCommit.Tree)
 		if !ok {
 			return failure("parent commit tree is invalid")
 		}
-		parentTree = parentCommit.Tree
+		parentTree = baseCommit.Tree
 		for _, file := range listed {
 			parentFiles[file.Path] = file
 		}
 	}
-	currentFiles, ok := a.walkTree(commit.Tree)
+	currentFiles, ok := headArchive.walkTree(headCommit.Tree)
 	if !ok {
 		return failure("commit tree is invalid")
 	}
@@ -346,7 +386,7 @@ func (a archive) inspectCommit(sha string, commit gitCommit) string {
 		return changes[i]["path"].(string) < changes[j]["path"].(string)
 	})
 	return encode(map[string]any{
-		"ok": true, "sha": sha, "parent": parent, "tree": commit.Tree, "parentTree": parentTree, "commit": commit, "files": changes,
+		"ok": true, "sha": headSHA, "parent": baseSHA, "tree": headCommit.Tree, "parentTree": parentTree, "commit": headCommit, "files": changes,
 		"additions": additions, "deletions": deletions, "legacy": legacy,
 	}, "could not encode commit inspection")
 }

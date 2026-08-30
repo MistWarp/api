@@ -1,0 +1,14 @@
+import "std:testing"
+
+def projectWorkspaceFingerprint(object project) string (
+    return project.fingerprint.toStr()
+)
+
+import "./cache-policy.osl"
+
+testing.assert(shouldPruneGitInspectionCache(1), "the first cache access prunes stale files")
+testing.assert(!shouldPruneGitInspectionCache(2), "adjacent cache hits do not rescan the directory")
+testing.assert(!shouldPruneGitInspectionCache(32), "the first batch contains 32 accesses")
+testing.assert(shouldPruneGitInspectionCache(33), "the next batch triggers another bounded prune")
+testing.assert(shouldPruneGitInspectionCache(65), "later batches keep pruning")
+testing.assert(projectWorkspaceEtag({id: "p1", fingerprint: "abc"}) == "\"workspace-p1-abc\"", "workspace ETags change with the stored history")

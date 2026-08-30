@@ -12,6 +12,15 @@ def gitInspectionCacheVersion() string (
 )
 
 def pruneGitInspectionCache(string cacheDir, string preserveName) (
+    number calls = 0
+    if gitInspectionPruneCache.has(cacheDir) (
+        calls = gitInspectionPruneCache.get(cacheDir).toNum()
+    )
+    calls = calls + 1
+    gitInspectionPruneCache.set(cacheDir, calls)
+    if !shouldPruneGitInspectionCache(calls) (
+        return
+    )
     raw("func() { entries, err := OSLos.ReadDir(cacheDir); if err != nil { return }; type cachedFile struct { path string; name string; size int64; modified time.Time }; files := []cachedFile{}; var total int64; now := time.Now(); for _, entry := range entries { if entry.IsDir() || OSLstrings.Contains(entry.Name(), \".tmp.\") { continue }; info, infoErr := entry.Info(); if infoErr != nil { continue }; item := cachedFile{path: cacheDir+entry.Name(), name: entry.Name(), size: info.Size(), modified: info.ModTime()}; if entry.Name() != preserveName && now.Sub(info.ModTime()) > 24*time.Hour { OSLos.Remove(item.path); continue }; files = append(files, item); total += item.size }; OSLsort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) }); for (len(files) > 256 || total > 2147483648) && len(files) > 0 { removeAt := -1; for i, item := range files { if item.name != preserveName { removeAt = i; break } }; if removeAt < 0 { break }; item := files[removeAt]; OSLos.Remove(item.path); total -= item.size; files = append(files[:removeAt], files[removeAt+1:]...) } }()")
 )
 
@@ -34,17 +43,26 @@ def cachedProjectWorkspacePath(object project) string (
     if fs.exists(cachedPath) (
         return cachedPath
     )
+    string lockName = "git-inspection-workspace-" ++ cacheName
+    sync.lock(lockName)
+    if fs.exists(cachedPath) (
+        sync.unlock(lockName)
+        return cachedPath
+    )
     string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
     if !copyProjectWorkspaceToPath(project, temporaryPath) (
         fs.remove(temporaryPath)
+        sync.unlock(lockName)
         return ""
     )
     if !fs.rename(temporaryPath, cachedPath) (
         fs.remove(temporaryPath)
         if !fs.exists(cachedPath) (
+            sync.unlock(lockName)
             return ""
         )
     )
+    sync.unlock(lockName)
     return cachedPath
 )
 
@@ -158,7 +176,10 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
 )
 
 def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
-    if !canSeeInsideProject(project, c) (
+    string pullIndex = c.query("pull")
+    string pullTarget = c.query("pullTarget")
+    boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
+    if !canSeeInsideProject(project, c) and !pullCommit (
         c.notFound("commit not found")
         return
     )
@@ -166,7 +187,7 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
         c.notFound("commit not found")
         return
     )
-    if !projectRecordsCommit(project, sha) (
+    if !projectRecordsCommit(project, sha) and !pullCommit (
         c.notFound("commit not found")
         return
     )

@@ -150,6 +150,7 @@ import "./database.osl"
 import "./user-identity.osl"
 import "./asset-routing.osl"
 import "./r2.osl"
+import "./cache-policy.osl"
 import "./git-inspection.osl"
 import "./gitea.osl"
 import "./auth.osl"
@@ -170,6 +171,7 @@ import "./report-evidence.osl"
 import "./comments.osl"
 import "./bounties.osl"
 import "./social.osl"
+import "./pull-metadata.osl"
 import "./pulls.osl"
 import "./reports.osl"
 import "./admin.osl"
@@ -190,6 +192,7 @@ auto sessionCache = cache.create(10000, 3600)
 auto bansCache = cache.create(2, 300)
 auto adminsCache = cache.create(2, 300)
 auto sharedProjectsCache = cache.create(2, 60)
+auto gitInspectionPruneCache = cache.create(4, 300)
 auto paidPerksCache = cache.create(10000, 300)
 auto groupSnapshotCache = cache.create(10000, 60)
 auto gameDataCapabilityCache = cache.create(100000, 300)

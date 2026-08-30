@@ -53,6 +53,10 @@ def commitsNotIn(array commits, array excluded) array (
 )
 
 def pullResponse(object pull) object (
+    number commentCount = storedPullCommentCount(pull)
+    if commentCount < 0 (
+        commentCount = loadComments(pullCommentKey(pull)).len
+    )
     return {
         id: pull["_id"],
         index: pull.index,
@@ -73,7 +77,7 @@ def pullResponse(object pull) object (
         updated: pull.updated,
         merged: pull.state.toStr() == "merged",
         mergedCommit: pull.mergedCommit,
-        commentCount: loadComments(pullCommentKey(pull)).len
+        commentCount: commentCount
     }
 )
 
@@ -101,9 +105,10 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     if target.contains("nativePullSeq") and target.nativePullSeq != null (
         sequence = target.nativePullSeq.toNum()
     )
-    sequence = sequence + 1
-    target.nativePullSeq = sequence
-    saveProject(target)
+    string sequenceLock = "native-pull-sequence:" ++ target.id.toStr()
+    sync.lock(sequenceLock)
+    array latestPulls = pullDocs.where("targetProjectId", db.equal, target.id.toStr()).sort("index", db.desc).limit(1).all()
+    sequence = nextPullSequence(sequence, latestPulls)
 
     string id = target.id.toStr() ++ ":" ++ sequence.toStr()
     string sourceBranch = "main"
@@ -135,11 +140,14 @@ def createNativePull(*serve.Context c, object target, object source, string titl
         created: timestamp,
         updated: timestamp,
         mergedCommit: "",
+        commentCount: 0,
         bountyId: bountyId
     }
-    if !putDocument(pullDocs, id, pull) (
-        return {ok: false, status: 500, error: "could not store the pull request"}
+    if pullDocs.insertOne(pull) == null (
+        sync.unlock(sequenceLock)
+        return {ok: false, status: 409, error: "another pull request was created at the same time, try again"}
     )
+    sync.unlock(sequenceLock)
     addNotification(target.owner.toStr(), c.getString("username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
     return {ok: true, pull: pullResponse(pull)}
 )
@@ -220,6 +228,11 @@ def handleGetPull(*serve.Context c) (
         c.notFound("pull request not found")
         return
     )
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    if !targetResult.ok or !canViewProject(targetResult.project.assert(object), c) (
+        c.notFound("pull request not found")
+        return
+    )
     c.json(200, {ok: true, pull: pullResponse(pull)})
 )
 
@@ -279,6 +292,18 @@ def handleCreatePullComment(*serve.Context c) (
         c.badRequest(created.error.toStr())
         return
     )
+    sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
+    object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
+    if latestPull.isEmpty() == false (
+        number storedCount = storedPullCommentCount(latestPull)
+        number actualCount = 0
+        if storedCount < 0 (
+            actualCount = loadComments(pullCommentKey(latestPull)).len
+        )
+        latestPull.commentCount = pullCommentCountAfterCreate(latestPull, actualCount)
+        putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
+    )
+    sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
     string commenter = c.getString("username")
     object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id}
     if normalizeUsername(pull.author.toStr()) != normalizeUsername(commenter) (
@@ -309,6 +334,18 @@ def handleDeletePullComment(*serve.Context c) (
         c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
         return
     )
+    sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
+    object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
+    if latestPull.isEmpty() == false (
+        number storedCount = storedPullCommentCount(latestPull)
+        number actualCount = 0
+        if storedCount < 0 (
+            actualCount = loadComments(pullCommentKey(latestPull)).len
+        )
+        latestPull.commentCount = pullCommentCountAfterDelete(latestPull, deleted.removed.toNum(), actualCount)
+        putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
+    )
+    sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
     c.json(200, {ok: true})
 )
 
@@ -333,10 +370,18 @@ def handleEditPullComment(*serve.Context c) (
 )
 
 def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) boolean (
-    if !c.getBool("authenticated") (
-        return false
+    array matches = []
+    object targetPull = pullDocument(project.id.toStr(), pullIndex)
+    if targetPull.isEmpty() == false (
+        matches.append(targetPull)
     )
-    array matches = pullDocs.where("index", db.equal, pullIndex.toNum()).limit(20).all()
+    array sourcePulls = pullDocs.where("sourceProjectId", db.equal, project.id.toStr()).and("index", db.equal, pullIndex.toNum()).limit(20).all()
+    for i sourcePulls.len (
+        object sourcePull = sourcePulls[i].assert(object)
+        if targetPull.isEmpty() == true or sourcePull["_id"].toStr() != targetPull["_id"].toStr() (
+            matches.append(sourcePull)
+        )
+    )
     for i matches.len (
         object pull = matches[i].assert(object)
         boolean related = pull.sourceProjectId.toStr() == project.id.toStr() or pull.targetProjectId.toStr() == project.id.toStr()
@@ -344,6 +389,12 @@ def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) b
             auto targetResult = loadProject(pull.targetProjectId.toStr())
             if targetResult.ok (
                 object target = targetResult.project.assert(object)
+                if canSeeInsideProject(target, c) (
+                    return true
+                )
+                if !c.getBool("authenticated") (
+                    continue
+                )
                 string viewer = normalizeUsername(c.getString("username"))
                 if canEditProject(target, c) or viewer == normalizeUsername(pull.sourceOwner.toStr()) (
                     return true
@@ -352,6 +403,31 @@ def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) b
         )
     )
     return false
+)
+
+def canAccessPullProjectCommit(object project, string targetId, string pullIndex, string sha, *serve.Context c) boolean (
+    object pull = pullDocument(targetId, pullIndex)
+    if pull.isEmpty() == true (
+        return false
+    )
+    boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha)
+    boolean matchingSource = pull.sourceProjectId.toStr() == project.id.toStr() and pull.headCommit.toStr() == sha
+    if !matchingTarget and !matchingSource (
+        return false
+    )
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    if !targetResult.ok (
+        return false
+    )
+    object target = targetResult.project.assert(object)
+    if canSeeInsideProject(target, c) (
+        return true
+    )
+    if !c.getBool("authenticated") (
+        return false
+    )
+    string viewer = normalizeUsername(c.getString("username"))
+    return canEditProject(target, c) or viewer == normalizeUsername(pull.sourceOwner.toStr())
 )
 
 def handleGetPullDiff(*serve.Context c) (
@@ -372,10 +448,32 @@ def handleGetPullDiff(*serve.Context c) (
         c.forbidden("only the fork owner and project maintainers can inspect this pull request")
         return
     )
+    string targetWorkspacePath = cachedProjectWorkspacePath(target)
+    string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+    if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+        c.internalError("could not assemble pull request history")
+        return
+    )
+    string baseCommit = pull.baseCommit.toStr()
+    string headCommit = pull.headCommit.toStr()
+    string inspectionJson = raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
+    auto parsedInspection = json.parse(inspectionJson, {type: "object"})
+    if parsedInspection.isErr() (
+        c.internalError("could not inspect pull request changes")
+        return
+    )
+    object inspection = parsedInspection.unwrap().assert(object)
+    if !inspection.contains("ok") or inspection.ok != true (
+        c.json(409, {ok: false, error: (inspection.error ?? "could not inspect pull request changes").toStr(), code: "pull_history_unavailable"})
+        return
+    )
     string suffix = "?pull=" ++ pull.index.toStr()
     c.json(200, {
         ok: true,
         pull: pullResponse(pull),
+        inspection: inspection,
+        targetProjectId: target.id,
+        sourceProjectId: source.id,
         targetWorkspaceUrl: appURL ++ "/api/projects/" ++ target.id.toStr() ++ "/workspace.mwp" ++ suffix,
         sourceWorkspaceUrl: appURL ++ "/api/projects/" ++ source.id.toStr() ++ "/workspace.mwp" ++ suffix,
         expectedHead: projectGitHead(target)

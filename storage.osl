@@ -218,8 +218,6 @@ def loadProject(string id) object (
         string uid = userIdForUsername(project.owner.toStr())
         if uid != "" (
             project.ownerId = uid
-            saveProject(project)
-            upsertIndexEntry(project)
         )
     )
     return {ok: true, project: project}

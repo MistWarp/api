@@ -1,0 +1,50 @@
+def storedPullCommentCount(object pull) number (
+    if !pull.contains("commentCount") or pull.commentCount == null (
+        return -1
+    )
+    number count = pull.commentCount.toNum()
+    if count < 0 (
+        return 0
+    )
+    return count
+)
+
+def pullCommentCountAfterCreate(object pull, number actualCount) number (
+    number stored = storedPullCommentCount(pull)
+    if stored < 0 (
+        if actualCount < 0 (
+            return 0
+        )
+        return actualCount
+    )
+    return stored + 1
+)
+
+def pullCommentCountAfterDelete(object pull, number removed, number actualCount) number (
+    number stored = storedPullCommentCount(pull)
+    if stored < 0 (
+        if actualCount < 0 (
+            return 0
+        )
+        return actualCount
+    )
+    if removed < 0 (
+        removed = 0
+    )
+    number next = stored - removed
+    if next < 0 (
+        return 0
+    )
+    return next
+)
+
+def nextPullSequence(number legacySequence, array latestPulls) number (
+    number sequence = legacySequence
+    if latestPulls.len > 0 (
+        number latestSequence = latestPulls[1].assert(object).index.toNum()
+        if latestSequence > sequence (
+            sequence = latestSequence
+        )
+    )
+    return sequence + 1
+)

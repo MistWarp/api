@@ -105,6 +105,24 @@ def removeSearchProject(string id) boolean (
     return true
 )
 
+def migratePullCommentCounts() boolean (
+    string migrationId = "migration:pull-comment-count-v1"
+    if diagnosticDocs.findById(migrationId).isEmpty() == false (
+        return true
+    )
+    array pulls = pullDocs.all()
+    for i pulls.len (
+        object pull = pulls[i].assert(object)
+        if !pull.contains("commentCount") or pull.commentCount == null (
+            pull.commentCount = loadComments(pullCommentKey(pull)).len
+            if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
+                return false
+            )
+        )
+    )
+    return putDocument(diagnosticDocs, migrationId, {_id: migrationId, completedAt: timestamp})
+)
+
 def initCommunityDatabase() boolean (
     if projectSearchDocs.count({}) == 0 (
         array projectFiles = fs.readDir(projectsDir).toArray()
@@ -180,7 +198,7 @@ def initCommunityDatabase() boolean (
             putDocument(reviewDocs, review["_id"].toStr(), review)
         )
     )
-    return true
+    return migratePullCommentCounts()
 )
 
 def validPreviewKey(string projectId, string key) boolean (

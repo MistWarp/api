@@ -1,0 +1,7 @@
+def shouldPruneGitInspectionCache(number callCount) boolean (
+    return callCount > 0 and ((callCount - 1) % 32) == 0
+)
+
+def projectWorkspaceEtag(object project) string (
+    return "\"workspace-" ++ project.id.toStr() ++ "-" ++ projectWorkspaceFingerprint(project) ++ "\""
+)

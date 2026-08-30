@@ -493,36 +493,26 @@ def handleGetProjectWorkspace(*serve.Context c) (
         c.notFound("workspace not found")
         return
     )
-    if keys.len > 1 (
-        string materializedPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
-        if !copyProjectWorkspaceToPath(project, materializedPath) (
-            fs.remove(materializedPath)
-            c.internalError("could not assemble project history")
-            return
-        )
-        byte[] assembledBody = fs.readFileBytes(materializedPath)
-        fs.remove(materializedPath)
-        c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
-        c.data(200, "application/x-mistwarp-project", assembledBody)
+    string etag = projectWorkspaceEtag(project)
+    c.setHeader("ETag", etag)
+    c.setHeader("Vary", "Authorization, Cookie")
+    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
+        c.setHeader("Cache-Control", "public, max-age=0, must-revalidate")
+        c.setHeader("CDN-Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+    ) else (
+        c.setHeader("Cache-Control", "private, no-store")
+        c.setHeader("CDN-Cache-Control", "private, no-store")
+    )
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
         return
     )
-    string key = keys[1].toStr()
-    string localPath = localBlobPath(key)
-    if fs.exists(localPath) (
-        c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
-        c.file(localPath)
+    c.setHeader("Content-Type", "application/x-mistwarp-project")
+    string workspacePath = cachedProjectWorkspacePath(project)
+    if workspacePath == "" (
+        c.internalError("could not assemble project history")
         return
     )
-    if r2Local (
-        c.notFound("workspace not found")
-        return
-    )
-    auto fetched = r2Client.get({key: key})
-    if !fetched.ok or fetched.status.toInt() != 200 (
-        c.notFound("workspace not found")
-        return
-    )
-    string body = fetched.body.toStr()
     c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
-    c.data(200, "application/x-mistwarp-project", raw("[]byte(body)"))
+    c.file(workspacePath)
 )
