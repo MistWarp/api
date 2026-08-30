@@ -146,3 +146,45 @@ func TestInspectRejectsUnreachableCommit(t *testing.T) {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 }
+
+func TestCompareArchivesReportsChangesWithoutCombiningRepositories(t *testing.T) {
+	baseRepository := newTestRepository()
+	oldBlob := baseRepository.object("blob", []byte("old\n"))
+	oldTree := baseRepository.tree("main.fractch", oldBlob)
+	base := baseRepository.commit(oldTree, "", "Initial version")
+
+	headRepository := newTestRepository()
+	newBlob := headRepository.object("blob", []byte("new\n"))
+	newTree := headRepository.tree("main.fractch", newBlob)
+	head := headRepository.commit(newTree, base, "Change remix")
+
+	result := decodeResult(t, CompareArchives(
+		baseRepository.write(t), base, headRepository.write(t), head,
+	))
+	if result["ok"] != true || result["parent"] != base || result["sha"] != head {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	files := result["files"].([]any)
+	if len(files) != 1 || files[0].(map[string]any)["status"] != "modified" {
+		t.Fatalf("expected one modified file, got %#v", files)
+	}
+}
+
+func TestCompareArchivesRejectsUnrelatedHistories(t *testing.T) {
+	baseRepository := newTestRepository()
+	baseBlob := baseRepository.object("blob", []byte("base\n"))
+	baseTree := baseRepository.tree("main.fractch", baseBlob)
+	base := baseRepository.commit(baseTree, "", "Base")
+
+	headRepository := newTestRepository()
+	headBlob := headRepository.object("blob", []byte("head\n"))
+	headTree := headRepository.tree("main.fractch", headBlob)
+	head := headRepository.commit(headTree, "", "Unrelated")
+
+	result := decodeResult(t, CompareArchives(
+		baseRepository.write(t), base, headRepository.write(t), head,
+	))
+	if result["ok"] != false || result["error"] != "head commit does not descend from the pull request base" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
