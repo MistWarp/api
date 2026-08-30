@@ -7,7 +7,7 @@ def corsMiddleware(*serve.Context c) (
         )
         c.setHeader("Vary", "Origin")
     )
-    c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
     c.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-MistWarp-Game-Data")
     c.setHeader("Access-Control-Max-Age", "86400")
 
