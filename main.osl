@@ -20,7 +20,6 @@ import "go:compress/gzip"
 import "go:compress/zlib"
 import "go:crypto/sha1"
 import "go:encoding/hex"
-import "go:encoding/json"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
