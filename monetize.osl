@@ -561,6 +561,10 @@ def handleSetVisibility(*serve.Context c) (
         c.badRequest("visibility must be public, unlisted, or private")
         return
     )
+    if target != "private" and projectMustStayPrivate(project) (
+        c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
+        return
+    )
     if projectVisibility(project) == target (
         c.json(200, {ok: true, project: projectResponse(project, c)})
         return

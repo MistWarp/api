@@ -1969,6 +1969,10 @@ def handleCreatePreview(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
+  if projectMustStayPrivate(project) (
+    c.forbidden("remixes of paid projects cannot create shareable preview links")
+    return
+  )
   array previews = previewDocs.where("projectId", db.equal, project.id.toStr()).all()
   number activePreviews = 0
   for i previews.len (

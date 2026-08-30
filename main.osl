@@ -144,6 +144,7 @@ auto r2Client = s3.new({
 fs.mkdirAll("data/")
 
 import "./utils.osl"
+import "./project-sharing-policy.osl"
 import "./archive-security.osl"
 import "./storage-addressing.osl"
 import "./storage.osl"
