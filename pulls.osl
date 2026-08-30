@@ -152,6 +152,20 @@ def handleGetCommits(*serve.Context c) (
     )
     object project = result.project.assert(object)
     object history = projectVersionHistory(project)
+    string etag = "\"project-history-" ++ projectWorkspaceFingerprint(project) ++ "-" ++ projectGitHead(project) ++ "-" ++ json.stringify(history).hashSHA256() ++ "\""
+    c.setHeader("ETag", etag)
+    c.setHeader("Vary", "Authorization, Cookie")
+    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
+        c.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400")
+        c.setHeader("CDN-Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
+    ) else (
+        c.setHeader("Cache-Control", "private, no-store")
+        c.setHeader("CDN-Cache-Control", "private, no-store")
+    )
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
+        return
+    )
     c.json(200, {
         ok: true,
         head: projectGitHead(project),
