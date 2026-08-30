@@ -64,3 +64,35 @@ testing.assert(mainLog.len == 4, "branch log is stitched without duplicates")
 testing.assert(mainLog[1] == second and mainLog[2] == first and mainLog[3] == base and mainLog[4] == older, "branch log spans delta and base")
 array releaseLog = graphBranchLog(merged.graph.assert(object), "release")
 testing.assert(releaseLog.len == 1 and releaseLog[1] == older, "unrelated inherited branch logs are preserved")
+
+string pullHead = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+string mergeHead = "ffffffffffffffffffffffffffffffffffffffff"
+object sourceHistory = {
+    gitCommits: [
+        {sha: pullHead, message: "Pull change"},
+        {sha: base, message: "Base"}
+    ],
+    gitGraph: {
+        branches: ["main"],
+        branchLogs: [{branch: "main", oids: [pullHead, base]}],
+        nodes: [
+            {sha: pullHead, message: "Pull change", parents: [base], branches: ["main"]},
+            {sha: base, message: "Base", parents: [], branches: ["main"]}
+        ]
+    }
+}
+object mergeDelta = {
+    branch: "main",
+    commits: [{sha: mergeHead, message: "Merge pull request #1"}],
+    graph: {
+        branches: ["main"],
+        branchLogs: [{branch: "main", oids: [mergeHead, base]}],
+        nodes: [{sha: mergeHead, message: "Merge pull request #1", parents: [base, pullHead], branches: ["main"]}]
+    }
+}
+object pullMerged = mergeDeltaHistory(sourceHistory, mergeDelta, base)
+array pullMergedCommits = pullMerged.commits.assert(array)
+testing.assert(pullMergedCommits.len == 3, "an explicit PR merge keeps the source commits")
+testing.assert(pullMergedCommits[1].sha == mergeHead and pullMergedCommits[2].sha == pullHead and pullMergedCommits[3].sha == base, "the PR merge is prepended to source history")
+array pullMergedLog = graphBranchLog(pullMerged.graph.assert(object), "main")
+testing.assert(pullMergedLog.len == 3 and pullMergedLog[1] == mergeHead and pullMergedLog[2] == pullHead and pullMergedLog[3] == base, "the main log connects the merge commit to the accepted source history")

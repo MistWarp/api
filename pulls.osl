@@ -653,32 +653,35 @@ def handleMergePull(*serve.Context c) (
             return
         )
         source = sourceWorkspaceSnapshots.project.assert(object)
-        string fastForwardPath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".fast-forward.mwp"
+        string mergeArchivePath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".pull-merge.mwp"
         string targetBranch = target.contains("gitBranch") and target.gitBranch != null ? target.gitBranch.toStr() "main"
         string targetRemixParent = target.contains("remixParent") and target.remixParent != null ? target.remixParent.toStr() ""
         string targetBaseCommit = target.contains("remixBaseCommit") and target.remixBaseCommit != null ? target.remixBaseCommit.toStr() ""
         string targetId = target.id.toStr()
-        string fastForwardJson = raw("gitinspection.FastForwardArchiveJSON(sourceWorkspacePath, currentSourceHead, fastForwardPath, targetId, targetRemixParent, targetBaseCommit, targetBranch)")
-        auto parsedFastForward = json.parse(fastForwardJson, {type: "object"})
-        if parsedFastForward.isErr() or parsedFastForward.unwrap().assert(object).ok != true or !fs.exists(fastForwardPath) (
-            fs.remove(fastForwardPath)
+        string mergeAuthor = normalizeUsername(c.getString("username"))
+        string mergeMessage = "Merge pull request #" ++ pull.index.toStr()
+        number mergeTimestamp = timestamp
+        string mergeArchiveJson = raw("gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, int64(mergeTimestamp / 1000))")
+        auto parsedMergeArchive = json.parse(mergeArchiveJson, {type: "object"})
+        if parsedMergeArchive.isErr() or parsedMergeArchive.unwrap().assert(object).ok != true or !fs.exists(mergeArchivePath) (
+            fs.remove(mergeArchivePath)
             sync.unlock("project-history-" ++ target.id.toStr())
-            c.internalError("could not create the fast-forward history")
+            c.internalError("could not create the pull request merge commit")
             return
         )
-        object fastForwardResult = parsedFastForward.unwrap().assert(object)
-        object fastForwardGit = fastForwardResult.manifest.assert(object)
-        byte[] fastForwardBody = fs.readFileBytes(fastForwardPath)
-        fs.remove(fastForwardPath)
-        if fastForwardBody.len > maxWorkspaceBytes (
+        object mergeArchiveResult = parsedMergeArchive.unwrap().assert(object)
+        object mergeArchiveGit = mergeArchiveResult.manifest.assert(object)
+        byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath)
+        fs.remove(mergeArchivePath)
+        if mergeArchiveBody.len > maxWorkspaceBytes (
             sync.unlock("project-history-" ++ target.id.toStr())
             c.json(413, {ok: false, error: "MistWarp project history exceeds the 128 MB limit", code: "workspace_too_large"})
             return
         )
-        string fastForwardKey = projectWorkspaceSnapshotKey(contentHash(fastForwardBody))
-        if !r2Put(fastForwardKey, fastForwardBody, "application/x-mistwarp-project") (
+        string mergeArchiveKey = projectWorkspaceSnapshotKey(contentHash(mergeArchiveBody))
+        if !r2Put(mergeArchiveKey, mergeArchiveBody, "application/x-mistwarp-project") (
             sync.unlock("project-history-" ++ target.id.toStr())
-            c.internalError("could not store the fast-forward history")
+            c.internalError("could not store the pull request merge history")
             return
         )
         string previousJsonKey = target.jsonKey.toStr()
@@ -688,11 +691,14 @@ def handleMergePull(*serve.Context c) (
         target.jsonGzip = true
         target.inheritedJson = true
         target.pendingJson = false
-        target.workspaceKey = fastForwardKey
-        target.workspaceLayers = [fastForwardKey]
-        target.gitHead = fastForwardGit.head
-        target.gitCommits = fastForwardGit.commits
-        target.gitGraph = fastForwardGit.graph
+        target.workspaceKey = mergeArchiveKey
+        target.workspaceLayers = [mergeArchiveKey]
+        target.gitHead = mergeArchiveGit.head
+        target.gitCommits = source.contains("gitCommits") ? source.gitCommits []
+        target.gitGraph = source.contains("gitGraph") ? source.gitGraph {branches: [], branchLogs: [], nodes: []}
+        object mergedHistory = mergeDeltaHistory(target, mergeArchiveGit, currentTargetHead)
+        target.gitCommits = mergedHistory.commits
+        target.gitGraph = mergedHistory.graph
         target.assets = source.assets
         target.sizeBytes = projectSizeBytes(source)
         target.edited = timestamp
@@ -712,7 +718,7 @@ def handleMergePull(*serve.Context c) (
         )
         target.extensionsIndexed = source.contains("extensionsIndexed") and source.extensionsIndexed == true
         if !storeProjectExtensions(target.id.toStr(), previousExtensions, storedProjectExtensions(target), {}) or !saveProject(target) (
-            removeProjectStorageKeyIfOrphaned(fastForwardKey, target.id.toStr(), true)
+            removeProjectStorageKeyIfOrphaned(mergeArchiveKey, target.id.toStr(), true)
             sync.unlock("project-history-" ++ target.id.toStr())
             c.internalError("could not save the merged project")
             return
@@ -734,7 +740,7 @@ def handleMergePull(*serve.Context c) (
                 removeProjectStorageKeyIfOrphaned(previousWorkspaceKey, target.id.toStr(), true)
             )
         )
-        c.json(200, {ok: true, merged: true, fastForward: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
+        c.json(200, {ok: true, merged: true, fastForward: false, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
         return
     )
     string targetWorkspacePath = cachedProjectWorkspacePath(target)

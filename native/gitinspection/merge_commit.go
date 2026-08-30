@@ -95,6 +95,61 @@ func encodeTreeNode(node *treeNode, objects map[string]rewrite.Object) (rewrite.
 	return rewrite.EncodeTree(entries)
 }
 
+func copyArchiveObjects(source archive) (map[string]rewrite.Object, error) {
+	objects := map[string]rewrite.Object{}
+	for objectPath, item := range source.objects {
+		parts := strings.Split(objectPath, "/")
+		if len(parts) != 4 || len(parts[2])+len(parts[3]) != 40 {
+			continue
+		}
+		file, err := item.Open()
+		if err != nil {
+			return nil, err
+		}
+		compressed, readErr := io.ReadAll(file)
+		_ = file.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		oid := parts[2] + parts[3]
+		objects[oid] = rewrite.Object{OID: oid, Compressed: compressed}
+	}
+	return objects, nil
+}
+
+func writeMergeArchive(outputPath, targetHead, sourceHead, treeOID, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64, objects map[string]rewrite.Object) restoreResult {
+	if timestamp <= 0 {
+		timestamp = time.Now().Unix()
+	}
+	if message == "" {
+		message = "Merge pull request"
+	}
+	commit, err := rewrite.EncodeCommit(rewrite.CommitInput{Tree: treeOID, Parents: []string{targetHead, sourceHead}, Author: author, Timestamp: timestamp, Message: message})
+	if err != nil {
+		return restoreResult{Error: "could not create merge commit"}
+	}
+	objects[commit.OID] = commit
+	date := timestamp * 1000
+	commitMetadata := map[string]any{"sha": commit.OID, "message": message, "author": author, "date": date}
+	node := map[string]any{"sha": commit.OID, "message": message, "author": author, "date": date, "parents": []string{targetHead, sourceHead}, "branches": []string{branch}}
+	manifest := map[string]any{
+		"format": "mistwarp-project", "version": 1, "createdWith": "MistWarp API", "projectId": projectID,
+		"remixParent": nil, "baseCommit": nil, "branch": branch, "head": commit.OID, "worktree": false,
+		"baseHead": targetHead, "delta": true, "commits": []any{commitMetadata},
+		"graph": map[string]any{"branches": []string{branch}, "branchLogs": []any{map[string]any{"branch": branch, "oids": []string{commit.OID, targetHead}}}, "nodes": []any{node}},
+	}
+	if remixParent != "" {
+		manifest["remixParent"] = remixParent
+	}
+	if baseCommit != "" {
+		manifest["baseCommit"] = baseCommit
+	}
+	if err := writeObjectDelta(outputPath, branch, commit.OID, objects, manifest); err != nil {
+		return restoreResult{Error: "could not write merge history"}
+	}
+	return restoreResult{OK: true, Head: commit.OID, Manifest: manifest}
+}
+
 func writeObjectDelta(path, branch, head string, objects map[string]rewrite.Object, manifest map[string]any) error {
 	output, err := os.Create(path)
 	if err != nil {
@@ -167,63 +222,55 @@ func CreateMergeArchive(targetPath, targetHead, sourcePath, sourceHead, treePath
 	if err != nil {
 		return restoreResult{Error: "merged project tree is invalid"}
 	}
-	objects := map[string]rewrite.Object{}
-	for objectPath, item := range source.objects {
-		parts := strings.Split(objectPath, "/")
-		if len(parts) != 4 || len(parts[2])+len(parts[3]) != 40 {
-			continue
-		}
-		file, openErr := item.Open()
-		if openErr != nil {
-			return restoreResult{Error: "source Git object is unavailable"}
-		}
-		compressed, readErr := io.ReadAll(file)
-		_ = file.Close()
-		if readErr != nil {
-			return restoreResult{Error: "source Git object is unavailable"}
-		}
-		oid := parts[2] + parts[3]
-		objects[oid] = rewrite.Object{OID: oid, Compressed: compressed}
+	objects, err := copyArchiveObjects(source)
+	if err != nil {
+		return restoreResult{Error: "source Git object is unavailable"}
 	}
 	tree, err := encodeTreeNode(root, objects)
 	if err != nil {
 		return restoreResult{Error: "could not encode merged project tree"}
 	}
 	objects[tree.OID] = tree
-	if timestamp <= 0 {
-		timestamp = time.Now().Unix()
-	}
-	if message == "" {
-		message = "Merge pull request"
-	}
-	commit, err := rewrite.EncodeCommit(rewrite.CommitInput{Tree: tree.OID, Parents: []string{targetHead, sourceHead}, Author: author, Timestamp: timestamp, Message: message})
-	if err != nil {
-		return restoreResult{Error: "could not create merge commit"}
-	}
-	objects[commit.OID] = commit
-	date := timestamp * 1000
-	commitMetadata := map[string]any{"sha": commit.OID, "message": message, "author": author, "date": date}
-	node := map[string]any{"sha": commit.OID, "message": message, "author": author, "date": date, "parents": []string{targetHead, sourceHead}, "branches": []string{branch}}
-	manifest := map[string]any{
-		"format": "mistwarp-project", "version": 1, "createdWith": "MistWarp API", "projectId": projectID,
-		"remixParent": nil, "baseCommit": nil, "branch": branch, "head": commit.OID, "worktree": false,
-		"baseHead": targetHead, "delta": true, "commits": []any{commitMetadata},
-		"graph": map[string]any{"branches": []string{branch}, "branchLogs": []any{map[string]any{"branch": branch, "oids": []string{commit.OID, targetHead}}}, "nodes": []any{node}},
-	}
-	if remixParent != "" {
-		manifest["remixParent"] = remixParent
-	}
-	if baseCommit != "" {
-		manifest["baseCommit"] = baseCommit
-	}
-	if err := writeObjectDelta(outputPath, branch, commit.OID, objects, manifest); err != nil {
-		return restoreResult{Error: "could not write merge history"}
-	}
-	return restoreResult{OK: true, Head: commit.OID, Manifest: manifest}
+	return writeMergeArchive(outputPath, targetHead, sourceHead, tree.OID, projectID, remixParent, baseCommit, branch, author, message, timestamp, objects)
 }
 
 func CreateMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) string {
 	result := CreateMergeArchive(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message, timestamp)
+	encoded, _ := json.Marshal(result)
+	return string(encoded)
+}
+
+// CreateFastForwardMergeArchive records an explicit merge commit whose tree is
+// the source tip. It is used when the target has not moved since the pull
+// request was opened, keeping PR history explicit without trusting the client
+// to upload a second copy of the merged project.
+func CreateFastForwardMergeArchive(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) restoreResult {
+	targetReader, target, err := openArchive(targetPath)
+	if err != nil {
+		return restoreResult{Error: "target workspace archive is unavailable"}
+	}
+	defer targetReader.Close()
+	sourceReader, source, err := openArchive(sourcePath)
+	if err != nil {
+		return restoreResult{Error: "source workspace archive is unavailable"}
+	}
+	defer sourceReader.Close()
+	if _, ok := target.parseCommit(targetHead); !ok {
+		return restoreResult{Error: "target head is unavailable"}
+	}
+	sourceCommit, ok := source.parseCommit(sourceHead)
+	if !ok || !source.reachable(targetHead, sourceHead) {
+		return restoreResult{Error: "source head does not descend from target head"}
+	}
+	objects, err := copyArchiveObjects(source)
+	if err != nil {
+		return restoreResult{Error: "source Git object is unavailable"}
+	}
+	return writeMergeArchive(outputPath, targetHead, sourceHead, sourceCommit.Tree, projectID, remixParent, baseCommit, branch, author, message, timestamp, objects)
+}
+
+func CreateFastForwardMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) string {
+	result := CreateFastForwardMergeArchive(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message, timestamp)
 	encoded, _ := json.Marshal(result)
 	return string(encoded)
 }

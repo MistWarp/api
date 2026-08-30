@@ -5,8 +5,43 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
+
+func isSyntheticPullBranch(branch string) bool {
+	const prefix = "mwp-pr-"
+	if !strings.HasPrefix(branch, prefix) {
+		return false
+	}
+	index, err := strconv.ParseUint(strings.TrimPrefix(branch, prefix), 10, 64)
+	return err == nil && index > 0
+}
+
+func rewrittenNodeBranches(value any, sourceBranch, targetBranch string) []any {
+	rewritten := []any{}
+	existing, _ := value.([]any)
+	for _, candidate := range existing {
+		name, _ := candidate.(string)
+		if name == sourceBranch {
+			name = targetBranch
+		}
+		if name == "" || isSyntheticPullBranch(name) {
+			continue
+		}
+		seen := false
+		for _, kept := range rewritten {
+			if kept == name {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			rewritten = append(rewritten, name)
+		}
+	}
+	return rewritten
+}
 
 func rewriteFastForwardManifest(raw []byte, projectID, remixParent, baseCommit, branch, head string) (map[string]any, []byte, error) {
 	manifest := map[string]any{}
@@ -36,7 +71,7 @@ func rewriteFastForwardManifest(raw []byte, projectID, remixParent, baseCommit, 
 	if existing, ok := graph["branches"].([]any); ok {
 		for _, candidate := range existing {
 			name, _ := candidate.(string)
-			if name != "" && name != branch && name != sourceBranch {
+			if name != "" && name != branch && name != sourceBranch && !isSyntheticPullBranch(name) {
 				branches = append(branches, name)
 			}
 		}
@@ -50,7 +85,7 @@ func rewriteFastForwardManifest(raw []byte, projectID, remixParent, baseCommit, 
 			name, _ := log["branch"].(string)
 			if name == sourceBranch {
 				activeLog, _ = log["oids"].([]any)
-			} else if name != branch {
+			} else if name != branch && !isSyntheticPullBranch(name) {
 				otherLogs = append(otherLogs, log)
 			}
 		}
@@ -62,10 +97,12 @@ func rewriteFastForwardManifest(raw []byte, projectID, remixParent, baseCommit, 
 	if nodes, ok := graph["nodes"].([]any); ok {
 		for _, candidate := range nodes {
 			node, _ := candidate.(map[string]any)
+			nodeBranches := rewrittenNodeBranches(node["branches"], sourceBranch, branch)
 			sha, _ := node["sha"].(string)
-			if sha == head {
-				node["branches"] = []any{branch}
+			if sha == head && len(nodeBranches) == 0 {
+				nodeBranches = []any{branch}
 			}
+			node["branches"] = nodeBranches
 		}
 	}
 	encoded, err := json.Marshal(manifest)
@@ -102,6 +139,13 @@ func FastForwardArchive(sourcePath, head, outputPath, projectID, remixParent, ba
 		_ = file.Close()
 		break
 	}
+	var sourceMetadata struct {
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(rawManifest, &sourceMetadata); err != nil {
+		return restoreResult{Error: "source manifest is invalid"}
+	}
+	sourceBranch := sourceMetadata.Branch
 	manifest, manifestJSON, err := rewriteFastForwardManifest(rawManifest, projectID, remixParent, baseCommit, branch, head)
 	if err != nil {
 		return restoreResult{Error: "source manifest is invalid"}
@@ -111,9 +155,13 @@ func FastForwardArchive(sourcePath, head, outputPath, projectID, remixParent, ba
 		return restoreResult{Error: "could not create fast-forward history"}
 	}
 	writer := zip.NewWriter(output)
-	skip := map[string]bool{"mwp.json": true, ".git/HEAD": true, ".git/refs/heads/" + branch: true}
+	skip := map[string]bool{
+		"mwp.json": true, ".git/HEAD": true,
+		".git/refs/heads/" + branch: true, ".git/refs/heads/" + sourceBranch: true,
+	}
 	for _, item := range reader.File {
-		if skip[item.Name] || item.FileInfo().IsDir() {
+		refBranch := strings.TrimPrefix(item.Name, ".git/refs/heads/")
+		if skip[item.Name] || (refBranch != item.Name && isSyntheticPullBranch(refBranch)) || item.FileInfo().IsDir() {
 			continue
 		}
 		sourceFile, openErr := item.Open()
