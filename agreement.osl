@@ -100,6 +100,26 @@ def handleAcceptAgreement(*serve.Context c) (
     c.json(200, {ok: true})
 )
 
+def requireCurrentAgreement(*serve.Context c) (
+    object agreement = loadAgreement()
+    number version = agreement.version.toNum()
+    if version > 0 and !userHasAcceptedVersion(c.getString("username"), version) (
+        c.json(428, {
+            ok: false,
+            error: "accept the current community guidelines before uploading",
+            code: "agreement_required",
+            agreement: {
+                text: agreement.text,
+                version: version,
+                updatedAt: agreement.updatedAt
+            }
+        })
+        c.abort()
+        return
+    )
+    c.next()
+)
+
 def handleAdminGetAgreement(*serve.Context c) (
     object agreement = loadAgreement()
     number version = agreement.version
