@@ -248,6 +248,35 @@ func encode(value map[string]any, message string) string {
 	return string(encoded)
 }
 
+// CommitTreesDiffer compares only the tree identities of two commits. This is
+// enough to reject empty save commits even when the incoming archive is a delta
+// that intentionally omits unchanged tree and blob objects.
+func CommitTreesDiffer(basePath, baseHead, incomingPath, incomingHead string) string {
+	baseReader, baseArchive, err := openArchive(basePath)
+	if err != nil {
+		return failure("current workspace archive is unavailable")
+	}
+	defer baseReader.Close()
+	incomingReader, incomingArchive, err := openArchive(incomingPath)
+	if err != nil {
+		return failure("incoming workspace archive is unavailable")
+	}
+	defer incomingReader.Close()
+
+	baseCommit, ok := baseArchive.parseCommit(baseHead)
+	if !ok {
+		return failure("current commit was not found in its workspace")
+	}
+	incomingCommit, ok := incomingArchive.parseCommit(incomingHead)
+	if !ok {
+		return failure("incoming commit was not found in its workspace")
+	}
+	return encode(map[string]any{
+		"ok":      true,
+		"changed": baseCommit.Tree != incomingCommit.Tree,
+	}, "could not compare commit trees")
+}
+
 // Inspect reads a commit, tree, or file from the loose Git objects stored in a
 // MistWarp project archive. It returns the JSON contract consumed by the OSL API.
 func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) string {

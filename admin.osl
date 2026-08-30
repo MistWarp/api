@@ -234,6 +234,7 @@ def handleListUsers(*serve.Context c) (
             string key = entry.usernameKey.toStr()
             object profile = loadProfile(key)
             object quota = quotaDetails(key)
+            object standing = standingInfo(key)
             number projectCount = projectSearchDocs.where("ownerKey", db.equal, key).count()
             out.append({
                 username: profile.username,
@@ -244,6 +245,7 @@ def handleListUsers(*serve.Context c) (
                 quotaLimit: quota.limit,
                 quotaOldestEventMs: quota.oldestEventMs,
                 quotaEventCount: quota.eventCount,
+                standingLevel: standing.level,
                 banned: isBannedUser(key)
             })
         )

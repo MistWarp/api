@@ -202,3 +202,37 @@ func TestCompareArchivesSupportsIndependentForkHistories(t *testing.T) {
 		t.Fatalf("expected the independent fork tree to be compared, got %#v", files)
 	}
 }
+
+func TestCommitTreesDifferRejectsMessageOnlyCommit(t *testing.T) {
+	baseRepository := newTestRepository()
+	blob := baseRepository.object("blob", []byte("same\n"))
+	tree := baseRepository.tree("main.fractch", blob)
+	base := baseRepository.commit(tree, "", "Initial version")
+
+	incomingRepository := newTestRepository()
+	head := incomingRepository.commit(tree, base, "Changed only the message")
+	result := decodeResult(t, CommitTreesDiffer(
+		baseRepository.write(t), base, incomingRepository.write(t), head,
+	))
+	if result["ok"] != true || result["changed"] != false {
+		t.Fatalf("expected identical trees to be rejected, got %#v", result)
+	}
+}
+
+func TestCommitTreesDifferAcceptsChangedTree(t *testing.T) {
+	baseRepository := newTestRepository()
+	oldBlob := baseRepository.object("blob", []byte("old\n"))
+	oldTree := baseRepository.tree("main.fractch", oldBlob)
+	base := baseRepository.commit(oldTree, "", "Initial version")
+
+	incomingRepository := newTestRepository()
+	newBlob := incomingRepository.object("blob", []byte("new\n"))
+	newTree := incomingRepository.tree("main.fractch", newBlob)
+	head := incomingRepository.commit(newTree, base, "Changed project")
+	result := decodeResult(t, CommitTreesDiffer(
+		baseRepository.write(t), base, incomingRepository.write(t), head,
+	))
+	if result["ok"] != true || result["changed"] != true {
+		t.Fatalf("expected different trees to be accepted, got %#v", result)
+	}
+}

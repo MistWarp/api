@@ -1613,6 +1613,52 @@ def handleUploadProject(*serve.Context c) (
     return
   )
 
+  // An editor with a shallow history can create a new commit object even when
+  // its project tree is identical to the current version. Compare the commit
+  // trees on the server before storing project JSON, assets, or history.
+  boolean ordinaryVersionSave = hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
+  if ordinaryVersionSave (
+    string incomingHead = canonicalHistoryHead(gitInfo)
+    if incomingHead == currentHead (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
+      return
+    )
+    if incomingHead != "" (
+      any incomingWorkspaceBody = workspaceFile.data
+      number incomingWorkspaceSize = workspaceFile.size.toNum()
+      if incomingWorkspaceSize > maxWorkspaceBytes or !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
+        return
+      )
+      string compareBasePath = tmpDir ++ workId ++ ".compare-base.mwp"
+      string compareIncomingPath = tmpDir ++ workId ++ ".compare-incoming.mwp"
+      boolean compareReady = copyProjectWorkspaceToPath(project, compareBasePath) and fs.writeFileBytes(compareIncomingPath, incomingWorkspaceBody)
+      string comparisonJson = ""
+      if compareReady (
+        comparisonJson = raw("gitinspection.CommitTreesDiffer(compareBasePath, currentHead, compareIncomingPath, incomingHead)")
+      )
+      fs.remove(compareBasePath)
+      fs.remove(compareIncomingPath)
+      auto parsedComparison = json.parse(comparisonJson, {type: "object"})
+      if !compareReady or parsedComparison.isErr() or parsedComparison.unwrap().assert(object).ok != true (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.json(400, {ok: false, error: "could not validate the MistWarp project history", code: "invalid_workspace"})
+        return
+      )
+      if parsedComparison.unwrap().assert(object).changed != true (
+        fs.remove(zipPath)
+        fs.remove(extractDir)
+        c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
+        return
+      )
+    )
+  )
+
   object extensionResult = collectProjectExtensions(extractDir ++ "/project.json", c.formValue("extensions"))
   if !extensionResult.ok (
     fs.remove(zipPath)
