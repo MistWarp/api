@@ -314,9 +314,6 @@ func CompareArchives(basePath, baseSHA, headPath, headSHA string) string {
 	if !ok {
 		return failure("head commit is unavailable")
 	}
-	if !headArchive.reachable(baseSHA, headSHA) {
-		return failure("head commit does not descend from the pull request base")
-	}
 	return compareCommitTrees(baseArchive, baseSHA, baseCommit, headArchive, headSHA, headCommit)
 }
 
