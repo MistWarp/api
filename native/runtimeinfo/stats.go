@@ -16,13 +16,13 @@ func classify(path string) string {
 	switch {
 	case strings.Contains(clean, "/blobs/assets/"):
 		return "assets"
-	case strings.Contains(clean, "/blobs/project-workspaces/"), strings.Contains(clean, "/git-inspection/"):
+	case strings.Contains(clean, "/blobs/project-workspaces/"):
 		return "history"
 	case strings.Contains(clean, "/staging/"), strings.Contains(clean, "/projects/"):
 		return "projectData"
 	case strings.HasSuffix(clean, ".db"), strings.Contains(clean, "/users/"), strings.Contains(clean, "/comments/"):
 		return "database"
-	case strings.Contains(clean, "/tmp/"):
+	case strings.Contains(clean, "/tmp/"), strings.Contains(clean, "/git-inspection/"):
 		return "cache"
 	case strings.Contains(clean, "/thumbnails/"):
 		return "thumbnails"

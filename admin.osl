@@ -281,6 +281,7 @@ def aggregateStorageObjects(object objects) object (
 
 def adminStorageStats() object (
     object local = localRuntimeStorageStats()
+    object inventorySync = syncR2StorageInventory(false)
     auto r2Loaded = readFile(r2StorageIndexFile)
     object r2Data = r2Loaded.ok ? r2Loaded.data.assertElse(object, {}) {}
     object r2Objects = r2Data.contains("objects") ? r2Data.objects.assertElse(object, {}) {}
@@ -292,10 +293,20 @@ def adminStorageStats() object (
         queuedObjects[item.key.toStr()] = item
     )
     object queued = aggregateStorageObjects(queuedObjects)
-    return {local: local, r2: r2, queued: queued, r2Configured: !r2Local}
+    number r2SyncedAt = r2Data.contains("syncedAt") ? r2Data.syncedAt.toNum() 0
+    return {local: local, r2: r2, queued: queued, r2Configured: !r2Local, r2SyncedAt: r2SyncedAt, inventorySync: inventorySync}
 )
 
 def handleAdminStorageStats(*serve.Context c) (
+    c.json(200, {ok: true, storage: adminStorageStats()})
+)
+
+def handleAdminSyncR2StorageStats(*serve.Context c) (
+    object result = syncR2StorageInventory(true)
+    if !result.ok (
+        c.json(502, {ok: false, error: result.error})
+        return
+    )
     c.json(200, {ok: true, storage: adminStorageStats()})
 )
 

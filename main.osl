@@ -19,6 +19,7 @@ import "go:time"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/gitinspection/rewrite"
 import "go:mistwarp.local/runtimeinfo"
+import "go:mistwarp.local/r2inventory"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
@@ -475,6 +476,7 @@ api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
 api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
 api.GET("/admin/stats", requireAdmin, handleAdminStats)
 api.GET("/admin/storage", requireAdmin, handleAdminStorageStats)
+api.POST("/admin/storage/sync", requireAdmin, handleAdminSyncR2StorageStats)
 api.GET("/admin/payouts", requireAdmin, handleListPendingPayouts)
 api.POST("/admin/payouts/retry", requireAdmin, handleRetryPendingPayouts)
 api.GET("/admin/users", requireAdmin, handleListUsers)
