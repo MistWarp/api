@@ -112,12 +112,27 @@ def siteFinishPlaytime(*ws.Connection conn) (
 
 def siteAuthenticate(*ws.Connection conn, object message) (
   string token = message.token.assertElse(string, "")
+  if token != "" and conn.Get("authenticated") == true and conn.Get("authToken").assertElse(string, "") == token (
+    siteSend(conn, {type: "authenticated", username: conn.Get("username")})
+    return
+  )
+  siteFinishPlaytime(conn)
+  conn.Set("authenticated", false)
+  conn.Set("authToken", "")
+  conn.Set("username", "")
+  conn.Set("userId", "")
+  conn.Set("isAdmin", false)
+  if token == "" (
+    siteSend(conn, {type: "unauthenticated"})
+    return
+  )
   object session = getSession(token)
   if !session.ok or isBannedUser(session.username.toStr()) (
     siteError(conn, "not authenticated")
     return
   )
   conn.Set("authenticated", true)
+  conn.Set("authToken", token)
   conn.Set("username", session.username.toStr())
   conn.Set("userId", session.userId.toStr())
   conn.Set("isAdmin", isAdminUser(session.username.toStr()))
@@ -202,6 +217,7 @@ def siteOnConnect(*ws.Connection conn) (
   )
   conn.Set("sessionId", "ws:" ++ sessionId)
   conn.Set("authenticated", false)
+  conn.Set("authToken", "")
   conn.Set("isAdmin", false)
   conn.Set("projects", [])
   conn.Set("projectKeys", {})
@@ -247,6 +263,9 @@ def siteOnMessage(*ws.Connection conn, string raw) (
     siteSend(conn, {type: "pong", at: timestamp})
     return
   )
+  if kind == "pong" (
+    return
+  )
   siteError(conn, "unknown message type")
 )
 
@@ -258,6 +277,15 @@ def handleSiteRealtimeHTTP(*serve.Context c) (
   c.json(426, {ok: false, error: "websocket required"})
 )
 
+def siteHeartbeat() (
+  while true (
+    wait 30
+    for conn in siteRealtimeSocket.GetConnections() (
+      siteSend(conn, {type: "ping"})
+    )
+  )
+)
+
 def setupSiteRealtime() (
   siteRealtimeSocket.AllowAllOrigins()
   siteRealtimeSocket.OnConnect(siteOnConnect)
@@ -265,4 +293,5 @@ def setupSiteRealtime() (
   siteRealtimeSocket.OnDisconnect(siteOnDisconnect)
   app.WS("/v1/ws", siteRealtimeSocket)
   app.GET("/v1/ws", handleSiteRealtimeHTTP)
+  thread.new(siteHeartbeat)
 )

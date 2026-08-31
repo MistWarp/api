@@ -757,6 +757,7 @@ def handlePurchaseConfirm(*serve.Context c) (
     )
     saveProject(project)
     upsertIndexEntry(project)
+    siteBroadcastStats(project.id.toStr(), buyer, {saved: true})
     addPurchaseRecord(buyerLower, {projectId: project.id.toStr(), title: project.title, seller: seller, amount: owed, at: timestamp})
     addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
 

@@ -2201,6 +2201,8 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
     identityKey = normalizeUsername(username)
   )
   string playtimeId = projectId ++ ":" ++ identityKey
+  string playtimeLock = "playtime:" ++ playtimeId
+  sync.lock(playtimeLock)
   object playtime = playtimeDocs.findById(playtimeId)
   if playtime.isEmpty() == true (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
@@ -2209,7 +2211,9 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
     playtime.userId = userId
     playtime.updated = timestamp
   )
-  return putDocument(playtimeDocs, playtimeId, playtime)
+  boolean saved = putDocument(playtimeDocs, playtimeId, playtime)
+  sync.unlock(playtimeLock)
+  return saved
 )
 
 def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
@@ -2222,6 +2226,8 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
   if credited > 0 (
     string identityKey = session.identityKey.assertElse(string, playtimeIdentity(username))
     string playtimeId = projectId ++ ":" ++ identityKey
+    string playtimeLock = "playtime:" ++ playtimeId
+    sync.lock(playtimeLock)
     object playtime = playtimeDocs.findById(playtimeId)
     if playtime.isEmpty() == true (
       playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
@@ -2229,6 +2235,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     playtime.duration = playtime.duration.toNum() + credited
     playtime.updated = timestamp
     putDocument(playtimeDocs, playtimeId, playtime)
+    sync.unlock(playtimeLock)
   )
   if finished (
     playtimeSessionDocs.deleteOne({_id: sessionId})
