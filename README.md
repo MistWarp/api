@@ -28,7 +28,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | R2_PUBLIC_BASE | | Public custom domain for the bucket |
 | GITEA_URL | https://git.rotur.dev | Optional Rotur Git instance |
 | GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
-| EDITOR_ORIGIN | https://warp.mistium.com | Editor origin for CORS |
+| EDITOR_ORIGIN | https://warp.mistium.com | Public editor base URL used in links |
 | ADMIN_USERS | mist | Comma separated admin usernames |
 | REALTIME_URL | wss://mwapi.mistium.com/v1/connect | Public multiplayer WebSocket endpoint |
 
