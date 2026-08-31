@@ -13,10 +13,12 @@ def corsOriginAllowed(string origin) boolean (
 def corsMiddleware(*serve.Context c) (
   string origin = c.header("Origin").strip()
   boolean allowed = corsOriginAllowed(origin)
+  if origin != "" (
+    c.setHeader("Vary", "Origin")
+  )
   if origin != "" and allowed (
     c.setHeader("Access-Control-Allow-Origin", origin)
     c.setHeader("Access-Control-Allow-Credentials", "true")
-    c.setHeader("Vary", "Origin")
   )
   c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
   c.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-MistWarp-Game-Data")

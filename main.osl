@@ -243,7 +243,7 @@ thread.new(generateMissingProjectHistories)
 app.bodyLimit(maxAppRequestBytes)
 app.use(websocketOriginGuard)
 app.use(realtimeUpgradeGuard)
-app.use(corsMiddleware)
+app.use(serve.corsOpen())
 app.use(serve.logger())
 
 app.static("/thumbnails", "./data/thumbnails")
