@@ -257,6 +257,106 @@ def handleListProjectBranches(*serve.Context c) (
     c.json(200, {ok: true, current: projectVersionHistory(project).branch, branches: projectBranchResponse(project)})
 )
 
+def handleProjectBranchMutation(*serve.Context c, string action) (
+    string lockName = "project-history-" ++ c.param("id")
+    sync.lock(lockName)
+    auto result = loadProject(c.param("id"))
+    if !result.ok (
+        sync.unlock(lockName)
+        c.notFound("project not found")
+        return
+    )
+    object project = result.project.assert(object)
+    if !canEditProject(project, c) (
+        sync.unlock(lockName)
+        c.forbidden("only project maintainers can manage branches")
+        return
+    )
+    object body = c.bodyJSON()
+    string branch = (body.branch ?? "").toStr().strip()
+    string name = (body.name ?? "").toStr().strip()
+    string from = (body.from ?? "").toStr().strip()
+    if action == "create" and from == "" (
+        from = projectVersionHistory(project).branch.toStr()
+    )
+    string sourcePath = tmpDir ++ project.id.toStr() ++ ".branches-source." ++ randomString(8) ++ ".mwp"
+    string outputPath = tmpDir ++ project.id.toStr() ++ ".branches-output." ++ randomString(8) ++ ".mwp"
+    if !copyProjectWorkspaceToPath(project, sourcePath) (
+        fs.remove(sourcePath)
+        sync.unlock(lockName)
+        c.json(409, {ok: false, error: "save the project before managing its branches", code: "branch_history_unavailable"})
+        return
+    )
+    object history = projectVersionHistory(project)
+    history.head = projectGitHead(project)
+    string historyJson = json.stringify(history)
+    string rewriteJson = raw("gitinspection.ManageBranchArchiveJSON(sourcePath, outputPath, action, branch, name, from, historyJson)")
+    auto parsedRewrite = json.parse(rewriteJson, {type: "object"})
+    fs.remove(sourcePath)
+    if parsedRewrite.isErr() or parsedRewrite.unwrap().assert(object).ok != true or !fs.exists(outputPath) (
+        string message = parsedRewrite.isErr() ? "could not update the branch" (parsedRewrite.unwrap().assert(object).error ?? "could not update the branch").toStr()
+        fs.remove(outputPath)
+        sync.unlock(lockName)
+        c.json(409, {ok: false, error: message, code: "branch_update_unavailable"})
+        return
+    )
+    object rewrite = parsedRewrite.unwrap().assert(object)
+    object manifest = rewrite.manifest.assert(object)
+    byte[] workspaceBody = fs.readFileBytes(outputPath)
+    fs.remove(outputPath)
+    if workspaceBody.len > maxWorkspaceBytes (
+        sync.unlock(lockName)
+        c.json(413, {ok: false, error: "MistWarp project history exceeds the 512 MB limit", code: "workspace_too_large"})
+        return
+    )
+    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
+    if !stageR2Blob(workspaceKey, workspaceBody, "application/x-mistwarp-project", "") (
+        sync.unlock(lockName)
+        c.internalError("could not store the updated branch history")
+        return
+    )
+    array previousWorkspaceKeys = projectWorkspaceKeys(project)
+    project.workspaceKey = workspaceKey
+    project.workspaceLayers = [workspaceKey]
+    project.gitHead = manifest.head
+    project.gitBranch = manifest.branch
+    if manifest.contains("commits") and manifest.commits != null (
+        project.gitCommits = paginate(manifest.commits.assert(array), 0, 50)
+    )
+    project.gitGraph = manifest.graph.assertElse(object, {branches: [], branchLogs: [], nodes: []})
+    if !saveProject(project) (
+        removeProjectStorageKeyIfOrphaned(workspaceKey, project.id.toStr(), true)
+        sync.unlock(lockName)
+        c.internalError("could not save the updated branches")
+        return
+    )
+    for i previousWorkspaceKeys.len (
+        string previousKey = previousWorkspaceKeys[i].toStr()
+        if previousKey != workspaceKey (
+            removeProjectStorageKeyIfOrphaned(previousKey, project.id.toStr(), true)
+        )
+    )
+    object response = {
+        ok: true,
+        current: project.gitBranch,
+        branches: projectBranchResponse(project)
+    }
+    sync.unlock(lockName)
+    c.json(200, response)
+)
+
+def handleCreateProjectBranch(*serve.Context c) (
+    handleProjectBranchMutation(c, "create")
+)
+
+def handleRenameProjectBranch(*serve.Context c) (
+    handleProjectBranchMutation(c, "rename")
+)
+
+def handleDeleteProjectBranch(*serve.Context c) (
+    handleProjectBranchMutation(c, "delete")
+)
+
 def handlePrepareBranchMerge(*serve.Context c) (
     auto result = loadProject(c.param("id"))
     if !result.ok or !canEditProject(result.project.assert(object), c) (
