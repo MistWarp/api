@@ -257,15 +257,16 @@ app.use(authMiddleware)
 setupGameRealtime()
 setupSiteRealtime()
 
-*serve.Router uploads = app.group("/api")
+def setupUploadRoutes(*serve.Router uploads) (
 uploads.POST("/projects/:id/upload", serve.maxBodySize(maxProjectUploadRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProject)
 uploads.POST("/projects/:id/upload-parts/:token/chunk", serve.maxBodySize(maxUploadChunkRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProjectPartChunk)
 uploads.POST("/projects/:id/history/bootstrap", serve.maxBodySize(maxWorkspaceBootstrapRequestBytes), requireAuth, requireCurrentAgreement, handleBootstrapProjectHistory)
 uploads.POST("/projects/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetThumbnail)
 uploads.POST("/spaces/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetSpaceThumbnail)
 uploads.POST("/admin/projects/:id/extensions/index", serve.maxBodySize(maxExtensionIndexRequestBytes), requireAdmin, handleAdminIndexProjectExtensions)
+)
 
-*serve.Router api = app.group("/api")
+def setupApiRoutes(*serve.Router api) (
 api.use(serve.maxBodySize(maxStandardRequestBytes))
 
 api.GET("/health", handleHealth)
@@ -492,6 +493,17 @@ api.GET("/admin/extensions", requireAdmin, handleAdminGetExtensions)
 api.GET("/admin/extensions/:hash/source", requireAdmin, handleAdminGetExtensionSource)
 api.POST("/admin/extensions/policy", requireAdmin, handleAdminSetExtensionPolicy)
 api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
+)
+
+*serve.Router uploadsV1 = app.group("/v1")
+setupUploadRoutes(uploadsV1)
+*serve.Router apiV1 = app.group("/v1")
+setupApiRoutes(apiV1)
+
+*serve.Router legacyUploads = app.group("/api")
+setupUploadRoutes(legacyUploads)
+*serve.Router legacyApi = app.group("/api")
+setupApiRoutes(legacyApi)
 
 log "MistWarp API listening on " ++ appURL
 app.serve(":" ++ port)

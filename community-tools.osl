@@ -2068,7 +2068,7 @@ def handleCreateRelease(*serve.Context c) (
     return
   )
   project = snapshot.project.assert(object)
-  string jsonUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
+  string jsonUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
   object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username"), creatorId: c.getString("userId")}
   releaseDocs.insertOne(release)
   if channel == "stable" (

@@ -292,7 +292,7 @@ def projectResponse(object project,*serve.Context c) object (
     projectJsonUrl: jsonUrl,
     assetsBase: assetsBaseUrl(),
     thumbUrl: thumbUrlFor(project),
-    cardUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/card.svg",
+    cardUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/card.svg",
     created: project.created,
     edited: project.edited,
     sharedAt: project.sharedAt,
@@ -325,7 +325,7 @@ def projectResponse(object project,*serve.Context c) object (
   }
   response.workspaceUrl = ""
   if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
-    response.workspaceUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
+    response.workspaceUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
   )
   response.gitHead = projectGitHead(project)
   response.gitBranch = "main"
@@ -2043,7 +2043,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     c.json(200, {
       ok: true,
       usedExisting: true,
-      workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+      workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
       head: projectGitHead(project),
       branch: configuredBranch,
       remixBaseCommit: remixBase
@@ -2141,7 +2141,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     c.json(200, {
       ok: true,
       usedExisting: true,
-      workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+      workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
       head: project.gitHead,
       branch: configuredBranch,
       remixBaseCommit: remixBase
@@ -2194,7 +2194,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
   c.json(201, {
     ok: true,
     usedExisting: false,
-    workspaceUrl: appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+    workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
     head: head,
     branch: configuredBranch,
     remixBaseCommit: remixBase
