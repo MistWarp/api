@@ -3347,6 +3347,21 @@ def handleGetRemixTree(*serve.Context c) (
       seen[entryId] = true
     )
   )
+  number scan = 1
+  while scan <= nodes.len and nodes.len < 500 (
+    object parentNode = nodes[scan].assert(object)
+    string parentId = parentNode.id.toStr()
+    array directChildren = projectSearchDocs.where("remixParent", db.equal, parentId).and("shared", db.equal, true).and("visibility", db.equal, "public").limit(500 - nodes.len).all()
+    for i directChildren.len (
+      object child = directChildren[i].assert(object)
+      string childId = child.id.toStr()
+      if !seen.contains(childId) and !bans.contains(normalizeUsername(child.owner.toStr())) (
+        nodes.append(child)
+        seen[childId] = true
+      )
+    )
+    scan = scan + 1
+  )
   if !seen.contains(id) and nodes.len < 500 (
     nodes.append(indexEntryFromProject(project))
   )
