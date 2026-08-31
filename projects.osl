@@ -3271,15 +3271,31 @@ def handleLeaderboard(*serve.Context c) (
   c.json(200, {ok: true, by: by, users: paginate(rows, 0, limit)})
 )
 
+def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
+  if isBannedUser(entry.owner.toStr()) and !c.getBool("isAdmin") (
+    return false
+  )
+  if entry.shared == true and projectVisibility(entry) == "public" (
+    return true
+  )
+  if !c.getBool("authenticated") (
+    return false
+  )
+  auto result = loadProject(entry.id.toStr())
+  if !result.ok (
+    return false
+  )
+  object project = result.project.assert(object)
+  return projectRole(project, c.getString("username")) != "" or canEditProject(project, c)
+)
+
 def handleGetRemixes(*serve.Context c) (
   string id = c.param("id")
-  array entries = projectSearchDocs.where("remixParent", db.equal, id).and("shared", db.equal, true).and("visibility", db.equal, "public").sort("sharedAt", db.desc).all()
-  object banData = cachedBans()
-  object bans = banData.bans
+  array entries = projectSearchDocs.where("remixParent", db.equal, id).sort("sharedAt", db.desc).all()
   array remixes = []
   for i entries.len (
     object entry = entries[i]
-    if !bans.contains(normalizeUsername(entry.owner.toStr())) (
+    if remixEntryVisibleInList(entry, c) (
       remixes.append(entry)
     )
   )
@@ -3336,13 +3352,11 @@ def handleGetRemixTree(*serve.Context c) (
       seen[ancestorId] = true
     )
   )
-  object banData = cachedBans()
-  object bans = banData.bans
-  array treeEntries = projectSearchDocs.where("remixRoot", db.equal, rootId).and("shared", db.equal, true).and("visibility", db.equal, "public").limit(499).all()
+  array treeEntries = projectSearchDocs.where("remixRoot", db.equal, rootId).limit(499).all()
   for i treeEntries.len (
     object entry = treeEntries[i].assert(object)
     string entryId = entry.id.toStr()
-    if !seen.contains(entryId) and !bans.contains(normalizeUsername(entry.owner.toStr())) (
+    if !seen.contains(entryId) and remixEntryVisibleInList(entry, c) (
       nodes.append(entry)
       seen[entryId] = true
     )
@@ -3351,11 +3365,11 @@ def handleGetRemixTree(*serve.Context c) (
   while scan <= nodes.len and nodes.len < 500 (
     object parentNode = nodes[scan].assert(object)
     string parentId = parentNode.id.toStr()
-    array directChildren = projectSearchDocs.where("remixParent", db.equal, parentId).and("shared", db.equal, true).and("visibility", db.equal, "public").limit(500 - nodes.len).all()
+    array directChildren = projectSearchDocs.where("remixParent", db.equal, parentId).limit(500 - nodes.len).all()
     for i directChildren.len (
       object child = directChildren[i].assert(object)
       string childId = child.id.toStr()
-      if !seen.contains(childId) and !bans.contains(normalizeUsername(child.owner.toStr())) (
+      if !seen.contains(childId) and remixEntryVisibleInList(child, c) (
         nodes.append(child)
         seen[childId] = true
       )
