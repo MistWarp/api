@@ -1,0 +1,268 @@
+def siteSend(*ws.Connection conn, object message) (
+  conn.Send(json.stringify(message))
+)
+
+def siteError(*ws.Connection conn, string message) (
+  siteSend(conn, {type: "error", error: message})
+)
+
+def siteAllows(*ws.Connection conn, string field, number maximum, number windowMs) boolean (
+  array recent = []
+  for entry in conn.Get(field).assertElse(array, []) (
+    if timestamp - entry.toNum() < windowMs (
+      recent.append(entry.toNum())
+    )
+  )
+  if recent.len >= maximum (
+    conn.Set(field, recent)
+    return false
+  )
+  recent.append(timestamp)
+  conn.Set(field, recent)
+  return true
+)
+
+def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
+  if conn.Get("isAdmin") == true (
+    return true
+  )
+  if projectIsViewable(project) (
+    return true
+  )
+  if validPreviewKey(project.id.toStr(), accessKey) (
+    return true
+  )
+  if conn.Get("authenticated") == true (
+    return projectRole(project, conn.Get("username").toStr()) != ""
+  )
+  return false
+)
+
+def siteSubscriptions(*ws.Connection conn) array (
+  return conn.Get("projects").assertElse(array, [])
+)
+
+def siteSubscribed(*ws.Connection conn, string projectId) boolean (
+  return siteSubscriptions(conn).contains(projectId)
+)
+
+def siteProjectKey(*ws.Connection conn, string projectId) string (
+  object keys = conn.Get("projectKeys").assertElse(object, {})
+  if keys.contains(projectId) (
+    return keys[projectId].toStr()
+  )
+  return ""
+)
+
+def siteProjectStats(string projectId) object (
+  auto result = loadProject(projectId)
+  if !result.ok (
+    return {}
+  )
+  object project = result.project.assert(object)
+  return {
+    type: "project_stats",
+    projectId: projectId,
+    hearts: project.loves.assertElse(array, []).len,
+    brokenHearts: project.brokenhearts.assertElse(array, []).len,
+    saves: projectSaves(project)
+  }
+)
+
+def siteBroadcastProject(string projectId, object message) (
+  auto result = loadProject(projectId)
+  if !result.ok (
+    return
+  )
+  object project = result.project.assert(object)
+  string encoded = json.stringify(message)
+  for conn in siteRealtimeSocket.GetConnections() (
+    if !siteSubscribed(conn, projectId) continue
+    string accessKey = siteProjectKey(conn, projectId)
+    if siteCanView(project, conn, accessKey) (
+      conn.Send(encoded)
+    )
+  )
+)
+
+def siteBroadcastStats(string projectId, string actor, object viewerState) (
+  object message = siteProjectStats(projectId)
+  if message.isEmpty() (
+    return
+  )
+  message.actor = actor
+  for key in viewerState.getKeys() (
+    message[key.toStr()] = viewerState[key.toStr()]
+  )
+  siteBroadcastProject(projectId, message)
+)
+
+def siteFinishPlaytime(*ws.Connection conn) (
+  string projectId = conn.Get("playingProject").assertElse(string, "")
+  if projectId != "" and conn.Get("authenticated") == true (
+    creditPlaytimeSession(
+      projectId,
+      conn.Get("username").toStr(),
+      conn.Get("sessionId").toStr(),
+      true
+    )
+  )
+  conn.Set("playingProject", "")
+)
+
+def siteAuthenticate(*ws.Connection conn, object message) (
+  string token = message.token.assertElse(string, "")
+  object session = getSession(token)
+  if !session.ok or isBannedUser(session.username.toStr()) (
+    siteError(conn, "not authenticated")
+    return
+  )
+  conn.Set("authenticated", true)
+  conn.Set("username", session.username.toStr())
+  conn.Set("userId", session.userId.toStr())
+  conn.Set("isAdmin", isAdminUser(session.username.toStr()))
+  siteSend(conn, {type: "authenticated", username: session.username})
+)
+
+def siteSubscribe(*ws.Connection conn, object message) (
+  string projectId = message.projectId.assertElse(string, "").strip()
+  string accessKey = message.accessKey.assertElse(string, "").strip()
+  auto result = loadProject(projectId)
+  if !result.ok or !siteCanView(result.project.assert(object), conn, accessKey) (
+    siteError(conn, "project not found")
+    return
+  )
+  array projects = siteSubscriptions(conn)
+  if !projects.contains(projectId) (
+    projects.append(projectId)
+    conn.Set("projects", projects)
+  )
+  object keys = conn.Get("projectKeys").assertElse(object, {})
+  keys[projectId] = accessKey
+  conn.Set("projectKeys", keys)
+  siteSend(conn, {type: "project_subscribed", projectId: projectId})
+  object stats = siteProjectStats(projectId)
+  if !stats.isEmpty() (
+    siteSend(conn, stats)
+  )
+)
+
+def siteUnsubscribe(*ws.Connection conn, string projectId) (
+  if conn.Get("playingProject").assertElse(string, "") == projectId (
+    siteFinishPlaytime(conn)
+  )
+  array projects = siteSubscriptions(conn).filter(id -> id.toStr() != projectId)
+  conn.Set("projects", projects)
+  object keys = conn.Get("projectKeys").assertElse(object, {})
+  keys.delete(projectId)
+  conn.Set("projectKeys", keys)
+)
+
+def siteDiagnostic(*ws.Connection conn, object message) (
+  string projectId = message.projectId.assertElse(string, "").strip()
+  if !siteSubscribed(conn, projectId) (
+    siteError(conn, "subscribe to the project first")
+    return
+  )
+  if !siteAllows(conn, "diagnosticTimes", 120, 60000) (
+    siteError(conn, "sending diagnostics too quickly")
+    return
+  )
+  object diagnostic = message.diagnostic.assertElse(object, {})
+  string kind = diagnostic.type.assertElse(string, "").toLower().strip()
+  if kind == "playtime_start" (
+    string playing = conn.Get("playingProject").assertElse(string, "")
+    if playing != "" and playing != projectId (
+      siteFinishPlaytime(conn)
+    )
+  )
+  object result = recordProjectDiagnostic(
+    projectId,
+    conn.Get("authenticated") == true,
+    conn.Get("username").assertElse(string, ""),
+    conn.Get("sessionId").toStr(),
+    diagnostic
+  )
+  if !result.ok (
+    siteError(conn, result.error.toStr())
+    return
+  )
+  if kind == "playtime_start" and conn.Get("authenticated") == true (
+    conn.Set("playingProject", projectId)
+  )
+  if kind == "playtime_finish" (
+    conn.Set("playingProject", "")
+  )
+)
+
+def siteOnConnect(*ws.Connection conn) (
+  string sessionId = conn.GetHeader("Sec-WebSocket-Key")
+  if sessionId == "" (
+    sessionId = randomString(24)
+  )
+  conn.Set("sessionId", "ws:" ++ sessionId)
+  conn.Set("authenticated", false)
+  conn.Set("isAdmin", false)
+  conn.Set("projects", [])
+  conn.Set("projectKeys", {})
+  conn.Set("playingProject", "")
+  conn.Set("messageTimes", [])
+  conn.Set("diagnosticTimes", [])
+  siteSend(conn, {type: "welcome", protocol: 1})
+)
+
+def siteOnMessage(*ws.Connection conn, string raw) (
+  if raw.len > 16384 (
+    siteError(conn, "message is too large")
+    return
+  )
+  if !siteAllows(conn, "messageTimes", 60, 1000) (
+    siteError(conn, "sending messages too quickly")
+    return
+  )
+  auto parsed = json.parseObject(raw)
+  if !parsed.isOk() (
+    siteError(conn, "invalid message")
+    return
+  )
+  object message = parsed.unwrapAs(object)
+  string kind = message.type.assertElse(string, "")
+  if kind == "authenticate" (
+    siteAuthenticate(conn, message)
+    return
+  )
+  if kind == "project_subscribe" (
+    siteSubscribe(conn, message)
+    return
+  )
+  if kind == "project_unsubscribe" (
+    siteUnsubscribe(conn, message.projectId.assertElse(string, ""))
+    return
+  )
+  if kind == "diagnostic" (
+    siteDiagnostic(conn, message)
+    return
+  )
+  if kind == "ping" (
+    siteSend(conn, {type: "pong", at: timestamp})
+    return
+  )
+  siteError(conn, "unknown message type")
+)
+
+def siteOnDisconnect(*ws.Connection conn) (
+  siteFinishPlaytime(conn)
+)
+
+def handleSiteRealtimeHTTP(*serve.Context c) (
+  c.json(426, {ok: false, error: "websocket required"})
+)
+
+def setupSiteRealtime() (
+  siteRealtimeSocket.AllowAllOrigins()
+  siteRealtimeSocket.OnConnect(siteOnConnect)
+  siteRealtimeSocket.OnMessage(siteOnMessage)
+  siteRealtimeSocket.OnDisconnect(siteOnDisconnect)
+  app.WS("/v1/ws", siteRealtimeSocket)
+  app.GET("/v1/ws", handleSiteRealtimeHTTP)
+)

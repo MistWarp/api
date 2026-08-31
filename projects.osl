@@ -328,11 +328,11 @@ def projectResponse(object project,*serve.Context c) object (
     response.workspaceUrl = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
   )
   response.gitHead = projectGitHead(project)
-    response.gitBranch = "main"
+  response.gitBranch = "main"
   if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
-        response.gitBranch = project.gitBranch
-    )
-    response.commitCount = projectVersionHistory(project).commits.assert(array).len
+    response.gitBranch = project.gitBranch
+  )
+  response.commitCount = projectVersionHistory(project).commits.assert(array).len
   response.remixBaseCommit = ""
   if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
     response.remixBaseCommit = project.remixBaseCommit
@@ -910,11 +910,11 @@ def handleStageProjectUploadPart(*serve.Context c) (
     size: file.size,
     expires: timestamp + stagedUploadPartTtlMs
   }) (
-    removeStagedUploadPart(token, {})
-    c.internalError("could not stage upload part")
-    return
-  )
-  c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
+  removeStagedUploadPart(token, {})
+  c.internalError("could not stage upload part")
+  return
+)
+c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
 )
 
 def uploadPartChunkPath(string token, number index) string (
@@ -3147,6 +3147,7 @@ def handleReactProject(*serve.Context c) (
   if broken.contains(viewer) (
     myReaction = "brokenheart"
   )
+  siteBroadcastStats(project.id.toStr(), c.getString("username"), {reaction: myReaction})
   c.json(200, {
     ok: true,
     hearts: loves.len,

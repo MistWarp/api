@@ -1,735 +1,737 @@
 def sortProjectsByEditedDesc(array items) array (
-    array sorted = []
-    for i items.len (
-        object current = items[i].assert(object)
-        number currentEdited = current.edited.toNum()
-        boolean inserted = false
-        array next = []
-        for j sorted.len (
-            object other = sorted[j].assert(object)
-            if !inserted and currentEdited > other.edited.toNum() (
-                next.append(current)
-                inserted = true
-            )
-            next.append(other)
-        )
-        if !inserted (
-            next.append(current)
-        )
-        sorted = next
+  array sorted = []
+  for i items.len (
+    object current = items[i].assert(object)
+    number currentEdited = current.edited.toNum()
+    boolean inserted = false
+    array next = []
+    for j sorted.len (
+      object other = sorted[j].assert(object)
+      if !inserted and currentEdited > other.edited.toNum() (
+        next.append(current)
+        inserted = true
+      )
+      next.append(other)
     )
-    return sorted
+    if !inserted (
+      next.append(current)
+    )
+    sorted = next
+  )
+  return sorted
 )
 
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
-    if isBannedUser(owner) (
-        return []
+  if isBannedUser(owner) (
+    return []
+  )
+  string ownerKey = normalizeUsername(owner)
+  string ownerId = userIdForUsername(owner)
+  object seen = {}
+  array stored = []
+  if ownerId != "" (
+    array idMatches = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
+    for i idMatches.len (
+      object entry = idMatches[i].assert(object)
+      string pid = entry.id.toStr()
+      if !seen.contains(pid) (
+        seen[pid] = true
+        stored.append(entry)
+      )
     )
-    string ownerKey = normalizeUsername(owner)
-    string ownerId = userIdForUsername(owner)
-    object seen = {}
-    array stored = []
-    if ownerId != "" (
-        array idMatches = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
-        for i idMatches.len (
-            object entry = idMatches[i].assert(object)
-            string pid = entry.id.toStr()
-            if !seen.contains(pid) (
-                seen[pid] = true
-                stored.append(entry)
-            )
+  )
+  if ownerKey != "" (
+    array keyMatches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    for i keyMatches.len (
+      object entry = keyMatches[i].assert(object)
+      string pid = entry.id.toStr()
+      if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId (
+        entry.ownerId = ownerId
+        putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+        auto loaded = loadProject(pid)
+        if loaded.ok (
+          object project = loaded.project.assert(object)
+          if (project.ownerId ?? "").toStr() != ownerId (
+            project.ownerId = ownerId
+            saveProject(project)
+          )
         )
+      )
+      if !seen.contains(pid) (
+        seen[pid] = true
+        stored.append(entry)
+      )
     )
-    if ownerKey != "" (
-        array keyMatches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
-        for i keyMatches.len (
-            object entry = keyMatches[i].assert(object)
-            string pid = entry.id.toStr()
-            if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId (
-                entry.ownerId = ownerId
-                putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
-                auto loaded = loadProject(pid)
-                if loaded.ok (
-                    object project = loaded.project.assert(object)
-                    if (project.ownerId ?? "").toStr() != ownerId (
-                        project.ownerId = ownerId
-                        saveProject(project)
-                    )
-                )
-            )
-            if !seen.contains(pid) (
-                seen[pid] = true
-                stored.append(entry)
-            )
-        )
+  )
+  array sorted = sortProjectsByEditedDesc(stored)
+  array entries = []
+  for i sorted.len (
+    object entry = sorted[i].assert(object)
+    if entry.shared == true or includeUnshared (
+      entries.append(entry)
     )
-    array sorted = sortProjectsByEditedDesc(stored)
-    array entries = []
-    for i sorted.len (
-        object entry = sorted[i].assert(object)
-        if entry.shared == true or includeUnshared (
-            entries.append(entry)
-        )
-    )
-    return entries
+  )
+  return entries
 )
 
 def ownerIndexCount(string owner, boolean includeUnshared) number (
-    return ownerIndexEntries(owner, includeUnshared).len
+  return ownerIndexEntries(owner, includeUnshared).len
 )
 
 def ownerIndexPage(string owner, boolean includeUnshared, number offset, number limit) array (
-    array entries = ownerIndexEntries(owner, includeUnshared)
-    return paginate(entries, offset, limit)
+  array entries = ownerIndexEntries(owner, includeUnshared)
+  return paginate(entries, offset, limit)
 )
 
 def isViewerOwner(*serve.Context c, string name) boolean (
-    if !c.getBool("authenticated") (
-        return false
-    )
-    if c.getBool("isAdmin") (
-        return true
-    )
-    object profile = loadProfile(name)
-    string profileId = ""
-    if profile.contains("userId") and profile.userId != null (
-        profileId = profile.userId.toStr()
-    )
-    return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
+  if !c.getBool("authenticated") (
+    return false
+  )
+  if c.getBool("isAdmin") (
+    return true
+  )
+  object profile = loadProfile(name)
+  string profileId = ""
+  if profile.contains("userId") and profile.userId != null (
+    profileId = profile.userId.toStr()
+  )
+  return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
 )
 
 def userPlaytimeRecords(string name) array (
-    string userId = userIdForUsername(name)
-    array records = []
-    object seen = {}
-    if userId != "" (
-        array idRecords = playtimeDocs.where("userId", db.equal, userId).all()
-        for i idRecords.len (
-            object record = idRecords[i].assert(object)
-            string recordId = record["_id"].toStr()
-            if !seen.contains(recordId) (
-                seen[recordId] = true
-                records.append(record)
-            )
-        )
-        array legacyIdRecords = playtimeDocs.where("_id", db.contains, ":" ++ userId).all()
-        for i legacyIdRecords.len (
-            object record = legacyIdRecords[i].assert(object)
-            string recordId = record["_id"].toStr()
-            if recordId.endsWith(":" ++ userId) and !seen.contains(recordId) (
-                record.userId = userId
-                record.username = name
-                putDocument(playtimeDocs, recordId, record)
-                seen[recordId] = true
-                records.append(record)
-            )
-        )
+  string userId = userIdForUsername(name)
+  array records = []
+  object seen = {}
+  if userId != "" (
+    array idRecords = playtimeDocs.where("userId", db.equal, userId).all()
+    for i idRecords.len (
+      object record = idRecords[i].assert(object)
+      string recordId = record["_id"].toStr()
+      if !seen.contains(recordId) (
+        seen[recordId] = true
+        records.append(record)
+      )
     )
-    array nameRecords = playtimeDocs.where("username", db.equal, name).all()
-    for i nameRecords.len (
-        object record = nameRecords[i].assert(object)
-        string recordId = record["_id"].toStr()
-        if !seen.contains(recordId) (
-            seen[recordId] = true
-            records.append(record)
-        )
+    array legacyIdRecords = playtimeDocs.where("_id", db.contains, ":" ++ userId).all()
+    for i legacyIdRecords.len (
+      object record = legacyIdRecords[i].assert(object)
+      string recordId = record["_id"].toStr()
+      if recordId.endsWith(":" ++ userId) and !seen.contains(recordId) (
+        record.userId = userId
+        record.username = name
+        putDocument(playtimeDocs, recordId, record)
+        seen[recordId] = true
+        records.append(record)
+      )
     )
-    string normalized = normalizeUsername(name)
-    if normalized != name (
-        array normalizedRecords = playtimeDocs.where("username", db.equal, normalized).all()
-        for i normalizedRecords.len (
-            object record = normalizedRecords[i].assert(object)
-            string recordId = record["_id"].toStr()
-            if !seen.contains(recordId) (
-                seen[recordId] = true
-                records.append(record)
-            )
-        )
+  )
+  array nameRecords = playtimeDocs.where("username", db.equal, name).all()
+  for i nameRecords.len (
+    object record = nameRecords[i].assert(object)
+    string recordId = record["_id"].toStr()
+    if !seen.contains(recordId) (
+      seen[recordId] = true
+      records.append(record)
     )
-    array legacyNameRecords = playtimeDocs.where("_id", db.contains, ":" ++ normalized).all()
-    for i legacyNameRecords.len (
-        object record = legacyNameRecords[i].assert(object)
-        string recordId = record["_id"].toStr()
-        if recordId.endsWith(":" ++ normalized) and !seen.contains(recordId) (
-            record.username = name
-            if userId != "" (
-                record.userId = userId
-            )
-            putDocument(playtimeDocs, recordId, record)
-            seen[recordId] = true
-            records.append(record)
-        )
+  )
+  string normalized = normalizeUsername(name)
+  if normalized != name (
+    array normalizedRecords = playtimeDocs.where("username", db.equal, normalized).all()
+    for i normalizedRecords.len (
+      object record = normalizedRecords[i].assert(object)
+      string recordId = record["_id"].toStr()
+      if !seen.contains(recordId) (
+        seen[recordId] = true
+        records.append(record)
+      )
     )
-    array merged = []
-    for i records.len (
-        object record = records[i].assert(object)
-        string projectId = (record.projectId ?? "").toStr()
-        if projectId != "" (
-            number duration = (record.duration ?? 0).toNum()
-            number updated = (record.updated ?? 0).toNum()
-            boolean combined = false
-            for j merged.len (
-                object existing = merged[j].assert(object)
-                if existing.projectId.toStr() == projectId (
-                    existing.duration = (existing.duration ?? 0).toNum() + duration
-                    if updated > (existing.updated ?? 0).toNum() (
-                        existing.updated = updated
-                    )
-                    merged[j] = existing
-                    combined = true
-                )
-            )
-            if !combined (
-                record.duration = duration
-                record.updated = updated
-                merged.append(record)
-            )
-        )
+  )
+  array legacyNameRecords = playtimeDocs.where("_id", db.contains, ":" ++ normalized).all()
+  for i legacyNameRecords.len (
+    object record = legacyNameRecords[i].assert(object)
+    string recordId = record["_id"].toStr()
+    if recordId.endsWith(":" ++ normalized) and !seen.contains(recordId) (
+      record.username = name
+      if userId != "" (
+        record.userId = userId
+      )
+      putDocument(playtimeDocs, recordId, record)
+      seen[recordId] = true
+      records.append(record)
     )
-    merged.sortBy("duration", "descending")
-    return merged
+  )
+  array merged = []
+  for i records.len (
+    object record = records[i].assert(object)
+    string projectId = (record.projectId ?? "").toStr()
+    if projectId != "" (
+      number duration = (record.duration ?? 0).toNum()
+      number updated = (record.updated ?? 0).toNum()
+      boolean combined = false
+      for j merged.len (
+        object existing = merged[j].assert(object)
+        if existing.projectId.toStr() == projectId (
+          existing.duration = (existing.duration ?? 0).toNum() + duration
+          if updated > (existing.updated ?? 0).toNum() (
+            existing.updated = updated
+          )
+          merged[j] = existing
+          combined = true
+        )
+      )
+      if !combined (
+        record.duration = duration
+        record.updated = updated
+        merged.append(record)
+      )
+    )
+  )
+  merged.sortBy("duration", "descending")
+  return merged
 )
 
-def userPlaytimeLibrary(string name, *serve.Context c) array (
-    object profile = loadProfile(name)
-    array savedProjects = []
-    if profile.contains("library") and profile.library != null (
-        savedProjects = profile.library.assert(array)
+def userPlaytimeLibrary(string name,*serve.Context c) array (
+  object profile = loadProfile(name)
+  array savedProjects = []
+  if profile.contains("library") and profile.library != null (
+    savedProjects = profile.library.assert(array)
+  )
+  array hiddenProjects = []
+  if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+    hiddenProjects = profile.hiddenLibraryProjects.assert(array)
+  )
+  boolean ownsProfile = isViewerOwner(c, name)
+  array library = []
+  for i savedProjects.len (
+    string projectId = savedProjects[i].toStr()
+    object project = projectSearchDocs.findById(projectId)
+    boolean libraryPublic = !hiddenProjects.contains(projectId)
+    boolean include = libraryPublic and !project.isEmpty() and projectVisibility(project) == "public"
+    if !include and !project.isEmpty() (
+      include = ownsProfile
     )
-    array hiddenProjects = []
-    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
-        hiddenProjects = profile.hiddenLibraryProjects.assert(array)
+    if include (
+      project.projectId = projectId
+      project.duration = projectPlaytime(projectId, name)
+      project.lastPlayed = projectLastPlayed(projectId, name)
+      project.libraryPublic = libraryPublic
+      library.append(project)
     )
-    boolean ownsProfile = isViewerOwner(c, name)
-    array library = []
-    for i savedProjects.len (
-        string projectId = savedProjects[i].toStr()
-        object project = projectSearchDocs.findById(projectId)
-        boolean libraryPublic = !hiddenProjects.contains(projectId)
-        boolean include = libraryPublic and !project.isEmpty() and projectVisibility(project) == "public"
-        if !include and !project.isEmpty() (
-            include = ownsProfile
-        )
-        if include (
-            project.projectId = projectId
-            project.duration = projectPlaytime(projectId, name)
-            project.lastPlayed = projectLastPlayed(projectId, name)
-            project.libraryPublic = libraryPublic
-            library.append(project)
-        )
-    )
-    library.sortBy("duration", "descending")
-    return library
+  )
+  library.sortBy("duration", "descending")
+  return library
 )
 
-def mostPlayedProjectActivity(string name, *serve.Context c, number limit) array (
-    return paginate(userPlaytimeLibrary(name, c), 0, limit)
+def mostPlayedProjectActivity(string name,*serve.Context c, number limit) array (
+  return paginate(userPlaytimeLibrary(name, c), 0, limit)
 )
 
 def handleGetUser(*serve.Context c) (
-    string name = c.param("name")
-    string key = normalizeUsername(name)
-    if isSafePathPart(key) and !fs.exists(usersDir ++ key ++ ".json") (
-        discoverUserIdentity(name)
+  string name = c.param("name")
+  string key = normalizeUsername(name)
+  if isSafePathPart(key) and !fs.exists(usersDir ++ key ++ ".json") (
+    discoverUserIdentity(name)
+  )
+  boolean exists = profileExists(name)
+  object profile = loadProfile(name)
+  array followers = profile.followers.assert(array)
+  array following = profile.following.assert(array)
+  string viewer = normalizeUsername(c.getString("username"))
+  object viewerSafety = {blocked: [], muted: []}
+  if c.getBool("authenticated") and viewer != "" (
+    viewerSafety = loadSafety(viewer)
+  )
+  number projectLimit = 24
+  number projectTotal = ownerIndexCount(name, false)
+  array projects = ownerIndexPage(name, false, 0, projectLimit)
+  string featuredId = profile.featuredProject.toStr()
+  if featuredId != "" (
+    boolean featuredIncluded = false
+    for i projects.len (
+      if projects[i].id.toStr() == featuredId (
+        featuredIncluded = true
+      )
     )
-    boolean exists = profileExists(name)
-    object profile = loadProfile(name)
-    array followers = profile.followers.assert(array)
-    array following = profile.following.assert(array)
-    string viewer = normalizeUsername(c.getString("username"))
-    object viewerSafety = {blocked: [], muted: []}
-    if c.getBool("authenticated") and viewer != "" (
-        viewerSafety = loadSafety(viewer)
+    if !featuredIncluded (
+      object featured = projectSearchDocs.findById(featuredId)
+      if featured.isEmpty() == false and featured.shared == true and featured.ownerKey.toStr() == key (
+        projects.append(featured)
+      )
     )
-    number projectLimit = 24
-    number projectTotal = ownerIndexCount(name, false)
-    array projects = ownerIndexPage(name, false, 0, projectLimit)
-    string featuredId = profile.featuredProject.toStr()
-    if featuredId != "" (
-        boolean featuredIncluded = false
-        for i projects.len (
-            if projects[i].id.toStr() == featuredId (
-                featuredIncluded = true
-            )
-        )
-        if !featuredIncluded (
-            object featured = projectSearchDocs.findById(featuredId)
-            if featured.isEmpty() == false and featured.shared == true and featured.ownerKey.toStr() == key (
-                projects.append(featured)
-            )
-        )
-    )
+  )
 
-    boolean commentsOff = false
-    if profile.contains("commentsOff") and profile.commentsOff == true (
-        commentsOff = true
-    )
-    boolean recentActivityVisible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
-    boolean ownsProfile = isViewerOwner(c, name)
-    array recentActivity = []
-    if recentActivityVisible or ownsProfile (
-        recentActivity = mostPlayedProjectActivity(profile.username.toStr(), c, 6)
-    )
-    c.json(200, {
-        ok: true,
-        exists: exists or projectTotal > 0,
-        username: profile.username,
-        bio: profile.bio,
-        featuredProject: profile.featuredProject,
-        followerCount: followers.len,
-        followingCount: following.len,
-        isFollowing: followers.contains(viewer),
-        viewerBlocked: viewerSafety.blocked.assert(array).contains(key),
-        viewerMuted: viewerSafety.muted.assert(array).contains(key),
-        commentsOff: commentsOff,
-        recentActivityVisible: recentActivityVisible,
-        recentActivity: recentActivity,
-        projects: projects,
-        projectTotal: projectTotal,
-        projectOffset: projectLimit
-    })
+  boolean commentsOff = false
+  if profile.contains("commentsOff") and profile.commentsOff == true (
+    commentsOff = true
+  )
+  boolean recentActivityVisible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+  boolean ownsProfile = isViewerOwner(c, name)
+  array recentActivity = []
+  if recentActivityVisible or ownsProfile (
+    recentActivity = mostPlayedProjectActivity(profile.username.toStr(), c, 6)
+  )
+  c.json(200, {
+    ok: true,
+    exists: exists or projectTotal > 0,
+    username: profile.username,
+    bio: profile.bio,
+    featuredProject: profile.featuredProject,
+    followerCount: followers.len,
+    followingCount: following.len,
+    isFollowing: followers.contains(viewer),
+    viewerBlocked: viewerSafety.blocked.assert(array).contains(key),
+    viewerMuted: viewerSafety.muted.assert(array).contains(key),
+    commentsOff: commentsOff,
+    recentActivityVisible: recentActivityVisible,
+    recentActivity: recentActivity,
+    projects: projects,
+    projectTotal: projectTotal,
+    projectOffset: projectLimit
+  })
 )
 
 def handleGetUserPlaytimeLibrary(*serve.Context c) (
-    string name = c.param("name")
-    object profile = loadProfile(name)
-    boolean visible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
-    boolean ownsProfile = isViewerOwner(c, name)
-    if !visible and !ownsProfile (
-        c.json(200, {ok: true, visible: false, projects: [], total: 0, nextOffset: 0})
-        return
-    )
-    array entries = userPlaytimeLibrary(profile.username.toStr(), c)
-    number total = entries.len
-    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
-    number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
-    c.json(200, {
-        ok: true,
-        visible: visible,
-        projects: paginate(entries, offset, limit),
-        total: total,
-        nextOffset: clampNumber(offset + limit, 0, total)
-    })
+  string name = c.param("name")
+  object profile = loadProfile(name)
+  boolean visible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+  boolean ownsProfile = isViewerOwner(c, name)
+  if !visible and !ownsProfile (
+    c.json(200, {ok: true, visible: false, projects: [], total: 0, nextOffset: 0})
+    return
+  )
+  array entries = userPlaytimeLibrary(profile.username.toStr(), c)
+  number total = entries.len
+  number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+  number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+  c.json(200, {
+    ok: true,
+    visible: visible,
+    projects: paginate(entries, offset, limit),
+    total: total,
+    nextOffset: clampNumber(offset + limit, 0, total)
+  })
 )
 
 def handleSearchUsers(*serve.Context c) (
-    string q = normalizeUsername(c.query("q"))
-    if q == "" (
-        c.json(200, {ok: true, users: []})
-        return
-    )
-    array matches = []
-    array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(8).all()
-    for i found.len (
-        object profile = found[i].assert(object)
-        number projectCount = projectSearchDocs.where("ownerKey", db.equal, profile.usernameKey).and("shared", db.equal, true).count()
-        matches.append({username: profile.username, followers: profile.followers, projects: projectCount})
-    )
-    c.json(200, {ok: true, users: matches})
+  string q = normalizeUsername(c.query("q"))
+  if q == "" (
+    c.json(200, {ok: true, users: []})
+    return
+  )
+  array matches = []
+  array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(8).all()
+  for i found.len (
+    object profile = found[i].assert(object)
+    number projectCount = projectSearchDocs.where("ownerKey", db.equal, profile.usernameKey).and("shared", db.equal, true).count()
+    matches.append({username: profile.username, followers: profile.followers, projects: projectCount})
+  )
+  c.json(200, {ok: true, users: matches})
 )
 
 def handleUpdateProfile(*serve.Context c) (
-    string username = c.getString("username")
-    object profile = loadProfile(username)
-    object body = c.bodyJSON()
-    boolean changed = false
+  string username = c.getString("username")
+  object profile = loadProfile(username)
+  object body = c.bodyJSON()
+  boolean changed = false
 
-    if body.contains("bio") (
-        string bio = body.bio.toStr()
-        if bio.len > 300 (
-            c.badRequest("bio too long")
-            return
-        )
-        if profile.bio.toStr() != bio (
-            profile.bio = bio
-            changed = true
-        )
+  if body.contains("bio") (
+    string bio = body.bio.toStr()
+    if bio.len > 300 (
+      c.badRequest("bio too long")
+      return
     )
+    if profile.bio.toStr() != bio (
+      profile.bio = bio
+      changed = true
+    )
+  )
 
-    if body.contains("featuredProject") (
-        string featured = body.featuredProject.toStr()
-        if featured != profile.featuredProject.toStr() and featured != "" (
-            auto result = loadProject(featured)
-            if !result.ok (
-                c.badRequest("project not found")
-                return
-            )
-            object project = result.project.assert(object)
-            if projectRole(project, username) != "owner" (
-                c.forbidden("not your project")
-                return
-            )
-            if project.shared != true (
-                c.badRequest("share the project before featuring it")
-                return
-            )
-        )
-        if profile.featuredProject.toStr() != featured (
-            profile.featuredProject = featured
-            changed = true
-        )
+  if body.contains("featuredProject") (
+    string featured = body.featuredProject.toStr()
+    if featured != profile.featuredProject.toStr() and featured != "" (
+      auto result = loadProject(featured)
+      if !result.ok (
+        c.badRequest("project not found")
+        return
+      )
+      object project = result.project.assert(object)
+      if projectRole(project, username) != "owner" (
+        c.forbidden("not your project")
+        return
+      )
+      if project.shared != true (
+        c.badRequest("share the project before featuring it")
+        return
+      )
     )
+    if profile.featuredProject.toStr() != featured (
+      profile.featuredProject = featured
+      changed = true
+    )
+  )
 
-    if body.contains("commentsOff") (
-        boolean commentsOff = body.commentsOff == true
-        boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
-        if currentCommentsOff != commentsOff (
-            profile.commentsOff = commentsOff
-            changed = true
-        )
+  if body.contains("commentsOff") (
+    boolean commentsOff = body.commentsOff == true
+    boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
+    if currentCommentsOff != commentsOff (
+      profile.commentsOff = commentsOff
+      changed = true
     )
+  )
 
-    if body.contains("showRecentActivity") (
-        boolean showRecentActivity = body.showRecentActivity == true
-        boolean currentShowRecentActivity = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
-        if currentShowRecentActivity != showRecentActivity (
-            profile.showRecentActivity = showRecentActivity
-            changed = true
-        )
+  if body.contains("showRecentActivity") (
+    boolean showRecentActivity = body.showRecentActivity == true
+    boolean currentShowRecentActivity = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+    if currentShowRecentActivity != showRecentActivity (
+      profile.showRecentActivity = showRecentActivity
+      changed = true
     )
+  )
 
-    if changed (
-        saveProfile(profile)
-    )
-    c.json(200, {ok: true})
+  if changed (
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true})
 )
 
 def handleFollowUser(*serve.Context c) (
-    string actor = c.getString("username")
-    string target = c.param("name")
-    string actorKey = normalizeUsername(actor)
-    string targetKey = normalizeUsername(target)
-    if actorKey == targetKey (
-        c.badRequest("cannot follow yourself")
-        return
-    )
-    if !profileExists(target) (
-        c.notFound("user not found")
-        return
-    )
-    if usersAreBlocked(actor, target) (
-        c.forbidden("this user cannot be followed")
-        return
-    )
+  string actor = c.getString("username")
+  string target = c.param("name")
+  string actorKey = normalizeUsername(actor)
+  string targetKey = normalizeUsername(target)
+  if actorKey == targetKey (
+    c.badRequest("cannot follow yourself")
+    return
+  )
+  if !profileExists(target) (
+    c.notFound("user not found")
+    return
+  )
+  if usersAreBlocked(actor, target) (
+    c.forbidden("this user cannot be followed")
+    return
+  )
 
-    object targetProfile = loadProfile(target)
-    array followers = targetProfile.followers.assert(array)
-    boolean wasFollowing = followers.contains(actorKey)
-    if !wasFollowing (
-        followers.append(actorKey)
-        targetProfile.followers = followers
-        saveProfile(targetProfile)
-    )
+  object targetProfile = loadProfile(target)
+  array followers = targetProfile.followers.assert(array)
+  boolean wasFollowing = followers.contains(actorKey)
+  if !wasFollowing (
+    followers.append(actorKey)
+    targetProfile.followers = followers
+    saveProfile(targetProfile)
+  )
 
-    object actorProfile = loadProfile(actor)
-    array following = actorProfile.following.assert(array)
-    if !following.contains(targetKey) (
-        following.append(targetKey)
-        actorProfile.following = following
-        saveProfile(actorProfile)
-    )
+  object actorProfile = loadProfile(actor)
+  array following = actorProfile.following.assert(array)
+  if !following.contains(targetKey) (
+    following.append(targetKey)
+    actorProfile.following = following
+    saveProfile(actorProfile)
+  )
 
-    if !wasFollowing (
-        addNotification(target, actor, "follow", {})
-    )
+  if !wasFollowing (
+    addNotification(target, actor, "follow", {})
+  )
 
-    c.json(200, {ok: true})
+  c.json(200, {ok: true})
 )
 
 def handleUnfollowUser(*serve.Context c) (
-    string actor = c.getString("username")
-    string target = c.param("name")
-    string actorKey = normalizeUsername(actor)
-    string targetKey = normalizeUsername(target)
+  string actor = c.getString("username")
+  string target = c.param("name")
+  string actorKey = normalizeUsername(actor)
+  string targetKey = normalizeUsername(target)
 
-    if profileExists(target) (
-        object targetProfile = loadProfile(target)
-        array followers = targetProfile.followers.assert(array)
-        if followers.contains(actorKey) (
-            targetProfile.followers = removeString(followers, actorKey)
-            saveProfile(targetProfile)
-        )
+  if profileExists(target) (
+    object targetProfile = loadProfile(target)
+    array followers = targetProfile.followers.assert(array)
+    if followers.contains(actorKey) (
+      targetProfile.followers = removeString(followers, actorKey)
+      saveProfile(targetProfile)
     )
+  )
 
-    object actorProfile = loadProfile(actor)
-    array following = actorProfile.following.assert(array)
-    if following.contains(targetKey) (
-        actorProfile.following = removeString(following, targetKey)
-        saveProfile(actorProfile)
-    )
+  object actorProfile = loadProfile(actor)
+  array following = actorProfile.following.assert(array)
+  if following.contains(targetKey) (
+    actorProfile.following = removeString(following, targetKey)
+    saveProfile(actorProfile)
+  )
 
-    c.json(200, {ok: true})
+  c.json(200, {ok: true})
 )
 
 def handleGetUserProjects(*serve.Context c) (
-    string name = c.param("name")
-    if userIdForUsername(name) == "" (
-        discoverUserIdentity(name)
-    )
-    boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
-    number requestedLimit = c.queryInt("limit", 0)
-    if requestedLimit > 0 (
-        number total = ownerIndexCount(name, includeUnshared)
-        number offset = clampNumber(c.queryInt("offset", 0), 0, total)
-        number limit = clampNumber(requestedLimit, 1, 100)
-        c.json(200, {
-            ok: true,
-            projects: ownerIndexPage(name, includeUnshared, offset, limit),
-            total: total,
-            nextOffset: clampNumber(offset + limit, 0, total)
-        })
-        return
-    )
-    array projects = ownerIndexEntries(name, includeUnshared)
-    c.json(200, {ok: true, projects: projects, total: projects.len})
+  string name = c.param("name")
+  if userIdForUsername(name) == "" (
+    discoverUserIdentity(name)
+  )
+  boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
+  number requestedLimit = c.queryInt("limit", 0)
+  if requestedLimit > 0 (
+    number total = ownerIndexCount(name, includeUnshared)
+    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+    number limit = clampNumber(requestedLimit, 1, 100)
+    c.json(200, {
+      ok: true,
+      projects: ownerIndexPage(name, includeUnshared, offset, limit),
+      total: total,
+      nextOffset: clampNumber(offset + limit, 0, total)
+    })
+    return
+  )
+  array projects = ownerIndexEntries(name, includeUnshared)
+  c.json(200, {ok: true, projects: projects, total: projects.len})
 )
 
 def userLibrary(string userLower) array (
-    object profile = loadProfile(userLower)
-    if profile.contains("library") and profile.library != null (
-        return profile.library.assert(array)
-    )
-    return []
+  object profile = loadProfile(userLower)
+  if profile.contains("library") and profile.library != null (
+    return profile.library.assert(array)
+  )
+  return []
 )
 
 def isInLibrary(string userLower, string projectId) boolean (
-    if userLower == "" (
-        return false
-    )
-    return userLibrary(userLower).contains(projectId)
+  if userLower == "" (
+    return false
+  )
+  return userLibrary(userLower).contains(projectId)
 )
 
 def addToLibrary(string userLower, string projectId) boolean (
-    object profile = loadProfile(userLower)
-    array lib = []
-    if profile.contains("library") and profile.library != null (
-        lib = profile.library.assert(array)
-    )
-    if lib.contains(projectId) (
-        return false
-    )
-    lib.append(projectId)
-    profile.library = lib
-    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
-        profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), projectId)
-    )
-    saveProfile(profile)
-    return true
+  object profile = loadProfile(userLower)
+  array lib = []
+  if profile.contains("library") and profile.library != null (
+    lib = profile.library.assert(array)
+  )
+  if lib.contains(projectId) (
+    return false
+  )
+  lib.append(projectId)
+  profile.library = lib
+  if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+    profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), projectId)
+  )
+  saveProfile(profile)
+  return true
 )
 
 def bumpProjectSaves(string projectId, number delta) number (
-    auto res = loadProject(projectId)
-    if !res.ok (
-        return 0
-    )
-    object project = res.project.assert(object)
-    number current = 0
-    if project.contains("saves") and project.saves != null (
-        current = project.saves.toNum()
-    )
-    number next = current + delta
-    if next < 0 (
-        next = 0
-    )
-    project.saves = next
-    saveProject(project)
-    return next
+  auto res = loadProject(projectId)
+  if !res.ok (
+    return 0
+  )
+  object project = res.project.assert(object)
+  number current = 0
+  if project.contains("saves") and project.saves != null (
+    current = project.saves.toNum()
+  )
+  number next = current + delta
+  if next < 0 (
+    next = 0
+  )
+  project.saves = next
+  saveProject(project)
+  return next
 )
 
 def handleSaveProject(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
-        return
-    )
-    boolean added = addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
-    number saves = projectSaves(project)
-    if added (
-        saves = bumpProjectSaves(project.id.toStr(), 1)
-        addActivity(c.getString("username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
-    )
-    c.json(200, {ok: true, saved: true, saves: saves})
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  boolean added = addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
+  number saves = projectSaves(project)
+  if added (
+    saves = bumpProjectSaves(project.id.toStr(), 1)
+    addActivity(c.getString("username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+  )
+  siteBroadcastStats(project.id.toStr(), c.getString("username"), {saved: true})
+  c.json(200, {ok: true, saved: true, saves: saves})
 )
 
 def handleUnsaveProject(*serve.Context c) (
-    string me = normalizeUsername(c.getString("username"))
-    object profile = loadProfile(me)
-    array lib = []
-    if profile.contains("library") and profile.library != null (
-        lib = profile.library.assert(array)
+  string me = normalizeUsername(c.getString("username"))
+  object profile = loadProfile(me)
+  array lib = []
+  if profile.contains("library") and profile.library != null (
+    lib = profile.library.assert(array)
+  )
+  string pid = c.param("id")
+  boolean had = lib.contains(pid)
+  number saves = 0
+  auto result = loadProject(pid)
+  if result.ok (
+    saves = projectSaves(result.project.assert(object))
+  )
+  if had (
+    profile.library = removeString(lib, pid)
+    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+      profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), pid)
     )
-    string pid = c.param("id")
-    boolean had = lib.contains(pid)
-    number saves = 0
-    auto result = loadProject(pid)
-    if result.ok (
-        saves = projectSaves(result.project.assert(object))
-    )
-    if had (
-        profile.library = removeString(lib, pid)
-        if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
-            profile.hiddenLibraryProjects = removeString(profile.hiddenLibraryProjects.assert(array), pid)
-        )
-        saveProfile(profile)
-        saves = bumpProjectSaves(pid, -1)
-    )
-    c.json(200, {ok: true, saved: false, saves: saves})
+    saveProfile(profile)
+    saves = bumpProjectSaves(pid,-1)
+  )
+  siteBroadcastStats(pid, c.getString("username"), {saved: false})
+  c.json(200, {ok: true, saved: false, saves: saves})
 )
 
 def addPurchaseRecord(string userLower, object entry) (
-    object profile = loadProfile(userLower)
-    array list = []
-    if profile.contains("purchases") and profile.purchases != null (
-        list = profile.purchases.assert(array)
+  object profile = loadProfile(userLower)
+  array list = []
+  if profile.contains("purchases") and profile.purchases != null (
+    list = profile.purchases.assert(array)
+  )
+  array next = [entry]
+  for i list.len (
+    if next.len < 200 (
+      next.append(list[i])
     )
-    array next = [entry]
-    for i list.len (
-        if next.len < 200 (
-            next.append(list[i])
-        )
-    )
-    profile.purchases = next
-    saveProfile(profile)
+  )
+  profile.purchases = next
+  saveProfile(profile)
 )
 
 def handleGetMyPurchases(*serve.Context c) (
-    object profile = loadProfile(normalizeUsername(c.getString("username")))
-    array list = []
-    if profile.contains("purchases") and profile.purchases != null (
-        list = profile.purchases.assert(array)
-    )
-    c.json(200, {ok: true, purchases: list})
+  object profile = loadProfile(normalizeUsername(c.getString("username")))
+  array list = []
+  if profile.contains("purchases") and profile.purchases != null (
+    list = profile.purchases.assert(array)
+  )
+  c.json(200, {ok: true, purchases: list})
 )
 
 def handleGetMyLibrary(*serve.Context c) (
-    object profile = loadProfile(normalizeUsername(c.getString("username")))
-    string username = profile.username.toStr()
-    array ids = []
-    if profile.contains("library") and profile.library != null (
-        ids = profile.library.assert(array)
+  object profile = loadProfile(normalizeUsername(c.getString("username")))
+  string username = profile.username.toStr()
+  array ids = []
+  if profile.contains("library") and profile.library != null (
+    ids = profile.library.assert(array)
+  )
+  array entries = []
+  array validIds = []
+  array hiddenIds = []
+  if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+    hiddenIds = profile.hiddenLibraryProjects.assert(array)
+  )
+  object seen = {}
+  for i ids.len (
+    string id = ids[i].toStr()
+    if !seen.contains(id) (
+      auto loaded = loadProject(id)
+      if loaded.ok and canViewProject(loaded.project.assert(object), c) (
+        seen[id] = true
+        validIds.append(id)
+        object entry = indexEntryFromProject(loaded.project.assert(object))
+        entry.libraryPublic = !hiddenIds.contains(id)
+        entry.duration = projectPlaytime(id, username)
+        entry.lastPlayed = projectLastPlayed(id, username)
+        entries.append(entry)
+      )
     )
-    array entries = []
-    array validIds = []
-    array hiddenIds = []
-    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
-        hiddenIds = profile.hiddenLibraryProjects.assert(array)
-    )
-    object seen = {}
-    for i ids.len (
-        string id = ids[i].toStr()
-        if !seen.contains(id) (
-            auto loaded = loadProject(id)
-            if loaded.ok and canViewProject(loaded.project.assert(object), c) (
-                seen[id] = true
-                validIds.append(id)
-                object entry = indexEntryFromProject(loaded.project.assert(object))
-                entry.libraryPublic = !hiddenIds.contains(id)
-                entry.duration = projectPlaytime(id, username)
-                entry.lastPlayed = projectLastPlayed(id, username)
-                entries.append(entry)
-            )
-        )
-    )
-    if validIds.len != ids.len (
-        profile.library = validIds
-        saveProfile(profile)
-    )
-    entries.reverse()
-    number total = entries.len
-    number offset = clampNumber(c.queryInt("offset", 0), 0, total)
-    number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
-    c.json(200, {
-        ok: true,
-        projects: paginate(entries, offset, limit),
-        total: total,
-        nextOffset: clampNumber(offset + limit, 0, total)
-    })
+  )
+  if validIds.len != ids.len (
+    profile.library = validIds
+    saveProfile(profile)
+  )
+  entries.reverse()
+  number total = entries.len
+  number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+  number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+  c.json(200, {
+    ok: true,
+    projects: paginate(entries, offset, limit),
+    total: total,
+    nextOffset: clampNumber(offset + limit, 0, total)
+  })
 )
 
 def handleSetLibraryProjectVisibility(*serve.Context c) (
-    string username = normalizeUsername(c.getString("username"))
-    object profile = loadProfile(username)
-    string projectId = c.param("project")
-    array library = []
-    if profile.contains("library") and profile.library != null (
-        library = profile.library.assert(array)
-    )
-    if !library.contains(projectId) (
-        c.notFound("project is not in your library")
-        return
-    )
-    object body = c.bodyJSON()
-    if !body.contains("public") (
-        c.badRequest("public must be true or false")
-        return
-    )
-    boolean libraryPublic = body.public == true
-    array hidden = []
-    if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
-        hidden = profile.hiddenLibraryProjects.assert(array)
-    )
-    if libraryPublic (
-        hidden = removeString(hidden, projectId)
-    ) else if !hidden.contains(projectId) (
-        hidden.append(projectId)
-    )
-    profile.hiddenLibraryProjects = hidden
-    saveProfile(profile)
-    c.json(200, {ok: true, projectId: projectId, public: libraryPublic})
+  string username = normalizeUsername(c.getString("username"))
+  object profile = loadProfile(username)
+  string projectId = c.param("project")
+  array library = []
+  if profile.contains("library") and profile.library != null (
+    library = profile.library.assert(array)
+  )
+  if !library.contains(projectId) (
+    c.notFound("project is not in your library")
+    return
+  )
+  object body = c.bodyJSON()
+  if !body.contains("public") (
+    c.badRequest("public must be true or false")
+    return
+  )
+  boolean libraryPublic = body.public == true
+  array hidden = []
+  if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+    hidden = profile.hiddenLibraryProjects.assert(array)
+  )
+  if libraryPublic (
+    hidden = removeString(hidden, projectId)
+  ) else if !hidden.contains(projectId) (
+    hidden.append(projectId)
+  )
+  profile.hiddenLibraryProjects = hidden
+  saveProfile(profile)
+  c.json(200, {ok: true, projectId: projectId, public: libraryPublic})
 )
 
 def handleGetActivity(*serve.Context c) (
-    array users = c.query("users").split(",")
-    array items = []
-    object selectedUsers = {}
-    number count = 0
-    for i users.len (
-        if count < 50 (
-            string username = normalizeUsername(users[i].toStr())
-            if username != "" and !selectedUsers.contains(username) (
-                selectedUsers[username] = true
-                array userItems = loadActivity(username)
-                number activityLimit = clampNumber(userItems.len, 0, 40)
-                for j activityLimit (
-                    items.append(userItems[j])
-                )
-                count = count + 1
-            )
+  array users = c.query("users").split(",")
+  array items = []
+  object selectedUsers = {}
+  number count = 0
+  for i users.len (
+    if count < 50 (
+      string username = normalizeUsername(users[i].toStr())
+      if username != "" and !selectedUsers.contains(username) (
+        selectedUsers[username] = true
+        array userItems = loadActivity(username)
+        number activityLimit = clampNumber(userItems.len, 0, 40)
+        for j activityLimit (
+          items.append(userItems[j])
         )
+        count = count + 1
+      )
     )
-    array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
-    number reviewItems = 0
-    for i recentReviews.len (
-        if reviewItems < 40 (
-            object review = recentReviews[i].assert(object)
-            string author = normalizeUsername(review.author.toStr())
-            if selectedUsers.contains(author) (
-                object project = projectSearchDocs.findById(review.projectId.toStr())
-                if !project.isEmpty() and projectIsViewable(project) (
-                    items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
-                    reviewItems = reviewItems + 1
-                )
-            )
+  )
+  array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
+  number reviewItems = 0
+  for i recentReviews.len (
+    if reviewItems < 40 (
+      object review = recentReviews[i].assert(object)
+      string author = normalizeUsername(review.author.toStr())
+      if selectedUsers.contains(author) (
+        object project = projectSearchDocs.findById(review.projectId.toStr())
+        if !project.isEmpty() and projectIsViewable(project) (
+          items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
+          reviewItems = reviewItems + 1
         )
+      )
     )
-    items.sortBy("created", "descending")
-    if items.len > 40 (
-        items = items.trim(1, 40)
-    )
-    c.json(200, {ok: true, activity: items})
+  )
+  items.sortBy("created", "descending")
+  if items.len > 40 (
+    items = items.trim(1, 40)
+  )
+  c.json(200, {ok: true, activity: items})
 )
 
 def handleGetUserFollowers(*serve.Context c) (
-    object profile = loadProfile(c.param("name"))
-    c.json(200, {ok: true, users: profile.followers.assert(array)})
+  object profile = loadProfile(c.param("name"))
+  c.json(200, {ok: true, users: profile.followers.assert(array)})
 )
 
 def handleGetUserFollowing(*serve.Context c) (
-    object profile = loadProfile(c.param("name"))
-    c.json(200, {ok: true, users: profile.following.assert(array)})
+  object profile = loadProfile(c.param("name"))
+  c.json(200, {ok: true, users: profile.following.assert(array)})
 )
