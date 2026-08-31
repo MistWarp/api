@@ -1,693 +1,723 @@
 def createComment(string key, string author, string authorId, string content, string parentId, string kind, number donationAmount, string donationPaymentId) object (
-    string trimmed = content.strip()
-    if trimmed == "" (
-        return {ok: false, error: "comment is empty"}
-    )
-    if trimmed.len > 500 (
-        return {ok: false, error: "comment too long"}
-    )
+  string trimmed = content.strip()
+  if trimmed == "" (
+    return {ok: false, error: "comment is empty"}
+  )
+  if trimmed.len > 500 (
+    return {ok: false, error: "comment too long"}
+  )
 
-    string lockName = "comments:" ++ key
-    sync.lock(lockName)
-    string commentsPath = commentsDir ++ key ++ ".jsonl"
-    if fs.exists(commentsPath) and fs.getSize(commentsPath) + json.stringify({author: author, content: trimmed}).len > 8388608 (
-        sync.unlock(lockName)
-        return {ok: false, error: "this comment thread is full"}
-    )
-    boolean hasJsonLines = fs.exists(commentsPath)
-    array comments = []
-    if parentId != "" or donationPaymentId != "" or !hasJsonLines (
-        comments = loadComments(key)
-    )
-
-    if donationPaymentId != "" (
-        for i comments.len (
-            object existing = comments[i]
-            if existing.contains("donationPaymentId") and existing.donationPaymentId.toStr() == donationPaymentId (
-                sync.unlock(lockName)
-                return {ok: true, comment: existing, parentAuthor: "", duplicate: true}
-            )
-        )
-    )
-
-    string parentAuthor = ""
-    if parentId != "" (
-        boolean parentOk = false
-        for i comments.len (
-            object existing = comments[i]
-            if existing.id.toStr() == parentId and commentParentId(existing) == "" (
-                parentOk = true
-                parentAuthor = existing.author.toStr()
-            )
-        )
-        if !parentOk (
-            sync.unlock(lockName)
-            return {ok: false, error: "invalid parent comment"}
-        )
-    )
-
-    object comment = {
-        id: generateCommentId(),
-        author: author,
-        authorId: authorId,
-        content: trimmed,
-        created: timestamp,
-        parent: parentId,
-        kind: kind
-    }
-    if donationAmount > 0 and donationPaymentId != "" (
-        comment.donationAmount = donationAmount
-        comment.donationPaymentId = donationPaymentId
-    )
-    boolean saved = false
-    if hasJsonLines (
-        saved = appendComment(key, comment)
-    ) else (
-        comments.append(comment)
-        saved = saveComments(key, comments)
-    )
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  string commentsPath = commentsDir ++ key ++ ".jsonl"
+  if fs.exists(commentsPath) and fs.getSize(commentsPath) + json.stringify({author: author, content: trimmed}).len > 8388608 (
     sync.unlock(lockName)
-    if !saved (
-        return {ok: false, error: "could not save comment"}
+    return {ok: false, error: "this comment thread is full"}
+  )
+  boolean hasJsonLines = fs.exists(commentsPath)
+  array comments = []
+  if parentId != "" or donationPaymentId != "" or !hasJsonLines (
+    comments = loadComments(key)
+  )
+
+  if donationPaymentId != "" (
+    for i comments.len (
+      object existing = comments[i]
+      if existing.contains("donationPaymentId") and existing.donationPaymentId.toStr() == donationPaymentId (
+        sync.unlock(lockName)
+        return {ok: true, comment: existing, parentAuthor: "", duplicate: true}
+      )
     )
-    return {ok: true, comment: comment, parentAuthor: parentAuthor}
+  )
+
+  string parentAuthor = ""
+  if parentId != "" (
+    boolean parentOk = false
+    for i comments.len (
+      object existing = comments[i]
+      if existing.id.toStr() == parentId and commentParentId(existing) == "" (
+        parentOk = true
+        parentAuthor = existing.author.toStr()
+      )
+    )
+    if !parentOk (
+      sync.unlock(lockName)
+      return {ok: false, error: "invalid parent comment"}
+    )
+  )
+
+  object comment = {
+    id: generateCommentId(),
+    author: author,
+    authorId: authorId,
+    content: trimmed,
+    created: timestamp,
+    parent: parentId,
+    kind: kind
+  }
+  if donationAmount > 0 and donationPaymentId != "" (
+    comment.donationAmount = donationAmount
+    comment.donationPaymentId = donationPaymentId
+  )
+  boolean saved = false
+  if hasJsonLines (
+    saved = appendComment(key, comment)
+  ) else (
+    comments.append(comment)
+    saved = saveComments(key, comments)
+  )
+  sync.unlock(lockName)
+  if !saved (
+    return {ok: false, error: "could not save comment"}
+  )
+  return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 
 def notifyMentions(string content, string actor, array skip, object extra) (
-    array tokens = regex.findAll("(^|[^A-Za-z0-9_])@[A-Za-z0-9_]+", content)
-    array notified = [normalizeUsername(actor)]
-    for i skip.len (
-        string skipped = normalizeUsername(skip[i].toStr())
-        if skipped != "" and !notified.contains(skipped) (
-            notified.append(skipped)
-        )
+  array tokens = regex.findAll("(^|[^A-Za-z0-9_])@[A-Za-z0-9_]+", content)
+  array notified = [normalizeUsername(actor)]
+  for i skip.len (
+    string skipped = normalizeUsername(skip[i].toStr())
+    if skipped != "" and !notified.contains(skipped) (
+      notified.append(skipped)
     )
-    for i tokens.len (
-        array parts = tokens[i].toStr().split("@")
-        string name = normalizeUsername(parts[2].toStr())
-        if !notified.contains(name) and isSafePathPart(name) and fs.exists(usersDir ++ name ++ ".json") (
-            addNotification(name, actor, "mention", extra)
-            notified.append(name)
-        )
+  )
+  for i tokens.len (
+    array parts = tokens[i].toStr().split("@")
+    string name = normalizeUsername(parts[2].toStr())
+    if !notified.contains(name) and isSafePathPart(name) and fs.exists(usersDir ++ name ++ ".json") (
+      addNotification(name, actor, "mention", extra)
+      notified.append(name)
     )
+  )
 )
 
 def commentParentId(object comment) string (
-    if comment.contains("parent") and comment.parent != null (
-        return comment.parent.toStr()
-    )
-    return ""
+  if comment.contains("parent") and comment.parent != null (
+    return comment.parent.toStr()
+  )
+  return ""
 )
 
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
-    string lockName = "comments:" ++ key
-    sync.lock(lockName)
-    array comments = loadComments(key)
-    object target = {}
-    boolean found = false
-    for i comments.len (
-        object existing = comments[i]
-        if existing.id.toStr() == cid (
-            target = existing
-            found = true
-        )
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  array comments = loadComments(key)
+  object target = {}
+  boolean found = false
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() == cid (
+      target = existing
+      found = true
     )
-    if !found (
-        sync.unlock(lockName)
-        return {ok: false, error: "comment not found", status: 404}
-    )
-
-    string requesterKey = normalizeUsername(requester)
-    boolean allowed = isAdmin
-    allowed = allowed or requesterKey == normalizeUsername(target.author.toStr())
-    allowed = allowed or requesterKey == normalizeUsername(moderator)
-    if !allowed (
-        sync.unlock(lockName)
-        return {ok: false, error: "not allowed", status: 403}
-    )
-
-    array next = []
-    for i comments.len (
-        object existing = comments[i]
-        if existing.id.toStr() != cid and commentParentId(existing) != cid (
-            next.append(existing)
-        )
-    )
-    boolean saved = saveComments(key, next)
+  )
+  if !found (
     sync.unlock(lockName)
-    if !saved (
-        return {ok: false, error: "could not delete comment", status: 500}
+    return {ok: false, error: "comment not found", status: 404}
+  )
+
+  string requesterKey = normalizeUsername(requester)
+  boolean allowed = isAdmin
+  allowed = allowed or requesterKey == normalizeUsername(target.author.toStr())
+  allowed = allowed or requesterKey == normalizeUsername(moderator)
+  if !allowed (
+    sync.unlock(lockName)
+    return {ok: false, error: "not allowed", status: 403}
+  )
+
+  array next = []
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() != cid and commentParentId(existing) != cid (
+      next.append(existing)
     )
-    return {ok: true, removed: comments.len - next.len}
+  )
+  boolean saved = saveComments(key, next)
+  sync.unlock(lockName)
+  if !saved (
+    return {ok: false, error: "could not delete comment", status: 500}
+  )
+  return {ok: true, removed: comments.len - next.len}
 )
 
 def editComment(string key, string cid, string requester, string content) object (
-    string trimmed = content.strip()
-    if trimmed == "" (
-        return {ok: false, error: "comment is empty", status: 400}
-    )
-    if trimmed.len > 500 (
-        return {ok: false, error: "comment too long", status: 400}
-    )
+  string trimmed = content.strip()
+  if trimmed == "" (
+    return {ok: false, error: "comment is empty", status: 400}
+  )
+  if trimmed.len > 500 (
+    return {ok: false, error: "comment too long", status: 400}
+  )
 
-    string lockName = "comments:" ++ key
-    sync.lock(lockName)
-    array comments = loadComments(key)
-    object target = {}
-    boolean found = false
-    for i comments.len (
-        object existing = comments[i]
-        if existing.id.toStr() == cid (
-            target = existing
-            found = true
-        )
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  array comments = loadComments(key)
+  object target = {}
+  boolean found = false
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() == cid (
+      target = existing
+      found = true
     )
-    if !found (
-        sync.unlock(lockName)
-        return {ok: false, error: "comment not found", status: 404}
-    )
-    if normalizeUsername(requester) != normalizeUsername(target.author.toStr()) (
-        sync.unlock(lockName)
-        return {ok: false, error: "not allowed", status: 403}
-    )
-    for i comments.len (
-        object existing = comments[i]
-        if existing.id.toStr() == cid (
-            existing.content = trimmed
-            existing.edited = timestamp
-            comments[i] = existing
-            target = existing
-        )
-    )
-    boolean saved = saveComments(key, comments)
+  )
+  if !found (
     sync.unlock(lockName)
-    if !saved (
-        return {ok: false, error: "could not edit comment", status: 500}
+    return {ok: false, error: "comment not found", status: 404}
+  )
+  if normalizeUsername(requester) != normalizeUsername(target.author.toStr()) (
+    sync.unlock(lockName)
+    return {ok: false, error: "not allowed", status: 403}
+  )
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() == cid (
+      existing.content = trimmed
+      existing.edited = timestamp
+      comments[i] = existing
+      target = existing
     )
-    return {ok: true, comment: target}
+  )
+  boolean saved = saveComments(key, comments)
+  sync.unlock(lockName)
+  if !saved (
+    return {ok: false, error: "could not edit comment", status: 500}
+  )
+  return {ok: true, comment: target}
 )
 
 def commentResponse(object comment, string username) object (
-    object reactions = {}
-    if comment.contains("reactions") and comment.reactions != null (
-        reactions = comment.reactions.assert(object)
-    )
-    object summary = reactionSummary(reactions, username)
-    comment.reactionCounts = summary.counts
-    comment.myReaction = summary.myReaction
-    if comment.contains("reactions") (
-        comment.delete("reactions")
-    )
-    if comment.contains("donationPaymentId") (
-        comment.delete("donationPaymentId")
-    )
-    return comment
+  object reactions = {}
+  if comment.contains("reactions") and comment.reactions != null (
+    reactions = comment.reactions.assert(object)
+  )
+  object summary = reactionSummary(reactions, username)
+  comment.reactionCounts = summary.counts
+  comment.myReaction = summary.myReaction
+  if comment.contains("reactions") (
+    comment.delete("reactions")
+  )
+  if comment.contains("donationPaymentId") (
+    comment.delete("donationPaymentId")
+  )
+  return comment
 )
 
-def commentPage(array comments, *serve.Context c) object (
+def commentPage(array comments,*serve.Context c) object (
+  for i comments.len (
+    comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+  )
+  array roots = []
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    if commentParentId(comment) == "" (
+      roots.append(comment)
+    )
+  )
+  if c.query("sort") == "donations" (
+    for i roots.len (
+      object root = roots[i].assert(object)
+      if !root.contains("donationAmount") or root.donationAmount == null (
+        root.donationAmount = 0
+        roots[i] = root
+      )
+    )
+    roots.sortBy("donationAmount", "descending")
+  ) else (
+    roots.sortBy("created", "descending")
+  )
+  number totalRoots = roots.len
+  number requestedLimit = c.queryInt("limit", 0)
+  if requestedLimit <= 0 or c.queryBool("all", false) (
+    return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots}
+  )
+  number offset = clampNumber(c.queryInt("offset", 0), 0, totalRoots)
+  number limit = clampNumber(requestedLimit, 1, 100)
+  array selectedRoots = paginate(roots, offset, limit)
+  object selected = {}
+  for i selectedRoots.len (
+    selected[selectedRoots[i].id.toStr()] = true
+  )
+  string anchor = c.query("anchor")
+  if anchor != "" (
+    string anchorRoot = ""
     for i comments.len (
-        comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
-    )
-    array roots = []
-    for i comments.len (
-        object comment = comments[i].assert(object)
-        if commentParentId(comment) == "" (
-            roots.append(comment)
-        )
-    )
-    if c.query("sort") == "donations" (
-        for i roots.len (
-            object root = roots[i].assert(object)
-            if !root.contains("donationAmount") or root.donationAmount == null (
-                root.donationAmount = 0
-                roots[i] = root
-            )
-        )
-        roots.sortBy("donationAmount", "descending")
-    ) else (
-        roots.sortBy("created", "descending")
-    )
-    number totalRoots = roots.len
-    number requestedLimit = c.queryInt("limit", 0)
-    if requestedLimit <= 0 or c.queryBool("all", false) (
-        return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots}
-    )
-    number offset = clampNumber(c.queryInt("offset", 0), 0, totalRoots)
-    number limit = clampNumber(requestedLimit, 1, 100)
-    array selectedRoots = paginate(roots, offset, limit)
-    object selected = {}
-    for i selectedRoots.len (
-        selected[selectedRoots[i].id.toStr()] = true
-    )
-    string anchor = c.query("anchor")
-    if anchor != "" (
-        string anchorRoot = ""
-        for i comments.len (
-            object comment = comments[i].assert(object)
-            if comment.id.toStr() == anchor (
-                anchorRoot = comment.id.toStr()
-                if commentParentId(comment) != "" (
-                    anchorRoot = commentParentId(comment)
-                )
-            )
-        )
-        if anchorRoot != "" (
-            selected[anchorRoot] = true
-        )
-    )
-    array page = []
-    for i comments.len (
-        object comment = comments[i].assert(object)
-        string rootId = comment.id.toStr()
+      object comment = comments[i].assert(object)
+      if comment.id.toStr() == anchor (
+        anchorRoot = comment.id.toStr()
         if commentParentId(comment) != "" (
-            rootId = commentParentId(comment)
+          anchorRoot = commentParentId(comment)
         )
-        if selected.contains(rootId) (
-            page.append(comment)
-        )
+      )
     )
-    return {
-        comments: page,
-        totalRoots: totalRoots,
-        nextOffset: clampNumber(offset + limit, 0, totalRoots)
-    }
+    if anchorRoot != "" (
+      selected[anchorRoot] = true
+    )
+  )
+  array page = []
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    string rootId = comment.id.toStr()
+    if commentParentId(comment) != "" (
+      rootId = commentParentId(comment)
+    )
+    if selected.contains(rootId) (
+      page.append(comment)
+    )
+  )
+  return {
+    comments: page,
+    totalRoots: totalRoots,
+    nextOffset: clampNumber(offset + limit, 0, totalRoots)
+  }
 )
 
 def handleGetProjectComments(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  object page = commentPage(loadComments("project-" ++ project.id.toStr()), c)
+  array comments = page.comments.assert(array)
+  object playtimeByAuthor = {}
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    if !comment.contains("kind") or comment.kind == null (
+      comment.kind = "comment"
     )
-    object project = result.project.assert(object)
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
-        return
+    string authorKey = normalizeUsername(comment.author.toStr())
+    if !playtimeByAuthor.contains(authorKey) (
+      playtimeByAuthor[authorKey] = projectPlaytime(project.id.toStr(), comment.author.toStr())
     )
-    object page = commentPage(loadComments("project-" ++ project.id.toStr()), c)
-    array comments = page.comments.assert(array)
-    object playtimeByAuthor = {}
-    for i comments.len (
-        object comment = comments[i].assert(object)
-        if !comment.contains("kind") or comment.kind == null (
-            comment.kind = "comment"
-        )
-        string authorKey = normalizeUsername(comment.author.toStr())
-        if !playtimeByAuthor.contains(authorKey) (
-            playtimeByAuthor[authorKey] = projectPlaytime(project.id.toStr(), comment.author.toStr())
-        )
-        comment.playtimeMs = playtimeByAuthor[authorKey]
-        comments[i] = comment
-    )
-    page.ok = true
-    page.comments = comments
-    c.json(200, page)
+    comment.playtimeMs = playtimeByAuthor[authorKey]
+    comments[i] = comment
+  )
+  page.ok = true
+  page.comments = comments
+  c.json(200, page)
 )
 
 def handleProjectCommentDonationIntent(*serve.Context c) (
-    if commerceServiceKey == "" (
-        c.json(503, {ok: false, error: "donations are not available right now"})
-        return
-    )
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
-        c.forbidden("you cannot comment on this project")
-        return
-    )
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
-        return
-    )
-    if !canInteractProject(project, c) (
-        c.json(403, {ok: false, error: "buy this project before donating with a comment"})
-        return
-    )
-    if project.contains("commentsOff") and project.commentsOff == true (
-        c.json(403, {ok: false, error: "comments are disabled on this project"})
-        return
-    )
-    string donor = normalizeUsername(c.getString("username"))
-    if donor == normalizeUsername(project.owner.toStr()) (
-        c.badRequest("you cannot donate to your own project")
-        return
-    )
-    object body = c.bodyJSON()
-    number amount = 0
-    if body.contains("amount") and body.amount != null (
-        amount = (body.amount.toNum() * 100).toInt() / 100
-    )
-    if amount < 0.01 or amount > 100000 (
-        c.badRequest("donation must be between 0.01 and 100000 credits")
-        return
-    )
+  if commerceServiceKey == "" (
+    c.json(503, {ok: false, error: "donations are not available right now"})
+    return
+  )
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+    c.forbidden("you cannot comment on this project")
+    return
+  )
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canInteractProject(project, c) (
+    c.json(403, {ok: false, error: "buy this project before donating with a comment"})
+    return
+  )
+  if project.contains("commentsOff") and project.commentsOff == true (
+    c.json(403, {ok: false, error: "comments are disabled on this project"})
+    return
+  )
+  string donor = normalizeUsername(c.getString("username"))
+  if donor == normalizeUsername(project.owner.toStr()) (
+    c.badRequest("you cannot donate to your own project")
+    return
+  )
+  object body = c.bodyJSON()
+  number amount = 0
+  if body.contains("amount") and body.amount != null (
+    amount = (body.amount.toNum() * 100).toInt() / 100
+  )
+  if amount < 0.01 or amount > 100000 (
+    c.badRequest("donation must be between 0.01 and 100000 credits")
+    return
+  )
 
-    string key = "mwdonate_" ++ randomString(16)
-    object store = prunePurchaseKeys(loadPurchaseKeys())
-    object keys = store.keys
-    keys[key] = {kind: "comment_donation", projectId: project.id.toStr(), buyer: donor, amount: amount, at: timestamp}
-    store.keys = keys
-    savePurchaseKeys(store)
-    c.json(200, {
-        ok: true,
-        key: key,
-        amount: amount,
-        projectId: project.id,
-        title: project.title,
-        recipient: project.owner,
-        splits: [{username: project.owner, basis_points: 10000}]
-    })
+  string key = "mwdonate_" ++ randomString(16)
+  object store = prunePurchaseKeys(loadPurchaseKeys())
+  object keys = store.keys
+  keys[key] = {kind: "comment_donation", projectId: project.id.toStr(), buyer: donor, amount: amount, at: timestamp}
+  store.keys = keys
+  savePurchaseKeys(store)
+  c.json(200, {
+    ok: true,
+    key: key,
+    amount: amount,
+    projectId: project.id,
+    title: project.title,
+    recipient: project.owner,
+    splits: [{username: project.owner, basis_points: 10000}]
+  })
 )
 
 def handleCreateProjectComment(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+    c.forbidden("you cannot comment on this project")
+    return
+  )
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canInteractProject(project, c) (
+    c.json(403, {ok: false, error: "buy this project to comment on it"})
+    return
+  )
+  if project.contains("commentsOff") and project.commentsOff == true (
+    c.json(403, {ok: false, error: "comments are disabled on this project"})
+    return
+  )
+
+  object body = c.bodyJSON()
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  string parentId = ""
+  if body.contains("parent") and body.parent != null (
+    parentId = body.parent.toStr()
+  )
+  string kind = "comment"
+  if parentId == "" and body.contains("kind") and body.kind != null (
+    string requestedKind = body.kind.toStr()
+    if ["comment", "bug", "suggestion", "question"].contains(requestedKind) (
+      kind = requestedKind
+    ) else (
+      c.badRequest("invalid comment type")
+      return
     )
-    object project = result.project.assert(object)
-    if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
-        c.forbidden("you cannot comment on this project")
-        return
+  )
+
+  number donationAmount = 0
+  string donationPaymentId = ""
+  string donationKey = ""
+  if body.contains("donation") and body.donation != null (
+    if parentId != "" (
+      c.badRequest("donations can only be attached to top-level comments")
+      return
     )
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
-        return
+    object donation = body.donation.assertElse(object, {})
+    if donation.contains("key") and donation.key != null (
+      donationKey = donation.key.toStr().strip()
     )
-    if !canInteractProject(project, c) (
-        c.json(403, {ok: false, error: "buy this project to comment on it"})
-        return
+    if donation.contains("paymentId") and donation.paymentId != null (
+      donationPaymentId = donation.paymentId.toStr().strip()
     )
-    if project.contains("commentsOff") and project.commentsOff == true (
-        c.json(403, {ok: false, error: "comments are disabled on this project"})
-        return
+    if donationKey == "" or donationPaymentId == "" (
+      c.badRequest("missing donation confirmation")
+      return
     )
 
-    object body = c.bodyJSON()
-    if !body.contains("content") or body.content == null (
-        c.badRequest("comment content is required")
+    array existingComments = loadComments("project-" ++ project.id.toStr())
+    for i existingComments.len (
+      object existingComment = existingComments[i].assert(object)
+      if existingComment.contains("donationPaymentId") and existingComment.donationPaymentId.toStr() == donationPaymentId (
+        c.json(200, {ok: true, comment: commentResponse(existingComment, c.getString("username")), duplicate: true})
         return
-    )
-    string parentId = ""
-    if body.contains("parent") and body.parent != null (
-        parentId = body.parent.toStr()
-    )
-    string kind = "comment"
-    if parentId == "" and body.contains("kind") and body.kind != null (
-        string requestedKind = body.kind.toStr()
-        if ["comment", "bug", "suggestion", "question"].contains(requestedKind) (
-            kind = requestedKind
-        ) else (
-            c.badRequest("invalid comment type")
-            return
-        )
+      )
     )
 
-    number donationAmount = 0
-    string donationPaymentId = ""
-    string donationKey = ""
-    if body.contains("donation") and body.donation != null (
-        if parentId != "" (
-            c.badRequest("donations can only be attached to top-level comments")
-            return
-        )
-        object donation = body.donation.assertElse(object, {})
-        if donation.contains("key") and donation.key != null (
-            donationKey = donation.key.toStr().strip()
-        )
-        if donation.contains("paymentId") and donation.paymentId != null (
-            donationPaymentId = donation.paymentId.toStr().strip()
-        )
-        if donationKey == "" or donationPaymentId == "" (
-            c.badRequest("missing donation confirmation")
-            return
-        )
+    object donationStore = loadPurchaseKeys()
+    object donationKeys = donationStore.keys
+    if !donationKeys.contains(donationKey) (
+      c.badRequest("this donation expired, start again")
+      return
+    )
+    object pendingDonation = donationKeys[donationKey].assert(object)
+    if !pendingDonation.contains("kind") or pendingDonation.kind.toStr() != "comment_donation" or pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
+      c.badRequest("this donation key does not match")
+      return
+    )
+    donationAmount = pendingDonation.amount.toNum()
+    if !verifyCommerceCommentDonation(donationPaymentId, c.getString("username"), project, donationAmount) (
+      c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
+      return
+    )
+  )
 
-        array existingComments = loadComments("project-" ++ project.id.toStr())
-        for i existingComments.len (
-            object existingComment = existingComments[i].assert(object)
-            if existingComment.contains("donationPaymentId") and existingComment.donationPaymentId.toStr() == donationPaymentId (
-                c.json(200, {ok: true, comment: commentResponse(existingComment, c.getString("username")), duplicate: true})
-                return
-            )
-        )
-
-        object donationStore = loadPurchaseKeys()
-        object donationKeys = donationStore.keys
-        if !donationKeys.contains(donationKey) (
-            c.badRequest("this donation expired, start again")
-            return
-        )
-        object pendingDonation = donationKeys[donationKey].assert(object)
-        if !pendingDonation.contains("kind") or pendingDonation.kind.toStr() != "comment_donation" or pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
-            c.badRequest("this donation key does not match")
-            return
-        )
-        donationAmount = pendingDonation.amount.toNum()
-        if !verifyCommerceCommentDonation(donationPaymentId, c.getString("username"), project, donationAmount) (
-            c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
-            return
-        )
+  object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
+  if !created.ok (
+    c.badRequest(created.error.toStr())
+    return
+  )
+  if donationKey != "" (
+    object donationStore = loadPurchaseKeys()
+    object donationKeys = donationStore.keys
+    donationKeys.delete(donationKey)
+    donationStore.keys = donationKeys
+    savePurchaseKeys(donationStore)
+  )
+  if created.contains("duplicate") and created.duplicate == true (
+    created.comment = commentResponse(created.comment.assert(object), c.getString("username"))
+    c.json(200, created)
+    return
+  )
+  string commenter = c.getString("username")
+  string parentAuthor = created.parentAuthor.toStr()
+  string newCommentId = created.comment.id.toStr()
+  if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+    addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+  )
+  if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
+    if donationAmount > 0 (
+      addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount})
+    ) else (
+      addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
     )
-
-    object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
-    if !created.ok (
-        c.badRequest(created.error.toStr())
-        return
-    )
-    if donationKey != "" (
-        object donationStore = loadPurchaseKeys()
-        object donationKeys = donationStore.keys
-        donationKeys.delete(donationKey)
-        donationStore.keys = donationKeys
-        savePurchaseKeys(donationStore)
-    )
-    if created.contains("duplicate") and created.duplicate == true (
-        created.comment = commentResponse(created.comment.assert(object), c.getString("username"))
-        c.json(200, created)
-        return
-    )
-    string commenter = c.getString("username")
-    string parentAuthor = created.parentAuthor.toStr()
-    string newCommentId = created.comment.id.toStr()
-    if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-        addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
-    )
-    if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
-        if donationAmount > 0 (
-            addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount})
-        ) else (
-            addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
-        )
-    )
-    notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
-    created.comment = commentResponse(created.comment.assert(object), commenter)
-    c.json(201, created)
+  )
+  notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+  created.comment = commentResponse(created.comment.assert(object), commenter)
+  created.comment.playtimeMs = projectPlaytime(project.id.toStr(), commenter)
+  siteBroadcastProject(project.id.toStr(), {
+    type: "comment_created",
+    projectId: project.id,
+    comment: created.comment,
+    actor: commenter
+  })
+  c.json(201, created)
 )
 
 def handleDeleteProjectComment(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
 
-    boolean requesterIsAdmin = c.getBool("isAdmin") == true
-    object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), requesterIsAdmin)
-    if !deleted.ok (
-        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
-        return
-    )
-    c.json(200, {ok: true})
+  boolean requesterIsAdmin = c.getBool("isAdmin") == true
+  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), requesterIsAdmin)
+  if !deleted.ok (
+    c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+    return
+  )
+  siteBroadcastProject(project.id.toStr(), {
+    type: "comment_deleted",
+    projectId: project.id,
+    commentId: c.param("cid"),
+    actor: c.getString("username")
+  })
+  c.json(200, {ok: true})
 )
 
 def handleEditProjectComment(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok or !canViewProject(result.project.assert(object), c) (
-        c.notFound("project not found")
-        return
-    )
-    object body = c.bodyJSON()
-    if !body.contains("content") or body.content == null (
-        c.badRequest("comment content is required")
-        return
-    )
-    object edited = editComment("project-" ++ c.param("id"), c.param("cid"), c.getString("username"), body.content.toStr())
-    if !edited.ok (
-        c.json(edited.status.toInt(), {ok: false, error: edited.error})
-        return
-    )
-    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
-    c.json(200, edited)
+  auto result = loadProject(c.param("id"))
+  if !result.ok or !canViewProject(result.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object body = c.bodyJSON()
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  object edited = editComment("project-" ++ c.param("id"), c.param("cid"), c.getString("username"), body.content.toStr())
+  if !edited.ok (
+    c.json(edited.status.toInt(), {ok: false, error: edited.error})
+    return
+  )
+  edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+  edited.comment.playtimeMs = projectPlaytime(c.param("id"), edited.comment.author.toStr())
+  siteBroadcastProject(c.param("id"), {
+    type: "comment_edited",
+    projectId: c.param("id"),
+    comment: edited.comment,
+    actor: c.getString("username")
+  })
+  c.json(200, edited)
 )
 
 def profileCommentKey(string name) string (
-    return "profile-" ++ normalizeUsername(name)
+  return "profile-" ++ normalizeUsername(name)
 )
 
 def profileCommentsOff(string name) boolean (
-    object profile = loadProfile(name)
-    if profile.contains("commentsOff") and profile.commentsOff == true (
-        return true
-    )
-    return false
+  object profile = loadProfile(name)
+  if profile.contains("commentsOff") and profile.commentsOff == true (
+    return true
+  )
+  return false
 )
 
 def handleGetProfileComments(*serve.Context c) (
-    string name = c.param("name")
-    object page = commentPage(loadComments(profileCommentKey(name)), c)
-    page.ok = true
-    page.commentsOff = profileCommentsOff(name)
-    c.json(200, page)
+  string name = c.param("name")
+  object page = commentPage(loadComments(profileCommentKey(name)), c)
+  page.ok = true
+  page.commentsOff = profileCommentsOff(name)
+  c.json(200, page)
 )
 
 def handleCreateProfileComment(*serve.Context c) (
-    string name = c.param("name")
-    string nameKey = normalizeUsername(name)
-    if !isSafePathPart(nameKey) or !fs.exists(usersDir ++ nameKey ++ ".json") (
-        c.notFound("this user is not on MistWarp")
-        return
-    )
-    if usersAreBlocked(c.getString("username"), name) (
-        c.forbidden("you cannot comment on this profile")
-        return
-    )
-    if profileCommentsOff(name) (
-        c.json(403, {ok: false, error: "comments are disabled on this profile"})
-        return
-    )
+  string name = c.param("name")
+  string nameKey = normalizeUsername(name)
+  if !isSafePathPart(nameKey) or !fs.exists(usersDir ++ nameKey ++ ".json") (
+    c.notFound("this user is not on MistWarp")
+    return
+  )
+  if usersAreBlocked(c.getString("username"), name) (
+    c.forbidden("you cannot comment on this profile")
+    return
+  )
+  if profileCommentsOff(name) (
+    c.json(403, {ok: false, error: "comments are disabled on this profile"})
+    return
+  )
 
-    object body = c.bodyJSON()
-    if !body.contains("content") or body.content == null (
-        c.badRequest("comment content is required")
-        return
-    )
-    string parentId = ""
-    if body.contains("parent") and body.parent != null (
-        parentId = body.parent.toStr()
-    )
+  object body = c.bodyJSON()
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  string parentId = ""
+  if body.contains("parent") and body.parent != null (
+    parentId = body.parent.toStr()
+  )
 
-    object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
-    if !created.ok (
-        c.badRequest(created.error.toStr())
-        return
-    )
-    string commenter = c.getString("username")
-    string parentAuthor = created.parentAuthor.toStr()
-    string newCommentId = created.comment.id.toStr()
-    if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-        addNotification(parentAuthor, commenter, "reply", {profile: name, commentId: newCommentId})
-    )
-    if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
-        addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId})
-    )
-    notifyMentions(created.comment.content.toStr(), commenter, [name, parentAuthor], {profile: name, commentId: newCommentId})
-    c.json(201, created)
+  object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
+  if !created.ok (
+    c.badRequest(created.error.toStr())
+    return
+  )
+  string commenter = c.getString("username")
+  string parentAuthor = created.parentAuthor.toStr()
+  string newCommentId = created.comment.id.toStr()
+  if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+    addNotification(parentAuthor, commenter, "reply", {profile: name, commentId: newCommentId})
+  )
+  if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
+    addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId})
+  )
+  notifyMentions(created.comment.content.toStr(), commenter, [name, parentAuthor], {profile: name, commentId: newCommentId})
+  c.json(201, created)
 )
 
 def handleDeleteProfileComment(*serve.Context c) (
-    boolean requesterIsAdmin = c.getBool("isAdmin") == true
-    object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), c.getString("username"), c.param("name"), requesterIsAdmin)
-    if !deleted.ok (
-        c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
-        return
-    )
-    c.json(200, {ok: true})
+  boolean requesterIsAdmin = c.getBool("isAdmin") == true
+  object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), c.getString("username"), c.param("name"), requesterIsAdmin)
+  if !deleted.ok (
+    c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+    return
+  )
+  c.json(200, {ok: true})
 )
 
 def handleEditProfileComment(*serve.Context c) (
-    string name = c.param("name")
-    if !profileExists(name) (
-        c.notFound("this user is not on MistWarp")
-        return
-    )
-    object body = c.bodyJSON()
-    if !body.contains("content") or body.content == null (
-        c.badRequest("comment content is required")
-        return
-    )
-    object edited = editComment(profileCommentKey(name), c.param("cid"), c.getString("username"), body.content.toStr())
-    if !edited.ok (
-        c.json(edited.status.toInt(), {ok: false, error: edited.error})
-        return
-    )
-    edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
-    c.json(200, edited)
+  string name = c.param("name")
+  if !profileExists(name) (
+    c.notFound("this user is not on MistWarp")
+    return
+  )
+  object body = c.bodyJSON()
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  object edited = editComment(profileCommentKey(name), c.param("cid"), c.getString("username"), body.content.toStr())
+  if !edited.ok (
+    c.json(edited.status.toInt(), {ok: false, error: edited.error})
+    return
+  )
+  edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+  c.json(200, edited)
 )
 
 def reactToComment(*serve.Context c, string key) (
-    object body = c.bodyJSON()
-    string reactionType = body.type.toStr()
-    if !isValidReaction(reactionType) (
-        c.badRequest("invalid reaction")
-        return
+  object body = c.bodyJSON()
+  string reactionType = body.type.toStr()
+  if !isValidReaction(reactionType) (
+    c.badRequest("invalid reaction")
+    return
+  )
+  string username = normalizeUsername(c.getString("username"))
+  string cid = c.param("cid")
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  array comments = loadComments(key)
+  boolean found = false
+  object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
+  for i comments.len (
+    object comment = comments[i]
+    if comment.id.toStr() == cid (
+      object reactions = {}
+      if comment.contains("reactions") and comment.reactions != null (
+        reactions = comment.reactions.assert(object)
+      )
+      comment.reactions = toggleReactionMap(reactions, username, reactionType)
+      summary = reactionSummary(comment.reactions.assert(object), username)
+      comments[i] = comment
+      found = true
     )
-    string username = normalizeUsername(c.getString("username"))
-    string cid = c.param("cid")
-    string lockName = "comments:" ++ key
-    sync.lock(lockName)
-    array comments = loadComments(key)
-    boolean found = false
-    object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
-    for i comments.len (
-        object comment = comments[i]
-        if comment.id.toStr() == cid (
-            object reactions = {}
-            if comment.contains("reactions") and comment.reactions != null (
-                reactions = comment.reactions.assert(object)
-            )
-            comment.reactions = toggleReactionMap(reactions, username, reactionType)
-            summary = reactionSummary(comment.reactions.assert(object), username)
-            comments[i] = comment
-            found = true
-        )
-    )
-    if !found (
-        sync.unlock(lockName)
-        c.notFound("comment not found")
-        return
-    )
-    boolean saved = saveComments(key, comments)
+  )
+  if !found (
     sync.unlock(lockName)
-    if !saved (
-        c.internalError("could not save reaction")
-        return
-    )
-    c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
+    c.notFound("comment not found")
+    return
+  )
+  boolean saved = saveComments(key, comments)
+  sync.unlock(lockName)
+  if !saved (
+    c.internalError("could not save reaction")
+    return
+  )
+  if key.startsWith("project-") (
+    siteBroadcastProject(c.param("id"), {
+      type: "comment_reaction",
+      projectId: c.param("id"),
+      commentId: cid,
+      reactionCounts: summary.counts,
+      actor: c.getString("username"),
+      reaction: summary.myReaction
+    })
+  )
+  c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
 )
 
 def handleReactProjectComment(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    if !canViewProject(project, c) (
-        c.notFound("project not found")
-        return
-    )
-    if !canInteractProject(project, c) (
-        c.json(403, {ok: false, error: "buy this project to react to its comments"})
-        return
-    )
-    reactToComment(c, "project-" ++ project.id.toStr())
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canInteractProject(project, c) (
+    c.json(403, {ok: false, error: "buy this project to react to its comments"})
+    return
+  )
+  reactToComment(c, "project-" ++ project.id.toStr())
 )
 
 def handleReactProfileComment(*serve.Context c) (
-    string name = c.param("name")
-    if !profileExists(name) (
-        c.notFound("this user is not on MistWarp")
-        return
-    )
-    if usersAreBlocked(c.getString("username"), name) (
-        c.forbidden("you cannot react to comments on this profile")
-        return
-    )
-    reactToComment(c, profileCommentKey(name))
+  string name = c.param("name")
+  if !profileExists(name) (
+    c.notFound("this user is not on MistWarp")
+    return
+  )
+  if usersAreBlocked(c.getString("username"), name) (
+    c.forbidden("you cannot react to comments on this profile")
+    return
+  )
+  reactToComment(c, profileCommentKey(name))
 )

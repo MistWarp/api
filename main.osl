@@ -186,6 +186,7 @@ import "./settings.osl"
 import "./agreement.osl"
 import "./account-controls.osl"
 import "./community-tools.osl"
+import "./site-realtime.osl"
 import "./history-migration.osl"
 
 auto viewDedup = cache.create(100000, 86400)
@@ -237,8 +238,10 @@ thread.new(generateMissingProjectHistories)
 
 *serve.Router app = serve.new()
 *ws.Server gameRealtimeSocket = ws.New()
+*ws.Server siteRealtimeSocket = ws.New()
 
 app.bodyLimit(maxAppRequestBytes)
+app.use(websocketOriginGuard)
 app.use(realtimeUpgradeGuard)
 app.use(corsMiddleware)
 app.use(serve.logger())
@@ -254,6 +257,7 @@ if r2Local (
 
 app.use(authMiddleware)
 setupGameRealtime()
+setupSiteRealtime()
 
 *serve.Router uploads = app.group("/api")
 uploads.POST("/projects/:id/upload", serve.maxBodySize(maxProjectUploadRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProject)

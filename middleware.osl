@@ -1,68 +1,99 @@
+def corsOriginAllowed(string origin) boolean (
+  if origin == "" (
+    return true
+  )
+  for configured in corsAllowedOrigins (
+    if configured.toStr().strip() == origin (
+      return true
+    )
+  )
+  return false
+)
+
 def corsMiddleware(*serve.Context c) (
-    string origin = c.header("Origin")
-    if origin != "" (
-        c.setHeader("Access-Control-Allow-Origin", origin)
-        if corsAllowedOrigins.contains(origin) (
-            c.setHeader("Access-Control-Allow-Credentials", "true")
-        )
-        c.setHeader("Vary", "Origin")
-    )
-    c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-    c.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-MistWarp-Game-Data")
-    c.setHeader("Access-Control-Max-Age", "86400")
+  string origin = c.header("Origin").strip()
+  boolean allowed = corsOriginAllowed(origin)
+  if origin != "" and allowed (
+    c.setHeader("Access-Control-Allow-Origin", origin)
+    c.setHeader("Access-Control-Allow-Credentials", "true")
+    c.setHeader("Vary", "Origin")
+  )
+  c.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+  c.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-MistWarp-Game-Data")
+  c.setHeader("Access-Control-Max-Age", "86400")
 
-    if c.method() == "OPTIONS" (
-        c.noContent()
-        return
-    )
+  if c.method() == "OPTIONS" and origin != "" and !allowed (
+    c.json(403, {ok: false, error: "origin not allowed"})
+    c.abort()
+    return
+  )
 
+  if c.method() == "OPTIONS" (
+    c.noContent()
+    return
+  )
+
+  c.next()
+)
+
+def websocketOriginGuard(*serve.Context c) (
+  boolean websocketRoute = c.path() == "/v1/connect" or c.path() == "/v1/ws"
+  if !websocketRoute or !c.isWebSocket() (
     c.next()
+    return
+  )
+  if !corsOriginAllowed(c.header("Origin").strip()) (
+    c.json(403, {ok: false, error: "origin not allowed"})
+    c.abort()
+    return
+  )
+  c.next()
 )
 
 def authMiddleware(*serve.Context c) (
-    boolean authenticated = false
-    string username = ""
-    string userId = ""
-    boolean isAdmin = false
+  boolean authenticated = false
+  string username = ""
+  string userId = ""
+  boolean isAdmin = false
 
-    string token = requestToken(c)
-    if token != "" (
-        object session = getSession(token)
-        if session.ok == true and !isBannedUser(session.username.toStr()) (
-            authenticated = true
-            username = session.username.toStr()
-            userId = session.userId.toStr()
-            isAdmin = isAdminUser(username)
-        )
+  string token = requestToken(c)
+  if token != "" (
+    object session = getSession(token)
+    if session.ok == true and !isBannedUser(session.username.toStr()) (
+      authenticated = true
+      username = session.username.toStr()
+      userId = session.userId.toStr()
+      isAdmin = isAdminUser(username)
     )
+  )
 
-    c.set("authenticated", authenticated)
-    c.set("username", username)
-    c.set("userId", userId)
-    c.set("isAdmin", isAdmin)
+  c.set("authenticated", authenticated)
+  c.set("username", username)
+  c.set("userId", userId)
+  c.set("isAdmin", isAdmin)
 
-    c.next()
+  c.next()
 )
 
 def requireAuth(*serve.Context c) (
-    if !c.getBool("authenticated") (
-        c.json(401, {ok: false, error: "not authenticated"})
-        c.abort()
-        return
-    )
-    c.next()
+  if !c.getBool("authenticated") (
+    c.json(401, {ok: false, error: "not authenticated"})
+    c.abort()
+    return
+  )
+  c.next()
 )
 
 def requireAdmin(*serve.Context c) (
-    if !c.getBool("authenticated") (
-        c.json(401, {ok: false, error: "not authenticated"})
-        c.abort()
-        return
-    )
-    if !c.getBool("isAdmin") (
-        c.json(403, {ok: false, error: "admin access required"})
-        c.abort()
-        return
-    )
-    c.next()
+  if !c.getBool("authenticated") (
+    c.json(401, {ok: false, error: "not authenticated"})
+    c.abort()
+    return
+  )
+  if !c.getBool("isAdmin") (
+    c.json(403, {ok: false, error: "admin access required"})
+    c.abort()
+    return
+  )
+  c.next()
 )

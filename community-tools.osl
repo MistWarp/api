@@ -2168,15 +2168,28 @@ def handleCreateContribution(*serve.Context c) (
   c.json(201, created)
 )
 
-def beginPlaytimeSession(string projectId, string username) boolean (
+def playtimeIdentity(string username) string (
   string userId = userIdForUsername(username)
-  string sessionId = userId
-  if sessionId == "" (
-    sessionId = normalizeUsername(username)
+  if userId != "" (
+    return userId
   )
+  return normalizeUsername(username)
+)
+
+def beginPlaytimeSession(string projectId, string username, string sessionId) boolean (
+  string userId = userIdForUsername(username)
+  string identityKey = playtimeIdentity(username)
   object session = playtimeSessionDocs.findById(sessionId)
   if session.isEmpty() == true or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
-    putDocument(playtimeSessionDocs, sessionId, {_id: sessionId, projectId: projectId, username: username, userId: userId, lastCredit: timestamp, lastSeen: timestamp})
+    putDocument(playtimeSessionDocs, sessionId, {
+      _id: sessionId,
+      projectId: projectId,
+      username: username,
+      userId: userId,
+      identityKey: identityKey,
+      lastCredit: timestamp,
+      lastSeen: timestamp
+    })
   )
   return true
 )
@@ -2199,19 +2212,16 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   return putDocument(playtimeDocs, playtimeId, playtime)
 )
 
-def creditPlaytimeSession(string projectId, string username, boolean finished) number (
+def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
   string userId = userIdForUsername(username)
-  string sessionId = userId
-  if sessionId == "" (
-    sessionId = normalizeUsername(username)
-  )
   object session = playtimeSessionDocs.findById(sessionId)
   if session.isEmpty() == true or session.projectId.toStr() != projectId (
     return 0
   )
   number credited = clampNumber(timestamp - session.lastCredit.toNum(), 0, 60000)
   if credited > 0 (
-    string playtimeId = projectId ++ ":" ++ sessionId
+    string identityKey = session.identityKey.assertElse(string, playtimeIdentity(username))
+    string playtimeId = projectId ++ ":" ++ identityKey
     object playtime = playtimeDocs.findById(playtimeId)
     if playtime.isEmpty() == true (
       playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
@@ -2230,19 +2240,12 @@ def creditPlaytimeSession(string projectId, string username, boolean finished) n
   return credited
 )
 
-def handleRecordDiagnostic(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !projectIsViewable(result.project.assert(object)) (
-    c.notFound("project not found")
-    return
-  )
-  object body = c.bodyJSON()
+def recordProjectDiagnostic(string projectId, boolean authenticated, string username, string sessionId, object body) object (
   string eventType = body.type.toStr().toLower().strip()
   if eventType != "load" and eventType != "start" and eventType != "crash" and eventType != "exit" and eventType != "playtime" and eventType != "playtime_start" and eventType != "playtime_ping" and eventType != "playtime_finish" (
-    c.badRequest("invalid diagnostic type")
-    return
+    return {ok: false, error: "invalid diagnostic type"}
   )
-  string diagnosticId = c.param("id") ++ ":" ++ randomString(16)
+  string diagnosticId = projectId ++ ":" ++ randomString(16)
   number duration = 0
   number loadMs = 0
   string errorText = ""
@@ -2260,37 +2263,56 @@ def handleRecordDiagnostic(*serve.Context c) (
     device = body.device.toStr().trim(1, 40)
   )
   if eventType == "playtime_start" or eventType == "playtime_ping" or eventType == "playtime_finish" or eventType == "playtime" (
-    if !c.getBool("authenticated") (
-      c.json(201, {ok: true})
-      return
+    if !authenticated (
+      return {ok: true}
     )
     if eventType == "playtime_start" (
-      beginPlaytimeSession(c.param("id"), c.getString("username"))
+      beginPlaytimeSession(projectId, username, sessionId)
     ) else if eventType == "playtime_finish" (
-      creditPlaytimeSession(c.param("id"), c.getString("username"), true)
+      creditPlaytimeSession(projectId, username, sessionId, true)
     ) else (
-      creditPlaytimeSession(c.param("id"), c.getString("username"), false)
+      creditPlaytimeSession(projectId, username, sessionId, false)
     )
-    c.json(201, {ok: true})
-    return
+    return {ok: true}
   )
-  if eventType == "start" and c.getBool("authenticated") (
-    beginPlaytimeSession(c.param("id"), c.getString("username"))
+  if eventType == "start" and authenticated (
+    beginPlaytimeSession(projectId, username, sessionId)
   )
-  if eventType == "load" and c.getBool("authenticated") (
-    touchRecentProjectActivity(c.param("id"), c.getString("username"))
+  if eventType == "load" and authenticated (
+    touchRecentProjectActivity(projectId, username)
   )
-  object item = {_id: diagnosticId, projectId: c.param("id"), type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
-  string diagnosticLock = "project-diagnostics-" ++ c.param("id")
+  object item = {_id: diagnosticId, projectId: projectId, type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
+  string diagnosticLock = "project-diagnostics-" ++ projectId
   sync.lock(diagnosticLock)
   diagnosticDocs.insertOne(item)
-  array storedDiagnostics = diagnosticDocs.where("projectId", db.equal, c.param("id")).sort("created", db.desc).limit(550).all()
+  array storedDiagnostics = diagnosticDocs.where("projectId", db.equal, projectId).sort("created", db.desc).limit(550).all()
   for i storedDiagnostics.len (
     if i > 500 (
       diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
     )
   )
   sync.unlock(diagnosticLock)
+  return {ok: true}
+)
+
+def handleRecordDiagnostic(*serve.Context c) (
+  auto projectResult = loadProject(c.param("id"))
+  if !projectResult.ok or !projectIsViewable(projectResult.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  string sessionId = playtimeIdentity(c.getString("username"))
+  object result = recordProjectDiagnostic(
+    c.param("id"),
+    c.getBool("authenticated"),
+    c.getString("username"),
+    sessionId,
+    c.bodyJSON()
+  )
+  if !result.ok (
+    c.badRequest(result.error.toStr())
+    return
+  )
   c.json(201, {ok: true})
 )
 
