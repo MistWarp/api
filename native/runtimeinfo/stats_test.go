@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func TestClassifyGitInspectionAsCache(t *testing.T) {
+	if got := classify("data/tmp/git-inspection/project.mwp"); got != "cache" {
+		t.Fatalf("git inspection workspace should be cache, got %q", got)
+	}
+	if got := classify("data/blobs/project-workspaces/project.mwp"); got != "history" {
+		t.Fatalf("staged workspace should be history, got %q", got)
+	}
+}
+
 func TestStatsClassifiesStoredData(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
