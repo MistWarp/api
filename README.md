@@ -18,7 +18,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | --- | --- | --- |
 | PORT | 5627 | Listen port |
 | HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
-| APP_URL | https://mwapi.mistium.com | Public URL of this API |
+| APP_URL | https://api.mistwarp.org | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
@@ -28,9 +28,9 @@ The server loads `.env` automatically. Real environment variables override `.env
 | R2_PUBLIC_BASE | | Public custom domain for the bucket |
 | GITEA_URL | https://git.rotur.dev | Optional Rotur Git instance |
 | GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
-| EDITOR_ORIGIN | https://warp.mistium.com | Public editor base URL used in links |
+| EDITOR_ORIGIN | https://mistwarp.org | Public editor base URL used in links |
 | ADMIN_USERS | mist | Comma separated admin usernames |
-| REALTIME_URL | wss://mwapi.mistium.com/v1/connect | Public multiplayer WebSocket endpoint |
+| REALTIME_URL | wss://api.mistwarp.org/v1/connect | Public multiplayer WebSocket endpoint |
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.
@@ -47,8 +47,9 @@ The site and editor are one scratch-gui build (community pages live in
 | /embed.html | scratch-gui embed player (project pages iframe this) |
 | /project/*, /explore, /users/*, /settings | community app (client routing) |
 
-This API runs on a SEPARATE domain, `mwapi.mistium.com`. The frontend calls it
-at `https://mwapi.mistium.com/api` directly. In dev, leave the API base unset and
+This API runs at `api.mistwarp.org`, with `mwapi.mistium.com` retained as a
+backwards-compatible hostname. The frontend calls it at
+`https://api.mistwarp.org/api` directly. In dev, leave the API base unset and
 webpack-dev-server proxies `/api` to `http://localhost:5627`. Auth is
 Bearer-token based (the session token returned by `/api/auth`), so a
 cross-domain API works without shared cookies. CORS echoes the request Origin

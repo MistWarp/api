@@ -3,15 +3,15 @@ import "std:fs"
 import "./asset-routing.osl"
 
 testing.assert(
-  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", true, "https://mwapi.mistium.com/blobs/assets", "https://mwassets.mistium.com") == "https://mwapi.mistium.com/blobs/assets/0123456789abcdef0123456789abcdef.png",
+  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", true, "https://api.mistwarp.org/blobs/assets", "https://mwassets.mistium.com") == "https://api.mistwarp.org/blobs/assets/0123456789abcdef0123456789abcdef.png",
   "uses the local asset URL when the file exists locally"
 )
 testing.assert(
-  assetUrlForLocation("fedcba9876543210fedcba9876543210.wav", false, "https://mwapi.mistium.com/blobs/assets", "https://mwassets.mistium.com") == "https://mwassets.mistium.com/assets/fedcba9876543210fedcba9876543210.wav",
+  assetUrlForLocation("fedcba9876543210fedcba9876543210.wav", false, "https://api.mistwarp.org/blobs/assets", "https://mwassets.mistium.com") == "https://mwassets.mistium.com/assets/fedcba9876543210fedcba9876543210.wav",
   "uses the R2 asset URL when the file does not exist locally"
 )
 testing.assert(
-  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", false, "https://mwapi.mistium.com/blobs/assets", "") == "https://mwapi.mistium.com/blobs/assets/0123456789abcdef0123456789abcdef.png",
+  assetUrlForLocation("0123456789abcdef0123456789abcdef.png", false, "https://api.mistwarp.org/blobs/assets", "") == "https://api.mistwarp.org/blobs/assets/0123456789abcdef0123456789abcdef.png",
   "falls back to the local asset URL when no R2 origin is configured"
 )
 

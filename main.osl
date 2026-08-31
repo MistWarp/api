@@ -103,7 +103,7 @@ number maxProjectExtensions = 100
 number maxExtensionSourceBytes = 2097152
 number maxProjectExtensionBytes = 10485760
 
-string appURL = configValue("APP_URL", "https://mwapi.mistium.com")
+string appURL = configValue("APP_URL", "https://api.mistwarp.org")
 string port = configValue("PORT", "5627")
 string roturAppKey = configValue("ROTUR_APP_KEY", "mistwarp")
 string r2Endpoint = configValue("R2_ENDPOINT", "")
@@ -113,13 +113,13 @@ string r2SecretAccessKey = configValue("R2_SECRET_ACCESS_KEY", "")
 string r2PublicBase = configValue("R2_PUBLIC_BASE", "")
 string giteaURL = configValue("GITEA_URL", "https://git.rotur.dev")
 string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
-string editorOrigin = configValue("EDITOR_ORIGIN", "https://warp.mistium.com")
+string editorOrigin = configValue("EDITOR_ORIGIN", "https://mistwarp.org")
 array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
 string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
 string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
 string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
-string realtimeURL = configValue("REALTIME_URL", "wss://mwapi.mistium.com/v1/connect")
+string realtimeURL = configValue("REALTIME_URL", "wss://api.mistwarp.org/v1/connect")
 number historyMigrationWorkers = configValue("HISTORY_MIGRATION_WORKERS", "4").toNum().toInt()
 if historyMigrationWorkers < 1 (
   historyMigrationWorkers = 1
