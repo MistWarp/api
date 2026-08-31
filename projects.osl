@@ -3300,20 +3300,23 @@ def handleGetRemixTree(*serve.Context c) (
   )
 
   string rootId = id
-  object current = projectSearchDocs.findById(id)
-  if current.isEmpty() == true (
-    current = indexEntryFromProject(project)
-  )
+  object current = indexEntryFromProject(project)
+  array ancestors = [current]
   number hops = 0
   boolean walking = true
   while walking and hops < 100 (
     string parent = current.remixParent.toStr()
-    object parentEntry = projectSearchDocs.findById(parent)
-    if parent != "" and parent != rootId and parentEntry.isEmpty() == false (
-      rootId = parent
-      current = parentEntry
-    ) else (
+    if parent == "" or parent == rootId (
       walking = false
+    ) else (
+      auto parentResult = loadProject(parent)
+      if parentResult.ok and canViewProject(parentResult.project.assert(object), c) (
+        rootId = parent
+        current = indexEntryFromProject(parentResult.project.assert(object))
+        ancestors.append(current)
+      ) else (
+        walking = false
+      )
     )
     hops = hops + 1
   )
@@ -3324,6 +3327,14 @@ def handleGetRemixTree(*serve.Context c) (
   if root.isEmpty() == false (
     nodes.append(root)
     seen[rootId] = true
+  )
+  for i ancestors.len (
+    object ancestor = ancestors[i].assert(object)
+    string ancestorId = ancestor.id.toStr()
+    if ancestorId != "" and !seen.contains(ancestorId) (
+      nodes.append(ancestor)
+      seen[ancestorId] = true
+    )
   )
   object banData = cachedBans()
   object bans = banData.bans
