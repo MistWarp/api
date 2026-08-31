@@ -87,7 +87,7 @@ def siteBroadcastProject(string projectId, object message) (
 
 def siteBroadcastStats(string projectId, string actor, object viewerState) (
   object message = siteProjectStats(projectId)
-  if message.isEmpty() (
+  if message.isEmpty() == true (
     return
   )
   message.actor = actor
@@ -142,7 +142,7 @@ def siteSubscribe(*ws.Connection conn, object message) (
   conn.Set("projectKeys", keys)
   siteSend(conn, {type: "project_subscribed", projectId: projectId})
   object stats = siteProjectStats(projectId)
-  if !stats.isEmpty() (
+  if stats.isEmpty() == false (
     siteSend(conn, stats)
   )
 )
