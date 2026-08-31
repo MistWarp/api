@@ -105,7 +105,7 @@ def projectViewKey(object project) string (
 def projectJsonBaseUrl(object project) string (
     string base = publicUrl(project.jsonKey.toStr())
     if project.jsonKey.toStr().startsWith("project-json/") or localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
-        base = appURL ++ "/api/projects/" ++ project.id.toStr() ++ "/project.json"
+        base = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/project.json"
     )
     return base
 )

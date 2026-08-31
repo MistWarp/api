@@ -688,8 +688,8 @@ def handleGetPullDiff(*serve.Context c) (
         inspection: inspection,
         targetProjectId: target.id,
         sourceProjectId: source.id,
-        targetWorkspaceUrl: appURL ++ "/api/projects/" ++ target.id.toStr() ++ "/workspace.mwp" ++ suffix,
-        sourceWorkspaceUrl: appURL ++ "/api/projects/" ++ source.id.toStr() ++ "/workspace.mwp" ++ suffix,
+        targetWorkspaceUrl: appURL ++ "/v1/projects/" ++ target.id.toStr() ++ "/workspace.mwp" ++ suffix,
+        sourceWorkspaceUrl: appURL ++ "/v1/projects/" ++ source.id.toStr() ++ "/workspace.mwp" ++ suffix,
         expectedHead: projectGitHead(target)
     })
 )

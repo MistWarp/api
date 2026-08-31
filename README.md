@@ -49,27 +49,31 @@ The site and editor are one scratch-gui build (community pages live in
 
 This API runs at `api.mistwarp.org`, with `mwapi.mistium.com` retained as a
 backwards-compatible hostname. The frontend calls it at
-`https://api.mistwarp.org/api` directly. In dev, leave the API base unset and
-webpack-dev-server proxies `/api` to `http://localhost:5627`. Auth is
-Bearer-token based (the session token returned by `/api/auth`), so a
+`https://api.mistwarp.org/v1` directly. In dev, leave the API base unset and
+webpack-dev-server proxies `/v1` to `http://localhost:5627`. Auth is
+Bearer-token based (the session token returned by `/v1/auth`), so a
 cross-domain API works without shared cookies. CORS echoes the request Origin
 with credentials, so any frontend origin is accepted.
+
+`/v1` is the canonical route group. Every route is also registered under
+`/api` for backwards compatibility, including uploads and their larger body
+limits. New clients and generated URLs must use `/v1`.
 
 R2 bucket only needs public GET through `R2_PUBLIC_BASE`, and the public domain must expose the bucket's `assets/` prefix and allow CORS GET requests from the MistWarp frontend. Project metadata keeps the API `/blobs/assets` base. That endpoint serves a local asset when its file exists under `data/blobs/assets/`; otherwise it redirects to `R2_PUBLIC_BASE`. All writes go through this server. With no R2 configured, the server falls back to local disk (`data/blobs/`, served at `/blobs`) so it runs locally with zero setup.
 
 ## Upload pipeline
 
-The editor POSTs a sparse sb3 to `POST /api/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 256 MiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
+The editor POSTs a sparse sb3 to `POST /v1/projects/:id/upload` (multipart, fields `project` and optional `thumbnail`). The server extracts at most 256 MiB of `project.json`, validates it incrementally, requires asset filenames to match their content, and limits every asset to 10 MiB and all assets to 50 MiB. The JSON is accepted only when its gzip representation is at most 20 MiB.
 
 ### Commit inspection
 
 The read-only commit endpoints inspect the stored `.mwp` on the server. Clients do not need to download the complete workspace to render history or browse an old revision.
 
-- `GET /api/projects/:id/commits/:sha` returns commit metadata, its first parent, and changed-file records. Each record has `path`, `status`, `oldOid`, `newOid`, `oldSize`, and `newSize`. With `?inline=1`, small text changes also include `oldData` and `newData` as base64, capped at 1 MiB per file and 8 MiB per response, so compatible clients can render ordinary diffs without a request per blob. Root commits report every file as added. `legacy: true` means the change includes an old `project.sb3`; clients that need the expanded Fractch diff should use their legacy conversion fallback.
-- `GET /api/projects/:id/commits/:sha/tree` returns `commit` and a flat `files` array. Each file has `path`, `oid`, `mode`, `size`, and `binary`.
-- `GET /api/projects/:id/commits/:sha/file?path=<path>` returns one file record and `content`, encoded as base64 by JSON.
-- `GET /api/projects/:id/commits/:sha/co-authors` returns the Rotur users credited on that commit. The older `/collaborators` path remains an alias.
-- `PATCH /api/projects/:id/commits/:sha` accepts `{coAuthors: string[]}` with at most 25 existing Rotur usernames. `{collaborators: string[]}` remains an input alias. It replaces the commit's co-author metadata without rewriting Git objects or changing any SHA. Responses expose canonical `coAuthors` records as `{username, userId}` and a compatibility `collaborators` alias. Only the project owner, a maintainer, or an administrator may patch commit credits.
+- `GET /v1/projects/:id/commits/:sha` returns commit metadata, its first parent, and changed-file records. Each record has `path`, `status`, `oldOid`, `newOid`, `oldSize`, and `newSize`. With `?inline=1`, small text changes also include `oldData` and `newData`, encoded as base64 and capped at 1 MiB per file and 8 MiB per response. Root commits report every file as added. `legacy: true` means the change includes an old `project.sb3`; clients that need the expanded Fractch diff should use their legacy conversion fallback.
+- `GET /v1/projects/:id/commits/:sha/tree` returns `commit` and a flat `files` array. Each file has `path`, `oid`, `mode`, `size`, and `binary`.
+- `GET /v1/projects/:id/commits/:sha/file?path=<path>` returns one file record and `content`, encoded as base64 by JSON.
+- `GET /v1/projects/:id/commits/:sha/co-authors` returns the Rotur users credited on that commit. The older `/collaborators` path remains an alias.
+- `PATCH /v1/projects/:id/commits/:sha` accepts `{coAuthors: string[]}` with at most 25 existing Rotur usernames. `{collaborators: string[]}` remains an input alias. It replaces the commit's co-author metadata without rewriting Git objects or changing any SHA. Responses expose canonical `coAuthors` records as `{username, userId}` and a compatibility `collaborators` alias. Only the project owner, a maintainer, or an administrator may patch commit credits.
 
 These routes use the same see-inside policy as workspace downloads. The server caches materialized workspace layers and computed JSON by the ordered content-addressed layer keys. Public, free projects may be cached by the CDN for one hour; private, unlisted, and paid responses use `private, no-store`. Stable ETags let browsers revalidate without reparsing Git objects. The local inspection cache keeps at most 256 files or 2 GiB and removes entries older than 24 hours.
 
@@ -89,4 +93,4 @@ For a delta whose `baseHead` still matches the stored head, the API removes loos
 
 1. Client holds a rotur token (rotur-sdk login).
 2. Client fetches `https://api.rotur.dev/generate_validator?key=<ROTUR_APP_KEY>&auth=<token>` (must be the same rotur instance the server validates against).
-3. Client calls `POST /api/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
+3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
