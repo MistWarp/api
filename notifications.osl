@@ -60,6 +60,17 @@ def notificationBody(string actor, string notifType, object extra) string (
         return actor ++ " loved your project"
     )
     if notifType == "comment" (
+        if extra.contains("pull") and extra.pull != null and extra.pull.toStr() != "" (
+            string pullIndex = extra.pull.toStr()
+            string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
+            if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
+                pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+            )
+            if projectTitle != "" (
+                return actor ++ " commented on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+            )
+            return actor ++ " commented on pr #" ++ pullIndex ++ ": " ++ pullLink
+        )
         if projectTitle != "" (
             return actor ++ " commented on " ++ projectTitle ++ ": " ++ projectLink
         )
@@ -83,12 +94,34 @@ def notificationBody(string actor, string notifType, object extra) string (
         return actor ++ " commented on " ++ roadmapTitle ++ ": " ++ roadmapLink
     )
     if notifType == "reply" (
+        if extra.contains("pull") and extra.pull != null and extra.pull.toStr() != "" (
+            string pullIndex = extra.pull.toStr()
+            string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
+            if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
+                pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+            )
+            if projectTitle != "" (
+                return actor ++ " replied to your comment on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+            )
+            return actor ++ " replied to your comment on pr #" ++ pullIndex ++ ": " ++ pullLink
+        )
         if projectLink != "" (
             return actor ++ " replied to your comment: " ++ projectLink
         )
         return actor ++ " replied to your comment"
     )
     if notifType == "mention" (
+        if extra.contains("pull") and extra.pull != null and extra.pull.toStr() != "" (
+            string pullIndex = extra.pull.toStr()
+            string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
+            if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
+                pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+            )
+            if projectTitle != "" (
+                return actor ++ " mentioned you on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+            )
+            return actor ++ " mentioned you on pr #" ++ pullIndex ++ ": " ++ pullLink
+        )
         if projectTitle != "" (
             return actor ++ " mentioned you on " ++ projectTitle ++ ": " ++ projectLink
         )
@@ -178,7 +211,32 @@ def notificationBody(string actor, string notifType, object extra) string (
         return actor ++ " joined " ++ extra.spaceTitle.toStr()
     )
     if notifType == "contribution" (
-        return actor ++ " sent changes for " ++ projectTitle ++ ": " ++ projectLink
+        string pullIndex = ""
+        if extra.contains("pull") and extra.pull != null (
+            pullIndex = extra.pull.toStr()
+        )
+        string contribLink = projectLink
+        if pullIndex != "" and extra.contains("projectId") and extra.projectId != null (
+            contribLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
+        )
+        if pullIndex != "" and projectTitle != "" (
+            return actor ++ " sent changes for " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ contribLink
+        )
+        return actor ++ " sent changes for " ++ projectTitle ++ ": " ++ contribLink
+    )
+    if notifType == "contribution_merged" (
+        string pullIndex = ""
+        if extra.contains("pull") and extra.pull != null (
+            pullIndex = extra.pull.toStr()
+        )
+        string contribLink = projectLink
+        if pullIndex != "" and extra.contains("projectId") and extra.projectId != null (
+            contribLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
+        )
+        if pullIndex != "" and projectTitle != "" (
+            return actor ++ " merged changes for " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ contribLink
+        )
+        return actor ++ " merged changes for " ++ projectTitle ++ ": " ++ contribLink
     )
     if notifType == "project_feedback" (
         return actor ++ " sent " ++ extra.feedbackType.toStr() ++ " feedback for " ++ projectTitle ++ ": " ++ projectLink
