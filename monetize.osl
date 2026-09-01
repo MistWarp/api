@@ -104,6 +104,9 @@ def canSeeInsideProject(object project, *serve.Context c) boolean (
     if canEditProject(project, c) (
         return true
     )
+    if canViewForkProject(project, c) (
+        return true
+    )
     if !projectSeeInside(project) (
         return false
     )

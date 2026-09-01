@@ -47,6 +47,28 @@ def canEditProject(object project,*serve.Context c) boolean (
   return role == "owner" or role == "maintainer"
 )
 
+def canViewForkProject(object project,*serve.Context c) boolean (
+  if !c.getBool("authenticated") (
+    return false
+  )
+  if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
+    auto parentResult = loadProject(project.remixParent.toStr())
+    if parentResult.ok and canEditProject(parentResult.project.assert(object), c) (
+      return true
+    )
+  )
+  if project.contains("remixRoot") and project.remixRoot != null and project.remixRoot.toStr() != "" (
+    string rootId = project.remixRoot.toStr()
+    if !project.contains("remixParent") or project.remixParent.toStr() != rootId (
+      auto rootResult = loadProject(rootId)
+      if rootResult.ok and canEditProject(rootResult.project.assert(object), c) (
+        return true
+      )
+    )
+  )
+  return false
+)
+
 def canViewProject(object project,*serve.Context c) boolean (
   if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
     return false
@@ -60,6 +82,9 @@ def canViewProject(object project,*serve.Context c) boolean (
   if projectRole(project, c.getString("username")) != "" (
     return true
   )
+  if canViewForkProject(project, c) (
+    return true
+  )
   return canEditProject(project, c)
 )
 
@@ -68,6 +93,9 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
     return false
   )
   if validPreviewKey(project.id.toStr(), c.query("k")) (
+    return true
+  )
+  if canViewForkProject(project, c) (
     return true
   )
   if projectPrice(project) > 0 (
@@ -259,7 +287,7 @@ def projectResponse(object project,*serve.Context c) object (
   )
   boolean locked = false
   if price > 0 (
-    if isOwner or bought (
+    if isOwner or bought or canViewForkProject(project, c) (
       jsonUrl = jsonBase ++ "?k=" ++ projectViewKey(project)
     ) else (
       jsonUrl = ""

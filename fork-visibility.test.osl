@@ -1,0 +1,283 @@
+import "std:testing"
+
+def userIdForUsername(string username) string (
+    if username == "alice" (
+        return "u_alice"
+    )
+    if username == "bob" (
+        return "u_bob"
+    )
+    if username == "charlie" (
+        return "u_charlie"
+    )
+    if username == "maintainer_dan" (
+        return "u_dan"
+    )
+    return ""
+)
+
+def identityMatches(string ownerId, string ownerUsername, string userId, string username) boolean (
+    if ownerId != "" and userId != "" and ownerId == userId (
+        return true
+    )
+    return ownerUsername.toLower() == username.toLower()
+)
+
+def isBannedUser(string username) boolean (
+    return false
+)
+
+def canManageGroupContent(object project, object ctx) boolean (
+    return false
+)
+
+def validPreviewKey(string id, string key) boolean (
+    return false
+)
+
+def projectVisibility(object project) string (
+    if project.contains("visibility") and project.visibility != null (
+        return project.visibility.toStr()
+    )
+    if project.shared == true (
+        return "public"
+    )
+    return "private"
+)
+
+def projectIsViewable(object project) boolean (
+    return projectVisibility(project) != "private"
+)
+
+def projectPrice(object project) number (
+    if project.contains("price") and project.price != null (
+        return project.price.toNum()
+    )
+    return 0
+)
+
+def canAccessPaidJson(object project, object ctx) boolean (
+    return false
+)
+
+def projectViewKey(object project) string (
+    if project.contains("viewKey") and project.viewKey != null (
+        return project.viewKey.toStr()
+    )
+    return ""
+)
+
+def projectSeeInside(object project) boolean (
+    if project.contains("seeInside") and project.seeInside == false (
+        return false
+    )
+    return true
+)
+
+object mockDb = {}
+
+def loadProject(string id) object (
+    if mockDb.contains(id) (
+        return {ok: true, project: mockDb[id]}
+    )
+    return {ok: false}
+)
+
+def projectRole(object project, string username) string (
+    string userId = userIdForUsername(username)
+    string ownerId = ""
+    if project.contains("ownerId") and project.ownerId != null (
+        ownerId = project.ownerId.toStr()
+    )
+    if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+        return "owner"
+    )
+    if project.contains("collaborators") and project.collaborators != null (
+        array collaborators = project.collaborators.assert(array)
+        for i collaborators.len (
+            object collaborator = collaborators[i].assert(object)
+            string collaboratorId = ""
+            if collaborator.contains("userId") and collaborator.userId != null (
+                collaboratorId = collaborator.userId.toStr()
+            )
+            if identityMatches(collaboratorId, collaborator.username.toStr(), userId, username) (
+                return collaborator.role.toStr()
+            )
+        )
+    )
+    return ""
+)
+
+def canEditProjectTest(object project, object ctx) boolean (
+    if !ctx.authenticated (
+        return false
+    )
+    if ctx.isAdmin (
+        return true
+    )
+    if canManageGroupContent(project, ctx) (
+        return true
+    )
+    string role = projectRole(project, ctx.username.toStr())
+    return role == "owner" or role == "maintainer"
+)
+
+def canViewForkProjectTest(object project, object ctx) boolean (
+    if !ctx.authenticated (
+        return false
+    )
+    if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
+        auto parentResult = loadProject(project.remixParent.toStr())
+        if parentResult.ok and canEditProjectTest(parentResult.project.assert(object), ctx) (
+            return true
+        )
+    )
+    if project.contains("remixRoot") and project.remixRoot != null and project.remixRoot.toStr() != "" (
+        string rootId = project.remixRoot.toStr()
+        if !project.contains("remixParent") or project.remixParent.toStr() != rootId (
+            auto rootResult = loadProject(rootId)
+            if rootResult.ok and canEditProjectTest(rootResult.project.assert(object), ctx) (
+                return true
+            )
+        )
+    )
+    return false
+)
+
+def canViewProjectTest(object project, object ctx) boolean (
+    if isBannedUser(project.owner.toStr()) and !ctx.isAdmin (
+        return false
+    )
+    if projectIsViewable(project) (
+        return true
+    )
+    if validPreviewKey(project.id.toStr(), (ctx.key ?? "").toStr()) (
+        return true
+    )
+    if projectRole(project, ctx.username.toStr()) != "" (
+        return true
+    )
+    if canViewForkProjectTest(project, ctx) (
+        return true
+    )
+    return canEditProjectTest(project, ctx)
+)
+
+def canViewProjectJsonTest(object project, object ctx) boolean (
+    if isBannedUser(project.owner.toStr()) and !ctx.isAdmin (
+        return false
+    )
+    if validPreviewKey(project.id.toStr(), (ctx.key ?? "").toStr()) (
+        return true
+    )
+    if canViewForkProjectTest(project, ctx) (
+        return true
+    )
+    if projectPrice(project) > 0 (
+        if canAccessPaidJson(project, ctx) (
+            return true
+        )
+        string pk = projectViewKey(project)
+        if pk != "" and (ctx.key ?? "").toStr() == pk (
+            return true
+        )
+        return false
+    )
+    if project.shared == true or projectVisibility(project) == "unlisted" (
+        return true
+    )
+    string k = projectViewKey(project)
+    if k != "" and (ctx.key ?? "").toStr() == k (
+        return true
+    )
+    return canEditProjectTest(project, ctx)
+)
+
+def canSeeInsideProjectTest(object project, object ctx) boolean (
+    if canEditProjectTest(project, ctx) (
+        return true
+    )
+    if canViewForkProjectTest(project, ctx) (
+        return true
+    )
+    if !projectSeeInside(project) (
+        return false
+    )
+    if !projectIsViewable(project) (
+        return false
+    )
+    if projectPrice(project) > 0 (
+        return canAccessPaidJson(project, ctx)
+    )
+    return true
+)
+
+// Setup projects
+// Project A: original project created by Alice, maintained by Dan
+object projectA = {
+    id: "proj_original",
+    owner: "alice",
+    ownerId: "u_alice",
+    shared: true,
+    visibility: "public",
+    collaborators: [{username: "maintainer_dan", userId: "u_dan", role: "maintainer"}]
+}
+
+// Project B: private fork of Project A created by Bob
+object projectB = {
+    id: "p178804999473398600081XWkq",
+    owner: "bob",
+    ownerId: "u_bob",
+    shared: false,
+    visibility: "private",
+    remixParent: "proj_original",
+    seeInside: false,
+    collaborators: []
+}
+
+// Project C: chained fork of Project B created by Charlie
+object projectC = {
+    id: "proj_chained_fork",
+    owner: "charlie",
+    ownerId: "u_charlie",
+    shared: false,
+    visibility: "private",
+    remixParent: "p178804999473398600081XWkq",
+    remixRoot: "proj_original",
+    seeInside: true,
+    collaborators: []
+}
+
+mockDb["proj_original"] = projectA
+mockDb["p178804999473398600081XWkq"] = projectB
+mockDb["proj_chained_fork"] = projectC
+
+object aliceCtx = {authenticated: true, username: "alice", userId: "u_alice", isAdmin: false}
+object bobCtx = {authenticated: true, username: "bob", userId: "u_bob", isAdmin: false}
+object charlieCtx = {authenticated: true, username: "charlie", userId: "u_charlie", isAdmin: false}
+object danCtx = {authenticated: true, username: "maintainer_dan", userId: "u_dan", isAdmin: false}
+object anonCtx = {authenticated: false, username: "", userId: "", isAdmin: false}
+object strangerCtx = {authenticated: true, username: "stranger", userId: "u_stranger", isAdmin: false}
+
+// Tests for Project B (fork of A)
+testing.assert(canViewProjectTest(projectB, aliceCtx), "Alice (creator of forked project) can view private fork")
+testing.assert(canViewProjectTest(projectB, danCtx), "Dan (maintainer of forked project) can view private fork")
+testing.assert(canViewProjectTest(projectB, bobCtx), "Bob (fork owner) can view own fork")
+testing.assert(!canViewProjectTest(projectB, strangerCtx), "Stranger cannot view private fork")
+testing.assert(!canViewProjectTest(projectB, anonCtx), "Anonymous user cannot view private fork")
+
+testing.assert(canSeeInsideProjectTest(projectB, aliceCtx), "Alice can see inside fork for diff and pr review even if seeInside is false")
+testing.assert(canSeeInsideProjectTest(projectB, danCtx), "Dan can see inside fork for diff and pr review")
+testing.assert(canSeeInsideProjectTest(projectB, bobCtx), "Bob can see inside own fork")
+testing.assert(!canSeeInsideProjectTest(projectB, strangerCtx), "Stranger cannot see inside private fork")
+
+testing.assert(canViewProjectJsonTest(projectB, aliceCtx), "Alice can view project JSON for private fork")
+testing.assert(canViewProjectJsonTest(projectB, danCtx), "Dan can view project JSON for private fork")
+testing.assert(canViewProjectJsonTest(projectB, bobCtx), "Bob can view project JSON for private fork")
+testing.assert(!canViewProjectJsonTest(projectB, strangerCtx), "Stranger cannot view project JSON for private fork")
+
+// Tests for chained fork C (remixRoot = proj_original)
+testing.assert(canViewProjectTest(projectC, charlieCtx), "Charlie (creator of chained fork) can view own fork")
+testing.assert(canViewProjectTest(projectC, aliceCtx), "Alice (creator of root project) can view chained fork")
+testing.assert(canViewProjectTest(projectC, bobCtx), "Bob (creator of direct parent fork) can view chained fork")
+testing.assert(!canViewProjectTest(projectC, strangerCtx), "Stranger cannot view chained fork")

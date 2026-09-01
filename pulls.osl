@@ -625,8 +625,8 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
     if pull.isEmpty() == true (
         return false
     )
-    boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha)
-    boolean matchingSource = pull.sourceProjectId.toStr() == project.id.toStr() and pull.headCommit.toStr() == sha
+    boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha or projectRecordsCommit(project, sha))
+    boolean matchingSource = pull.sourceProjectId.toStr() == project.id.toStr() and (pull.headCommit.toStr() == sha or projectRecordsCommit(project, sha))
     if !matchingTarget and !matchingSource (
         return false
     )
