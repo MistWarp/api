@@ -2625,11 +2625,19 @@ def handleUpdateProject(*serve.Context c) (
       object cleanVisual = {}
       if visualType == "image" (
         string itemImage = visual.url.toStr().strip()
-        if !itemImage.startsWith("https://") or itemImage.len > 500 (
-          c.badRequest("portable item images must use a short HTTPS URL")
-          return
+        if itemImage.startsWith("data:image/") (
+          if itemImage.len > 100000 (
+            c.badRequest("portable item images must be smaller than 100KB")
+            return
+          )
+          cleanVisual = {type: "image", url: itemImage}
+        ) else (
+          if !itemImage.startsWith("https://") or itemImage.len > 500 (
+            c.badRequest("portable item images must use a short HTTPS URL")
+            return
+          )
+          cleanVisual = {type: "image", url: itemImage}
         )
-        cleanVisual = {type: "image", url: itemImage}
       ) else if visualType == "costume" (
         string assetId = visual.assetId.toStr().strip()
         string dataFormat = visual.dataFormat.toStr().toLower().strip()
