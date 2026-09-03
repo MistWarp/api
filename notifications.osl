@@ -23,7 +23,7 @@ def saveNotifications(string username, array items) boolean (
 
 def sanitizeNotificationPayload(object payload, string notifType, string actor) object (
     object data = {}
-    if payload == null or typeof(payload) != "object" (
+    if typeof(payload) != "object" (
         return data
     )
     array keys = payload.getKeys().toArray()
@@ -250,7 +250,7 @@ def notificationBody(string actor, string notifType, object extra) string (
 
 def notifyRequestBody(string target, string actor, string notifType, object extra) object (
     object data = {}
-    if extra != null and typeof(extra) == "object" (
+    if typeof(extra) == "object" (
         array keys = extra.getKeys().toArray()
         for i keys.len (
             string key = keys[i].toStr()

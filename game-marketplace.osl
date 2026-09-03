@@ -45,6 +45,7 @@ def gameProductResponse(object project, object product, *serve.Context c) object
         description: product.description,
         price: product.price,
         grantsItem: grantsItem,
+        icon: product.icon.toStr(),
         owned: c.getBool("authenticated") and ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr())
     }
 )
@@ -60,6 +61,37 @@ def grantGameProductItem(object project, object product, string userId, string p
     )
     object granted = grantInventoryItem(userId, project, found.item.assert(object), 1, "purchase", "payment:" ++ paymentId)
     return granted.ok == true
+)
+
+def saveGameProductEntitlement(string projectId, string userId, string productId, string paymentId) boolean (
+    string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
+    sync.lock(lockName)
+    object entitlements = loadGameEntitlements(projectId, userId)
+    object products = entitlements.products.assertElse(object, {})
+    products[productId] = {purchasedAt: timestamp, paymentId: paymentId}
+    entitlements.products = products
+    entitlements.updatedAt = timestamp
+    fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+    boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
+    sync.unlock(lockName)
+    return saved
+)
+
+def removeGameProductEntitlement(string projectId, string userId, string productId) boolean (
+    if !ownsGameProduct(projectId, userId, productId) (
+        return true
+    )
+    string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
+    sync.lock(lockName)
+    object entitlements = loadGameEntitlements(projectId, userId)
+    object products = entitlements.products.assertElse(object, {})
+    products.delete(productId)
+    entitlements.products = products
+    entitlements.updatedAt = timestamp
+    fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+    boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
+    sync.unlock(lockName)
+    return saved
 )
 
 def handleListGameProducts(*serve.Context c) (
@@ -92,10 +124,6 @@ def handleOwnsGameProduct(*serve.Context c) (
 )
 
 def handleGameProductIntent(*serve.Context c) (
-    if commerceServiceKey == "" (
-        c.json(503, {ok: false, error: "purchases are not available right now"})
-        return
-    )
     auto loaded = loadProject(c.param("id"))
     if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
         c.notFound("project not found")
@@ -108,6 +136,22 @@ def handleGameProductIntent(*serve.Context c) (
         return
     )
     object product = found.product.assert(object)
+    if product.price.toNum() <= 0 (
+        if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), "free-claim") (
+            c.internalError("failed to grant game product")
+            return
+        )
+        if !grantGameProductItem(project, product, c.getString("userId"), "free-claim") (
+            c.internalError("failed to grant the product's portable item")
+            return
+        )
+        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+        return
+    )
+    if commerceServiceKey == "" (
+        c.json(503, {ok: false, error: "purchases are not available right now"})
+        return
+    )
     if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
         object entitlements = loadGameEntitlements(project.id.toStr(), c.getString("userId"))
         object products = entitlements.products.assertElse(object, {})
@@ -221,17 +265,7 @@ def handleGameProductConfirm(*serve.Context c) (
         c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
         return
     )
-    string lockName = "game-entitlement-" ++ project.id.toStr() ++ "-" ++ gameDataUserKey(c.getString("userId"))
-    sync.lock(lockName)
-    object entitlements = loadGameEntitlements(project.id.toStr(), c.getString("userId"))
-    object products = entitlements.products.assertElse(object, {})
-    products[product.id.toStr()] = {purchasedAt: timestamp, paymentId: paymentId}
-    entitlements.products = products
-    entitlements.updatedAt = timestamp
-    fs.mkdirAll(gameEntitlementsDir ++ project.id.toStr() ++ "/")
-    boolean saved = writeFile(gameEntitlementPath(project.id.toStr(), c.getString("userId")), entitlements)
-    sync.unlock(lockName)
-    if !saved (
+    if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), paymentId) (
         c.internalError("failed to grant game product")
         return
     )
@@ -245,4 +279,124 @@ def handleGameProductConfirm(*serve.Context c) (
     addPurchaseRecord(normalizeUsername(buyer), {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: product.price, at: timestamp, type: "game_product"})
     addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: product.price})
     c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
+)
+
+def verifyGameProductRefund(string paymentId, string creator, string buyer, string projectId, string productId, number price) boolean (
+    if commerceServiceKey == "" or paymentId == "" (
+        return false
+    )
+    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+    if !resp.success or resp.status.toInt() != 200 (
+        return false
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+        return false
+    )
+    object payload = parsed.unwrap().assert(object)
+    object payment = payload.payment.assertElse(object, {})
+    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" (
+        return false
+    )
+    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(creator) or payment.amount.toNum() + 0.001 < price (
+        return false
+    )
+    if payment.resource_type.toStr() != "game_product" or payment.resource_id.toStr() != projectId ++ ":" ++ productId (
+        return false
+    )
+    array actual = payment.recipients.assertElse(array, [])
+    if actual.len == 0 (
+        return true
+    )
+    for i actual.len (
+        object recipient = actual[i].assert(object)
+        if normalizeUsername(recipient.username.toStr()) == normalizeUsername(buyer) (
+            return true
+        )
+    )
+    return false
+)
+
+def handleGrantGameProduct(*serve.Context c) (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = loaded.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("only the project creator can grant products")
+        return
+    )
+    object found = findGameProduct(project, c.param("product"))
+    if !found.ok (
+        c.notFound("game product not found")
+        return
+    )
+    object product = found.product.assert(object)
+    object body = c.bodyJSON()
+    string targetId = userIdForUsername(body.username.toStr())
+    if targetId == "" (
+        c.badRequest("could not find that user")
+        return
+    )
+    if ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
+        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+        return
+    )
+    if !saveGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr(), "creator-grant") (
+        c.internalError("failed to grant game product")
+        return
+    )
+    if !grantGameProductItem(project, product, targetId, "creator-grant") (
+        c.internalError("failed to grant the product's portable item")
+        return
+    )
+    c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
+)
+
+def handleRevokeGameProduct(*serve.Context c) (
+    auto loaded = loadProject(c.param("id"))
+    if !loaded.ok (
+        c.notFound("project not found")
+        return
+    )
+    object project = loaded.project.assert(object)
+    if !canEditProject(project, c) (
+        c.forbidden("only the project creator can revoke products")
+        return
+    )
+    object found = findGameProduct(project, c.param("product"))
+    if !found.ok (
+        c.notFound("game product not found")
+        return
+    )
+    object product = found.product.assert(object)
+    object body = c.bodyJSON()
+    string targetUsername = body.username.toStr()
+    string targetId = userIdForUsername(targetUsername)
+    if targetId == "" (
+        c.badRequest("could not find that user")
+        return
+    )
+    if !ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
+        c.json(200, {ok: true, removed: false})
+        return
+    )
+    number price = product.price.toNum()
+    boolean refunded = false
+    if price > 0 and body.noRefund != true (
+        string paymentId = body.paymentId.toStr().strip()
+        if !verifyGameProductRefund(paymentId, c.getString("username"), targetUsername, project.id.toStr(), product.id.toStr(), price) (
+            c.json(402, {ok: false, error: "refund payment not received yet, send the refund first or revoke without refund"})
+            return
+        )
+        refunded = true
+    )
+    if !removeGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr()) (
+        c.internalError("failed to revoke game product")
+        return
+    )
+    c.json(200, {ok: true, removed: true, refunded: refunded})
 )

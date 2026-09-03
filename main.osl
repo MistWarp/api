@@ -188,7 +188,7 @@ import "./community-tools.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
-auto viewDedup = cache.create(100000, 86400)
+auto viewDedup = cache.create(100000, 21600)
 auto viewIndexFlush = cache.create(100000, 600)
 auto userIdsCache = cache.create(10000, 300)
 auto identityRefreshCache = cache.create(10000, 300)
@@ -360,6 +360,8 @@ api.GET("/projects/:id/products", handleListGameProducts)
 api.GET("/projects/:id/products/:product/owns", requireAuth, handleOwnsGameProduct)
 api.POST("/projects/:id/products/:product/purchase/intent", requireAuth, handleGameProductIntent)
 api.POST("/projects/:id/products/:product/purchase/confirm", requireAuth, handleGameProductConfirm)
+api.POST("/projects/:id/products/:product/grant", requireAuth, handleGrantGameProduct)
+api.POST("/projects/:id/products/:product/revoke", requireAuth, handleRevokeGameProduct)
 api.GET("/projects/:id/game-inventory-config", requireAuth, handleGetGameInventoryConfig)
 api.GET("/projects/:id/me/inventory", requireAuth, handleGetProjectInventory)
 api.POST("/projects/:id/me/inventory/grant", requireAuth, handleGrantProjectItem)
