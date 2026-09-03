@@ -2758,6 +2758,15 @@ def handleEditIdeaComment(*serve.Context c) (
   c.json(200, edited)
 )
 
+def handleReactIdeaComment(*serve.Context c) (
+  object idea = ideaDocs.findById(c.param("id"))
+  if idea.isEmpty() == true (
+    c.notFound("idea not found")
+    return
+  )
+  reactToComment(c, "roadmap-" ++ idea["_id"].toStr())
+)
+
 def handleUpdateIdea(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
   if idea.isEmpty() == true (
