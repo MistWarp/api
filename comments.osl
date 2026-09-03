@@ -99,6 +99,74 @@ def commentParentId(object comment) string (
   return ""
 )
 
+def isCommentPinned(object comment) boolean (
+  if comment.contains("pinned") and comment.pinned == true (
+    return true
+  )
+  return false
+)
+
+def commentPinnedAt(object comment) number (
+  if comment.contains("pinnedAt") and comment.pinnedAt != null (
+    return comment.pinnedAt.toNum()
+  )
+  return 0
+)
+
+def setCommentPin(string key, string cid, string requester, string moderator, boolean isAdmin, boolean pinned) object (
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  array comments = loadComments(key)
+  object target = {}
+  boolean found = false
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() == cid (
+      target = existing
+      found = true
+    )
+  )
+  if !found (
+    sync.unlock(lockName)
+    return {ok: false, error: "comment not found", status: 404}
+  )
+  if commentParentId(target) != "" (
+    sync.unlock(lockName)
+    return {ok: false, error: "only top-level comments can be pinned", status: 400}
+  )
+
+  string requesterKey = normalizeUsername(requester)
+  boolean allowed = isAdmin
+  allowed = allowed or requesterKey == normalizeUsername(moderator)
+  if !allowed (
+    sync.unlock(lockName)
+    return {ok: false, error: "not allowed", status: 403}
+  )
+
+  for i comments.len (
+    object existing = comments[i]
+    if existing.id.toStr() == cid (
+      if pinned (
+        existing.pinned = true
+        existing.pinnedAt = timestamp
+      ) else (
+        existing.pinned = false
+        if existing.contains("pinnedAt") (
+          existing.delete("pinnedAt")
+        )
+      )
+      comments[i] = existing
+      target = existing
+    )
+  )
+  boolean saved = saveComments(key, comments)
+  sync.unlock(lockName)
+  if !saved (
+    return {ok: false, error: "could not save comment", status: 500}
+  )
+  return {ok: true, comment: target}
+)
+
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
@@ -226,6 +294,27 @@ def commentPage(array comments,*serve.Context c) object (
     roots.sortBy("donationAmount", "descending")
   ) else (
     roots.sortBy("created", "descending")
+  )
+  array pinnedRoots = []
+  array normalRoots = []
+  for i roots.len (
+    object root = roots[i].assert(object)
+    if isCommentPinned(root) (
+      pinnedRoots.append(root)
+    ) else (
+      normalRoots.append(root)
+    )
+  )
+  if pinnedRoots.len > 0 (
+    pinnedRoots.sortBy("pinnedAt", "descending")
+    array ordered = []
+    for i pinnedRoots.len (
+      ordered.append(pinnedRoots[i])
+    )
+    for i normalRoots.len (
+      ordered.append(normalRoots[i])
+    )
+    roots = ordered
   )
   number totalRoots = roots.len
   number requestedLimit = c.queryInt("limit", 0)
@@ -546,6 +635,34 @@ def handleEditProjectComment(*serve.Context c) (
   c.json(200, edited)
 )
 
+def handlePinProjectComment(*serve.Context c) (
+  auto result = loadProject(c.param("id"))
+  if !result.ok or !canViewProject(result.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  object body = c.bodyJSON()
+  boolean pinned = true
+  if body.contains("pinned") and body.pinned != null (
+    pinned = body.pinned == true
+  )
+  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin") == true, pinned)
+  if !updated.ok (
+    c.json(updated.status.toInt(), {ok: false, error: updated.error})
+    return
+  )
+  updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
+  updated.comment.playtimeMs = projectPlaytime(project.id.toStr(), updated.comment.author.toStr())
+  siteBroadcastProject(project.id.toStr(), {
+    type: "comment_edited",
+    projectId: project.id,
+    comment: updated.comment,
+    actor: c.getString("username")
+  })
+  c.json(200, updated)
+)
+
 def profileCommentKey(string name) string (
   return "profile-" ++ normalizeUsername(name)
 )
@@ -638,6 +755,26 @@ def handleEditProfileComment(*serve.Context c) (
   )
   edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
   c.json(200, edited)
+)
+
+def handlePinProfileComment(*serve.Context c) (
+  string name = c.param("name")
+  if !profileExists(name) (
+    c.notFound("this user is not on MistWarp")
+    return
+  )
+  object body = c.bodyJSON()
+  boolean pinned = true
+  if body.contains("pinned") and body.pinned != null (
+    pinned = body.pinned == true
+  )
+  object updated = setCommentPin(profileCommentKey(name), c.param("cid"), c.getString("username"), name, c.getBool("isAdmin") == true, pinned)
+  if !updated.ok (
+    c.json(updated.status.toInt(), {ok: false, error: updated.error})
+    return
+  )
+  updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
+  c.json(200, updated)
 )
 
 def reactToComment(*serve.Context c, string key) (
