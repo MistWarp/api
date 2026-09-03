@@ -2567,6 +2567,7 @@ def handleUpdateProject(*serve.Context c) (
       string productDescription = incomingProduct.description.toStr().strip()
       number productPrice = incomingProduct.price.toNum()
       string grantsItem = incomingProduct.grantsItem.toStr().toLower().strip()
+      string productIcon = incomingProduct.icon.toStr().strip()
       if !regex.match("^[a-z0-9_-]{1,40}$", productId) or productIds.contains(productId) (
         c.badRequest("game product ids must be unique lowercase identifiers")
         return
@@ -2575,8 +2576,16 @@ def handleUpdateProject(*serve.Context c) (
         c.badRequest("invalid game product name or description")
         return
       )
-      if productPrice < 0.01 or productPrice > 1000 (
-        c.badRequest("game product prices must be between 0.01 and 1000 credits")
+      if productPrice < 0 or productPrice > 1000 (
+        c.badRequest("game product prices must be between 0 and 1000 credits")
+        return
+      )
+      if productIcon != "" and productIcon.len > 100000 (
+        c.badRequest("game product icons must be smaller than 100KB")
+        return
+      )
+      if productIcon != "" and !productIcon.startsWith("data:image/") and !productIcon.startsWith("https://") and !productIcon.startsWith("http://") (
+        c.badRequest("game product icons must be image data URLs or image URLs")
         return
       )
       if grantsItem != "" and !regex.match("^[a-z0-9_-]{1,40}$", grantsItem) (
@@ -2584,7 +2593,7 @@ def handleUpdateProject(*serve.Context c) (
         return
       )
       productIds.append(productId)
-      products.append({id: productId, name: productName, description: productDescription, price: productPrice, grantsItem: grantsItem})
+      products.append({id: productId, name: productName, description: productDescription, price: productPrice, grantsItem: grantsItem, icon: productIcon})
     )
     project.gameProducts = products
   )
@@ -3075,10 +3084,6 @@ def handleViewProject(*serve.Context c) (
     return
   )
   string viewer = normalizeUsername(c.getString("username"))
-  if viewer != "" and projectRole(project, c.getString("username")) == "owner" (
-    c.json(200, {ok: true})
-    return
-  )
   string dedupKey = project.id.toStr() ++ "|" ++ viewer
   if viewer == "" (
     dedupKey = project.id.toStr() ++ "|ip:" ++ c.ip()
