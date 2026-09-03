@@ -2211,6 +2211,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
     playtime.userId = userId
     playtime.updated = timestamp
   )
+  playtime.projectId = projectId
   boolean saved = putDocument(playtimeDocs, playtimeId, playtime)
   sync.unlock(playtimeLock)
   return saved
@@ -2234,6 +2235,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     )
     playtime.duration = playtime.duration.toNum() + credited
     playtime.updated = timestamp
+    playtime.projectId = projectId
     putDocument(playtimeDocs, playtimeId, playtime)
     sync.unlock(playtimeLock)
   )
