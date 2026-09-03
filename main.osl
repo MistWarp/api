@@ -406,6 +406,7 @@ api.POST("/projects/:id/comments", requireAuth, requireGoodStanding, serve.rateL
 api.DELETE("/projects/:id/comments/:cid", requireAuth, handleDeleteProjectComment)
 api.PUT("/projects/:id/comments/:cid", requireAuth, handleEditProjectComment)
 api.POST("/projects/:id/comments/:cid/react", requireAuth, handleReactProjectComment)
+api.POST("/projects/:id/comments/:cid/pin", requireAuth, handlePinProjectComment)
 
 api.GET("/bounties/:id/activity", handleGetBountyActivity)
 api.POST("/bounties/:id/comments", requireAuth, requireGoodStanding, serve.rateLimit(30, 60), handleCreateBountyComment)
@@ -453,6 +454,7 @@ api.POST("/users/:name/comments", requireAuth, requireGoodStanding, serve.rateLi
 api.DELETE("/users/:name/comments/:cid", requireAuth, handleDeleteProfileComment)
 api.PUT("/users/:name/comments/:cid", requireAuth, handleEditProfileComment)
 api.POST("/users/:name/comments/:cid/react", requireAuth, handleReactProfileComment)
+api.POST("/users/:name/comments/:cid/pin", requireAuth, handlePinProfileComment)
 
 api.GET("/news", handleGetNews)
 api.GET("/news/:id", handleGetNewsItem)
