@@ -189,7 +189,7 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
 
 def missingProjectHistoryFiles() array (
   array missing = []
-  array files = fs.readDir(projectsDir).toArray()
+  array files = fs.readDir(projectsDir)
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (

@@ -564,7 +564,7 @@ def handleDeletePullComment(*serve.Context c) (
         return
     )
     object project = result.project.assert(object)
-    object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin") == true)
+    object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin"))
     if !deleted.ok (
         c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
         return

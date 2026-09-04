@@ -125,7 +125,7 @@ def gameInventoryItemResponse(string globalId, object owned) object (
 def gameInventoryResponse(string userId, object allowedProject) object (
     object inventory = loadGameInventory(userId)
     object ownedItems = inventory.items.assertElse(object, {})
-    array ids = ownedItems.getKeys().toArray()
+    array ids = ownedItems.getKeys()
     array items = []
     for i ids.len (
         string globalId = ids[i].toStr()
@@ -151,7 +151,7 @@ def grantInventoryItem(string userId, object project, object item, number amount
         sync.unlock(lockName)
         return {ok: true, replayed: true, item: owned}
     )
-    if !items.contains(globalId) and items.getKeys().toArray().len >= mistwarpBenefitsForUserId(userId).maxGameInventoryItems.toNum() (
+    if !items.contains(globalId) and items.getKeys().len >= mistwarpBenefitsForUserId(userId).maxGameInventoryItems.toNum() (
         sync.unlock(lockName)
         return {ok: false, error: "portable item inventory limit reached"}
     )

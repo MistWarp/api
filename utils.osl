@@ -1,5 +1,5 @@
 def randomString(number length) string (
-    return crypto.randomString(length).toStr()
+    return crypto.randomString(length)
 )
 
 def generateId() string (

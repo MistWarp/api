@@ -127,7 +127,7 @@ def migratePullCommentCounts() boolean (
 
 def initCommunityDatabase() boolean (
     if projectSearchDocs.count({}) == 0 (
-        array projectFiles = fs.readDir(projectsDir).toArray()
+        array projectFiles = fs.readDir(projectsDir)
         for i projectFiles.len (
             string file = projectFiles[i].toStr()
             if file.endsWith(".json") (
@@ -142,7 +142,7 @@ def initCommunityDatabase() boolean (
         )
     )
     if profileSearchDocs.count({}) == 0 (
-        array names = fs.readDir(usersDir).toArray()
+        array names = fs.readDir(usersDir)
         for i names.len (
             string file = names[i].toStr()
             if file.endsWith(".json") (

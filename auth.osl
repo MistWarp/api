@@ -57,7 +57,7 @@ def deleteSession(string token) boolean (
 )
 
 def cleanupExpiredSessions() (
-    array files = fs.readDir(sessionsDir).toArray()
+    array files = fs.readDir(sessionsDir)
     for i files.len (
         string path = sessionsDir ++ files[i].toStr()
         auto res = readFile(path)

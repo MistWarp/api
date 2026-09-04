@@ -346,7 +346,7 @@ def syncR2StorageInventory(boolean force) object (
     object latest = latestLoaded.ok ? latestLoaded.data.assertElse(object, {}) {}
     object inventoryObjects = inventory.objects.assertElse(object, {})
     object latestObjects = latest.contains("objects") ? latest.objects.assertElse(object, {}) {}
-    array latestKeys = latestObjects.getKeys().toArray()
+    array latestKeys = latestObjects.getKeys()
     for i latestKeys.len (
         string key = latestKeys[i].toStr()
         object item = latestObjects[key].assertElse(object, {})

@@ -183,7 +183,7 @@ def handleUnbanUser(*serve.Context c) (
 def handleListBans(*serve.Context c) (
     object data = loadBans()
     object bans = data.bans
-    array keys = bans.getKeys().toArray()
+    array keys = bans.getKeys()
     array out = []
     for i keys.len (
         string key = keys[i].toStr()
@@ -265,7 +265,7 @@ def localRuntimeStorageStats() object (
 def aggregateStorageObjects(object objects) object (
     object types = {assets: 0, history: 0, projectData: 0, database: 0, cache: 0, thumbnails: 0, other: 0}
     number total = 0
-    array keys = objects.getKeys().toArray()
+    array keys = objects.getKeys()
     for i keys.len (
         object item = objects[keys[i].toStr()].assertElse(object, {})
         string kind = item.type.toStr()
@@ -361,7 +361,7 @@ def handleAdminStats(*serve.Context c) (
         )
         projectUpdatesByDay[editKey] = previousUpdates + 1
     )
-    array userFiles = fs.readDir(usersDir).toArray()
+    array userFiles = fs.readDir(usersDir)
     number totalUsers = 0
     object usersByDay = {}
     for i userFiles.len (
@@ -378,7 +378,7 @@ def handleAdminStats(*serve.Context c) (
             )
         )
     )
-    array sessionFiles = fs.readDir(sessionsDir).toArray()
+    array sessionFiles = fs.readDir(sessionsDir)
     object loginsByDay = {}
     number activeSessions = 0
     for i sessionFiles.len (
@@ -461,7 +461,7 @@ def handleAdminStats(*serve.Context c) (
             crashesByDay[diagnosticDay] = previousCrashes + 1
         )
     )
-    array loadDays = loadSamplesByDay.getKeys().toArray()
+    array loadDays = loadSamplesByDay.getKeys()
     for i loadDays.len (
         string loadDay = loadDays[i].toStr()
         averageLoadMsByDay[loadDay] = loadTimeTotalsByDay[loadDay].toNum() / loadSamplesByDay[loadDay].toNum()
@@ -486,7 +486,7 @@ def handleAdminStats(*serve.Context c) (
     )
     object banData = loadBans()
     object bans = banData.bans
-    number bannedUsers = bans.getKeys().toArray().len
+    number bannedUsers = bans.getKeys().len
     array news = loadNews()
     object payoutStore = loadPendingPayouts()
     array pendingPayouts = payoutStore.payouts.assert(array)
@@ -566,7 +566,7 @@ def handlePublicStats(*serve.Context c) (
     )
     number totalUsers = 0
     object usersByDay = {}
-    array userFiles = fs.readDir(usersDir).toArray()
+    array userFiles = fs.readDir(usersDir)
     for i userFiles.len (
         string filename = userFiles[i].toStr()
         if filename.endsWith(".json") (

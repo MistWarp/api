@@ -26,7 +26,7 @@ def sanitizeNotificationPayload(object payload, string notifType, string actor) 
     if typeof(payload) != "object" (
         return data
     )
-    array keys = payload.getKeys().toArray()
+    array keys = payload.getKeys()
     for i keys.len (
         string key = keys[i].toStr()
         data[key] = payload[key]
@@ -254,7 +254,7 @@ def notificationBody(string actor, string notifType, object extra) string (
 def notifyRequestBody(string target, string actor, string notifType, object extra) object (
     object data = {}
     if typeof(extra) == "object" (
-        array keys = extra.getKeys().toArray()
+        array keys = extra.getKeys()
         for i keys.len (
             string key = keys[i].toStr()
             data[key] = extra[key]
@@ -346,7 +346,7 @@ def addNotification(string target, string actor, string notifType, object extra)
         if typeof(existing.platform_data) == "object" (
             existingPd = existing.platform_data
         )
-        array payloadKeys = payload.getKeys().toArray()
+        array payloadKeys = payload.getKeys()
         for j payloadKeys.len (
             string k = payloadKeys[j].toStr()
             if !existingPd.contains(k) or existingPd[k] != payload[k] (
