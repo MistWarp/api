@@ -178,7 +178,10 @@ import "./pull-metadata.osl"
 import "./pulls.osl"
 import "./reports.osl"
 import "./admin.osl"
+import "./like-milestone-policy.osl"
+import "./like-milestones.osl"
 import "./notifications.osl"
+import "./remote-milestones.osl"
 import "./news.osl"
 import "./standing.osl"
 import "./settings.osl"
@@ -188,6 +191,7 @@ import "./community-tools.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
+auto remoteMilestoneChecks = cache.create(10000, 10)
 auto viewDedup = cache.create(100000, 21600)
 auto viewIndexFlush = cache.create(100000, 600)
 auto userIdsCache = cache.create(10000, 300)
@@ -276,6 +280,9 @@ api.POST("/auth", handleRoturAuth)
 api.GET("/me", handleGetMe)
 api.POST("/logout", handleLogout)
 
+api.POST("/milestones/followers/:name", requireAuth, handleCheckFollowerMilestones)
+api.POST("/milestones/posts/:id", requireAuth, handleCheckPostMilestones)
+api.POST("/milestones/themes/:id", requireAuth, handleCheckThemeMilestones)
 api.GET("/notifications", requireAuth, handleGetNotifications)
 api.POST("/notifications/read", requireAuth, handleReadNotifications)
 

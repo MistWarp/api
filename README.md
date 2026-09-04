@@ -94,3 +94,16 @@ For a delta whose `baseHead` still matches the stored head, the API removes loos
 1. Client holds a rotur token (rotur-sdk login).
 2. Client fetches `https://api.rotur.dev/generate_validator?key=<ROTUR_APP_KEY>&auth=<token>` (must be the same rotur instance the server validates against).
 3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
+
+
+## Milestone notifications
+
+MistWarp sends one-time notifications at 5, 25, 50, 100, 500, and 1,000 likes or followers. Likes are counted separately for each project, comment, roadmap post, space, news post, profile post, and theme. The `like_milestones` collection stores progress independently of the inbox, so clearing notifications, unliking, and re-liking do not reset it.
+
+Project and community reactions check milestones when saved. Profile-post, theme, and follower checks read existing public APIs and keep their state in MistWarp. The client requests a check after a like or follow; opening the inbox also checks the current account's followers. These sampled counts can detect a threshold crossed between visits, but cannot detect a count that rose and fell entirely between checks. Existing counts establish a baseline without sending every earlier milestone. No Rotur or WarpTheme server changes are required.
+
+## Project source access
+
+Paid projects and projects with See inside disabled expose commits, branches, files, and workspace archives only to their owner. Buying a project grants playback, not source-history access. Pull-request inspection follows the same restriction for both projects. The project response exposes `canViewSource` for clients.
+
+Deploy the API and client changes together. Purge previously cached project history and workspace responses from the CDN when deploying this policy; new responses use `private, no-store`. This policy controls MistWarp's inspection endpoints. Playback still sends the data required to run a Scratch project to the browser.

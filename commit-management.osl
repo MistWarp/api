@@ -47,6 +47,9 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
     )
     object project = loaded.project.assert(object)
     string role = projectRole(project, username)
+    if !projectSourcePolicyAllows(project, projectPrice(project), role == "owner") (
+        return {status: 403, error: "only the owner can edit commits for this project"}
+    )
     if !isAdmin and role != "owner" and role != "maintainer" (
         return {status: 403, error: "only project owners and maintainers can edit commits"}
     )
@@ -105,6 +108,8 @@ def handlePatchCommit(*serve.Context c) (
 )
 
 def handleGetCommitCollaborators(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     auto loaded = loadProject(c.param("id"))
     if !loaded.ok (
         c.notFound("project not found")

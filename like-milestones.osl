@@ -1,0 +1,37 @@
+// Claims survive inbox clearing and server restarts. Serialize claims for the
+// same item so simultaneous reactions cannot send the same milestone twice.
+def notifyLikeMilestones(string target, string kind, string contentId, number before, number after, string path, object extra) (
+    if target == "" or after <= before (
+        return
+    )
+    string recipient = userIdForUsername(target)
+    if recipient == "" (
+        recipient = normalizeUsername(target)
+    )
+    string key = kind ++ ":" ++ contentId ++ ":" ++ recipient
+    string lockName = "like-milestone:" ++ key
+    sync.lock(lockName)
+    object previous = likeMilestoneDocs.findById(key)
+    number notifiedThrough = (previous.notifiedThrough ?? 0).toNum()
+    array milestones = crossedLikeMilestones(before, after, notifiedThrough)
+    for i milestones.len (
+        number milestone = milestones[i].toNum()
+        if putDocument(likeMilestoneDocs, key, {notifiedThrough: milestone}) (
+            string notifType = "like_milestone"
+            if kind == "followers" (
+                notifType = "follower_milestone"
+            )
+            object payload = sanitizeNotificationPayload(extra, notifType, "")
+            payload.milestone = milestone
+            payload.contentKind = kind
+            payload.contentId = contentId
+            payload.path = path
+            payload.body = "Your " ++ kind ++ " got " ++ milestone.toStr() ++ " likes"
+            if kind == "followers" (
+                payload.body = "You reached " ++ milestone.toStr() ++ " followers"
+            )
+            addNotification(target, "", notifType, payload)
+        )
+    )
+    sync.unlock(lockName)
+)

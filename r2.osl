@@ -679,6 +679,8 @@ def handleGetProjectBlob(*serve.Context c) (
 )
 
 def handleGetProjectWorkspace(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     auto result = loadProject(c.param("id"))
     if !result.ok (
         c.notFound("project not found")
@@ -697,13 +699,8 @@ def handleGetProjectWorkspace(*serve.Context c) (
     string etag = projectWorkspaceEtag(project)
     c.setHeader("ETag", etag)
     c.setHeader("Vary", "Authorization, Cookie")
-    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
-        c.setHeader("Cache-Control", "public, max-age=0, must-revalidate")
-        c.setHeader("CDN-Cache-Control", "public, max-age=60, stale-while-revalidate=300")
-    ) else (
-        c.setHeader("Cache-Control", "private, no-store")
-        c.setHeader("CDN-Cache-Control", "private, no-store")
-    )
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     if c.header("If-None-Match").contains(etag) (
         c.status(304)
         return

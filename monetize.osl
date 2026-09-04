@@ -100,7 +100,15 @@ def projectSeeInside(object project) boolean (
     return true
 )
 
+def sourcePolicyAllowsViewer(object project, *serve.Context c) boolean (
+    boolean owner = c.getBool("authenticated") and projectRole(project, c.getString("username")) == "owner"
+    return projectSourcePolicyAllows(project, projectPrice(project), owner)
+)
+
 def canSeeInsideProject(object project, *serve.Context c) boolean (
+    if !sourcePolicyAllowsViewer(project, c) (
+        return false
+    )
     if canEditProject(project, c) (
         return true
     )
@@ -120,6 +128,9 @@ def canSeeInsideProject(object project, *serve.Context c) boolean (
 )
 
 def canRemixProject(object project, *serve.Context c) boolean (
+    if !sourcePolicyAllowsViewer(project, c) (
+        return false
+    )
     if !projectRemixable(project) (
         return canEditProject(project, c)
     )

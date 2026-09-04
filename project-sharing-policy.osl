@@ -5,3 +5,11 @@ def projectContributionOnlyFlag(object project) boolean (
 def remixIsContributionOnly(object parent, number parentPrice) boolean (
     return parentPrice > 0 or projectContributionOnlyFlag(parent)
 )
+
+// Buying access to play does not grant access to source or history.
+def projectSourcePolicyAllows(object project, number price, boolean isOwner) boolean (
+    if isOwner (
+        return true
+    )
+    return price <= 0 and !(project.contains("seeInside") and project.seeInside == false)
+)

@@ -352,7 +352,8 @@ def projectResponse(object project,*serve.Context c) object (
     isOwner: isOwner
   }
   response.workspaceUrl = ""
-  if project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
+  response.canViewSource = canSeeInsideProject(project, c)
+  if response.canViewSource == true and project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
     response.workspaceUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
   )
   response.gitHead = projectGitHead(project)
@@ -366,6 +367,13 @@ def projectResponse(object project,*serve.Context c) object (
     response.remixBaseCommit = project.remixBaseCommit
   )
   response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
+  if response.canViewSource != true (
+    response.gitHead = ""
+    response.gitBranch = ""
+    response.commitCount = 0
+    response.remixBaseCommit = ""
+    response.needsHistoryBootstrap = false
+  )
   object searchEntry = indexEntryFromProject(project)
   response.collaboration = {
     teamSize: searchEntry.teamSize,
@@ -2265,6 +2273,8 @@ def handleSetThumbnail(*serve.Context c) (
 )
 
 def handleGetProject(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
@@ -3132,6 +3142,13 @@ def handleViewProject(*serve.Context c) (
 )
 
 def handleReactProject(*serve.Context c) (
+    string lockName = "project-reactions:" ++ c.param("id")
+    sync.lock(lockName)
+    handleReactProjectLocked(c)
+    sync.unlock(lockName)
+)
+
+def handleReactProjectLocked(*serve.Context c) (
   object body = c.bodyJSON()
   string reactionType = body.type.toStr()
   if !isValidReaction(reactionType) (
@@ -3159,6 +3176,7 @@ def handleReactProject(*serve.Context c) (
   if project.contains("brokenhearts") (
     broken = project.brokenhearts.assert(array)
   )
+  number previousLikes = loves.len
   boolean hadHeart = loves.contains(viewer)
   boolean hadBroken = broken.contains(viewer)
   loves = removeString(loves, viewer)
@@ -3173,9 +3191,13 @@ def handleReactProject(*serve.Context c) (
   )
   project.loves = loves
   project.brokenhearts = broken
-  saveProject(project)
+  if !saveProject(project) (
+    c.internalError("could not save reaction")
+    return
+  )
   upsertIndexEntry(project)
 
+  notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
   if addedHeart (
     addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
     addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})

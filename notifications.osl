@@ -42,6 +42,9 @@ def sanitizeNotificationPayload(object payload, string notifType, string actor) 
 
 
 def notificationBody(string actor, string notifType, object extra) string (
+    if notifType == "like_milestone" or notifType == "follower_milestone" (
+        return extra.body.toStr() ++ ": " ++ editorOrigin ++ extra.path.toStr()
+    )
     string projectTitle = ""
     if extra.contains("projectTitle") (
         projectTitle = extra.projectTitle.toStr()
@@ -289,6 +292,7 @@ def postRoturNotification(string target, string targetId, string actor, string a
         requestBody.actor_id = actorId
     )
     object resp = requests.post(roturBase ++ "/v2/notifications", {
+        timeout: 5,
         headers: notifyHeaders(),
         body: json.stringify(requestBody)
     })
@@ -303,12 +307,15 @@ def addNotification(string target, string actor, string notifType, object extra)
         return
     )
     string targetId = userIdForUsername(target)
-    string actorId = userIdForUsername(actor)
+    string actorId = ""
+    if actorKey != "" (
+        actorId = userIdForUsername(actor)
+    )
     object targetSafety = loadSafety(target)
     if targetSafety.blocked.assert(array).contains(actorKey) or targetSafety.muted.assert(array).contains(actorKey) (
         return
     )
-    if userHasBlocked(actor, target) (
+    if actorKey != "" and userHasBlocked(actor, target) (
         return
     )
     object payload = sanitizeNotificationPayload(extra, notifType, actor)
@@ -328,6 +335,7 @@ def addNotification(string target, string actor, string notifType, object extra)
         return
     )
 
+    sync.lock("notifications:" ++ targetKey)
     array items = loadNotifications(targetKey)
     array next = [item]
     number kept = 1
@@ -354,11 +362,14 @@ def addNotification(string target, string actor, string notifType, object extra)
         )
     )
     saveNotifications(targetKey, next)
+    sync.unlock("notifications:" ++ targetKey)
 )
 
 
 def handleGetNotifications(*serve.Context c) (
     string username = c.getString("username")
+    syncFollowerMilestones(username)
+    sync.lock("notifications:" ++ normalizeUsername(username))
     array local = loadNotifications(username)
     boolean changed = false
     for i local.len (
@@ -378,17 +389,20 @@ def handleGetNotifications(*serve.Context c) (
     if changed (
         saveNotifications(username, local)
     )
+    sync.unlock("notifications:" ++ normalizeUsername(username))
     c.json(200, {ok: true, notifications: local})
 )
 
 
 def handleReadNotifications(*serve.Context c) (
     string username = c.getString("username")
+    sync.lock("notifications:" ++ normalizeUsername(username))
     array items = loadNotifications(username)
     for i items.len (
         object item = items[i]
         item.read = true
     )
     saveNotifications(username, items)
+    sync.unlock("notifications:" ++ normalizeUsername(username))
     c.json(200, {ok: true})
 )

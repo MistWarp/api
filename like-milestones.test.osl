@@ -1,0 +1,97 @@
+import "std:testing"
+import "std:db"
+import "std:sync"
+import "std:fs"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:url"
+import "std:cache"
+import "./remote-milestones.osl"
+import "./like-milestone-policy.osl"
+import "./like-milestones.osl"
+
+string path = "/tmp/mistwarp-milestones-" ++ timestamp.toStr() ++ ".db"
+auto milestoneDb = db.open(path)
+*db.Collection likeMilestoneDocs = milestoneDb.collection("milestones")
+string roturBase = "http://unused.invalid"
+auto remoteMilestoneChecks = cache.create(100, 10)
+array sent = []
+def isSafePathPart(string value) boolean ( return true )
+def profileExists(string name) boolean ( return true )
+def usernameForId(string id) string ( return id )
+boolean failWrite = false
+
+def normalizeUsername(string name) string (
+  return name.toLower()
+)
+def userIdForUsername(string name) string (
+  // Simulate an account rename without changing identity.
+  if name == "alice" or name == "renamed" (
+    return "u-alice"
+  )
+  return name.toLower()
+)
+def sanitizeNotificationPayload(object extra, string notifType, string actor) object (
+  return json.parse(json.stringify(extra), {type: "object"}).unwrap().assert(object)
+)
+def addNotification(string target, string actor, string notifType, object payload) (
+  sent.append({target: target, actor: actor, type: notifType, data: payload})
+)
+def putDocument(*db.Collection collection, string id, object value) boolean (
+  if failWrite (
+    return false
+  )
+  value["_id"] = id
+  if collection.exists({_id: id}) (
+    return collection.replaceOne({_id: id}, value) == 1
+  )
+  return collection.insertOne(value) != null
+)
+
+notifyLikeMilestones("alice", "project", "p1", 3, 4, "/project/p1", {})
+testing.assert(sent.len == 0, "below five does not notify")
+notifyLikeMilestones("alice", "project", "p1", 4, 5, "/project/p1", {})
+testing.assert(sent.len == 1, "fifth like notifies")
+testing.assert(sent[1].data.body == "Your project got 5 likes", "project wording")
+testing.assert(sent[1].data.path == "/project/p1", "links to the project")
+notifyLikeMilestones("alice", "project", "p1", 5, 4, "/project/p1", {})
+notifyLikeMilestones("alice", "project", "p1", 4, 5, "/project/p1", {})
+testing.assert(sent.len == 1, "unlike and relike do not repeat")
+// Persistence survives process-style close and reopen, and account renames.
+milestoneDb.close()
+milestoneDb = db.open(path)
+likeMilestoneDocs = milestoneDb.collection("milestones")
+notifyLikeMilestones("renamed", "project", "p1", 4, 5, "/project/p1", {})
+testing.assert(sent.len == 1, "restart and rename do not repeat")
+array thresholds = [25, 50, 100, 500, 1000]
+for i thresholds.len (
+  number milestone = thresholds[i].toNum()
+  notifyLikeMilestones("alice", "project", "p1", milestone - 1, milestone, "/project/p1", {})
+)
+testing.assert(sent.len == 6, "every requested milestone fires")
+notifyLikeMilestones("alice", "comment", "p1:c1", 4, 5, "/project/p1#comment-id-c1", {})
+notifyLikeMilestones("alice", "roadmap post", "p1", 4, 5, "/roadmap#idea-p1", {})
+notifyLikeMilestones("alice", "followers", "u-alice", 24, 25, "/users/alice/followers", {})
+testing.assert(sent.len == 9, "different content and followers have independent milestones")
+testing.assert(sent[9].type == "follower_milestone", "followers have their own notification type")
+testing.assert(sent[9].data.body == "You reached 25 followers", "follower wording")
+notifyLikeMilestones("alice", "project", "old", 499, 500, "/project/old", {})
+testing.assert(sent.len == 10 and sent[10].data.milestone == 500, "existing likes do not backfill old milestones")
+failWrite = true
+notifyLikeMilestones("alice", "post", "failed", 4, 5, "/posts/failed", {})
+testing.assert(sent.len == 10, "failed durable claims do not send")
+failWrite = false
+notifyLikeMilestones("alice", "post", "failed", 4, 5, "/posts/failed", {})
+testing.assert(sent.len == 11, "failed claims can be retried")
+observeRemoteMilestone("alice", "followers", "remote", 24, "/users/alice/followers", {})
+testing.assert(sent.len == 11, "first sample establishes a baseline")
+observeRemoteMilestone("alice", "followers", "remote", 27, "/users/alice/followers", {})
+testing.assert(sent.len == 12 and sent[12].data.milestone == 25, "sampled counts catch a skipped threshold")
+observeRemoteMilestone("alice", "followers", "remote", 24, "/users/alice/followers", {})
+observeRemoteMilestone("alice", "followers", "remote", 25, "/users/alice/followers", {})
+testing.assert(sent.len == 12, "follower drops and refollows do not repeat")
+milestoneDb.close()
+fs.remove(path)
+fs.remove(path ++ "-wal")
+fs.remove(path ++ "-shm")

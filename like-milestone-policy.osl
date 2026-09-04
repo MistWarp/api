@@ -1,0 +1,12 @@
+// Only new crossings count. Existing likes are not backfilled on rollout.
+def crossedLikeMilestones(number before, number after, number notifiedThrough) array (
+    array result = []
+    array thresholds = [5, 25, 50, 100, 500, 1000]
+    for i thresholds.len (
+        number threshold = thresholds[i].toNum()
+        if before < threshold and after >= threshold and notifiedThrough < threshold (
+            result.append(threshold)
+        )
+    )
+    return result
+)

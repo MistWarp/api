@@ -777,7 +777,7 @@ def handlePinProfileComment(*serve.Context c) (
   c.json(200, updated)
 )
 
-def reactToComment(*serve.Context c, string key) (
+def reactToComment(*serve.Context c, string key, string path) (
   object body = c.bodyJSON()
   string reactionType = body.type.toStr()
   if !isValidReaction(reactionType) (
@@ -791,6 +791,8 @@ def reactToComment(*serve.Context c, string key) (
   array comments = loadComments(key)
   boolean found = false
   object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
+  number previousLikes = 0
+  string author = ""
   for i comments.len (
     object comment = comments[i]
     if comment.id.toStr() == cid (
@@ -798,6 +800,8 @@ def reactToComment(*serve.Context c, string key) (
       if comment.contains("reactions") and comment.reactions != null (
         reactions = comment.reactions.assert(object)
       )
+      previousLikes = reactionSummary(reactions, username).counts.heart.toNum()
+      author = comment.author.toStr()
       comment.reactions = toggleReactionMap(reactions, username, reactionType)
       summary = reactionSummary(comment.reactions.assert(object), username)
       comments[i] = comment
@@ -815,6 +819,7 @@ def reactToComment(*serve.Context c, string key) (
     c.internalError("could not save reaction")
     return
   )
+  notifyLikeMilestones(author, "comment", key ++ ":" ++ cid, previousLikes, summary.counts.heart.toNum(), path ++ "#comment-id-" ++ cid, {commentId: cid})
   if key.startsWith("project-") (
     siteBroadcastProject(c.param("id"), {
       type: "comment_reaction",
@@ -843,7 +848,7 @@ def handleReactProjectComment(*serve.Context c) (
     c.json(403, {ok: false, error: "buy this project to react to its comments"})
     return
   )
-  reactToComment(c, "project-" ++ project.id.toStr())
+  reactToComment(c, "project-" ++ project.id.toStr(), "/project/" ++ project.id.toStr())
 )
 
 def handleReactProfileComment(*serve.Context c) (
@@ -856,5 +861,5 @@ def handleReactProfileComment(*serve.Context c) (
     c.forbidden("you cannot react to comments on this profile")
     return
   )
-  reactToComment(c, profileCommentKey(name))
+  reactToComment(c, profileCommentKey(name), "/users/" ++ name)
 )

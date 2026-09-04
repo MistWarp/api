@@ -452,6 +452,13 @@ def handleDeleteNews(*serve.Context c) (
 )
 
 def handleReactNews(*serve.Context c) (
+    string lockName = "news-reactions"
+    sync.lock(lockName)
+    handleReactNewsLocked(c)
+    sync.unlock(lockName)
+)
+
+def handleReactNewsLocked(*serve.Context c) (
     object body = c.bodyJSON()
     string reactionType = body.type.toStr()
     if !isValidReaction(reactionType) (
@@ -462,6 +469,8 @@ def handleReactNews(*serve.Context c) (
     string username = normalizeUsername(c.getString("username"))
     array items = loadNews()
     boolean found = false
+    number previousLikes = 0
+    string author = ""
     object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
     for i items.len (
         object item = items[i]
@@ -470,8 +479,11 @@ def handleReactNews(*serve.Context c) (
             if item.contains("reactions") and item.reactions != null (
                 reactions = item.reactions.assert(object)
             )
+            previousLikes = reactionSummary(reactions, username).counts.heart.toNum()
+            author = item.author.toStr()
             item.reactions = toggleReactionMap(reactions, username, reactionType)
             summary = reactionSummary(item.reactions.assert(object), username)
+            items[i] = item
             found = true
         )
     )
@@ -479,7 +491,11 @@ def handleReactNews(*serve.Context c) (
         c.notFound("news item not found")
         return
     )
-    saveNews(items)
+    if !saveNews(items) (
+        c.internalError("could not save reaction")
+        return
+    )
+    notifyLikeMilestones(author, "news post", id, previousLikes, summary.counts.heart.toNum(), "/news/" ++ id, {newsId: id})
     c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
 )
 
