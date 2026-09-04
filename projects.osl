@@ -92,6 +92,7 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
   if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
     return false
   )
+  if canSaveLiveProject(project, c) return true
   if validPreviewKey(project.id.toStr(), c.query("k")) (
     return true
   )
@@ -1404,19 +1405,12 @@ def ensureProjectJsonSnapshot(object project) object (
     fs.remove(tempPath)
     return {ok: false}
   )
-  string previousKey = project.jsonKey.toStr()
   project.jsonKey = key
   project.jsonGzip = true
   project.pendingJson = false
-  fs.remove(stagingJsonPath(project.id.toStr()))
   fs.remove(tempPath)
-  if !saveProject(project) (
-    removeProjectStorageKeyIfOrphaned(key, project.id.toStr(), false)
-    return {ok: false}
-  )
-  if previousKey != key (
-    removeProjectStorageKeyIfOrphaned(previousKey, project.id.toStr(), false)
-  )
+  // Return an immutable snapshot to the caller without rewriting the source
+  // record. Another save may have advanced that record while storage was read.
   return {ok: true, project: project}
 )
 
@@ -1442,19 +1436,20 @@ def ensureProjectWorkspaceSnapshots(object project) object (
   fs.remove(tempPath)
   project.workspaceKey = key
   project.workspaceLayers = [key]
-  if !saveProject(project) (
-    removeProjectStorageKeyIfOrphaned(key, project.id.toStr(), true)
-    return {ok: false}
-  )
-  for i previousKeys.len (
-    if previousKeys[i].toStr() != key (
-      removeProjectStorageKeyIfOrphaned(previousKeys[i].toStr(), project.id.toStr(), true)
-    )
-  )
   return {ok: true, project: project}
 )
 
 def maybeFlushProject(object project) (
+  string lockName = "project-history-" ++ project.id.toStr()
+  sync.lock(lockName)
+  auto latest = loadProject(project.id.toStr())
+  if latest.ok (
+    flushProjectLocked(latest.project.assert(object))
+  )
+  sync.unlock(lockName)
+)
+
+def flushProjectLocked(object project) (
   if project.contains("pendingJson") and project.pendingJson == true (
     number lastUploadAt = project.lastUploadAt.toNum()
     if timestamp - lastUploadAt >= uploadDebounceMs (
@@ -1531,7 +1526,7 @@ def handleCheckProjectAssets(*serve.Context c) (
 )
 
 def handleUploadProject(*serve.Context c) (
-  string lockName = "project-upload:" ++ c.param("id")
+  string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
   handleUploadProjectLocked(c)
   sync.unlock(lockName)
@@ -1668,6 +1663,26 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
+  if hasWorkspace (
+    if workspaceFile.size.toNum() > maxWorkspaceBytes or !validateZipArchive(workspaceFile.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
+      return
+    )
+    object checked = validateUploadedHistory(project, workspaceFile.data, gitMetadata, currentHead)
+    if !checked.ok (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
+      return
+    )
+    workspaceFile.data = checked.data
+    workspaceFile.size = checked.size
+    gitInfo = checked.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+  )
+
   // An editor with a shallow history can create a new commit object even when
   // its project tree is identical to the current version. Compare the commit
   // trees on the server before storing project JSON, assets, or history.
@@ -1725,53 +1740,6 @@ def handleUploadProjectLocked(*serve.Context c) (
     c.json(400, extensionError)
     return
   )
-
-  object uploadResult = uploadProjectFiles(project, extractDir, projectBenefits)
-
-  if !uploadResult.ok (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
-    object errorBody = {ok: false, error: uploadResult.error}
-    if uploadResult.contains("code") (
-      errorBody.code = uploadResult.code
-    )
-    c.json(uploadResult.status.toInt(), errorBody)
-    return
-  )
-
-  array projectExtensions = extensionResult.extensions.assert(array)
-  if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
-    c.internalError("failed to store extension sources")
-    return
-  )
-
-  auto thumbResult = c.formFile("thumbnail")
-  if !thumbResult.isErr() (
-    object thumb = thumbResult.unwrap().assert(object)
-    if thumb.size.toNum() <= maxThumbBytes (
-      fs.writeFileBytes(thumbnailPath(id), thumb.data)
-    )
-  )
-
-  project.assets = uploadResult.assets
-  project.edited = timestamp
-
-  string gzipPath = uploadResult.gzipPath.toStr()
-  string previousJsonKey = project.jsonKey.toStr()
-  if previousJsonKey.startsWith("project-json/") or (project.contains("inheritedJson") and project.inheritedJson == true) (
-    project.jsonKey = projectJsonKey(id)
-  )
-  project.inheritedJson = false
-  project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
-  project.jsonBytes = uploadResult.jsonBytes
-  project.storedJsonBytes = uploadResult.storedJsonBytes
-  project.assetBytes = uploadResult.assetBytes
-  project.jsonGzip = true
-  project.extensions = projectExtensions
-  project.extensionsIndexed = true
-  project.delete("pendingExtensionUrls")
 
   boolean generatedWorkspace = false
   byte[] generatedWorkspaceBody = []
@@ -1886,7 +1854,20 @@ def handleUploadProjectLocked(*serve.Context c) (
     fs.remove(restoreDeltaPath)
   )
 
-  array previousWorkspaceKeys = []
+  if generatedWorkspace (
+    object checked = validateUploadedHistory(project, generatedWorkspaceBody, gitMetadata, historyBaseHead)
+    if !checked.ok (
+      fs.remove(zipPath)
+      fs.remove(extractDir)
+      c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
+      return
+    )
+    generatedWorkspaceBody = checked.data.assert(byte[])
+    gitInfo = checked.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+  )
+
+  array previousWorkspaceKeys = projectWorkspaceKeys(project)
   if hasWorkspace or generatedWorkspace (
     any incomingWorkspaceBody = generatedWorkspaceBody
     number incomingWorkspaceSize = generatedWorkspaceBody.len
@@ -1906,67 +1887,77 @@ def handleUploadProjectLocked(*serve.Context c) (
       c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
       return
     )
-    boolean workspaceDelta = gitInfo.contains("delta") and gitInfo.delta == true
+    // Validation has materialized all required layers and derived metadata.
     previousWorkspaceKeys = projectWorkspaceKeys(project)
-    boolean replaceWorkspace = !workspaceDelta
-    any storedWorkspaceBody = incomingWorkspaceBody
-    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(storedWorkspaceBody))
-    if !stageR2Blob(workspaceKey, storedWorkspaceBody, "application/x-mistwarp-project", "") (
+    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(incomingWorkspaceBody))
+    if !stageR2Blob(workspaceKey, incomingWorkspaceBody, "application/x-mistwarp-project", "") (
       fs.remove(zipPath)
       fs.remove(extractDir)
       c.internalError("failed to store MistWarp project history")
       return
     )
-    array nextWorkspaceLayers = [workspaceKey]
-    if !replaceWorkspace (
-      nextWorkspaceLayers = []
-      for i previousWorkspaceKeys.len (
-        nextWorkspaceLayers.append(previousWorkspaceKeys[i])
-      )
-      nextWorkspaceLayers.append(workspaceKey)
-    )
     project.workspaceKey = workspaceKey
-    project.workspaceLayers = nextWorkspaceLayers
-    if gitMetadata != "" (
-      project.gitHead = canonicalHistoryHead(gitInfo)
-      project.gitBranch = gitInfo.branch.toStr()
-      if workspaceDelta (
-        object mergedHistory = mergeDeltaHistory(project, gitInfo, historyBaseHead)
-        project.gitCommits = mergedHistory.commits
-        project.gitGraph = mergedHistory.graph
-      ) else (
-        if gitInfo.contains("commits") and gitInfo.commits != null (
-          project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
-        )
-        if gitInfo.contains("graph") and gitInfo.graph != null (
-          object graph = gitInfo.graph.assert(object)
-          if graph.contains("nodes") and graph.nodes != null (
-            graph.nodes = paginate(graph.nodes.assert(array), 0, 200)
-          )
-          project.gitGraph = graph
-        )
-      )
+    project.workspaceLayers = [workspaceKey]
+    project.gitHead = gitInfo.head
+    project.gitBranch = gitInfo.branch
+    project.gitCommits = gitInfo.commits
+    project.gitGraph = gitInfo.graph
+  )
+
+  object uploadResult = uploadProjectFiles(project, extractDir, projectBenefits)
+
+  if !uploadResult.ok (
+    fs.remove(zipPath)
+    fs.remove(extractDir)
+    object errorBody = {ok: false, error: uploadResult.error}
+    if uploadResult.contains("code") (
+      errorBody.code = uploadResult.code
+    )
+    c.json(uploadResult.status.toInt(), errorBody)
+    return
+  )
+
+  array projectExtensions = extensionResult.extensions.assert(array)
+  if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
+    fs.remove(zipPath)
+    fs.remove(extractDir)
+    c.internalError("failed to store extension sources")
+    return
+  )
+
+  auto thumbResult = c.formFile("thumbnail")
+  if !thumbResult.isErr() (
+    object thumb = thumbResult.unwrap().assert(object)
+    if thumb.size.toNum() <= maxThumbBytes (
+      fs.writeFileBytes(thumbnailPath(id), thumb.data)
     )
   )
-  boolean storedJson = false
-  if r2Local (
-    storedJson = pushProjectJsonToR2(project, gzipPath)
-    if storedJson (
-      project.lastUploadAt = timestamp
-      project.pendingJson = false
-    )
-  ) else (
-    if stageProjectJson(project, gzipPath) (
-      project.pendingJson = true
-      storedJson = true
-    ) else (
-      storedJson = pushProjectJsonToR2(project, gzipPath)
-      if storedJson (
-        project.lastUploadAt = timestamp
-        project.pendingJson = false
-      )
-    )
+
+  project.assets = uploadResult.assets
+  project.edited = timestamp
+
+  string gzipPath = uploadResult.gzipPath.toStr()
+  string previousJsonKey = project.jsonKey.toStr()
+  if previousJsonKey.startsWith("project-json/") or (project.contains("inheritedJson") and project.inheritedJson == true) (
+    project.jsonKey = projectJsonKey(id)
   )
+  project.inheritedJson = false
+  project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
+  project.jsonBytes = uploadResult.jsonBytes
+  project.storedJsonBytes = uploadResult.storedJsonBytes
+  project.assetBytes = uploadResult.assetBytes
+  project.jsonGzip = true
+  project.extensions = projectExtensions
+  project.extensionsIndexed = true
+  project.delete("pendingExtensionUrls")
+
+  // Use an immutable JSON key so a failed metadata publication cannot
+  // overwrite the playable content referenced by the previous record.
+  byte[] jsonBody = fs.readFileBytes(gzipPath)
+  project.jsonKey = projectJsonSnapshotKey(contentHash(jsonBody))
+  boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
+  project.lastUploadAt = timestamp
+  project.pendingJson = false
   if !storedJson (
     if project.contains("workspaceLayers") and project.workspaceLayers != null (
       array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
@@ -1983,40 +1974,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
-  boolean historyMutationLocked = false
-  if hasWorkspace (
-    sync.lock("project-history-" ++ project.id.toStr())
-    historyMutationLocked = true
-    auto latestResult = loadProject(project.id.toStr())
-    string latestHead = latestResult.ok ? projectGitHead(latestResult.project.assert(object)) ""
-    if !latestResult.ok or latestHead != currentHead (
-      sync.unlock("project-history-" ++ project.id.toStr())
-      historyMutationLocked = false
-      fs.remove(stagingJsonPath(project.id.toStr()))
-      if project.jsonKey.toStr() != previousJsonKey (
-        removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
-      )
-      if project.contains("workspaceLayers") and project.workspaceLayers != null (
-        array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
-        for i failedWorkspaceKeys.len (
-          string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
-          if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
-            removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
-          )
-        )
-      )
-      fs.remove(zipPath)
-      fs.remove(extractDir)
-      c.json(409, {ok: false, error: "the project history changed while this save was processing", code: "head_changed", currentHead: latestHead})
-      return
-    )
-  )
+  // The wrapper holds the publication lock from the initial version read.
   boolean savedProject = saveProject(project)
-  if historyMutationLocked (
-    sync.unlock("project-history-" ++ project.id.toStr())
-  )
   if !savedProject (
-    fs.remove(stagingJsonPath(project.id.toStr()))
     if project.jsonKey.toStr() != previousJsonKey (
       removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
     )
@@ -2086,173 +2046,17 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  string configuredBranch = "main"
-  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
-    configuredBranch = project.gitBranch.toStr()
-  )
-  string remixBase = ""
-  if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
-    remixBase = project.remixBaseCommit.toStr()
-  )
-  if projectHasWorkspace(project) (
-    c.json(200, {
-      ok: true,
-      usedExisting: true,
-      workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
-      head: projectGitHead(project),
-      branch: configuredBranch,
-      remixBaseCommit: remixBase
-    })
+  object ensured = ensureGeneratedProjectHistory(project, {}, false)
+  if !ensured.ok or !projectHasWorkspace(ensured.project.assertElse(object, {})) (
+    c.json(409, {ok: false, code: "history_unavailable", error: "stored history could not be prepared; retry or recover the original repository"})
     return
   )
-
-  auto workspaceResult = c.formFile("workspace")
-  string gitMetadata = c.formValue("git")
-  boolean stagedWorkspace = false
-  object workspace = {}
-  if !workspaceResult.isErr() (
-    workspace = workspaceResult.unwrap().assert(object)
-  ) else if c.formValue("workspaceToken") != "" (
-    object staged = consumeStagedUploadPart(c.formValue("workspaceToken"), project.id.toStr(), "workspace", c.getString("userId"))
-    if !staged.ok (
-      c.badRequest(staged.error.toStr())
-      return
-    )
-    workspace = staged.file.assert(object)
-    stagedWorkspace = true
-  )
-  if workspace.getKeys().len == 0 or gitMetadata == "" (
-    c.badRequest("missing MistWarp history")
-    return
-  )
-  if workspace.size.toNum() > maxWorkspaceBytes (
-    c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit"})
-    return
-  )
-  string uploader = normalizeUsername(c.getString("username"))
-  number incomingBytes = workspace.size.toNum()
-  object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
-  number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
-  if !stagedWorkspace (
-    object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
-    if !reservation.ok (
-      number usedMb = (reservation.used.toNum() / 1048576).toInt()
-      number limitMb = (uploadLimit / 1048576).toInt()
-      c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
-      return
-    )
-  )
-  number workspaceExpandedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
-  if !validateZipArchive(workspace.data, maxWorkspaceBytes, workspaceExpandedLimit, maxWorkspaceFiles, true) (
-    c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
-    return
-  )
-  auto parsedGit = json.parse(gitMetadata, {type: "object"})
-  if parsedGit.isErr() (
-    c.badRequest("invalid MistWarp history metadata")
-    return
-  )
-  object gitInfo = parsedGit.unwrap().assert(object)
-  string head = canonicalHistoryHead(gitInfo)
-  string baseBranch = gitInfo.branch.toStr()
-  if head == "" or baseBranch == "" (
-    c.badRequest("incomplete MistWarp history metadata")
-    return
-  )
-
-  object parent = {}
-  boolean hasParent = project.remixParent.toStr() != ""
-  if hasParent (
-    auto parentResult = loadProject(project.remixParent.toStr())
-    if !parentResult.ok (
-      c.notFound("parent project not found")
-      return
-    )
-    parent = parentResult.project.assert(object)
-  )
-
-  if hasParent and projectHasWorkspace(parent) (
-    object snapshots = ensureProjectWorkspaceSnapshots(parent)
-    if !snapshots.ok (
-      c.internalError("could not prepare parent history")
-      return
-    )
-    parent = snapshots.project.assert(object)
-    project.workspaceKey = parent.workspaceKey
-    project.workspaceLayers = projectWorkspaceKeys(parent)
-    project.gitHead = parent.gitHead
-    project.gitCommits = []
-    if parent.contains("gitCommits") and parent.gitCommits != null (
-      project.gitCommits = parent.gitCommits
-    )
-    project.gitGraph = {branches: [], branchLogs: [], nodes: []}
-    if parent.contains("gitGraph") and parent.gitGraph != null (
-      project.gitGraph = parent.gitGraph
-    )
-    project.remixBaseCommit = parent.gitHead
-    remixBase = parent.gitHead.toStr()
-    saveProject(project)
-    upsertIndexEntry(project)
-    c.json(200, {
-      ok: true,
-      usedExisting: true,
-      workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
-      head: project.gitHead,
-      branch: configuredBranch,
-      remixBaseCommit: remixBase
-    })
-    return
-  )
-
-  string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace.data))
-  if !stageR2Blob(workspaceKey, workspace.data, "application/x-mistwarp-project", "") (
-    c.internalError("could not store MistWarp history")
-    return
-  )
-  project.workspaceKey = workspaceKey
-  project.workspaceLayers = [workspaceKey]
-  project.gitHead = head
-  if !project.contains("gitBranch") or project.gitBranch.toStr() == "" (
-    project.gitBranch = baseBranch
-    configuredBranch = baseBranch
-  )
-  project.gitCommits = []
-  if gitInfo.contains("commits") and gitInfo.commits != null (
-    project.gitCommits = paginate(gitInfo.commits.assert(array), 0, 50)
-  )
-  project.gitGraph = {branches: [], branchLogs: [], nodes: []}
-  if gitInfo.contains("graph") and gitInfo.graph != null (
-    project.gitGraph = gitInfo.graph
-  )
-
-  if hasParent (
-    parent.workspaceKey = workspaceKey
-    parent.workspaceLayers = [workspaceKey]
-    parent.gitHead = head
-    parent.gitBranch = baseBranch
-    parent.gitCommits = project.gitCommits
-    parent.gitGraph = project.gitGraph
-    if !saveProject(parent) (
-      removeProjectStorageKeyIfOrphaned(workspaceKey, project.id.toStr(), true)
-      c.internalError("failed to save parent project history")
-      return
-    )
-    upsertIndexEntry(parent)
-    project.remixBaseCommit = head
-    remixBase = head
-  )
-  if !saveProject(project) (
-    c.internalError("failed to save project history")
-    return
-  )
-  upsertIndexEntry(project)
-  c.json(201, {
-    ok: true,
-    usedExisting: false,
+  project = ensured.project.assert(object)
+  c.json(200, {
+    ok: true, usedExisting: true,
     workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
-    head: head,
-    branch: configuredBranch,
-    remixBaseCommit: remixBase
+    head: projectGitHead(project), branch: project.gitBranch,
+    remixBaseCommit: project.remixBaseCommit
   })
 )
 
@@ -2368,6 +2172,13 @@ def handleGetProjectJson(*serve.Context c) (
 )
 
 def handleUpdateProject(*serve.Context c) (
+  string lockName = "project-upload:" ++ c.param("id")
+  sync.lock(lockName)
+  handleUpdateProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleUpdateProjectLocked(*serve.Context c) (
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
@@ -3500,6 +3311,13 @@ def handleGetRemixTree(*serve.Context c) (
 )
 
 def handleRemixProject(*serve.Context c) (
+  string lockName = "project-history-" ++ c.param("id")
+  sync.lock(lockName)
+  handleRemixProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleRemixProjectLocked(*serve.Context c) (
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
@@ -3553,6 +3371,29 @@ def handleRemixProject(*serve.Context c) (
   )
   parent = workspaceSnapshots.project.assert(object)
 
+  if !projectHasWorkspace(parent) (
+    c.json(409, {ok: false, code: "history_unavailable", error: "prepare the original project's history before remixing"})
+    return
+  )
+  string sourcePath = cachedProjectWorkspacePath(parent)
+  string forkPath = tmpDir ++ id ++ ".fork.mwp"
+  string parentId = parent.id.toStr()
+  string forkJson = raw("gitinspection.ForkHistoryArchiveJSON(sourcePath, forkPath, forkBranch, id, parentId)")
+  auto parsedFork = json.parse(forkJson, {type: "object"})
+  if parsedFork.isErr() or parsedFork.unwrap().assert(object).ok != true (
+    fs.remove(forkPath)
+    c.json(409, {ok: false, code: "history_unavailable", error: "requested branch history is unavailable"})
+    return
+  )
+  object forkHistory = parsedFork.unwrap().assert(object).manifest.assert(object)
+  byte[] forkBody = fs.readFileBytes(forkPath)
+  fs.remove(forkPath)
+  string forkKey = projectWorkspaceSnapshotKey(contentHash(forkBody))
+  if !stageR2Blob(forkKey, forkBody, "application/x-mistwarp-project", "") (
+    c.internalError("could not store fork history")
+    return
+  )
+
   object project = {
     id: id,
     owner: username,
@@ -3590,17 +3431,13 @@ def handleRemixProject(*serve.Context c) (
   if parentEntry.isEmpty() == false and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
     project.remixRoot = parentEntry.remixRoot
   )
-  if parent.contains("gitHead") (
-    project.gitHead = parent.gitHead
-    project.remixBaseCommit = parent.gitHead
-  )
-  project.gitBranch = forkBranch
-  if parent.contains("gitCommits") (
-    project.gitCommits = parent.gitCommits
-  )
-  if parent.contains("gitGraph") (
-    project.gitGraph = parent.gitGraph
-  )
+  project.workspaceKey = forkKey
+  project.workspaceLayers = [forkKey]
+  project.gitHead = forkHistory.head
+  project.remixBaseCommit = forkHistory.head
+  project.gitBranch = forkHistory.branch
+  project.gitCommits = forkHistory.commits
+  project.gitGraph = forkHistory.graph
   if parent.contains("jsonBytes") (
     project.jsonBytes = parent.jsonBytes
   )
@@ -3618,7 +3455,10 @@ def handleRemixProject(*serve.Context c) (
     c.internalError("could not index project extensions")
     return
   )
-  saveProject(project)
+  if !saveProject(project) (
+    c.internalError("could not save fork")
+    return
+  )
   upsertIndexEntry(project)
 
   c.json(201, {
@@ -3627,4 +3467,38 @@ def handleRemixProject(*serve.Context c) (
     projectJsonUrl: projectJsonUrlFor(project),
     assetsBase: assetsBaseUrl()
   })
+)
+
+def validateUploadedHistory(object project, any body, string metadata, string currentHead) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".incoming.mwp"
+  string outputPath = workId ++ ".validated.mwp"
+  string basePath = ""
+  if projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+    if basePath == "" (
+      return {ok: false, error: "stored history unavailable; retry later"}
+    )
+  )
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false, error: "could not stage history"}
+  )
+  string forkBase = (project.remixBaseCommit ?? "").toStr()
+  string projectId = project.id.toStr()
+  string remixParent = (project.remixParent ?? "").toStr()
+  string resultJson = raw("gitinspection.ValidateHistoryArchiveJSON(basePath, incomingPath, outputPath, currentHead, forkBase, metadata, projectId, remixParent)")
+  fs.remove(incomingPath)
+  auto parsed = json.parse(resultJson, {type: "object"})
+  if parsed.isErr() (
+    fs.remove(outputPath)
+    return {ok: false, error: "could not validate history"}
+  )
+  object result = parsed.unwrap().assert(object)
+  if result.ok (
+    byte[] data = fs.readFileBytes(outputPath)
+    result.data = data
+    result.size = data.len
+  )
+  fs.remove(outputPath)
+  return result
 )

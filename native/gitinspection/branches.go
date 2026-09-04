@@ -24,6 +24,9 @@ func validBranchName(name string) bool {
 }
 
 func stringSlice(value any) []string {
+	if items, ok := value.([]string); ok {
+		return append([]string{}, items...)
+	}
 	items, _ := value.([]any)
 	result := make([]string, 0, len(items))
 	for _, item := range items {
@@ -150,43 +153,17 @@ func writeBranchArchive(reader *zip.ReadCloser, outputPath string, manifest map[
 // or worktree object. It writes a full archive so removed refs cannot survive in
 // an older workspace layer.
 func ManageBranchArchive(sourcePath, outputPath, action, branch, name, from, historyJSON string) restoreResult {
-	reader, _, err := openArchive(sourcePath)
+	reader, source, _, manifest, refs, activeBranch, err := readHistoryArchive(sourcePath)
 	if err != nil {
-		return restoreResult{Error: "workspace archive is unavailable"}
+		return restoreResult{Error: err.Error()}
 	}
 	defer reader.Close()
-	var manifest map[string]any
-	for _, item := range reader.File {
-		if item.Name != "mwp.json" {
-			continue
-		}
-		file, openErr := item.Open()
-		if openErr != nil {
-			return restoreResult{Error: "workspace manifest is unavailable"}
-		}
-		manifest = map[string]any{}
-		decodeErr := json.NewDecoder(file).Decode(&manifest)
-		_ = file.Close()
-		if decodeErr != nil {
-			return restoreResult{Error: "workspace manifest is invalid"}
-		}
-		break
+	commits, actualGraph, err := repositoryHistory(source, refs, activeBranch)
+	if err != nil {
+		return restoreResult{Error: err.Error()}
 	}
-	if manifest == nil {
-		return restoreResult{Error: "workspace manifest is unavailable"}
-	}
-	if historyJSON != "" {
-		history := map[string]any{}
-		if err := json.Unmarshal([]byte(historyJSON), &history); err != nil {
-			return restoreResult{Error: "project branch history is invalid"}
-		}
-		manifest["branch"] = history["branch"]
-		manifest["graph"] = history["graph"]
-		manifest["commits"] = history["commits"]
-		if head, ok := history["head"].(string); ok && head != "" {
-			manifest["head"] = head
-		}
-	}
+	manifest["commits"] = commits
+	manifest["graph"] = actualGraph
 	graph, _ := manifest["graph"].(map[string]any)
 	if graph == nil {
 		return restoreResult{Error: "workspace branch history is unavailable"}

@@ -17,7 +17,6 @@ import "std:ws"
 
 import "go:time"
 import "go:mistwarp.local/gitinspection"
-import "go:mistwarp.local/gitinspection/rewrite"
 import "go:mistwarp.local/runtimeinfo"
 import "go:mistwarp.local/r2inventory"
 

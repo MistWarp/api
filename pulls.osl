@@ -792,6 +792,14 @@ def handleMergePull(*serve.Context c) (
         object mergeArchiveGit = mergeArchiveResult.manifest.assert(object)
         byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath)
         fs.remove(mergeArchivePath)
+        object checkedHistory = validateUploadedHistory(target, mergeArchiveBody, json.stringify(mergeArchiveGit), currentTargetHead)
+        if !checkedHistory.ok (
+            sync.unlock("project-history-" ++ target.id.toStr())
+            c.json(409, {ok: false, code: "invalid_workspace", error: checkedHistory.error})
+            return
+        )
+        mergeArchiveBody = checkedHistory.data.assert(byte[])
+        mergeArchiveGit = checkedHistory.manifest.assert(object)
         if mergeArchiveBody.len > maxWorkspaceBytes (
             sync.unlock("project-history-" ++ target.id.toStr())
             c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit", code: "workspace_too_large"})
@@ -813,11 +821,9 @@ def handleMergePull(*serve.Context c) (
         target.workspaceKey = mergeArchiveKey
         target.workspaceLayers = [mergeArchiveKey]
         target.gitHead = mergeArchiveGit.head
-        target.gitCommits = source.contains("gitCommits") ? source.gitCommits []
-        target.gitGraph = source.contains("gitGraph") ? source.gitGraph {branches: [], branchLogs: [], nodes: []}
-        object mergedHistory = mergeDeltaHistory(target, mergeArchiveGit, currentTargetHead)
-        target.gitCommits = mergedHistory.commits
-        target.gitGraph = mergedHistory.graph
+        target.gitBranch = mergeArchiveGit.branch
+        target.gitCommits = mergeArchiveGit.commits
+        target.gitGraph = mergeArchiveGit.graph
         target.assets = source.assets
         target.sizeBytes = projectSizeBytes(source)
         target.edited = timestamp

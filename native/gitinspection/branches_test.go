@@ -113,7 +113,7 @@ func TestManageBranchArchiveRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
-func TestManageBranchArchiveUsesAuthoritativeProjectGraph(t *testing.T) {
+func TestManageBranchArchiveDoesNotInventRefsFromStaleMetadata(t *testing.T) {
 	repository := newTestRepository()
 	blob := repository.object("blob", []byte("project\n"))
 	head := repository.commit(repository.tree("main.fractch", blob), "", "Initial")
@@ -140,7 +140,7 @@ func TestManageBranchArchiveUsesAuthoritativeProjectGraph(t *testing.T) {
 		t.Fatalf("create failed: %#v", result)
 	}
 	branches, refs, _ := branchNames(t, output)
-	if len(branches) != 3 || branches[1] != "release" || refs["release"] != head+"\n" {
-		t.Fatalf("server-side branch history was dropped: branches=%#v refs=%#v", branches, refs)
+	if len(branches) != 2 || refs["release"] != "" || refs["feature"] != head+"\n" {
+		t.Fatalf("stale metadata invented a branch: branches=%#v refs=%#v", branches, refs)
 	}
 }

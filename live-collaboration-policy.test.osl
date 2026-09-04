@@ -1,0 +1,14 @@
+import "std:testing"
+import "./live-collaboration-policy.osl"
+
+testing.assert(isSharedEditorRole("editor"), "shared editors can edit while owners are offline")
+testing.assert(isSharedEditorRole("maintainer"), "maintainers retain editing")
+testing.assert(isSharedEditorRole("owner"), "owners retain editing")
+testing.assert(!isSharedEditorRole("contributor"), "pull-request contributors still require approval")
+testing.assert(!isSharedEditorRole("tester"), "testers cannot become automatic editors")
+testing.assert(!isSharedEditorRole(""), "outsiders cannot become automatic editors")
+testing.assert(liveSessionKey({id: "p1"}, "main") != liveSessionKey({id: "p2"}, "main"), "projects are isolated")
+testing.assert(liveSessionKey({id: "p1"}, "main") != liveSessionKey({id: "p1"}, "feature"), "branches are isolated")
+testing.assert(liveMemberCanSave({approved: true, expires: 101}, 100), "active approval allows a save")
+testing.assert(!liveMemberCanSave({approved: true, expires: 100}, 100), "expiry revokes a save")
+testing.assert(!liveMemberCanSave({approved: false, expires: 101}, 100), "waiting users cannot save")

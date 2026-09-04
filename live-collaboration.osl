@@ -1,4 +1,6 @@
-// Sessions are leases. Restarting the API or losing host heartbeats revokes saves.
+import "./live-collaboration-policy.osl"
+
+// Temporary approvals are leases; explicitly shared Editor access persists.
 auto liveEditorSessions = cache.create(10000, 90)
 
 def handleGetSharedProjects(*serve.Context c) (
@@ -29,17 +31,13 @@ def handleGetSharedProjects(*serve.Context c) (
   c.json(200, {ok: true, projects: projects})
 )
 
-def liveSessionKey(object project, string branch) string (
-  return project.id.toStr() ++ ":" ++ branch
-)
-
 def liveSession(object project, string branch) object (
   object session = liveEditorSessions.get(liveSessionKey(project, branch)).assertElse(object, {})
-  if session.isEmpty() or session.expires.toNum() <= timestamp (
+  if session.getKeys().len == 0 or session.expires.toNum() <= timestamp (
     return {}
   )
   string role = projectRole(project, session.host.toStr())
-  if role != "owner" and role != "maintainer" and role != "editor" (
+  if !isSharedEditorRole(role) (
     return {}
   )
   return session
@@ -52,16 +50,16 @@ def canSaveLiveProject(object project,*serve.Context c) boolean (
   string role = projectRole(project, username)
   if role == "editor" return true
   if role == "" or role == "tester" return false
-  string branch = c.formValue("collaborationBranch").assertElse(string, "")
+  string branch = c.formValue("collaborationBranch")
   if branch == "" (
     branch = project.gitBranch.assertElse(string, "main")
   )
   object session = liveSession(project, branch)
-  if session.isEmpty() == true return false
+  if session.getKeys().len == 0 return false
   object members = session.members.assertElse(object, {})
   if !members.contains(username) return false
   object member = members[username].assert(object)
-  return member.approved == true and member.expires.toNum() > timestamp
+  return liveMemberCanSave(member, timestamp)
 )
 
 def handleLiveCollaboration(*serve.Context c) (
@@ -87,19 +85,31 @@ def handleLiveCollaboration(*serve.Context c) (
   string action = body.action.assertElse(string, "list")
   string lockName = "live-editor:" ++ sessionKey
   sync.lock(lockName)
+  // Release the lease lock even if malformed state raises a runtime error.
+  raw("defer sync.unlock(lockName)")
   object session = liveSession(project, branch)
   string errorMessage = ""
+  if session.getKeys().len != 0 (
+    object activeMembers = session.members.assert(object)
+    for key in activeMembers.getKeys() (
+      string memberRole = projectRole(project, key)
+      if activeMembers[key].expires.toNum() <= timestamp or memberRole == "" or memberRole == "tester" (
+        activeMembers.delete(key)
+      )
+    )
+    session.members = activeMembers
+  )
   if action == "host" (
     string room = body.roomId.assertElse(string, "").strip()
-    if (role != "owner" and role != "maintainer" and role != "editor") or room == "" or room.len > 128 (
+    if !isSharedEditorRole(role) or room == "" or room.len > 128 (
       errorMessage = "only a project editor can host a project session"
     ) else (
-      if session.isEmpty() and body.sessionId.assertElse(string, "") != "" (
+      if session.getKeys().len == 0 and body.sessionId.assertElse(string, "") != "" (
         errorMessage = "this editing session expired; start a new session"
-      ) else if !session.isEmpty() and session.id.toStr() != body.sessionId.assertElse(string, "") (
+      ) else if session.getKeys().len != 0 and session.id.toStr() != body.sessionId.assertElse(string, "") (
         errorMessage = "an editing session is already active"
       ) else (
-        if session.isEmpty() == true (
+        if session.getKeys().len == 0 (
           session = {id: randomString(32), host: username, roomId: room, branch: branch, members: {}}
         )
         session.expires = timestamp + 90000
@@ -108,7 +118,7 @@ def handleLiveCollaboration(*serve.Context c) (
       )
     )
   )
-  if action == "end" and !session.isEmpty() (
+  if action == "end" and session.getKeys().len != 0 (
     if session.host.toStr() != username or session.id.toStr() != body.sessionId.assertElse(string, "") (
       errorMessage = "only the session host can end this session"
     ) else (
@@ -117,7 +127,7 @@ def handleLiveCollaboration(*serve.Context c) (
     )
   )
   if action == "request" or action == "heartbeat" or action == "approve" or action == "deny" or action == "leave" (
-    if session.isEmpty() or session.id.toStr() != body.sessionId.assertElse(string, "") (
+    if session.getKeys().len == 0 or session.id.toStr() != body.sessionId.assertElse(string, "") (
       errorMessage = "this editing session has ended"
     ) else (
       object members = session.members.assert(object)
@@ -132,7 +142,7 @@ def handleLiveCollaboration(*serve.Context c) (
           errorMessage = "a contributor account and connected room are required"
         ) else (
           if !members.contains(username) or members[username].peerId.toStr() != peerId (
-            boolean approved = role == "owner" or role == "maintainer" or role == "editor"
+            boolean approved = isSharedEditorRole(role)
             members[username] = {username: username, peerId: peerId, approved: approved, expires: timestamp + 90000}
           )
         )
@@ -160,7 +170,7 @@ def handleLiveCollaboration(*serve.Context c) (
     )
   )
   object response = {}
-  if !session.isEmpty() (
+  if session.getKeys().len != 0 (
     array responseMembers = []
     for key in session.members.assert(object).getKeys() (
       object member = session.members[key].assert(object)
@@ -170,10 +180,9 @@ def handleLiveCollaboration(*serve.Context c) (
     )
     response = {id: session.id, host: session.host, title: session.title, roomId: session.roomId, branch: branch, members: responseMembers}
   )
-  sync.unlock(lockName)
   if errorMessage != "" (
     c.json(409, {ok: false, error: errorMessage})
     return
   )
-  c.json(200, {ok: true, session: response})
+  c.json(200, {ok: true, session: response, myRole: role, hasTeam: project.collaborators.assertElse(array, []).len > 0})
 )

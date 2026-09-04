@@ -1,0 +1,11 @@
+def isSharedEditorRole(string role) boolean (
+  return role == "owner" or role == "maintainer" or role == "editor"
+)
+
+def liveSessionKey(object project, string branch) string (
+  return project.id.toStr() ++ ":" ++ branch
+)
+
+def liveMemberCanSave(object member, number now) boolean (
+  return member.approved == true and member.expires.toNum() > now
+)
