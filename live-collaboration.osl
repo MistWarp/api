@@ -10,7 +10,9 @@ def handleGetSharedProjects(*serve.Context c) (
     array contributors = entry.contributors.assertElse(array, [])
     boolean candidate = false
     for j contributors.len (
-      if normalizeUsername(contributors[j].toStr()) == username candidate = true
+      if normalizeUsername(contributors[j].toStr()) == username (
+        candidate = true
+      )
     )
     if candidate (
       auto result = loadProject(entry.id.toStr())
@@ -51,7 +53,9 @@ def canSaveLiveProject(object project,*serve.Context c) boolean (
   if role == "editor" return true
   if role == "" or role == "tester" return false
   string branch = c.formValue("collaborationBranch").assertElse(string, "")
-  if branch == "" branch = project.gitBranch.assertElse(string, "main")
+  if branch == "" (
+    branch = project.gitBranch.assertElse(string, "main")
+  )
   object session = liveSession(project, branch)
   if session.isEmpty() == true return false
   object members = session.members.assertElse(object, {})
