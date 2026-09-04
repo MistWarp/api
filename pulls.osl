@@ -99,6 +99,13 @@ def canClosePull(object pull, object target, *serve.Context c) boolean (
 )
 
 def canInspectPull(object pull, object target, *serve.Context c) boolean (
+    if !sourcePolicyAllowsViewer(target, c) (
+        return false
+    )
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !sourceResult.ok or !sourcePolicyAllowsViewer(sourceResult.project.assert(object), c) (
+        return false
+    )
     if canSeeInsideProject(target, c) (
         return true
     )
@@ -180,8 +187,10 @@ def createNativePull(*serve.Context c, object target, object source, string titl
 )
 
 def handleGetCommits(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     auto result = loadProject(c.param("id"))
-    if !result.ok or !canViewProject(result.project.assert(object), c) (
+    if !result.ok or !canSeeInsideProject(result.project.assert(object), c) (
         c.notFound("project not found")
         return
     )
@@ -190,13 +199,8 @@ def handleGetCommits(*serve.Context c) (
     string etag = "\"project-history-" ++ projectWorkspaceFingerprint(project) ++ "-" ++ projectGitHead(project) ++ "-" ++ json.stringify(history).hashSHA256() ++ "\""
     c.setHeader("ETag", etag)
     c.setHeader("Vary", "Authorization, Cookie")
-    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
-        c.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400")
-        c.setHeader("CDN-Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
-    ) else (
-        c.setHeader("Cache-Control", "private, no-store")
-        c.setHeader("CDN-Cache-Control", "private, no-store")
-    )
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     if c.header("If-None-Match").contains(etag) (
         c.status(304)
         return
@@ -248,8 +252,10 @@ def projectBranchResponse(object project) array (
 )
 
 def handleListProjectBranches(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     auto result = loadProject(c.param("id"))
-    if !result.ok or !canViewProject(result.project.assert(object), c) (
+    if !result.ok or !canSeeInsideProject(result.project.assert(object), c) (
         c.notFound("project not found")
         return
     )
@@ -267,7 +273,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
         return
     )
     object project = result.project.assert(object)
-    if !canEditProject(project, c) (
+    if !canEditProject(project, c) or !canSeeInsideProject(project, c) (
         sync.unlock(lockName)
         c.forbidden("only project maintainers can manage branches")
         return
@@ -359,7 +365,7 @@ def handleDeleteProjectBranch(*serve.Context c) (
 
 def handlePrepareBranchMerge(*serve.Context c) (
     auto result = loadProject(c.param("id"))
-    if !result.ok or !canEditProject(result.project.assert(object), c) (
+    if !result.ok or !canEditProject(result.project.assert(object), c) or !canSeeInsideProject(result.project.assert(object), c) (
         c.forbidden("only project maintainers can merge branches")
         return
     )
@@ -454,11 +460,14 @@ def handleGetPull(*serve.Context c) (
     object response = pullResponse(pull)
     object target = targetResult.project.assert(object)
     response.canClose = canClosePull(pull, target, c)
-    response.canMerge = canEditProject(target, c)
+    response.canInspect = canInspectPull(pull, target, c)
+    response.canMerge = canEditProject(target, c) and response.canInspect == true
     c.json(200, {ok: true, pull: response})
 )
 
 def handleGetPullTimeline(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     object pull = pullDocument(c.param("id"), c.param("index"))
     if pull.isEmpty() == true (
         c.notFound("pull request not found")
@@ -472,6 +481,10 @@ def handleGetPullTimeline(*serve.Context c) (
     )
     object target = targetResult.project.assert(object)
     object source = sourceResult.project.assert(object)
+    if !canInspectPull(pull, target, c) (
+        c.notFound("pull request history not found")
+        return
+    )
     array comments = loadComments(pullCommentKey(pull))
     for i comments.len (
         comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
@@ -592,6 +605,9 @@ def handleEditPullComment(*serve.Context c) (
 )
 
 def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) boolean (
+    if !sourcePolicyAllowsViewer(project, c) (
+        return false
+    )
     array matches = []
     object targetPull = pullDocument(project.id.toStr(), pullIndex)
     if targetPull.isEmpty() == false (
@@ -621,6 +637,9 @@ def canAccessPullWorkspace(object project, string pullIndex, *serve.Context c) b
 )
 
 def canAccessPullProjectCommit(object project, string targetId, string pullIndex, string sha, *serve.Context c) boolean (
+    if !sourcePolicyAllowsViewer(project, c) (
+        return false
+    )
     object pull = pullDocument(targetId, pullIndex)
     if pull.isEmpty() == true (
         return false
@@ -635,16 +654,12 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
         return false
     )
     object target = targetResult.project.assert(object)
-    if canSeeInsideProject(target, c) (
-        return true
-    )
-    if !c.getBool("authenticated") (
-        return false
-    )
-    return canEditProject(target, c) or isPullSourceOwner(pull, c)
+    return canInspectPull(pull, target, c)
 )
 
 def handleGetPullDiff(*serve.Context c) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     object pull = pullDocument(c.param("id"), c.param("index"))
     if pull.isEmpty() == true (
         c.notFound("pull request not found")
@@ -712,6 +727,10 @@ def handleMergePull(*serve.Context c) (
         return
     )
     object source = sourceResult.project.assert(object)
+    if !canInspectPull(pull, target, c) (
+        c.forbidden("project source is restricted to its owner")
+        return
+    )
     string currentTargetHead = projectGitHead(target)
     string currentSourceHead = projectGitHead(source)
     if currentTargetHead == pull.baseCommit.toStr() and currentSourceHead == pull.headCommit.toStr() (

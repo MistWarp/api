@@ -1,0 +1,111 @@
+// Use existing public Rotur APIs. Counts, recipients and links never come
+// from the caller. This records milestones observed through MistWarp.
+def remoteMilestoneData(string path) object (
+    return milestoneDataFromUrl(roturBase ++ "/v2" ++ path)
+)
+
+def milestoneDataFromUrl(string endpoint) object (
+    object response = requests.get(endpoint, {timeout: 5, max_bytes: 2097152})
+    if !response.success or response.status.toInt() != 200 (
+        return {}
+    )
+    auto parsed = json.parse(response.body, {type: "object"})
+    if parsed.isErr() (
+        return {}
+    )
+    return parsed.unwrap().assert(object)
+)
+
+def observeRemoteMilestone(string target, string kind, string id, number count, string path, object extra) (
+    string key = "observed:" ++ kind ++ ":" ++ id
+    sync.lock(key)
+    object previous = likeMilestoneDocs.findById(key)
+    // First observation establishes a baseline; an exact milestone still counts.
+    number before = count - 1
+    if previous.contains("count") (
+        before = previous.count.toNum()
+    )
+    notifyLikeMilestones(target, kind, id, before, count, path, extra)
+    putDocument(likeMilestoneDocs, key, {count: count})
+    sync.unlock(key)
+)
+
+def syncFollowerMilestones(string username) (
+    string name = normalizeUsername(username)
+    if !isSafePathPart(name) or !profileExists(name) (
+        return
+    )
+    string key = "followers:" ++ name
+    if remoteMilestoneChecks.has(key) (
+        return
+    )
+    remoteMilestoneChecks.set(key, true)
+    object data = remoteMilestoneData("/users/" ++ url.escape(name) ++ "/followers")
+    if !data.contains("followers") or typeof(data.followers) != "array" (
+        return
+    )
+    array followers = data.followers.assert(array)
+    string identity = userIdForUsername(name)
+    if identity == "" (
+        identity = name
+    )
+    observeRemoteMilestone(name, "followers", identity, followers.len, "/users/" ++ name ++ "/followers", {profile: name})
+)
+
+def handleCheckFollowerMilestones(*serve.Context c) (
+    syncFollowerMilestones(c.param("name"))
+    c.json(200, {ok: true})
+)
+
+def handleCheckPostMilestones(*serve.Context c) (
+    string id = c.param("id")
+    if !isSafePathPart(id) (
+        c.badRequest("invalid post id")
+        return
+    )
+    string key = "post:" ++ id
+    if remoteMilestoneChecks.has(key) (
+        c.json(200, {ok: true})
+        return
+    )
+    remoteMilestoneChecks.set(key, true)
+    object post = remoteMilestoneData("/posts/" ++ url.escape(id))
+    if !post.contains("likes") or typeof(post.likes) != "array" or !post.contains("user") (
+        c.json(200, {ok: true})
+        return
+    )
+    string author = post.user.toStr()
+    if profileExists(author) (
+        array likes = post.likes.assert(array)
+        observeRemoteMilestone(author, "post", id, likes.len, "/posts/" ++ id, {post_id: id})
+    )
+    c.json(200, {ok: true})
+)
+
+def handleCheckThemeMilestones(*serve.Context c) (
+    string id = c.param("id")
+    if !isSafePathPart(id) (
+        c.badRequest("invalid theme id")
+        return
+    )
+    string key = "theme:" ++ id
+    if remoteMilestoneChecks.has(key) (
+        c.json(200, {ok: true})
+        return
+    )
+    remoteMilestoneChecks.set(key, true)
+    object data = milestoneDataFromUrl("https://warptheme.mistium.com/api/theme?uuid=" ++ url.escape(id))
+    object theme = data.theme.assertElse(object, {})
+    if theme.authorType.toStr() != "rotur" (
+        c.json(200, {ok: true})
+        return
+    )
+    string author = usernameForId(theme.author.toStr())
+    if author != "" and profileExists(author) (
+        object ratings = milestoneDataFromUrl("https://warptheme.mistium.com/api/ratings?uuid=" ++ url.escape(id))
+        if ratings.ok == true and ratings.contains("likes") (
+            observeRemoteMilestone(author, "theme", id, ratings.likes.toNum(), "/themes/" ++ id, {themeId: id})
+        )
+    )
+    c.json(200, {ok: true})
+)

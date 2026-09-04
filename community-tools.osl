@@ -1822,6 +1822,13 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
 )
 
 def handleReactSpace(*serve.Context c) (
+    string lockName = "space-reactions:" ++ c.param("id")
+    sync.lock(lockName)
+    handleReactSpaceLocked(c)
+    sync.unlock(lockName)
+)
+
+def handleReactSpaceLocked(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
   if space.isEmpty() == true or !canViewSpace(space, c) (
     c.notFound("space not found")
@@ -1835,6 +1842,7 @@ def handleReactSpace(*serve.Context c) (
   string username = c.getString("username")
   array likes = spaceLikes(space)
   array brokenHearts = spaceBrokenHearts(space)
+  number previousLikes = likes.len
   boolean hadReaction = false
   if reactionType == "heart" (
     hadReaction = stringArrayContainsUser(likes, username)
@@ -1851,7 +1859,11 @@ def handleReactSpace(*serve.Context c) (
   space.likes = likes
   space.brokenHearts = brokenHearts
   space.edited = timestamp
-  putSpaceDocument(space)
+  if !putSpaceDocument(space) (
+    c.internalError("could not save reaction")
+    return
+  )
+  notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
   c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: hadReaction ? "" reactionType})
 )
 
@@ -1955,7 +1967,7 @@ def handleReactSpaceComment(*serve.Context c) (
     c.notFound("space not found")
     return
   )
-  reactToComment(c, spaceCommentKey(space["_id"].toStr()))
+  reactToComment(c, spaceCommentKey(space["_id"].toStr()), "/spaces/" ++ space["_id"].toStr())
 )
 
 def handleCreatePreview(*serve.Context c) (
@@ -2620,6 +2632,13 @@ def handleCreateIdea(*serve.Context c) (
 )
 
 def handleVoteIdea(*serve.Context c) (
+    string lockName = "idea-reactions:" ++ c.param("id")
+    sync.lock(lockName)
+    handleVoteIdeaLocked(c)
+    sync.unlock(lockName)
+)
+
+def handleVoteIdeaLocked(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
   if idea.isEmpty() == true (
     c.notFound("idea not found")
@@ -2641,6 +2660,7 @@ def handleVoteIdea(*serve.Context c) (
   if idea.contains("dislikes") (
     dislikes = idea["dislikes"].assertElse(array, [])
   )
+  number previousLikes = likes.len
   boolean hadVote = false
   if vote == "like" (
     hadVote = stringArrayContainsUser(likes, username)
@@ -2658,7 +2678,11 @@ def handleVoteIdea(*serve.Context c) (
   idea.dislikes = dislikes
   idea.votes = likes.len - dislikes.len
   idea.edited = timestamp
-  putDocument(ideaDocs, idea["_id"].toStr(), idea)
+  if !putDocument(ideaDocs, idea["_id"].toStr(), idea) (
+    c.internalError("could not save reaction")
+    return
+  )
+  notifyLikeMilestones(idea.author.toStr(), "roadmap post", idea["_id"].toStr(), previousLikes, likes.len, "/roadmap#idea-" ++ idea["_id"].toStr(), {})
   string myVote = ""
   if !hadVote (
     myVote = vote
@@ -2764,7 +2788,7 @@ def handleReactIdeaComment(*serve.Context c) (
     c.notFound("idea not found")
     return
   )
-  reactToComment(c, "roadmap-" ++ idea["_id"].toStr())
+  reactToComment(c, "roadmap-" ++ idea["_id"].toStr(), "/roadmap?idea=" ++ idea["_id"].toStr())
 )
 
 def handleUpdateIdea(*serve.Context c) (

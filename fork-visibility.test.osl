@@ -1,4 +1,5 @@
 import "std:testing"
+import "./project-sharing-policy.osl"
 
 def userIdForUsername(string username) string (
     if username == "alice" (
@@ -194,6 +195,9 @@ def canViewProjectJsonTest(object project, object ctx) boolean (
 )
 
 def canSeeInsideProjectTest(object project, object ctx) boolean (
+    if !projectSourcePolicyAllows(project, projectPrice(project), ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner") (
+        return false
+    )
     if canEditProjectTest(project, ctx) (
         return true
     )
@@ -266,8 +270,8 @@ testing.assert(canViewProjectTest(projectB, bobCtx), "Bob (fork owner) can view 
 testing.assert(!canViewProjectTest(projectB, strangerCtx), "Stranger cannot view private fork")
 testing.assert(!canViewProjectTest(projectB, anonCtx), "Anonymous user cannot view private fork")
 
-testing.assert(canSeeInsideProjectTest(projectB, aliceCtx), "Alice can see inside fork for diff and pr review even if seeInside is false")
-testing.assert(canSeeInsideProjectTest(projectB, danCtx), "Dan can see inside fork for diff and pr review")
+testing.assert(!canSeeInsideProjectTest(projectB, aliceCtx), "Parent owners cannot inspect a fork with seeInside disabled")
+testing.assert(!canSeeInsideProjectTest(projectB, danCtx), "Parent maintainers cannot inspect a fork with seeInside disabled")
 testing.assert(canSeeInsideProjectTest(projectB, bobCtx), "Bob can see inside own fork")
 testing.assert(!canSeeInsideProjectTest(projectB, strangerCtx), "Stranger cannot see inside private fork")
 

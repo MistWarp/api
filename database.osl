@@ -12,6 +12,7 @@ auto communityDb = db.open("data/community.db")
 *db.Collection playtimeSessionDocs = communityDb.collection("project_playtime_sessions")
 *db.Collection reviewDocs = communityDb.collection("project_reviews")
 *db.Collection pullDocs = communityDb.collection("project_pulls")
+*db.Collection likeMilestoneDocs = communityDb.collection("like_milestones")
 *db.Collection bountyWorkerDocs = communityDb.collection("bounty_workers")
 
 def putDocument(*db.Collection collection, string id, object value) boolean (

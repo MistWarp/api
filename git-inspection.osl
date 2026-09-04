@@ -176,6 +176,8 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
 )
 
 def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     string pullIndex = c.query("pull")
     string pullTarget = c.query("pullTarget")
     boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
@@ -205,13 +207,8 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
     string etag = "\"git-" ++ gitInspectionCacheVersion() ++ "-" ++ fingerprint ++ "-" ++ historyFingerprint ++ "-" ++ sha ++ "-" ++ operation ++ "-" ++ requestedPath.hashSHA256() ++ "\""
     c.setHeader("ETag", etag)
     c.setHeader("Vary", "Authorization, Cookie")
-    if project.shared == true and projectVisibility(project) == "public" and projectPrice(project) <= 0 (
-        c.setHeader("Cache-Control", "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400")
-        c.setHeader("CDN-Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
-    ) else (
-        c.setHeader("Cache-Control", "private, no-store")
-        c.setHeader("CDN-Cache-Control", "private, no-store")
-    )
+    c.setHeader("Cache-Control", "private, no-store")
+    c.setHeader("CDN-Cache-Control", "private, no-store")
     if c.header("If-None-Match").contains(etag) (
         c.status(304)
         return
