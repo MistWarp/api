@@ -42,6 +42,9 @@ def sanitizeNotificationPayload(object payload, string notifType, string actor) 
 
 
 def notificationBody(string actor, string notifType, object extra) string (
+    if notifType == "project_shared" (
+        return actor ++ " shared " ++ extra.projectTitle.toStr() ++ " with you (" ++ extra.role.toStr() ++ "): " ++ editorOrigin ++ "/project/" ++ extra.projectId.toStr()
+    )
     if notifType == "like_milestone" or notifType == "follower_milestone" (
         return extra.body.toStr() ++ ": " ++ editorOrigin ++ extra.path.toStr()
     )
