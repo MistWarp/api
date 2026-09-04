@@ -1,0 +1,134 @@
+// Sessions are leases. Restarting the API or losing host heartbeats revokes saves.
+auto liveEditorSessions = cache.create(10000, 90)
+
+def liveSession(object project) object (
+  object session = liveEditorSessions.get(project.id.toStr()).assertElse(object, {})
+  if session.isEmpty() or session.expires.toNum() <= timestamp (
+    return {}
+  )
+  if projectRole(project, session.host.toStr()) != "owner" (
+    return {}
+  )
+  return session
+)
+
+def canSaveLiveProject(object project,*serve.Context c) boolean (
+  if canEditProject(project, c) return true
+  if !c.getBool("authenticated") return false
+  object session = liveSession(project)
+  if session.isEmpty() == true return false
+  string username = normalizeUsername(c.getString("username"))
+  string role = projectRole(project, username)
+  if role == "" or role == "tester" return false
+  object members = session.members.assertElse(object, {})
+  if !members.contains(username) return false
+  object member = members[username].assert(object)
+  return member.approved == true and member.expires.toNum() > timestamp
+)
+
+def handleLiveCollaboration(*serve.Context c) (
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  string username = normalizeUsername(c.getString("username"))
+  string role = projectRole(project, username)
+  if role == "" (
+    c.forbidden("only project team members can discover editing sessions")
+    return
+  )
+  object body = c.bodyJSON()
+  string action = body.action.assertElse(string, "list")
+  string lockName = "live-editor:" ++ project.id.toStr()
+  sync.lock(lockName)
+  object session = liveSession(project)
+  string errorMessage = ""
+  if action == "host" (
+    string room = body.roomId.assertElse(string, "").strip()
+    if role != "owner" or room == "" or room.len > 128 (
+      errorMessage = "only the project owner can host a project session"
+    ) else (
+      if session.isEmpty() and body.sessionId.assertElse(string, "") != "" (
+        errorMessage = "this editing session expired; start a new session"
+      ) else if !session.isEmpty() and session.id.toStr() != body.sessionId.assertElse(string, "") (
+        errorMessage = "an editing session is already active"
+      ) else (
+        if session.isEmpty() == true (
+          session = {id: randomString(32), host: username, roomId: room, members: {}}
+        )
+        session.expires = timestamp + 90000
+        session.title = project.title
+        liveEditorSessions.set(project.id.toStr(), session)
+      )
+    )
+  )
+  if action == "end" and !session.isEmpty() (
+    if session.host.toStr() != username or session.id.toStr() != body.sessionId.assertElse(string, "") (
+      errorMessage = "only the session host can end this session"
+    ) else (
+      liveEditorSessions.delete(project.id.toStr())
+      session = {}
+    )
+  )
+  if action == "request" or action == "heartbeat" or action == "approve" or action == "deny" or action == "leave" (
+    if session.isEmpty() or session.id.toStr() != body.sessionId.assertElse(string, "") (
+      errorMessage = "this editing session has ended"
+    ) else (
+      object members = session.members.assert(object)
+      for key in members.getKeys() (
+        if members[key].expires.toNum() <= timestamp (
+          members.delete(key)
+        )
+      )
+      if action == "request" (
+        string peerId = body.peerId.assertElse(string, "")
+        if peerId == "" or peerId.len > 200 or role == "tester" (
+          errorMessage = "a contributor account and connected room are required"
+        ) else (
+          if !members.contains(username) or members[username].peerId.toStr() != peerId (
+            members[username] = {username: username, peerId: peerId, approved: false, expires: timestamp + 90000}
+          )
+        )
+      )
+      if action == "heartbeat" and members.contains(username) (
+        members[username].expires = timestamp + 90000
+      )
+      if action == "leave" (
+        members.delete(username)
+      )
+      if action == "approve" or action == "deny" (
+        string memberName = normalizeUsername(body.username.assertElse(string, ""))
+        if session.host.toStr() != username or !members.contains(memberName) (
+          errorMessage = "only the host can answer a pending request"
+        ) else (
+          if action == "approve" (
+            members[memberName].approved = true
+          ) else (
+            members.delete(memberName)
+          )
+        )
+      )
+      session.members = members
+      liveEditorSessions.set(project.id.toStr(), session)
+    )
+  )
+  object response = {}
+  if !session.isEmpty() (
+    array responseMembers = []
+    for key in session.members.assert(object).getKeys() (
+      object member = session.members[key].assert(object)
+      if member.expires.toNum() > timestamp and (session.host.toStr() == username or key == username) (
+        responseMembers.append(member)
+      )
+    )
+    response = {id: session.id, host: session.host, title: session.title, roomId: session.roomId, members: responseMembers}
+  )
+  sync.unlock(lockName)
+  if errorMessage != "" (
+    c.json(409, {ok: false, error: errorMessage})
+    return
+  )
+  c.json(200, {ok: true, session: response})
+)

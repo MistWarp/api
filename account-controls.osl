@@ -81,7 +81,7 @@ def updateSafetyList(*serve.Context c, string field, boolean add) (
 
 def removeUserFromSafetyLists(string username) (
     string key = normalizeUsername(username)
-    array files = fs.readDir(safetyDir).toArray()
+    array files = fs.readDir(safetyDir)
     for i files.len (
         string name = files[i].toStr()
         if name.endsWith(".json") and name != key ++ ".json" (
@@ -98,7 +98,7 @@ def removeUserFromSafetyLists(string username) (
 
 def renameUserSafety(string oldKey, string newKey) boolean (
     renameUserFile(safetyDir, oldKey, newKey)
-    array files = fs.readDir(safetyDir).toArray()
+    array files = fs.readDir(safetyDir)
     for i files.len (
         string name = files[i].toStr()
         if name.endsWith(".json") (
@@ -138,7 +138,7 @@ def handleUnmuteUser(*serve.Context c) (
 def collectMyComments(string username) array (
     string key = normalizeUsername(username)
     array mine = []
-    array files = fs.readDir(commentsDir).toArray()
+    array files = fs.readDir(commentsDir)
     for i files.len (
         string name = files[i].toStr()
         string source = name.replace(".jsonl", "").replace(".json", "")
@@ -203,7 +203,7 @@ def handleDeleteMyData(*serve.Context c) (
         )
     )
     purgeProjects(projectsToPurge)
-    array trashFiles = fs.readDir(trashDir).toArray()
+    array trashFiles = fs.readDir(trashDir)
     for i trashFiles.len (
         string trashFile = trashFiles[i].toStr()
         if trashFile.endsWith(".json") (

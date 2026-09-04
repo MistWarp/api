@@ -106,6 +106,9 @@ def sourcePolicyAllowsViewer(object project, *serve.Context c) boolean (
 )
 
 def canSeeInsideProject(object project, *serve.Context c) boolean (
+    if !canEditProject(project, c) and canSaveLiveProject(project, c) (
+        return true
+    )
     if !sourcePolicyAllowsViewer(project, c) (
         return false
     )
@@ -250,7 +253,7 @@ def projectCommerceSplits(object project) array (
 
     addCommerceSplit(totals, project.owner.toStr(), 10000 - allocated)
     array result = []
-    array usernames = totals.getKeys().toArray()
+    array usernames = totals.getKeys()
     for i usernames.len (
         string username = usernames[i].toStr()
         result.append({username: username, basis_points: totals[username].toNum().toInt()})
@@ -398,7 +401,7 @@ def renameUserMonetization(string oldKey, string newName) boolean (
     string newKey = normalizeUsername(newName)
     object purchaseStore = loadPurchaseKeys()
     object keys = purchaseStore.keys
-    array purchaseKeys = keys.getKeys().toArray()
+    array purchaseKeys = keys.getKeys()
     for i purchaseKeys.len (
         string purchaseKey = purchaseKeys[i].toStr()
         object purchase = keys[purchaseKey].assert(object)
@@ -469,7 +472,7 @@ def handleRetryPendingPayouts(*serve.Context c) (
 
 def prunePurchaseKeys(object store) object (
     object keys = store.keys
-    array names = keys.getKeys().toArray()
+    array names = keys.getKeys()
     object kept = {}
     for i names.len (
         string k = names[i].toStr()
@@ -483,7 +486,7 @@ def prunePurchaseKeys(object store) object (
 )
 
 def mergeDayHistory(object into, object from) (
-    array days = from.getKeys().toArray()
+    array days = from.getKeys()
     for i days.len (
         string k = days[i].toStr()
         number cur = 0
@@ -532,7 +535,7 @@ def handleGetMyStats(*serve.Context c) (
     )
 
     number viewsThisMonth = 0
-    array vk = viewHistory.getKeys().toArray()
+    array vk = viewHistory.getKeys()
     for i vk.len (
         if today - vk[i].toNum() < 30 (
             viewsThisMonth = viewsThisMonth + viewHistory[vk[i].toStr()].toNum()

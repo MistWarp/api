@@ -29,7 +29,7 @@ def gameSaveUsagePath(string userId) string (
 def calculateGameSaveStorageBytes(string userId) number (
     string filename = gameDataUserKey(userId) ++ ".json"
     number total = 0
-    array projects = fs.readDir(gameSavesDir).toArray()
+    array projects = fs.readDir(gameSavesDir)
     array namespaces = ["production", "test"]
     for i projects.len (
         string projectId = projects[i].toStr()
@@ -254,7 +254,7 @@ def validGameSaveRequestId(string requestId) boolean (
 )
 
 def validGameSaveKeys(object value) boolean (
-    array keys = value.getKeys().toArray()
+    array keys = value.getKeys()
     if keys.len > 128 (
         return false
     )
@@ -347,7 +347,7 @@ def handleListMyGameSaves(*serve.Context c) (
     string userId = c.getString("userId")
     string filename = gameDataUserKey(userId) ++ ".json"
     array saves = []
-    array projects = fs.readDir(gameSavesDir).toArray()
+    array projects = fs.readDir(gameSavesDir)
     for i projects.len (
         string projectId = projects[i].toStr()
         if isSafePathPart(projectId) (
@@ -403,7 +403,7 @@ def collectGameDataForUser(string userId) object (
     string filename = gameDataUserKey(userId) ++ ".json"
     array saves = []
     array entitlements = []
-    array projects = fs.readDir(gameSavesDir).toArray()
+    array projects = fs.readDir(gameSavesDir)
     array namespaces = ["production", "test"]
     for i projects.len (
         string projectId = projects[i].toStr()
@@ -417,7 +417,7 @@ def collectGameDataForUser(string userId) object (
             )
         )
     )
-    array entitlementProjects = fs.readDir(gameEntitlementsDir).toArray()
+    array entitlementProjects = fs.readDir(gameEntitlementsDir)
     for i entitlementProjects.len (
         string projectId = entitlementProjects[i].toStr()
         if isSafePathPart(projectId) (
@@ -439,7 +439,7 @@ def purgeGameDataForProject(string projectId) (
         string namespace = namespaces[n].toStr()
         string dir = gameSavesDir ++ projectId ++ "/" ++ namespace ++ "/"
         if fs.exists(dir) (
-            array files = fs.readDir(dir).toArray()
+            array files = fs.readDir(dir)
             for i files.len (
                 string file = files[i].toStr()
                 if file.endsWith(".json") (
@@ -454,7 +454,7 @@ def purgeGameDataForProject(string projectId) (
     fs.remove(gameSavesDir ++ projectId ++ "/")
     string entDir = gameEntitlementsDir ++ projectId ++ "/"
     if fs.exists(entDir) (
-        array files = fs.readDir(entDir).toArray()
+        array files = fs.readDir(entDir)
         for i files.len (
             fs.remove(entDir ++ files[i].toStr())
         )
@@ -464,7 +464,7 @@ def purgeGameDataForProject(string projectId) (
 
 def purgeGameDataForUser(string userId) (
     string filename = gameDataUserKey(userId) ++ ".json"
-    array projects = fs.readDir(gameSavesDir).toArray()
+    array projects = fs.readDir(gameSavesDir)
     for i projects.len (
         string projectId = projects[i].toStr()
         if isSafePathPart(projectId) (
@@ -472,7 +472,7 @@ def purgeGameDataForUser(string userId) (
             fs.remove(gameSavesDir ++ projectId ++ "/test/" ++ filename)
         )
     )
-    array entitlementProjects = fs.readDir(gameEntitlementsDir).toArray()
+    array entitlementProjects = fs.readDir(gameEntitlementsDir)
     for i entitlementProjects.len (
         string projectId = entitlementProjects[i].toStr()
         if isSafePathPart(projectId) (

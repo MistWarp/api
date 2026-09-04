@@ -1928,7 +1928,7 @@ def handleDeleteSpaceComment(*serve.Context c) (
   if canManageSpace(space, c) (
     moderator = c.getString("username")
   )
-  object deleted = deleteComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), c.getString("username"), moderator, c.getBool("isAdmin") == true)
+  object deleted = deleteComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), c.getString("username"), moderator, c.getBool("isAdmin"))
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -2616,7 +2616,7 @@ def handleCreateIdea(*serve.Context c) (
   )
   string ideaId = "i" ++ randomString(14)
   string source = "community"
-  if c.getBool("isAdmin") == true (
+  if c.getBool("isAdmin") (
     source = "mistwarp"
   )
   object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
@@ -2745,7 +2745,7 @@ def handleDeleteIdeaComment(*serve.Context c) (
     c.notFound("idea not found")
     return
   )
-  object deleted = deleteComment("roadmap-" ++ idea["_id"].toStr(), c.param("cid"), c.getString("username"), idea.author.toStr(), c.getBool("isAdmin") == true)
+  object deleted = deleteComment("roadmap-" ++ idea["_id"].toStr(), c.param("cid"), c.getString("username"), idea.author.toStr(), c.getBool("isAdmin"))
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return

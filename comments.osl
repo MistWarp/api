@@ -593,7 +593,7 @@ def handleDeleteProjectComment(*serve.Context c) (
   )
   object project = result.project.assert(object)
 
-  boolean requesterIsAdmin = c.getBool("isAdmin") == true
+  boolean requesterIsAdmin = c.getBool("isAdmin")
   object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
@@ -647,7 +647,7 @@ def handlePinProjectComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin") == true, pinned)
+  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return
@@ -728,7 +728,7 @@ def handleCreateProfileComment(*serve.Context c) (
 )
 
 def handleDeleteProfileComment(*serve.Context c) (
-  boolean requesterIsAdmin = c.getBool("isAdmin") == true
+  boolean requesterIsAdmin = c.getBool("isAdmin")
   object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), c.getString("username"), c.param("name"), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
@@ -768,7 +768,7 @@ def handlePinProfileComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin(profileCommentKey(name), c.param("cid"), c.getString("username"), name, c.getBool("isAdmin") == true, pinned)
+  object updated = setCommentPin(profileCommentKey(name), c.param("cid"), c.getString("username"), name, c.getBool("isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return

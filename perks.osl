@@ -230,7 +230,7 @@ def trimDayHistory(object history, number days) object (
     )
     object kept = {}
     number today = (timestamp / 86400000).toInt()
-    array keys = history.getKeys().toArray()
+    array keys = history.getKeys()
     for i keys.len (
         string key = keys[i].toStr()
         if today - key.toNum() < days (

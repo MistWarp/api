@@ -54,7 +54,7 @@ def removeEvidenceDir(string id) (
     object meta = loadEvidenceMeta(id)
     string assetsDir = dir ++ "assets/"
     if fs.exists(assetsDir) (
-        array files = fs.readDir(assetsDir).toArray()
+        array files = fs.readDir(assetsDir)
         for i files.len (
             fs.remove(assetsDir ++ files[i].toStr())
         )

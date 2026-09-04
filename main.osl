@@ -161,6 +161,7 @@ import "./middleware.osl"
 import "./perks.osl"
 import "./groups.osl"
 import "./projects.osl"
+import "./live-collaboration.osl"
 import "./history-delta.osl"
 import "./commit-management.osl"
 import "./game-data-access.osl"
@@ -354,6 +355,7 @@ api.POST("/spaces/:id/comments/:cid/react", requireAuth, handleReactSpaceComment
 api.GET("/me/spaces", requireAuth, handleMySpaces)
 
 api.POST("/projects", requireAuth, serve.rateLimit(30, 3600), handleCreateProject)
+api.POST("/projects/:id/live", requireAuth, serve.rateLimit(120, 60), handleLiveCollaboration)
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
 api.POST("/projects/:id/upload-parts", requireAuth, requireCurrentAgreement, handleCreateProjectUploadPart)
 api.POST("/projects/:id/upload-parts/:token/complete", requireAuth, requireCurrentAgreement, handleCompleteProjectUploadPart)

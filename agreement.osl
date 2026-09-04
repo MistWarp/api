@@ -127,7 +127,7 @@ def handleAdminGetAgreement(*serve.Context c) (
     number totalUsers = 0
 
     fs.mkdirAll(agreementAcceptDir)
-    array files = fs.readDir(agreementAcceptDir).toArray()
+    array files = fs.readDir(agreementAcceptDir)
     for i files.len (
         string name = files[i].toStr()
         if name.endsWith(".json") (

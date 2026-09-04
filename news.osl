@@ -23,7 +23,7 @@ def purgeUserFromNews(string username) boolean (
         if item.contains("reactions") and item.reactions != null (
             reactions = item.reactions.assert(object)
         )
-        array reactionTypes = reactions.getKeys().toArray()
+        array reactionTypes = reactions.getKeys()
         for j reactionTypes.len (
             string reactionType = reactionTypes[j].toStr()
             reactions[reactionType] = removeUser(reactions[reactionType].assertElse(array, []), key)
@@ -57,7 +57,7 @@ def renameUserInNews(string oldKey, string newName) boolean (
         if item.contains("reactions") and item.reactions != null (
             reactions = item.reactions.assert(object)
         )
-        array reactionTypes = reactions.getKeys().toArray()
+        array reactionTypes = reactions.getKeys()
         for j reactionTypes.len (
             string reactionType = reactionTypes[j].toStr()
             reactions[reactionType] = replaceUserInArray(reactions[reactionType].assertElse(array, []), oldKey, newKey)
@@ -85,7 +85,7 @@ def toggleReactionMap(object reactions, string username, string reactionType) ob
         chosen = reactions[reactionType].assert(array)
     )
     boolean had = chosen.contains(username)
-    array keys = reactions.getKeys().toArray()
+    array keys = reactions.getKeys()
     for i keys.len (
         string k = keys[i].toStr()
         array users = []
@@ -283,7 +283,7 @@ def handleCreateNews(*serve.Context c) (
         next.append(items[i])
     )
     saveNews(next)
-    array userFiles = fs.readDir(usersDir).toArray()
+    array userFiles = fs.readDir(usersDir)
     for i userFiles.len (
         string f = userFiles[i].toStr()
         if f.endsWith(".json") (

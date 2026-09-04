@@ -35,7 +35,7 @@ def weekViewsOf(object project) number (
         return 0
     )
     object history = project.viewHistory.assert(object)
-    array keys = history.getKeys().toArray()
+    array keys = history.getKeys()
     number today = (timestamp / 86400000).toInt()
     number total = 0
     for i keys.len (
@@ -296,7 +296,7 @@ def addActivity(string username, string activityType, object extra) (
         return
     )
     object item = {type: activityType, actor: key, created: timestamp}
-    array extraKeys = extra.getKeys().toArray()
+    array extraKeys = extra.getKeys()
     for i extraKeys.len (
         string k = extraKeys[i].toStr()
         item[k] = extra[k]

@@ -381,6 +381,7 @@ def projectResponse(object project,*serve.Context c) object (
     acceptedChanges: searchEntry.acceptedChanges
   }
   response.myRole = projectRole(project, viewer)
+  response.canSaveDirectly = canSaveLiveProject(project, c)
   if isOwner (
     response.collaborators = collaborators
   )
@@ -451,7 +452,7 @@ def handleGetMyQuota(*serve.Context c) (
   )
 
   array daily = []
-  array keys = dailyMap.getKeys().toArray()
+  array keys = dailyMap.getKeys()
   keys.sort()
   for i keys.len (
     string dayKey = keys[i].toStr()
@@ -650,7 +651,7 @@ def handleCreateProject(*serve.Context c) (
 
 def ownedProjectSlotCount(string userId, string username) number (
   number count = ownerIndexCount(username, true)
-  array trashFiles = fs.readDir(trashDir).toArray()
+  array trashFiles = fs.readDir(trashDir)
   for i trashFiles.len (
     string file = trashFiles[i].toStr()
     if file.endsWith(".json") (
@@ -813,7 +814,7 @@ def consumeStagedUploadPart(string token, string projectId, string kind, string 
 )
 
 def cleanupExpiredStagedUploadParts() (
-  array files = fs.readDir(tmpDir).toArray()
+  array files = fs.readDir(tmpDir)
   for i files.len (
     string filename = files[i].toStr()
     if filename.startsWith("upload-part-") and filename.endsWith(".json") (
@@ -837,7 +838,7 @@ def handleUploadProjectAsset(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !canEditProject(project, c) (
+  if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -906,7 +907,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !canEditProject(project, c) (
+  if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -975,7 +976,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !canEditProject(project, c) (
+  if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -1196,7 +1197,7 @@ def inspectProjectJson(string path) object (
 )
 
 def uploadProjectFiles(object project, string extractDir, object benefits) object (
-  array names = fs.readDir(extractDir).toArray()
+  array names = fs.readDir(extractDir)
   string jsonPath = extractDir ++ "/project.json"
   if !fs.exists(jsonPath) (
     return {ok: false, error: "sb3 has no project.json", status: 400}
@@ -1267,7 +1268,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits) objec
       referencedNames[name] = true
     )
   )
-  array referencedUnique = referencedNames.getKeys().toArray()
+  array referencedUnique = referencedNames.getKeys()
   for i referencedUnique.len (
     string name = referencedUnique[i].toStr()
     if !providedSet.contains(name) (
@@ -1351,7 +1352,7 @@ def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean
   array directories = [projectsDir, trashDir]
   for d directories.len (
     string directory = directories[d].toStr()
-    array files = fs.readDir(directory).toArray()
+    array files = fs.readDir(directory)
     for i files.len (
       auto loaded = readFile(directory ++ files[i].toStr())
       if loaded.ok (
@@ -1371,7 +1372,7 @@ def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean
     return true
   )
   if !workspace (
-    array evidenceIds = fs.readDir(reportEvidenceDir).toArray()
+    array evidenceIds = fs.readDir(reportEvidenceDir)
     for i evidenceIds.len (
       object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
       if (evidence.evidenceJsonKey ?? "").toStr() == key (
@@ -1481,7 +1482,7 @@ def maybeFlushProject(object project) (
 )
 
 def sweepStagedProjects() (
-  array files = fs.readDir(stagingDir).toArray()
+  array files = fs.readDir(stagingDir)
   for i files.len (
     array parts = files[i].toStr().split(".")
     string id = parts[1].toStr()
@@ -1499,7 +1500,7 @@ def handleCheckProjectAssets(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !canEditProject(project, c) (
+  if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -1530,13 +1531,20 @@ def handleCheckProjectAssets(*serve.Context c) (
 )
 
 def handleUploadProject(*serve.Context c) (
+  string lockName = "project-upload:" ++ c.param("id")
+  sync.lock(lockName)
+  handleUploadProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleUploadProjectLocked(*serve.Context c) (
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
     return
   )
   object project = result.project.assert(object)
-  if !canEditProject(project, c) (
+  if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -1550,6 +1558,17 @@ def handleUploadProject(*serve.Context c) (
   string requestedMergeSourceHead = c.formValue("mergeSourceHead").strip()
   string requestedMergeTargetHead = c.formValue("mergeTargetHead").strip()
   string currentHead = projectGitHead(project)
+  string expectedEdited = c.formValue("expectedEdited").strip()
+  if !canEditProject(project, c) (
+    if expectedEdited == "" or restoreCommit != "" or pullId != "" or mergeSourceBranch != "" (
+      c.forbidden("live contributors can save the current project; history and publishing require a maintainer")
+      return
+    )
+  )
+  if expectedEdited != "" and expectedEdited.toNum() != project.edited.toNum() (
+    c.json(409, {ok: false, error: "someone saved newer changes; refresh project history before saving again", code: "head_changed"})
+    return
+  )
   if expectedHead != "" and expectedHead != currentHead (
     c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
     return
@@ -2102,7 +2121,7 @@ def handleBootstrapProjectHistory(*serve.Context c) (
     workspace = staged.file.assert(object)
     stagedWorkspace = true
   )
-  if workspace.getKeys().toArray().len == 0 or gitMetadata == "" (
+  if workspace.getKeys().len == 0 or gitMetadata == "" (
     c.badRequest("missing MistWarp history")
     return
   )
@@ -2405,7 +2424,7 @@ def handleUpdateProject(*serve.Context c) (
   object creatorBenefits = mistwarpBenefitsForProject(project)
   if body.contains("branding") (
     object incomingBranding = body.branding.assertElse(object, {})
-    boolean clearingBranding = incomingBranding.getKeys().toArray().len == 0
+    boolean clearingBranding = incomingBranding.getKeys().len == 0
     string accentColor = (incomingBranding.accentColor ?? "").toStr().strip()
     string tagline = (incomingBranding.tagline ?? "").toStr().strip()
     if accentColor != "" and !regex.match("^#[0-9a-fA-F]{6}$", accentColor) (
@@ -2771,7 +2790,7 @@ def collectAssetsUsedByOthers(string excludeId) object (
   array directories = [projectsDir, trashDir]
   for d directories.len (
     string directory = directories[d].toStr()
-    array files = fs.readDir(directory).toArray()
+    array files = fs.readDir(directory)
     for i files.len (
       auto res = readFile(directory ++ files[i].toStr())
       if res.ok (
@@ -2785,7 +2804,7 @@ def collectAssetsUsedByOthers(string excludeId) object (
       )
     )
   )
-  array evidenceIds = fs.readDir(reportEvidenceDir).toArray()
+  array evidenceIds = fs.readDir(reportEvidenceDir)
   for i evidenceIds.len (
     object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
     if evidence.id.toStr() != excludeId and evidence.contains("assets") and evidence.assets != null (
@@ -2919,7 +2938,7 @@ def loadTrashedProject(string id) object (
 )
 
 def purgeExpiredTrash() (
-  array files = fs.readDir(trashDir).toArray()
+  array files = fs.readDir(trashDir)
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
@@ -2939,7 +2958,7 @@ def handleGetMyTrash(*serve.Context c) (
   array projects = []
   string userId = c.getString("userId")
   string username = c.getString("username")
-  array files = fs.readDir(trashDir).toArray()
+  array files = fs.readDir(trashDir)
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
@@ -3123,7 +3142,7 @@ def handleViewProject(*serve.Context c) (
     dayCount = history[dayKey].toNum()
   )
   object pruned = {}
-  array dayKeys = history.getKeys().toArray()
+  array dayKeys = history.getKeys()
   for i dayKeys.len (
     string k = dayKeys[i].toStr()
     if today - k.toNum() < 31 (
@@ -3322,7 +3341,7 @@ def handleLeaderboard(*serve.Context c) (
     )
   )
   array rows = []
-  array keys = totals.getKeys().toArray()
+  array keys = totals.getKeys()
   for i keys.len (
     rows.append(totals[keys[i].toStr()])
   )

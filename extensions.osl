@@ -100,7 +100,7 @@ def readExtensionRecord(string hash) object (
 
 def extensionRecord(object policy, string hash) object (
     object record = readExtensionRecord(hash)
-    if record.getKeys().toArray().len > 0 (
+    if record.getKeys().len > 0 (
         return record
     )
     object hashes = policy.hashes.assert(object)
@@ -156,7 +156,7 @@ def inspectProjectExtensionUrls(string jsonPath) object (
                 return {ok: false, error: "invalid extension URLs"}
             )
             object entries = result.unwrap().assert(object)
-            array ids = entries.getKeys().toArray()
+            array ids = entries.getKeys()
             found = found + ids.len
             for i ids.len (
                 string extensionUrl = entries[ids[i].toStr()].toStr()
@@ -169,7 +169,7 @@ def inspectProjectExtensionUrls(string jsonPath) object (
     if !valid (
         return {ok: false, error: "invalid extension URLs"}
     )
-    array urls = unique.getKeys().toArray()
+    array urls = unique.getKeys()
     if urls.len > maxProjectExtensions (
         return {ok: false, error: "too many custom extensions"}
     )
@@ -284,7 +284,7 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
             )
         )
         object record = extensionRecord(policy, hash)
-        if record.getKeys().toArray().len == 0 (
+        if record.getKeys().len == 0 (
             record = {status: "untrusted", urls: [], projects: [], firstSeen: timestamp}
         )
         if !record.contains("urls") (
@@ -344,7 +344,7 @@ def migrateExtensionUsage() boolean (
         sync.unlock("extension-index-migration")
         return true
     )
-    array files = fs.readDir(projectsDir).toArray()
+    array files = fs.readDir(projectsDir)
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
         if result.ok (
@@ -458,7 +458,7 @@ def unshareProjectForBlockedExtension(object project) boolean (
 )
 
 def unshareProjectsUsingHash(string hash) object (
-    array files = fs.readDir(projectsDir).toArray()
+    array files = fs.readDir(projectsDir)
     number affected = 0
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
@@ -476,7 +476,7 @@ def unshareProjectsUsingHash(string hash) object (
 )
 
 def unshareProjectsUsingUrl(string extensionUrl) object (
-    array files = fs.readDir(projectsDir).toArray()
+    array files = fs.readDir(projectsDir)
     number affected = 0
     for i files.len (
         auto result = readFile(projectsDir ++ files[i].toStr())
@@ -528,7 +528,7 @@ def handleGetProjectExtensionSource(*serve.Context c) (
 
 def ensureExtensionRecords(object policy) boolean (
     object hashes = policy.hashes.assert(object)
-    array hashKeys = hashes.getKeys().toArray()
+    array hashKeys = hashes.getKeys()
     for i hashKeys.len (
         string hash = hashKeys[i].toStr()
         if isExtensionHash(hash) and !fs.exists(extensionRecordPath(hash)) (
@@ -548,11 +548,11 @@ def ensureExtensionRecords(object policy) boolean (
             )
         )
     )
-    array files = fs.readDir(extensionsDir).toArray()
+    array files = fs.readDir(extensionsDir)
     for i files.len (
         string fileName = files[i].toStr()
         if fileName.endsWith(".js") (
-            string hash = fileName.split(".")[1].toStr()
+            string hash = fileName.split(".")[1]
             if isExtensionHash(hash) and !fs.exists(extensionRecordPath(hash)) (
                 string lockName = "extension-" ++ hash
                 sync.lock(lockName)
@@ -574,11 +574,11 @@ def handleAdminGetExtensions(*serve.Context c) (
         return
     )
     array extensions = []
-    array files = fs.readDir(extensionsDir).toArray()
+    array files = fs.readDir(extensionsDir)
     for i files.len (
         string fileName = files[i].toStr()
         if fileName.endsWith(".json") (
-            string hash = fileName.split(".")[1].toStr()
+            string hash = fileName.split(".")[1]
             if isExtensionHash(hash) (
                 object record = readExtensionRecord(hash)
                 array urls = []
@@ -649,7 +649,7 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
         return
     )
     object record = readExtensionRecord(hash)
-    if record.getKeys().toArray().len == 0 (
+    if record.getKeys().len == 0 (
         c.notFound("extension not found")
         return
     )

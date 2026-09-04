@@ -56,7 +56,7 @@ def handleEditBountyComment(*serve.Context c) (
 )
 
 def handleDeleteBountyComment(*serve.Context c) (
-    object deleted = deleteComment(bountyCommentKey(c.param("id")), c.param("cid"), c.getString("username"), "", c.getBool("isAdmin") == true)
+    object deleted = deleteComment(bountyCommentKey(c.param("id")), c.param("cid"), c.getString("username"), "", c.getBool("isAdmin"))
     if !deleted.ok (
         c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
         return

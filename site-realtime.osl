@@ -92,7 +92,7 @@ def siteBroadcastStats(string projectId, string actor, object viewerState) (
   )
   message.actor = actor
   for key in viewerState.getKeys() (
-    message[key.toStr()] = viewerState[key.toStr()]
+    message[key] = viewerState[key]
   )
   siteBroadcastProject(projectId, message)
 )
