@@ -1,12 +1,43 @@
 // Sessions are leases. Restarting the API or losing host heartbeats revokes saves.
 auto liveEditorSessions = cache.create(10000, 90)
 
-def liveSession(object project) object (
-  object session = liveEditorSessions.get(project.id.toStr()).assertElse(object, {})
+def handleGetSharedProjects(*serve.Context c) (
+  string username = normalizeUsername(c.getString("username"))
+  array projects = []
+  array entries = projectSearchDocs.all()
+  for i entries.len (
+    object entry = entries[i].assert(object)
+    array contributors = entry.contributors.assertElse(array, [])
+    boolean candidate = false
+    for j contributors.len (
+      if normalizeUsername(contributors[j].toStr()) == username candidate = true
+    )
+    if candidate (
+      auto result = loadProject(entry.id.toStr())
+      if result.ok (
+        object project = result.project.assert(object)
+        string role = projectRole(project, username)
+        if role != "" and role != "owner" and canViewProject(project, c) (
+          projects.append(projectResponse(project, c))
+        )
+      )
+    )
+  )
+  projects.sortBy("edited", "descending")
+  c.json(200, {ok: true, projects: projects})
+)
+
+def liveSessionKey(object project, string branch) string (
+  return project.id.toStr() ++ ":" ++ branch
+)
+
+def liveSession(object project, string branch) object (
+  object session = liveEditorSessions.get(liveSessionKey(project, branch)).assertElse(object, {})
   if session.isEmpty() or session.expires.toNum() <= timestamp (
     return {}
   )
-  if projectRole(project, session.host.toStr()) != "owner" (
+  string role = projectRole(project, session.host.toStr())
+  if role != "owner" and role != "maintainer" and role != "editor" (
     return {}
   )
   return session
@@ -15,11 +46,14 @@ def liveSession(object project) object (
 def canSaveLiveProject(object project,*serve.Context c) boolean (
   if canEditProject(project, c) return true
   if !c.getBool("authenticated") return false
-  object session = liveSession(project)
-  if session.isEmpty() == true return false
   string username = normalizeUsername(c.getString("username"))
   string role = projectRole(project, username)
+  if role == "editor" return true
   if role == "" or role == "tester" return false
+  string branch = c.formValue("collaborationBranch").assertElse(string, "")
+  if branch == "" branch = project.gitBranch.assertElse(string, "main")
+  object session = liveSession(project, branch)
+  if session.isEmpty() == true return false
   object members = session.members.assertElse(object, {})
   if !members.contains(username) return false
   object member = members[username].assert(object)
@@ -40,15 +74,21 @@ def handleLiveCollaboration(*serve.Context c) (
     return
   )
   object body = c.bodyJSON()
+  string branch = body.branch.assertElse(string, project.gitBranch.assertElse(string, "main")).strip()
+  if branch == "" or branch.len > 200 (
+    c.badRequest("a project branch is required")
+    return
+  )
+  string sessionKey = liveSessionKey(project, branch)
   string action = body.action.assertElse(string, "list")
-  string lockName = "live-editor:" ++ project.id.toStr()
+  string lockName = "live-editor:" ++ sessionKey
   sync.lock(lockName)
-  object session = liveSession(project)
+  object session = liveSession(project, branch)
   string errorMessage = ""
   if action == "host" (
     string room = body.roomId.assertElse(string, "").strip()
-    if role != "owner" or room == "" or room.len > 128 (
-      errorMessage = "only the project owner can host a project session"
+    if (role != "owner" and role != "maintainer" and role != "editor") or room == "" or room.len > 128 (
+      errorMessage = "only a project editor can host a project session"
     ) else (
       if session.isEmpty() and body.sessionId.assertElse(string, "") != "" (
         errorMessage = "this editing session expired; start a new session"
@@ -56,11 +96,11 @@ def handleLiveCollaboration(*serve.Context c) (
         errorMessage = "an editing session is already active"
       ) else (
         if session.isEmpty() == true (
-          session = {id: randomString(32), host: username, roomId: room, members: {}}
+          session = {id: randomString(32), host: username, roomId: room, branch: branch, members: {}}
         )
         session.expires = timestamp + 90000
         session.title = project.title
-        liveEditorSessions.set(project.id.toStr(), session)
+        liveEditorSessions.set(sessionKey, session)
       )
     )
   )
@@ -68,7 +108,7 @@ def handleLiveCollaboration(*serve.Context c) (
     if session.host.toStr() != username or session.id.toStr() != body.sessionId.assertElse(string, "") (
       errorMessage = "only the session host can end this session"
     ) else (
-      liveEditorSessions.delete(project.id.toStr())
+      liveEditorSessions.delete(sessionKey)
       session = {}
     )
   )
@@ -88,7 +128,8 @@ def handleLiveCollaboration(*serve.Context c) (
           errorMessage = "a contributor account and connected room are required"
         ) else (
           if !members.contains(username) or members[username].peerId.toStr() != peerId (
-            members[username] = {username: username, peerId: peerId, approved: false, expires: timestamp + 90000}
+            boolean approved = role == "owner" or role == "maintainer" or role == "editor"
+            members[username] = {username: username, peerId: peerId, approved: approved, expires: timestamp + 90000}
           )
         )
       )
@@ -111,7 +152,7 @@ def handleLiveCollaboration(*serve.Context c) (
         )
       )
       session.members = members
-      liveEditorSessions.set(project.id.toStr(), session)
+      liveEditorSessions.set(sessionKey, session)
     )
   )
   object response = {}
@@ -123,7 +164,7 @@ def handleLiveCollaboration(*serve.Context c) (
         responseMembers.append(member)
       )
     )
-    response = {id: session.id, host: session.host, title: session.title, roomId: session.roomId, members: responseMembers}
+    response = {id: session.id, host: session.host, title: session.title, roomId: session.roomId, branch: branch, members: responseMembers}
   )
   sync.unlock(lockName)
   if errorMessage != "" (

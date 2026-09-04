@@ -2374,6 +2374,7 @@ def handleUpdateProject(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
+  array previousTeam = project.collaborators.assertElse(array, [])
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2755,9 +2756,9 @@ def handleUpdateProject(*serve.Context c) (
     for i incoming.len (
       if collaborators.len < 25 (
         object entry = incoming[i].assert(object)
-        string username = entry.username.toStr().strip()
+        string username = normalizeUsername(entry.username.toStr())
         string role = entry.role.toStr().toLower().strip()
-        boolean validRole = role == "maintainer" or role == "contributor" or role == "tester"
+        boolean validRole = role == "editor" or role == "maintainer" or role == "contributor" or role == "tester"
         number share = 0
         if entry.contains("share") and entry.share != null (
           share = entry.share.toNum()
@@ -2767,8 +2768,19 @@ def handleUpdateProject(*serve.Context c) (
           return
         )
         if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
+          string teammateId = discoverUserIdentity(username)
+          if teammateId == "" (
+            c.badRequest("Rotur user not found: " ++ username)
+            return
+          )
+          for memberIndex collaborators.len (
+            if collaborators[memberIndex].username.toStr() == username (
+              c.badRequest("a person can only appear once in the project team")
+              return
+            )
+          )
           totalShare = totalShare + share
-          collaborators.append({username: username, userId: userIdForUsername(username), role: role, share: share})
+          collaborators.append({username: username, userId: teammateId, role: role, share: share})
         )
       )
     )
@@ -2780,8 +2792,29 @@ def handleUpdateProject(*serve.Context c) (
   )
 
   project.edited = timestamp
-  saveProject(project)
+  if !saveProject(project) (
+    c.internalError("could not save project access")
+    return
+  )
   upsertIndexEntry(project)
+  if body.contains("collaborators") (
+    array nextTeam = project.collaborators.assert(array)
+    for i nextTeam.len (
+      object member = nextTeam[i].assert(object)
+      boolean newlyShared = true
+      for j previousTeam.len (
+        object previousMember = previousTeam[j].assert(object)
+        if normalizeUsername(previousMember.username.toStr()) == normalizeUsername(member.username.toStr()) and previousMember.role == member.role (
+          newlyShared = false
+        )
+      )
+      if newlyShared (
+        addNotification(member.username.toStr(), c.getString("username"), "project_shared", {
+          projectId: project.id, projectTitle: project.title, role: member.role
+        })
+      )
+    )
+  )
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
