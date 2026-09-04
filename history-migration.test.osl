@@ -1,0 +1,154 @@
+import "std:testing"
+import "std:fs"
+import "std:zip"
+import "std:json"
+import "std:sync"
+import "std:thread"
+import "go:mistwarp.local/gitinspection"
+
+string tmpDir = raw("func() string { p, _ := OSLos.MkdirTemp(\"\", \"mistwarp-history-test-\"); return p+\"/\" }()")
+string projectsDir = tmpDir ++ "projects/"
+number historyMigrationWorkers = 1
+object records = {}
+number saves = 0
+number readFailures = 0
+boolean failRead = false
+boolean failCopy = false
+number serial = 0
+
+def randomString(number length) string (
+  serial += 1
+  return serial.toStr()
+)
+def loadProject(string id) object (
+  if readFailures > 0 (
+    readFailures -= 1
+    return {ok: false, retryable: true}
+  )
+  if failRead (
+    return {ok: false, retryable: true}
+  )
+  if records.contains(id) (
+    return {ok: true, project: json.parse(json.stringify(records[id]), {type: "object"}).unwrap()}
+  )
+  return {ok: false, missing: true}
+)
+def projectHasWorkspace(object project) boolean (
+  return (project.workspaceKey ?? "").toStr() != ""
+)
+def projectGitHead(object project) string (
+  return (project.gitHead ?? "").toStr()
+)
+def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
+  string plain = outputPath ++ ".json"
+  fs.writeFile(plain, "{\"targets\":[]}")
+  boolean ok = zip.gzipLimited(plain, outputPath, 1024, 1024)
+  fs.remove(plain)
+  return ok
+)
+def isValidMd5Ext(string name) boolean (
+  return true
+)
+def assetObjectKey(string name) string (
+  return name
+)
+def copyStorageKeyToPath(string name, string path) boolean (
+  return false
+)
+def copyProjectWorkspaceToPath(object project, string path) boolean (
+  if failCopy (
+    return false
+  )
+  return zip.copyFile(tmpDir ++ project.workspaceKey.toStr(), path)
+)
+def contentHash(byte[] data) string (
+  return randomString(8)
+)
+def projectWorkspaceSnapshotKey(string hash) string (
+  return hash ++ ".mwp"
+)
+def stageR2Blob(string key, byte[] data, string contentType, string encoding) boolean (
+  return fs.writeFileBytes(tmpDir ++ key, data)
+)
+def removeProjectStorageKeyIfOrphaned(string key, string id, boolean workspace) (
+  return
+)
+def saveProject(object project) boolean (
+  saves += 1
+  records[project.id.toStr()] = project
+  return true
+)
+def upsertIndexEntry(object project) (
+  return
+)
+def readFile(string path) object (
+  return {ok: false}
+)
+
+import "./history-migration.osl"
+
+object original = {id: "parent", owner: "Mist", created: 1000, jsonKey: "parent.json", lastUploadAt: 1000, assets: []}
+records.parent = original
+object generated = ensureGeneratedProjectHistory(original, {}, false)
+testing.assert(generated.ok == true, "generate original")
+object parent = generated.project.assert(object)
+string base = parent.gitHead.toStr()
+object child = {id: "child", owner: "Mist", created: 2000, jsonKey: "child.json", lastUploadAt: 2000, remixParent: "parent", remixBaseCommit: base, assets: []}
+records.child = child
+number before = saves
+failRead = true
+object failedRead = ensureGeneratedProjectHistory(child, {}, false)
+testing.assert(failedRead.ok == false and failedRead.retryable == true, "transient reads remain retryable")
+testing.assert(saves == before and !projectHasWorkspace(child), "transient read publishes nothing")
+failRead = false
+failCopy = true
+object failedCopy = ensureGeneratedProjectHistory(child, {}, false)
+testing.assert(failedCopy.ok == false and saves == before, "copy failure cannot generate a disconnected root")
+failCopy = false
+object migrated = ensureGeneratedProjectHistory(child, {}, false)
+testing.assert(migrated.ok == true, "retry succeeds")
+object migratedChild = migrated.project.assert(object)
+testing.assert(migratedChild.gitCommits.assert(array).len == 2, "inherited metadata remains visible")
+object nested = {id: "nested", owner: "Mist", created: 3000, jsonKey: "nested.json", lastUploadAt: 3000, remixParent: "child", remixBaseCommit: migratedChild.gitHead, assets: []}
+records.nested = nested
+object nestedResult = ensureGeneratedProjectHistory(nested, {}, false)
+testing.assert(nestedResult.ok == true and nestedResult.project.assert(object).gitCommits.assert(array).len == 3, "nested migration includes ancestors")
+before = saves
+object repeated = ensureGeneratedProjectHistory(migratedChild, {}, false)
+testing.assert(repeated.ok == true and saves == before, "bootstrap/migration never resets existing edits")
+object missing = {id: "missing", jsonKey: "x", lastUploadAt: 1, remixParent: "deleted"}
+object missingResult = ensureGeneratedProjectHistory(missing, {}, false)
+testing.assert(missingResult.ok == false and missingResult.code == "parent_missing" and saves == before, "deleted parent requires original history")
+object unknown = {id: "unknown", jsonKey: "x", lastUploadAt: 1, remixParent: "parent"}
+testing.assert(ensureGeneratedProjectHistory(unknown, {}, false).ok == false, "never guess a historical base from today's parent HEAD")
+object cycleA = {id: "a", jsonKey: "a", lastUploadAt: 1, remixParent: "b"}
+object cycleB = {id: "b", jsonKey: "b", lastUploadAt: 1, remixParent: "a"}
+records.a = cycleA
+records.b = cycleB
+object cycleResult = ensureGeneratedProjectHistory(cycleA, {}, false)
+testing.assert(cycleResult.ok == false and cycleResult.error == "remix cycle" and saves == before, "cycles publish nothing")
+
+object editedFork = {id: "edited", jsonKey: "edited.json", lastUploadAt: 1, remixParent: "parent", remixBaseCommit: base, gitHead: "recorded-edits"}
+testing.assert(ensureGeneratedProjectHistory(editedFork, {}, false).ok == false, "bootstrap must not discard established edits even when workspace is missing")
+
+// Migration and bootstrap share this code. Contending calls must publish once.
+def concurrentEnsureHistory(object candidate,*sync.WaitGroup jobs) (
+  ensureGeneratedProjectHistory(candidate, {}, false)
+  jobs.done()
+)
+object concurrent = {id: "concurrent", owner: "Mist", created: 4000, jsonKey: "concurrent.json", lastUploadAt: 4000, assets: []}
+records.concurrent = concurrent
+before = saves
+*sync.WaitGroup jobs = sync.waitGroup()
+for i 2 (
+  jobs.add()
+  thread.new(concurrentEnsureHistory, concurrent, jobs)
+)
+jobs.wait()
+testing.assert(saves == before + 1, "concurrent migration/bootstrap publishes one history")
+object retryChild = {id: "retry-child", owner: "Mist", created: 5000, jsonKey: "retry-child.json", lastUploadAt: 5000, remixParent: "parent", remixBaseCommit: base, assets: []}
+records["retry-child"] = retryChild
+readFailures = 1
+object retried = ensureGeneratedProjectHistory(retryChild, {}, false)
+testing.assert(retried.ok == true and readFailures == 0, "transient parent read retries in the same call")
+fs.remove(tmpDir)

@@ -1,5 +1,5 @@
-def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead) string (
-  return raw("rewrite.WriteGeneratedHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, float64(createdAt), parentArchivePath, parentHead)")
+def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead, string parentId) string (
+  return raw("gitinspection.GenerateHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, float64(createdAt), parentArchivePath, parentHead, parentId)")
 )
 
 def projectHasStoredContent(object project) boolean (
@@ -10,7 +10,7 @@ def projectHasStoredContent(object project) boolean (
 
 def projectHistorySourceVersion(object project) string (
   array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
-  return project.jsonKey.toStr() ++ "\n" ++ project.lastUploadAt.toStr() ++ "\n" ++ project.pendingJson.toStr() ++ "\n" ++ project.remixParent.toStr() ++ "\n" ++ json.stringify(assets)
+  return project.jsonKey.toStr() ++ "\n" ++ project.lastUploadAt.toStr() ++ "\n" ++ project.pendingJson.toStr() ++ "\n" ++ project.remixParent.toStr() ++ "\n" ++ project.remixBaseCommit.toStr() ++ "\n" ++ project.edited.toStr() ++ "\n" ++ json.stringify(assets)
 )
 
 def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
@@ -72,14 +72,17 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
     log "WARNING: salvaging MistWarp history for " ++ id ++ " without " ++ missingAssets.toStr() ++ " missing legacy assets"
   )
 
-  string head = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead)
+  string generatedJson = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead, (project.remixParent ?? "").toStr())
   fs.remove(jsonPath)
   fs.remove(assetsPath)
-  if head == "" or !fs.exists(workspacePath) (
+  auto parsedGeneratedHistory = json.parse(generatedJson, {type: "object"})
+  if parsedGeneratedHistory.isErr() or parsedGeneratedHistory.unwrap().assert(object).ok != true or !fs.exists(workspacePath) (
     fs.remove(workspacePath)
     return {ok: false, error: "could not generate history archive"}
   )
 
+  object history = parsedGeneratedHistory.unwrap().assert(object).manifest.assert(object)
+  string head = history.head.toStr()
   auto currentResult = loadProject(id)
   if !currentResult.ok (
     fs.remove(workspacePath)
@@ -121,9 +124,8 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   current.workspaceLayers = [workspaceKey]
   current.gitHead = head
   current.gitBranch = "main"
-  current.gitCommits = [{sha: head, message: "Initial version", author: current.owner, date: current.created}]
-  array parents = parentHead == "" ? [] [parentHead]
-  current.gitGraph = {branches: ["main"], branchLogs: [{branch: "main", oids: [head]}], nodes: [{sha: head, message: "Initial version", author: current.owner, date: current.created, parents: parents, branches: ["main"]}]}
+  current.gitCommits = history.commits
+  current.gitGraph = history.graph
   if parentHead != "" (
     current.remixBaseCommit = parentHead
   )
@@ -142,6 +144,11 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
   if !projectHasStoredContent(project) (
     return {ok: true, project: project, generated: false}
   )
+  string recordedHead = projectGitHead(project)
+  string recordedBase = (project.remixBaseCommit ?? "").toStr()
+  if recordedHead != "" and recordedHead != recordedBase (
+    return {ok: false, error: "recorded edits require the original repository; bootstrap cannot reset history"}
+  )
   string id = project.id.toStr()
   if visiting.contains(id) (
     return {ok: false, error: "remix cycle"}
@@ -150,39 +157,62 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
 
   string parentPath = ""
   string parentHead = ""
-  string parentId = project.remixParent.toStr()
+  string parentId = (project.remixParent ?? "").toStr()
   if parentId != "" (
+    // Absence never authorizes inventing a root or using today's parent HEAD.
+    // Keep the record retryable until its recorded base can be materialized.
     auto parentResult = loadProject(parentId)
-    if parentResult.ok (
-      object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting, allowMissingAssets)
-      if ensuredParent.ok (
-        object parent = ensuredParent.project.assert(object)
-        if projectHasWorkspace(parent) (
-          parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
-          if !copyProjectWorkspaceToPath(parent, parentPath) (
-            parentPath = ""
-          ) else (
-            parentHead = projectGitHead(parent)
-          )
-        )
+    for attempt 2 (
+      if !parentResult.ok and parentResult.missing != true (
+        parentResult = loadProject(parentId)
       )
+    )
+    if !parentResult.ok (
+      if parentResult.missing == true (
+        return {ok: false, code: "parent_missing", error: "parent deleted or missing; original history or external backup required"}
+      )
+      return {ok: false, code: "parent_read_failed", retryable: true, error: "could not read parent; retry later"}
+    )
+    object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting, allowMissingAssets)
+    if !ensuredParent.ok (
+      return ensuredParent
+    )
+    object parent = ensuredParent.project.assert(object)
+    parentHead = (project.remixBaseCommit ?? "").toStr()
+    if parentHead == "" (
+      return {ok: false, error: "historical remix base unknown; original history required"}
+    )
+    if !projectHasWorkspace(parent) (
+      return {ok: false, error: "parent history unavailable; retry later"}
+    )
+    parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
+    boolean parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
+    for attempt 2 (
+      if !parentCopied (
+        fs.remove(parentPath)
+        parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
+      )
+    )
+    if !parentCopied (
+      fs.remove(parentPath)
+      return {ok: false, retryable: true, error: "could not read parent history; retry later"}
     )
   )
 
-  sync.lock("history-migration-project-" ++ id)
+  sync.lock("project-history-" ++ id)
   auto currentResult = loadProject(id)
   object result = {ok: false, error: "project disappeared during migration"}
   if currentResult.ok (
     object current = currentResult.project.assert(object)
     if projectHasWorkspace(current) (
       result = {ok: true, project: current, generated: false}
-    ) else if current.remixParent.toStr() != parentId (
+    ) else if projectHistorySourceVersion(current) != projectHistorySourceVersion(project) or projectGitHead(current) != recordedHead (
       result = {ok: false, error: "project changed during migration; will retry later"}
     ) else (
       result = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
     )
   )
-  sync.unlock("history-migration-project-" ++ id)
+  sync.unlock("project-history-" ++ id)
   fs.remove(parentPath)
   return result
 )

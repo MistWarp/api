@@ -211,7 +211,9 @@ def loadProject(string id) object (
     )
     auto result = readFile(projectsDir ++ id ++ ".json")
     if !result.ok (
-        return {ok: false, error: "project not found"}
+        string projectPath = projectsDir ++ id ++ ".json"
+        boolean missing = raw("func() bool { _, err := OSLos.Stat(projectPath); return OSLos.IsNotExist(err) }()")
+        return {ok: false, error: missing ? "project not found" "project read failed", missing: missing, retryable: !missing}
     )
     object project = result.data.assert(object)
     if (!project.contains("ownerId") or project.ownerId == null or project.ownerId.toStr() == "") and project.contains("owner") and project.owner != null (
