@@ -330,6 +330,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
         project.gitCommits = paginate(manifest.commits.assert(array), 0, 50)
     )
     project.gitGraph = manifest.graph.assertElse(object, {branches: [], branchLogs: [], nodes: []})
+    project.edited = timestamp
     if !saveProject(project) (
         removeProjectStorageKeyIfOrphaned(workspaceKey, project.id.toStr(), true)
         sync.unlock(lockName)

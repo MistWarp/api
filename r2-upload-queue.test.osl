@@ -1,0 +1,145 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:sync"
+import "./storage-addressing.osl"
+
+string testDir = raw("func() string { p, _ := OSLos.MkdirTemp(\"\", \"mistwarp-r2-queue-test-\"); return p+\"/\" }()")
+string projectsDir = testDir ++ "projects/"
+string trashDir = testDir ++ "trash/"
+string r2UploadQueueFile = testDir ++ "queue.json"
+string r2StorageIndexFile = testDir ++ "stored.json"
+number uploadDebounceMs = 604800000
+boolean r2Local = false
+boolean failUpload = false
+array puts = []
+object remoteObjects = {}
+
+def readFile(string path) object (
+    if !fs.exists(path) (
+        return {ok: false}
+    )
+    auto parsed = json.parse(fs.readFile(path), {type: "object"})
+    return parsed.isErr() ? {ok: false} {ok: true, data: parsed.unwrap()}
+)
+def writeFile(string path, object data) boolean (
+    return fs.writeFile(path, json.stringify(data))
+)
+def localBlobPath(string key) string (
+    return testDir ++ "blobs/" ++ key
+)
+def parentDirOf(string path) string (
+    return raw("OSLstrings.TrimSuffix(path, OSLstrings.Split(path, \"/\")[len(OSLstrings.Split(path, \"/\"))-1])")
+)
+def assetObjectKey(string name) string (
+    return "assets/" ++ name
+)
+def isSafeBlobKey(string key) boolean (
+    return key != "" and !key.contains("..")
+)
+def r2ObjectType(string key) string (
+    return "test"
+)
+def r2PutEncoded(string key, byte[] body, string contentType, string contentEncoding) boolean (
+    puts.append({key: key, body: body.toStr(), contentType: contentType, contentEncoding: contentEncoding})
+    if failUpload (
+        return false
+    )
+    remoteObjects[key] = {size: body.len}
+    writeFile(r2StorageIndexFile, {objects: remoteObjects})
+    return true
+)
+
+import "./r2-upload-queue.osl"
+
+fs.mkdirAll(projectsDir)
+fs.mkdirAll(trashDir)
+number now = timestamp
+number old = now - uploadDebounceMs - 10000
+object item = {key: "shared", queuedAt: 100}
+testing.assert(!r2UploadReady(item, {}, (100 + uploadDebounceMs) - 1), "wait seven full days before first upload")
+testing.assert(r2UploadReady(item, {}, 100 + uploadDebounceMs), "upload at the exact inactivity boundary")
+testing.assert(!r2UploadReady(item, {shared: 200}, 100 + uploadDebounceMs), "project activity extends an older queue entry")
+testing.assert(projectStorageActivityAt({created: 100, edited: 200, lastUploadAt: 1}) == 200, "use the last edit, not the last R2 upload")
+testing.assert(projectStorageActivityAt({created: 100}) == 100, "new projects use their creation time")
+
+array keys = ["project-json/one.json.gz", "project-workspaces/one.mwp", "assets/shared.svg"]
+for i keys.len (
+    string key = keys[i].toStr()
+    testing.assert(stageR2Blob(key, "payload", "application/json", "gzip"), "stage locally")
+)
+object active = {id: "active", created: old, edited: now, jsonKey: keys[1], workspaceLayers: [keys[2]], assets: ["shared.svg"]}
+writeFile(projectsDir ++ "active.json", active)
+flushR2UploadQueue()
+testing.assert(puts.len == 0 and loadR2UploadQueue().len == 3, "new projects upload nothing on the five-minute flush")
+
+// Simulate a persisted queue older than seven days, followed by another project save.
+array queuedItems = loadR2UploadQueue()
+for i queuedItems.len (
+    object queuedItem = queuedItems[i].assert(object)
+    queuedItem.queuedAt = old
+    queuedItems[i] = queuedItem
+)
+writeFile(r2UploadQueueFile, {items: queuedItems})
+flushR2UploadQueue()
+testing.assert(puts.len == 0, "old JSON, history, and assets stay local while their project is active")
+
+testing.assert(stageR2Blob(keys[1].toStr(), "payload", "application/json", "gzip"), "save identical JSON again")
+array refreshed = loadR2UploadQueue()
+testing.assert(refreshed.len == 3 and refreshed[1].assert(object).queuedAt.toNum() >= now, "repeated saves reset the clock without duplicate queue entries")
+writeFile(r2UploadQueueFile, {items: queuedItems})
+
+active.edited = old
+writeFile(projectsDir ++ "active.json", active)
+object remix = {id: "remix", edited: now, jsonKey: keys[1], workspaceLayers: [keys[2]], assets: ["shared.svg"]}
+writeFile(trashDir ++ "remix.json", remix)
+flushR2UploadQueue()
+testing.assert(puts.len == 0, "shared blobs wait for an active remix, including in trash")
+remix.edited = old
+writeFile(trashDir ++ "remix.json", remix)
+
+failUpload = true
+flushR2UploadQueue()
+testing.assert(puts.len == 3 and loadR2UploadQueue().len == 3, "failed uploads remain queued")
+for i keys.len (
+    testing.assert(fs.exists(localBlobPath(keys[i].toStr())), "failed uploads retain every local file")
+)
+failUpload = false
+flushR2UploadQueue()
+testing.assert(puts.len == 6 and loadR2UploadQueue().len == 0, "inactive blobs upload successfully on retry")
+testing.assert(puts[4].assert(object).contentEncoding == "gzip" and puts[4].assert(object).body == "payload", "upload preserves bytes and encoding")
+for i keys.len (
+    testing.assert(!fs.exists(localBlobPath(keys[i].toStr())), "successful uploads remove local copies")
+)
+
+// Existing deployments already have uploaded blobs that were never evicted.
+for i keys.len (
+    fs.writeFile(localBlobPath(keys[i].toStr()), "payload")
+)
+active.edited = timestamp
+writeFile(projectsDir ++ "active.json", active)
+flushR2UploadQueue()
+testing.assert(puts.len == 6 and fs.exists(localBlobPath(keys[1].toStr())), "keep previously uploaded local copies while active")
+active.edited = old
+writeFile(projectsDir ++ "active.json", active)
+flushR2UploadQueue()
+testing.assert(puts.len == 6 and loadR2UploadQueue().len == 0, "evict existing R2 copies without uploading again")
+for i keys.len (
+    testing.assert(!fs.exists(localBlobPath(keys[i].toStr())), "reclaim historical local copies")
+)
+
+stageR2Blob(keys[1].toStr(), "payload", "application/json", "gzip")
+flushR2UploadQueue()
+testing.assert(fs.exists(localBlobPath(keys[1].toStr())) and puts.len == 6, "resaving known R2 content keeps the new local copy for seven days")
+
+writeFile(r2UploadQueueFile, {items: queuedItems})
+fs.writeFile(projectsDir ++ "unreadable.json", "invalid json")
+flushR2UploadQueue()
+testing.assert(fs.exists(localBlobPath(keys[1].toStr())), "unreadable project metadata prevents unsafe eviction")
+fs.remove(projectsDir ++ "unreadable.json")
+
+r2Local = true
+stageR2Blob("assets/local.svg", "local", "image/svg+xml", "")
+flushR2UploadQueue()
+testing.assert(fs.exists(localBlobPath("assets/local.svg")) and puts.len == 6, "local-only mode retains files and never uploads")
+fs.remove(testDir)

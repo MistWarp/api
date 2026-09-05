@@ -230,7 +230,11 @@ def saveProject(object project) boolean (
     if !isSafePathPart(id) (
         return false
     )
-    return writeFile(projectsDir ++ id ++ ".json", project)
+    // Keep the inactivity scan and eviction consistent with published edits.
+    sync.lock("r2-upload-queue")
+    boolean saved = writeFile(projectsDir ++ id ++ ".json", project)
+    sync.unlock("r2-upload-queue")
+    return saved
 )
 
 def deleteProjectFile(string id) boolean (

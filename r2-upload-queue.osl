@@ -1,0 +1,171 @@
+def projectStorageActivityAt(object project) number (
+    number edited = (project.edited ?? 0).toNum()
+    number created = (project.created ?? 0).toNum()
+    return edited > 0 ? edited created
+)
+
+// Shared blobs must wait for every project that references them, including trash.
+// Read under the queue lock, which also serializes project metadata publication.
+def loadR2BlobActivity() object (
+    object activity = {}
+    array directories = [projectsDir, trashDir]
+    for d directories.len (
+        string directory = directories[d].toStr()
+        array files = fs.readDir(directory)
+        for i files.len (
+            string name = files[i].toStr()
+            if name.endsWith(".json") (
+                auto loaded = readFile(directory ++ name)
+                if !loaded.ok (
+                    return {ok: false}
+                )
+                object project = loaded.data.assert(object)
+                number edited = projectStorageActivityAt(project)
+                array keys = projectWorkspaceKeys(project)
+                keys.append((project.jsonKey ?? "").toStr())
+                array assets = (project.assets ?? []).assertElse(array, [])
+                for a assets.len (
+                    keys.append(assetObjectKey(assets[a].toStr()))
+                )
+                for k keys.len (
+                    string key = keys[k].toStr()
+                    if key != "" and (!activity.contains(key) or edited > activity[key].toNum()) (
+                        activity[key] = edited
+                    )
+                )
+            )
+        )
+    )
+    return {ok: true, activity: activity}
+)
+
+def r2UploadReady(object item, object activity, number now) boolean (
+    number lastActivity = (item.queuedAt ?? 0).toNum()
+    string key = item.key.toStr()
+    if activity.contains(key) and activity[key].toNum() > lastActivity (
+        lastActivity = activity[key].toNum()
+    )
+    return now - lastActivity >= uploadDebounceMs
+)
+
+def loadR2UploadQueue() array (
+    auto loaded = readFile(r2UploadQueueFile)
+    if loaded.ok (
+        object data = loaded.data.assertElse(object, {})
+        if data.contains("items") (
+            return data.items.assertElse(array, [])
+        )
+    )
+    return []
+)
+
+def queueR2UploadLocked(string key, string contentType, string contentEncoding) boolean (
+    array items = loadR2UploadQueue()
+    string path = localBlobPath(key)
+    number size = fs.exists(path) ? fs.getSize(path) 0
+    object item = {key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp}
+    boolean found = false
+    for i items.len (
+        if items[i].assertElse(object, {}).key.toStr() == key (
+            // Saving the same content still restarts the inactivity window.
+            items[i] = item
+            found = true
+        )
+    )
+    if !found (
+        items.append(item)
+    )
+    return writeFile(r2UploadQueueFile, {items: items})
+)
+
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+    if !isSafeBlobKey(key) (
+        return false
+    )
+    sync.lock("r2-upload-queue")
+    string path = localBlobPath(key)
+    boolean saved = true
+    if !fs.exists(path) (
+        fs.mkdirAll(parentDirOf(path))
+        saved = fs.writeFileBytes(path, body)
+    )
+    if saved and !r2Local (
+        saved = queueR2UploadLocked(key, contentType, contentEncoding)
+    )
+    sync.unlock("r2-upload-queue")
+    return saved
+)
+
+def flushR2UploadQueue() (
+    if r2Local (
+        return
+    )
+    sync.lock("r2-upload-queue")
+    object activityResult = loadR2BlobActivity()
+    if !activityResult.ok (
+        sync.unlock("r2-upload-queue")
+        return
+    )
+    object activity = activityResult.activity.assert(object)
+    array items = loadR2UploadQueue()
+    auto storedResult = readFile(r2StorageIndexFile)
+    object stored = storedResult.ok ? (storedResult.data.assert(object).objects ?? {}).assertElse(object, {}) {}
+    object queued = {}
+    for i items.len (
+        queued[items[i].assert(object).key.toStr()] = true
+    )
+    number now = timestamp
+    // Older flushes retained their local copies. Reclaim those too, without PUTs.
+    array storedKeys = stored.getKeys()
+    for i storedKeys.len (
+        string key = storedKeys[i].toStr()
+        if !queued.contains(key) and isSafeBlobKey(key) and !key.startsWith("projects/") and fs.exists(localBlobPath(key)) (
+            if r2UploadReady({key: key, queuedAt: 0}, activity, now) (
+                fs.remove(localBlobPath(key))
+            )
+        )
+    )
+    array remaining = []
+    number uploadedBytes = 0
+    number uploadedItems = 0
+    for i items.len (
+        object item = items[i].assertElse(object, {})
+        string key = item.key.toStr()
+        string path = localBlobPath(key)
+        boolean removed = false
+        if isSafeBlobKey(key) and r2UploadReady(item, activity, now) (
+            // Only immutable keys can use the inventory to skip an upload.
+            boolean uploaded = stored.contains(key) and !key.startsWith("projects/")
+            if !uploaded and uploadedItems < 64 and uploadedBytes < 268435456 and fs.exists(path) (
+                byte[] body = fs.readFileBytes(path)
+                uploaded = r2PutEncoded(key, body, item.contentType.toStr(), item.contentEncoding.toStr())
+                if uploaded (
+                    uploadedItems += 1
+                    uploadedBytes += body.len
+                )
+            )
+            if uploaded (
+                removed = !fs.exists(path) or fs.remove(path)
+            )
+        )
+        if !removed (
+            remaining.append(item)
+        )
+    )
+    writeFile(r2UploadQueueFile, {items: remaining})
+    sync.unlock("r2-upload-queue")
+)
+
+def removeQueuedR2Upload(string key) (
+    sync.lock("r2-upload-queue")
+    array items = loadR2UploadQueue()
+    array remaining = []
+    for i items.len (
+        object item = items[i].assertElse(object, {})
+        if item.key.toStr() != key (
+            remaining.append(item)
+        )
+    )
+    writeFile(r2UploadQueueFile, {items: remaining})
+    sync.unlock("r2-upload-queue")
+)
