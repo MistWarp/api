@@ -1401,7 +1401,7 @@ def ensureProjectJsonSnapshot(object project) object (
   )
   byte[] snapshotBody = fs.readFileBytes(tempPath)
   string key = projectJsonSnapshotKey(contentHash(snapshotBody))
-  if !r2PutEncoded(key, snapshotBody, "application/json", "gzip") (
+  if !stageR2Blob(key, snapshotBody, "application/json", "gzip") (
     fs.remove(tempPath)
     return {ok: false}
   )
@@ -1451,8 +1451,7 @@ def maybeFlushProject(object project) (
 
 def flushProjectLocked(object project) (
   if project.contains("pendingJson") and project.pendingJson == true (
-    number lastUploadAt = project.lastUploadAt.toNum()
-    if timestamp - lastUploadAt >= uploadDebounceMs (
+    if timestamp - projectStorageActivityAt(project) >= uploadDebounceMs (
       string path = stagingJsonPath(project.id.toStr())
       if fs.exists(path) (
         string gzipPath = path
