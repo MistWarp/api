@@ -9,3 +9,7 @@ def liveSessionKey(object project, string branch) string (
 def liveMemberCanSave(object member, number now) boolean (
   return member.approved == true and member.expires.toNum() > now
 )
+
+def canJoinLiveSession(object session, string role) boolean (
+  return session.public.assertElse(boolean, false) and role != "" and role != "tester"
+)

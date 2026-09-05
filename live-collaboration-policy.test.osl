@@ -12,3 +12,10 @@ testing.assert(liveSessionKey({id: "p1"}, "main") != liveSessionKey({id: "p1"}, 
 testing.assert(liveMemberCanSave({approved: true, expires: 101}, 100), "active approval allows a save")
 testing.assert(!liveMemberCanSave({approved: true, expires: 100}, 100), "expiry revokes a save")
 testing.assert(!liveMemberCanSave({approved: false, expires: 101}, 100), "waiting users cannot save")
+
+testing.assert(!canJoinLiveSession({}, "editor"), "legacy sessions are private by default")
+testing.assert(!canJoinLiveSession({public: false}, "owner"), "even owners cannot auto-join private work")
+testing.assert(canJoinLiveSession({public: true}, "editor"), "editors may explicitly join open sessions")
+testing.assert(canJoinLiveSession({public: true}, "contributor"), "contributors may join when invited by the host")
+testing.assert(!canJoinLiveSession({public: true}, "tester"), "test access does not allow live editing")
+testing.assert(!canJoinLiveSession({public: true}, ""), "public means the project team, not outsiders")
