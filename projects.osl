@@ -1699,7 +1699,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   // An editor with a shallow history can create a new commit object even when
   // its project tree is identical to the current version. Compare the commit
   // trees on the server before storing project JSON, assets, or history.
-  boolean ordinaryVersionSave = !replaceHistory and hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
+  boolean ordinaryVersionSave = !replaceHistory and (gitInfo.worktree ?? false) != true and hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
   if ordinaryVersionSave (
     string incomingHead = canonicalHistoryHead(gitInfo)
     if incomingHead == currentHead (

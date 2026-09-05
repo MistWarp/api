@@ -11,8 +11,10 @@ for i projects.len (
   for j prices.len (
     object project = projects[i].assert(object)
     number price = prices[j].toNum()
-    testing.assert(projectSourcePolicyAllows(project, price, true), "owners retain source access")
+    testing.assert(projectSourcePolicyAllows(project, price, true, false), "owners retain source access")
+    boolean openSource = !(project.contains("seeInside") and project.seeInside == false)
+    testing.assert(projectSourcePolicyAllows(project, price, false, true) == openSource, "buyers can inspect open source but cannot bypass See inside")
     boolean expected = price == 0 and !(project.contains("seeInside") and project.seeInside == false)
-    testing.assert(projectSourcePolicyAllows(project, price, false) == expected, "nonowners need free and open source")
+    testing.assert(projectSourcePolicyAllows(project, price, false, false) == expected, "nonbuyers need free and open source")
   )
 )
