@@ -2,6 +2,7 @@ import "./live-collaboration-policy.osl"
 
 // Temporary approvals are leases; explicitly shared Editor access persists.
 auto liveEditorSessions = cache.create(10000, 90)
+auto projectEditorPresence = cache.create(10000, 90)
 
 def handleGetSharedProjects(*serve.Context c) (
   string username = normalizeUsername(c.getString("username"))
@@ -88,6 +89,19 @@ def handleLiveCollaboration(*serve.Context c) (
   // Release the lease lock even if malformed state raises a runtime error.
   raw("defer sync.unlock(lockName)")
   object session = liveSession(project, branch)
+  object editors = projectEditorPresence.get(sessionKey).assertElse(object, {})
+  for key in editors.getKeys() (
+    if editors[key].expires.toNum() <= timestamp or projectRole(project, key) == "" (
+      editors.delete(key)
+    )
+  )
+  if action == "presence" or action == "host" or action == "heartbeat" (
+    editors[username] = {username: username, expires: timestamp + 90000}
+  )
+  if action == "away" (
+    editors.delete(username)
+  )
+  projectEditorPresence.set(sessionKey, editors)
   string errorMessage = ""
   if session.getKeys().len != 0 (
     object activeMembers = session.members.assert(object)
@@ -106,11 +120,11 @@ def handleLiveCollaboration(*serve.Context c) (
     ) else (
       if session.getKeys().len == 0 and body.sessionId.assertElse(string, "") != "" (
         errorMessage = "this editing session expired; start a new session"
-      ) else if session.getKeys().len != 0 and session.id.toStr() != body.sessionId.assertElse(string, "") (
+      ) else if session.getKeys().len != 0 and (session.id.toStr() != body.sessionId.assertElse(string, "") or session.host.toStr() != username) (
         errorMessage = "an editing session is already active"
       ) else (
         if session.getKeys().len == 0 (
-          session = {id: randomString(32), host: username, roomId: room, branch: branch, members: {}}
+          session = {id: randomString(32), host: username, roomId: room, branch: branch, members: {}, public: body.public.assertElse(boolean, false)}
         )
         session.expires = timestamp + 90000
         session.title = project.title
@@ -138,11 +152,13 @@ def handleLiveCollaboration(*serve.Context c) (
       )
       if action == "request" (
         string peerId = body.peerId.assertElse(string, "")
-        if peerId == "" or peerId.len > 200 or role == "tester" (
+        if !canJoinLiveSession(session, role) (
+          errorMessage = "this session is not open to your account"
+        ) else if peerId == "" or peerId.len > 200 or role == "tester" (
           errorMessage = "a contributor account and connected room are required"
         ) else (
           if !members.contains(username) or members[username].peerId.toStr() != peerId (
-            boolean approved = isSharedEditorRole(role)
+            boolean approved = role != "" and role != "tester"
             members[username] = {username: username, peerId: peerId, approved: approved, expires: timestamp + 90000}
           )
         )
@@ -178,11 +194,15 @@ def handleLiveCollaboration(*serve.Context c) (
         responseMembers.append(member)
       )
     )
-    response = {id: session.id, host: session.host, title: session.title, roomId: session.roomId, branch: branch, members: responseMembers}
+    response = {public: session.public.assertElse(boolean, false), id: session.id, host: session.host, title: session.title, roomId: session.roomId, branch: branch, members: responseMembers}
   )
   if errorMessage != "" (
     c.json(409, {ok: false, error: errorMessage})
     return
   )
-  c.json(200, {ok: true, session: response, myRole: role, hasTeam: project.collaborators.assertElse(array, []).len > 0})
+  array presence = []
+  for key in editors.getKeys() (
+    presence.append({username: key, branch: branch})
+  )
+  c.json(200, {ok: true, editors: presence, session: response, myRole: role, hasTeam: project.collaborators.assertElse(array, []).len > 0})
 )
