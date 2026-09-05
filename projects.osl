@@ -1544,6 +1544,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
+  boolean replaceHistory = c.formValue("replaceHistory") == "true"
   string expectedHead = c.formValue("expectedHead").strip()
   string restoreCommit = c.formValue("restoreCommit").strip()
   string restoreMessage = c.formValue("restoreMessage").strip()
@@ -1555,7 +1556,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   string currentHead = projectGitHead(project)
   string expectedEdited = c.formValue("expectedEdited").strip()
   if !canEditProject(project, c) (
-    if expectedEdited == "" or restoreCommit != "" or pullId != "" or mergeSourceBranch != "" (
+    if expectedEdited == "" or restoreCommit != "" or pullId != "" or mergeSourceBranch != "" or replaceHistory (
       c.forbidden("live contributors can save the current project; history and publishing require a maintainer")
       return
     )
@@ -1566,6 +1567,11 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
   if expectedHead != "" and expectedHead != currentHead (
     c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
+    return
+  )
+
+  if replaceHistory and (expectedHead != currentHead or restoreCommit != "" or pullId != "" or mergeSourceBranch != "") (
+    c.json(409, {ok: false, error: "history replacement requires the current saved head and a full workspace", code: "head_changed"})
     return
   )
 
@@ -1663,6 +1669,13 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
+  if replaceHistory and !hasWorkspace (
+    fs.remove(zipPath)
+    fs.remove(extractDir)
+    c.badRequest("history replacement requires a full workspace")
+    return
+  )
+
   if hasWorkspace (
     if workspaceFile.size.toNum() > maxWorkspaceBytes or !validateZipArchive(workspaceFile.data, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
       fs.remove(zipPath)
@@ -1670,7 +1683,7 @@ def handleUploadProjectLocked(*serve.Context c) (
       c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
       return
     )
-    object checked = validateUploadedHistory(project, workspaceFile.data, gitMetadata, currentHead)
+    object checked = validateUploadedHistoryMode(project, workspaceFile.data, gitMetadata, currentHead, replaceHistory)
     if !checked.ok (
       fs.remove(zipPath)
       fs.remove(extractDir)
@@ -1686,7 +1699,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   // An editor with a shallow history can create a new commit object even when
   // its project tree is identical to the current version. Compare the commit
   // trees on the server before storing project JSON, assets, or history.
-  boolean ordinaryVersionSave = hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
+  boolean ordinaryVersionSave = !replaceHistory and hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
   if ordinaryVersionSave (
     string incomingHead = canonicalHistoryHead(gitInfo)
     if incomingHead == currentHead (
@@ -1902,6 +1915,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     project.gitBranch = gitInfo.branch
     project.gitCommits = gitInfo.commits
     project.gitGraph = gitInfo.graph
+    if replaceHistory (
+      project.remixBaseCommit = ""
+    )
   )
 
   object uploadResult = uploadProjectFiles(project, extractDir, projectBenefits)
@@ -2028,6 +2044,13 @@ def handleUploadProjectLocked(*serve.Context c) (
 
   c.json(200, {
     ok: true,
+    project: {
+      id: project.id,
+      gitHead: projectGitHead(project),
+      gitBranch: project.gitBranch,
+      edited: project.edited,
+      remixBaseCommit: project.remixBaseCommit
+    },
     uploaded: uploadResult.uploaded,
     skipped: uploadResult.skipped,
     projectJsonUrl: projectJsonUrlFor(project),
@@ -3470,11 +3493,17 @@ def handleRemixProjectLocked(*serve.Context c) (
 )
 
 def validateUploadedHistory(object project, any body, string metadata, string currentHead) object (
+  return validateUploadedHistoryMode(project, body, metadata, currentHead, false)
+)
+
+// Only the explicit maintainer upload path may discard the stored graph.
+// With no base archive, validation also rejects deltas and incomplete history.
+def validateUploadedHistoryMode(object project, any body, string metadata, string currentHead, boolean replaceHistory) object (
   string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
   string incomingPath = workId ++ ".incoming.mwp"
   string outputPath = workId ++ ".validated.mwp"
   string basePath = ""
-  if projectHasWorkspace(project) (
+  if !replaceHistory and projectHasWorkspace(project) (
     basePath = cachedProjectWorkspacePath(project)
     if basePath == "" (
       return {ok: false, error: "stored history unavailable; retry later"}
@@ -3484,6 +3513,10 @@ def validateUploadedHistory(object project, any body, string metadata, string cu
     return {ok: false, error: "could not stage history"}
   )
   string forkBase = (project.remixBaseCommit ?? "").toStr()
+  if replaceHistory (
+    currentHead = ""
+    forkBase = ""
+  )
   string projectId = project.id.toStr()
   string remixParent = (project.remixParent ?? "").toStr()
   string resultJson = raw("gitinspection.ValidateHistoryArchiveJSON(basePath, incomingPath, outputPath, currentHead, forkBase, metadata, projectId, remixParent)")
