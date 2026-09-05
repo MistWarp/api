@@ -315,3 +315,41 @@ func TestGraphCapStillValidatesOlderObjects(t *testing.T) {
 		t.Fatal("cap hid missing ancestor")
 	}
 }
+
+func TestFullHistoryReplacementDropsOldBranches(t *testing.T) {
+	old := newTestRepository()
+	oldTree := old.tree("main.fractch", old.object("blob", []byte("old")))
+	oldHead := old.commit(oldTree, "", "old")
+	stored := historyFixture(t, old, map[string]string{"main": oldHead, "old-branch": oldHead}, "main", "", "")
+	imported := newTestRepository()
+	tree := imported.tree("main.fractch", imported.object("blob", []byte("imported")))
+	base := imported.commit(tree, "", "imported base")
+	head := imported.commit(tree, base, "imported head")
+	incoming := historyFixture(t, imported, map[string]string{"custom": head, "release": base}, "custom", "", "")
+	output := filepath.Join(t.TempDir(), "replacement.mwp")
+	if ValidateHistoryArchive(stored, incoming, output, oldHead, "", "").OK {
+		t.Fatal("ordinary save accepted unrelated history")
+	}
+	// The explicit replacement upload supplies no stored archive or ancestry constraints.
+	result := ValidateHistoryArchive("", incoming, output, "", "", "", "saved-project", "")
+	if !result.OK {
+		t.Fatal(result.Error)
+	}
+	assertHistory(t, output, head, base, tree, 2)
+	r, _, _, _, refs, branch, err := readHistoryArchive(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if branch != "custom" || len(refs) != 2 || refs["release"] != base || refs["old-branch"] != "" {
+		t.Fatalf("replacement retained old refs or lost imported refs: %v", refs)
+	}
+	for _, bad := range []string{
+		historyFixture(t, imported, map[string]string{"custom": head}, "custom", base, ""),
+		historyFixture(t, imported, map[string]string{"custom": head}, "custom", "", base),
+	} {
+		if ValidateHistoryArchive("", bad, filepath.Join(t.TempDir(), "bad.mwp"), "", "", "").OK {
+			t.Fatal("replacement accepted a delta or incomplete history")
+		}
+	}
+}
