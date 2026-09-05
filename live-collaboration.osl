@@ -84,24 +84,25 @@ def handleLiveCollaboration(*serve.Context c) (
   )
   string sessionKey = liveSessionKey(project, branch)
   string action = body.action.assertElse(string, "list")
-  string lockName = "live-editor:" ++ sessionKey
+  string lockName = "live-editor:" ++ project.id.toStr()
   sync.lock(lockName)
   // Release the lease lock even if malformed state raises a runtime error.
   raw("defer sync.unlock(lockName)")
   object session = liveSession(project, branch)
-  object editors = projectEditorPresence.get(sessionKey).assertElse(object, {})
+  object editors = projectEditorPresence.get(project.id.toStr()).assertElse(object, {})
   for key in editors.getKeys() (
-    if editors[key].expires.toNum() <= timestamp or projectRole(project, key) == "" (
+    if editors[key].expires.toNum() <= timestamp or projectRole(project, editors[key].username.toStr()) == "" (
       editors.delete(key)
     )
   )
+  string presenceKey = username ++ ":" ++ branch
   if action == "presence" or action == "host" or action == "heartbeat" (
-    editors[username] = {username: username, expires: timestamp + 90000}
+    editors[presenceKey] = {username: username, branch: branch, expires: timestamp + 90000}
   )
   if action == "away" (
-    editors.delete(username)
+    editors.delete(presenceKey)
   )
-  projectEditorPresence.set(sessionKey, editors)
+  projectEditorPresence.set(project.id.toStr(), editors)
   string errorMessage = ""
   if session.getKeys().len != 0 (
     object activeMembers = session.members.assert(object)
@@ -202,7 +203,10 @@ def handleLiveCollaboration(*serve.Context c) (
   )
   array presence = []
   for key in editors.getKeys() (
-    presence.append({username: key, branch: branch})
+    object editor = editors[key].assert(object)
+    if body.allBranches.assertElse(boolean, false) or editor.branch.toStr() == branch (
+      presence.append({username: editor.username, branch: editor.branch})
+    )
   )
   c.json(200, {ok: true, editors: presence, session: response, myRole: role, hasTeam: project.collaborators.assertElse(array, []).len > 0})
 )
