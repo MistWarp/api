@@ -102,7 +102,8 @@ def projectSeeInside(object project) boolean (
 
 def sourcePolicyAllowsViewer(object project, *serve.Context c) boolean (
     boolean owner = c.getBool("authenticated") and projectRole(project, c.getString("username")) == "owner"
-    return projectSourcePolicyAllows(project, projectPrice(project), owner)
+    boolean purchased = c.getBool("authenticated") and hasBought(project, normalizeUsername(c.getString("username")))
+    return projectSourcePolicyAllows(project, projectPrice(project), owner, purchased)
 )
 
 def canSeeInsideProject(object project, *serve.Context c) boolean (

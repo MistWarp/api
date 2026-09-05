@@ -47,7 +47,7 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
     )
     object project = loaded.project.assert(object)
     string role = projectRole(project, username)
-    if !projectSourcePolicyAllows(project, projectPrice(project), role == "owner") (
+    if !projectSourcePolicyAllows(project, projectPrice(project), role == "owner", hasBought(project, normalizeUsername(username))) (
         return {status: 403, error: "only the owner can edit commits for this project"}
     )
     if !isAdmin and role != "owner" and role != "maintainer" (

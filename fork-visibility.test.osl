@@ -58,7 +58,7 @@ def projectPrice(object project) number (
 )
 
 def canAccessPaidJson(object project, object ctx) boolean (
-    return false
+    return ctx.authenticated == true and ctx.contains("bought") and ctx.bought == true
 )
 
 def projectViewKey(object project) string (
@@ -195,7 +195,7 @@ def canViewProjectJsonTest(object project, object ctx) boolean (
 )
 
 def canSeeInsideProjectTest(object project, object ctx) boolean (
-    if !projectSourcePolicyAllows(project, projectPrice(project), ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner") (
+    if !projectSourcePolicyAllows(project, projectPrice(project), ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner", ctx.authenticated == true and canAccessPaidJson(project, ctx)) (
         return false
     )
     if canEditProjectTest(project, ctx) (
@@ -285,3 +285,12 @@ testing.assert(canViewProjectTest(projectC, charlieCtx), "Charlie (creator of ch
 testing.assert(canViewProjectTest(projectC, aliceCtx), "Alice (creator of root project) can view chained fork")
 testing.assert(canViewProjectTest(projectC, bobCtx), "Bob (creator of direct parent fork) can view chained fork")
 testing.assert(!canViewProjectTest(projectC, strangerCtx), "Stranger cannot view chained fork")
+
+// A purchase grants source access only while See inside is enabled.
+object paidProject = {id: "paid", owner: "alice", ownerId: "u_alice", shared: true, price: 10, seeInside: true}
+object buyerCtx = {authenticated: true, username: "bob", bought: true}
+object nonbuyerCtx = {authenticated: true, username: "bob", bought: false}
+testing.assert(canSeeInsideProjectTest(paidProject, buyerCtx), "buyers can see inside paid projects")
+testing.assert(!canSeeInsideProjectTest(paidProject, nonbuyerCtx), "nonbuyers cannot inspect paid source")
+paidProject.seeInside = false
+testing.assert(!canSeeInsideProjectTest(paidProject, buyerCtx), "a purchase does not bypass disabled See inside")
