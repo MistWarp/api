@@ -151,4 +151,29 @@ records["retry-child"] = retryChild
 readFailures = 1
 object retried = ensureGeneratedProjectHistory(retryChild, {}, false)
 testing.assert(retried.ok == true and readFailures == 0, "transient parent read retries in the same call")
+// A first upload already owns the publication lock when preparing history.
+object uploaded = {id: "uploaded", owner: "Mist", created: 6000, jsonKey: "uploaded.json", lastUploadAt: 6000, assets: []}
+records.uploaded = uploaded
+sync.lock("project-history-uploaded")
+object uploadHistory = ensureUploadedProjectHistory(uploaded)
+sync.unlock("project-history-uploaded")
+testing.assert(uploadHistory.ok == true and projectHasWorkspace(uploadHistory.project.assert(object)), "upload holding publication lock completes initial history")
+sync.lock("project-history-uploaded")
+sync.unlock("project-history-uploaded")
+
+// Failed preparation must also restore lock ownership for the upload wrapper.
+sync.lock("project-history-missing")
+object failedUploadHistory = ensureUploadedProjectHistory(missing)
+sync.unlock("project-history-missing")
+testing.assert(failedUploadHistory.ok == false and failedUploadHistory.code == "parent_missing", "upload history failure returns with publication lock restored")
+
+// Releasing the lock must not allow history from an older upload to replace
+// a newer saved snapshot.
+object staleUpload = {id: "stale-upload", owner: "Mist", created: 7000, jsonKey: "old.json", lastUploadAt: 7000, assets: []}
+records["stale-upload"] = {id: "stale-upload", owner: "Mist", created: 7000, jsonKey: "new.json", lastUploadAt: 8000, assets: []}
+before = saves
+sync.lock("project-history-stale-upload")
+object staleHistory = ensureUploadedProjectHistory(staleUpload)
+sync.unlock("project-history-stale-upload")
+testing.assert(staleHistory.ok == false and saves == before, "history preparation rejects a replaced upload snapshot")
 fs.remove(tmpDir)

@@ -137,6 +137,18 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   return {ok: true, project: current, generated: true}
 )
 
+// Upload callers hold the publication lock. History preparation takes that
+// lock itself after resolving ancestors and revalidates the saved source.
+// Drop it during preparation to avoid both self-deadlock and nested locks
+// across remix ancestors, then restore the caller's lock ownership.
+def ensureUploadedProjectHistory(object project) object (
+  string lockName = "project-history-" ++ project.id.toStr()
+  sync.unlock(lockName)
+  object result = ensureGeneratedProjectHistory(project, {}, false)
+  sync.lock(lockName)
+  return result
+)
+
 def ensureGeneratedProjectHistory(object project, object visiting, boolean allowMissingAssets) object (
   if projectHasWorkspace(project) (
     return {ok: true, project: project, generated: false}
