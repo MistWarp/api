@@ -1,0 +1,43 @@
+def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
+    if !isSafeBlobKey(key) (
+        c.notFound("project snapshot not found")
+        return
+    )
+    string etag = "\"" ++ key ++ "\""
+    c.setHeader("ETag", etag)
+    c.setHeader("Cache-Control", "no-cache")
+    if c.header("If-None-Match").contains(etag) (
+        c.status(304)
+        return
+    )
+    string localPath = localBlobPath(key)
+    if fs.exists(localPath) (
+        c.setHeader("Content-Type", "application/json")
+        if gzip (
+            c.setHeader("Content-Encoding", "gzip")
+        )
+        c.file(localPath)
+        return
+    )
+    if r2Local (
+        c.notFound("project snapshot not found")
+        return
+    )
+    auto signed = r2Client.presign({key: key, expires: 60})
+    if !signed.ok (
+        c.notFound("project snapshot not found")
+        return
+    )
+    // An explicit encoding prevents the HTTP client from decompressing R2's body.
+    auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
+    if !fetched.success or fetched.status.toInt() != 200 (
+        c.notFound("project snapshot not found")
+        return
+    )
+    if gzip (
+        c.setHeader("Content-Encoding", "gzip")
+    )
+    // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
+    string snapshotBody = fetched.body.toStr()
+    c.data(200, "application/json", raw("[]byte(snapshotBody)"))
+)
