@@ -2019,7 +2019,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   fs.remove(extractDir)
 
   if !projectHasWorkspace(project) (
-    object generatedHistory = ensureGeneratedProjectHistory(project, {}, false)
+    object generatedHistory = ensureUploadedProjectHistory(project)
     if generatedHistory.ok (
       project = generatedHistory.project.assert(object)
     ) else (

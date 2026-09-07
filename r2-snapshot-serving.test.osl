@@ -1,0 +1,65 @@
+import "std:testing"
+import "std:fs"
+import "std:serve"
+import "std:s3"
+import "std:requests"
+import "go:net/http/httptest"
+
+string testDir = raw("func() string { p, err := OSLos.MkdirTemp(\"\", \"mistwarp-snapshot-test-\"); if err != nil { panic(err) }; return p }()")
+boolean r2Local = false
+object snapshotResponse = {}
+number fetchCount = 0
+// Match std:s3.get's raw string body, including arbitrary binary bytes.
+auto storageServer = raw("httptest.NewServer(OSLhttp.HandlerFunc(func(w OSLhttp.ResponseWriter, r *OSLhttp.Request) { fetchCount++; if snapshotResponse[\"gzip\"] == true { w.Header().Set(\"Content-Encoding\", \"gzip\") }; w.WriteHeader(snapshotResponse[\"status\"].(int)); w.Write([]byte(OSLtoString(snapshotResponse[\"body\"]))) }))")
+string storageEndpoint = raw("storageServer.(*httptest.Server).URL")
+auto r2Client = s3.new({endpoint: storageEndpoint, bucket: "test", access_key_id: "test", secret_access_key: "test"})
+
+def isSafeBlobKey(string key) boolean (
+    return key != "" and !key.contains("..")
+)
+def localBlobPath(string key) string (
+    return testDir ++ "/" ++ key
+)
+
+import "./r2-snapshot-serving.osl"
+
+def requestSnapshot(string key, boolean gzip, string etag) object (
+    auto recorder = raw("httptest.NewRecorder()")
+    auto request = raw("httptest.NewRequest(\"GET\", \"http://snapshot.test/\", nil)")
+    raw("request.Header.Set(\"If-None-Match\", etag)")
+    *serve.Context context = raw("&OSLserveContext{w: &OSLserveResponseWriter{ResponseWriter: recorder}, r: request}")
+    serveProjectJsonStorageKey(context, key, gzip)
+    return raw("map[string]any{\"status\": recorder.Code, \"body\": recorder.Body.String(), \"encoding\": recorder.Header().Get(\"Content-Encoding\"), \"type\": recorder.Header().Get(\"Content-Type\"), \"etag\": recorder.Header().Get(\"ETag\")}")
+)
+
+string plain = "{\"targets\":[],\"meta\":{\"name\":\"burger 🍔\"}}"
+snapshotResponse = {ok: true, status: 200, body: plain}
+object response = requestSnapshot("plain.json", false, "")
+testing.assert(response.status == 200 and response.body == plain, "remote JSON is returned verbatim without base64 decoding")
+testing.assert(response.type == "application/json" and response.encoding == "", "plain JSON has the correct headers")
+
+string compressed = raw("string([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xab, 0x56, 0x2a, 0x49, 0x2c, 0x4a, 0x4f, 0x2d, 0x29, 0x56, 0xb2, 0x8a, 0x8e, 0xad, 0x05, 0x00, 0x8a, 0xeb, 0x23, 0xb3, 0x0e, 0x00, 0x00, 0x00})")
+snapshotResponse = {ok: true, status: 200, body: compressed, gzip: true}
+response = requestSnapshot("compressed.json.gz", true, "")
+testing.assert(response.status == 200 and response.body == compressed, "remote binary gzip bytes are preserved exactly")
+testing.assert(response.encoding == "gzip", "remote compressed snapshots retain Content-Encoding")
+
+number before = fetchCount
+response = requestSnapshot("compressed.json.gz", true, "\"compressed.json.gz\"")
+testing.assert(response.status == 304 and fetchCount == before, "matching ETags skip storage fetches")
+
+snapshotResponse = {ok: false, status: 404}
+response = requestSnapshot("missing.json", false, "")
+testing.assert(response.status == 404, "missing remote snapshots return 404")
+
+fs.writeFile(localBlobPath("local.json"), plain)
+before = fetchCount
+response = requestSnapshot("local.json", false, "")
+testing.assert(response.status == 200 and response.body == plain and fetchCount == before, "local snapshots bypass R2")
+r2Local = true
+response = requestSnapshot("missing.json", false, "")
+testing.assert(response.status == 404 and fetchCount == before, "local-only missing snapshots return 404 without R2")
+response = requestSnapshot("../unsafe.json", false, "")
+testing.assert(response.status == 404 and fetchCount == before, "unsafe keys cannot reach storage")
+raw("storageServer.(*httptest.Server).Close()")
+raw("OSLos.RemoveAll(testDir)")
