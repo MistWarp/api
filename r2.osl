@@ -489,42 +489,7 @@ def serveProjectJson(*serve.Context c, object project) (
     serveProjectJsonStorageKey(c, project.jsonKey.toStr(), projectJsonIsGzip(project))
 )
 
-def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
-    if !isSafeBlobKey(key) (
-        c.notFound("project snapshot not found")
-        return
-    )
-    string etag = "\"" ++ key ++ "\""
-    c.setHeader("ETag", etag)
-    c.setHeader("Cache-Control", "no-cache")
-    if c.header("If-None-Match").contains(etag) (
-        c.status(304)
-        return
-    )
-    string localPath = localBlobPath(key)
-    if fs.exists(localPath) (
-        c.setHeader("Content-Type", "application/json")
-        if gzip (
-            c.setHeader("Content-Encoding", "gzip")
-        )
-        c.file(localPath)
-        return
-    )
-    if r2Local (
-        c.notFound("project snapshot not found")
-        return
-    )
-    auto fetched = r2Client.get({key: key})
-    if !fetched.ok or fetched.status.toInt() != 200 (
-        c.notFound("project snapshot not found")
-        return
-    )
-    if gzip (
-        c.setHeader("Content-Encoding", "gzip")
-    )
-    byte[] snapshotBody = fetched.body.assert(byte[])
-    c.data(200, "application/json", snapshotBody)
-)
+import "./r2-snapshot-serving.osl"
 
 def handleGetAssetBlob(*serve.Context c) (
     string name = c.param("name")
