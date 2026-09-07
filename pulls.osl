@@ -190,7 +190,7 @@ def handleGetCommits(*serve.Context c) (
     c.setHeader("Cache-Control", "private, no-store")
     c.setHeader("CDN-Cache-Control", "private, no-store")
     auto result = loadProject(c.param("id"))
-    if !result.ok or !canSeeInsideProject(result.project.assert(object), c) (
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
         c.notFound("project not found")
         return
     )
@@ -255,7 +255,7 @@ def handleListProjectBranches(*serve.Context c) (
     c.setHeader("Cache-Control", "private, no-store")
     c.setHeader("CDN-Cache-Control", "private, no-store")
     auto result = loadProject(c.param("id"))
-    if !result.ok or !canSeeInsideProject(result.project.assert(object), c) (
+    if !result.ok or !canViewProject(result.project.assert(object), c) (
         c.notFound("project not found")
         return
     )
@@ -482,10 +482,6 @@ def handleGetPullTimeline(*serve.Context c) (
     )
     object target = targetResult.project.assert(object)
     object source = sourceResult.project.assert(object)
-    if !canInspectPull(pull, target, c) (
-        c.notFound("pull request history not found")
-        return
-    )
     array comments = loadComments(pullCommentKey(pull))
     for i comments.len (
         comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))

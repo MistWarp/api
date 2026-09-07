@@ -117,7 +117,7 @@ def handleGetCommitCollaborators(*serve.Context c) (
     )
     object project = loaded.project.assert(object)
     string sha = c.param("sha")
-    if !canSeeInsideProject(project, c) or !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
+    if !canViewProject(project, c) or !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
         c.notFound("commit not found")
         return
     )

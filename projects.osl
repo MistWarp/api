@@ -368,13 +368,6 @@ def projectResponse(object project,*serve.Context c) object (
     response.remixBaseCommit = project.remixBaseCommit
   )
   response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
-  if response.canViewSource != true (
-    response.gitHead = ""
-    response.gitBranch = ""
-    response.commitCount = 0
-    response.remixBaseCommit = ""
-    response.needsHistoryBootstrap = false
-  )
   object searchEntry = indexEntryFromProject(project)
   response.collaboration = {
     teamSize: searchEntry.teamSize,
