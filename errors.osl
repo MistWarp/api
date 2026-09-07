@@ -1,0 +1,147 @@
+def pruneSiteErrors() (
+    array stored = errorDocs.sort("created", db.desc).limit(1100).all()
+    for i stored.len (
+        if i >= 1000 (
+            object entry = stored[i].assert(object)
+            errorDocs.deleteOne({_id: entry["_id"]})
+        )
+    )
+)
+
+def handleRecordSiteError(*serve.Context c) (
+    object body = c.bodyJSON()
+    string message = body.message.toStr().strip()
+    if message == "" (
+        c.badRequest("error message is required")
+        return
+    )
+    if message.len > 2000 (
+        message = message.trim(1, 2000)
+    )
+    string stack = ""
+    if body.contains("stack") and body.stack != null (
+        stack = body.stack.toStr().trim(1, 20000)
+    )
+    if stack == "" and body.contains("trace") and body.trace != null (
+        stack = body.trace.toStr().trim(1, 20000)
+    )
+    string url = ""
+    if body.contains("url") and body.url != null (
+        url = body.url.toStr().strip().trim(1, 2000)
+    )
+    string projectId = ""
+    if body.contains("projectId") and body.projectId != null (
+        projectId = body.projectId.toStr().strip().trim(1, 120)
+    )
+    string kind = "uncaught"
+    if body.contains("kind") and body.kind != null (
+        kind = body.kind.toStr().toLower().strip().trim(1, 40)
+    )
+    if kind != "uncaught" and kind != "rejection" and kind != "react" and kind != "manual" (
+        kind = "uncaught"
+    )
+    string viewport = ""
+    if body.contains("viewport") and body.viewport != null (
+        viewport = body.viewport.toStr().strip().trim(1, 40)
+    )
+    string appVersion = ""
+    if body.contains("version") and body.version != null (
+        appVersion = body.version.toStr().strip().trim(1, 120)
+    )
+    if appVersion == "" and body.contains("appVersion") and body.appVersion != null (
+        appVersion = body.appVersion.toStr().strip().trim(1, 120)
+    )
+    string componentStack = ""
+    if body.contains("componentStack") and body.componentStack != null (
+        componentStack = body.componentStack.toStr().trim(1, 10000)
+    )
+    string userAgent = c.header("User-Agent").strip().trim(1, 500)
+    string username = c.getString("username")
+    object entry = {
+        _id: "e" ++ randomString(16),
+        message: message,
+        stack: stack,
+        url: url,
+        projectId: projectId,
+        kind: kind,
+        username: username,
+        userAgent: userAgent,
+        viewport: viewport,
+        appVersion: appVersion,
+        componentStack: componentStack,
+        created: timestamp,
+        resolved: false
+    }
+    sync.lock("site-errors")
+    errorDocs.insertOne(entry)
+    pruneSiteErrors()
+    sync.unlock("site-errors")
+    c.json(201, {ok: true})
+)
+
+def handleAdminGetErrors(*serve.Context c) (
+    string show = c.query("show").toLower().strip()
+    array items = errorDocs.sort("created", db.desc).limit(200).all()
+    if show != "all" and show != "resolved" (
+        array open = []
+        for i items.len (
+            object item = items[i].assert(object)
+            if item.resolved != true (
+                open.append(item)
+            )
+        )
+        items = open
+    ) else if show == "resolved" (
+        array resolved = []
+        for i items.len (
+            object item = items[i].assert(object)
+            if item.resolved == true (
+                resolved.append(item)
+            )
+        )
+        items = resolved
+    )
+    number openCount = errorDocs.where("resolved", db.equal, false).count()
+    c.json(200, {ok: true, errors: items, openCount: openCount})
+)
+
+def handleAdminResolveSiteError(*serve.Context c) (
+    object body = c.bodyJSON()
+    string id = body.id.toStr()
+    if id == "" (
+        c.badRequest("error id is required")
+        return
+    )
+    boolean resolved = true
+    if body.contains("resolved") (
+        resolved = body.resolved == true
+    )
+    object entry = errorDocs.findById(id)
+    if entry.isEmpty() == true (
+        c.notFound("error not found")
+        return
+    )
+    entry.resolved = resolved
+    entry.resolvedBy = c.getString("username")
+    entry.resolvedAt = timestamp
+    if putDocument(errorDocs, id, entry) (
+        c.json(200, {ok: true})
+        return
+    )
+    c.internalError("could not update error")
+)
+
+def handleAdminDeleteSiteError(*serve.Context c) (
+    object body = c.bodyJSON()
+    string id = body.id.toStr()
+    if id == "" (
+        c.badRequest("error id is required")
+        return
+    )
+    if errorDocs.findById(id).isEmpty() == true (
+        c.notFound("error not found")
+        return
+    )
+    errorDocs.deleteOne({_id: id})
+    c.json(200, {ok: true})
+)

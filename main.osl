@@ -178,6 +178,7 @@ import "./social.osl"
 import "./pull-metadata.osl"
 import "./pulls.osl"
 import "./reports.osl"
+import "./errors.osl"
 import "./admin.osl"
 import "./like-milestone-policy.osl"
 import "./like-milestones.osl"
@@ -478,6 +479,7 @@ api.POST("/news/:id/poll", requireAuth, handleVoteNewsPoll)
 api.POST("/report", requireAuth, serve.rateLimit(10, 3600), handleCreateReport)
 api.POST("/reports", requireAuth, serve.rateLimit(10, 3600), handleCreateReport)
 api.POST("/support", serve.rateLimit(5, 3600), handleCreateSupportRequest)
+api.POST("/errors", serve.rateLimit(20, 60), handleRecordSiteError)
 api.GET("/stats", handlePublicStats)
 
 api.GET("/admin/reports", requireAdmin, handleGetReports)
@@ -505,6 +507,9 @@ api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
 api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)
 api.POST("/admin/reconcile-deletions", requireAdmin, handleReconcileDeletions)
 api.GET("/admin/extensions", requireAdmin, handleAdminGetExtensions)
+api.GET("/admin/errors", requireAdmin, handleAdminGetErrors)
+api.POST("/admin/errors/resolve", requireAdmin, handleAdminResolveSiteError)
+api.POST("/admin/errors/delete", requireAdmin, handleAdminDeleteSiteError)
 api.GET("/admin/extensions/:hash/source", requireAdmin, handleAdminGetExtensionSource)
 api.POST("/admin/extensions/policy", requireAdmin, handleAdminSetExtensionPolicy)
 api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)

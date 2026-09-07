@@ -563,17 +563,18 @@ def handleCreateProjectComment(*serve.Context c) (
   string commenter = c.getString("username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
+  string preview = created.comment.content.toStr()
   if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-    addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+    addNotification(parentAuthor, commenter, "reply", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
   )
   if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
     if donationAmount > 0 (
-      addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount})
+      addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount, preview: preview})
     ) else (
-      addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+      addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
     )
   )
-  notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId})
+  notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
   created.comment = commentResponse(created.comment.assert(object), commenter)
   created.comment.playtimeMs = projectPlaytime(project.id.toStr(), commenter)
   siteBroadcastProject(project.id.toStr(), {
@@ -717,13 +718,14 @@ def handleCreateProfileComment(*serve.Context c) (
   string commenter = c.getString("username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
+  string preview = created.comment.content.toStr()
   if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-    addNotification(parentAuthor, commenter, "reply", {profile: name, commentId: newCommentId})
+    addNotification(parentAuthor, commenter, "reply", {profile: name, commentId: newCommentId, preview: preview})
   )
   if normalizeUsername(name) != normalizeUsername(commenter) and normalizeUsername(name) != normalizeUsername(parentAuthor) (
-    addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId})
+    addNotification(name, commenter, "profile_comment", {profile: name, commentId: newCommentId, preview: preview})
   )
-  notifyMentions(created.comment.content.toStr(), commenter, [name, parentAuthor], {profile: name, commentId: newCommentId})
+  notifyMentions(created.comment.content.toStr(), commenter, [name, parentAuthor], {profile: name, commentId: newCommentId, preview: preview})
   c.json(201, created)
 )
 
@@ -793,6 +795,7 @@ def reactToComment(*serve.Context c, string key, string path) (
   object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
   number previousLikes = 0
   string author = ""
+  string preview = ""
   for i comments.len (
     object comment = comments[i]
     if comment.id.toStr() == cid (
@@ -802,6 +805,7 @@ def reactToComment(*serve.Context c, string key, string path) (
       )
       previousLikes = reactionSummary(reactions, username).counts.heart.toNum()
       author = comment.author.toStr()
+      preview = comment.content.toStr()
       comment.reactions = toggleReactionMap(reactions, username, reactionType)
       summary = reactionSummary(comment.reactions.assert(object), username)
       comments[i] = comment
@@ -819,7 +823,7 @@ def reactToComment(*serve.Context c, string key, string path) (
     c.internalError("could not save reaction")
     return
   )
-  notifyLikeMilestones(author, "comment", key ++ ":" ++ cid, previousLikes, summary.counts.heart.toNum(), path ++ "#comment-id-" ++ cid, {commentId: cid})
+  notifyLikeMilestones(author, "comment", key ++ ":" ++ cid, previousLikes, summary.counts.heart.toNum(), path ++ "#comment-id-" ++ cid, {commentId: cid, preview: preview})
   if key.startsWith("project-") (
     siteBroadcastProject(c.param("id"), {
       type: "comment_reaction",

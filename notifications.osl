@@ -41,12 +41,20 @@ def sanitizeNotificationPayload(object payload, string notifType, string actor) 
 )
 
 
+def quotedPreview(object extra) string (
+    if extra.contains("preview") and extra.preview != null and extra.preview.toStr() != "" (
+        return " \"" ++ extra.preview.toStr() ++ "\""
+    )
+    return ""
+)
+
+
 def notificationBody(string actor, string notifType, object extra) string (
     if notifType == "project_shared" (
         return actor ++ " shared " ++ extra.projectTitle.toStr() ++ " with you (" ++ extra.role.toStr() ++ "): " ++ editorOrigin ++ "/project/" ++ extra.projectId.toStr()
     )
     if notifType == "like_milestone" or notifType == "follower_milestone" (
-        return extra.body.toStr() ++ ": " ++ editorOrigin ++ extra.path.toStr()
+        return extra.body.toStr() ++ quotedPreview(extra) ++ ": " ++ editorOrigin ++ extra.path.toStr()
     )
     string projectTitle = ""
     if extra.contains("projectTitle") (
@@ -73,20 +81,24 @@ def notificationBody(string actor, string notifType, object extra) string (
                 pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
             )
             if projectTitle != "" (
-                return actor ++ " commented on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+                return actor ++ " commented on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
             )
-            return actor ++ " commented on pr #" ++ pullIndex ++ ": " ++ pullLink
+            return actor ++ " commented on pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
         )
         if projectTitle != "" (
-            return actor ++ " commented on " ++ projectTitle ++ ": " ++ projectLink
+            return actor ++ " commented on " ++ projectTitle ++ quotedPreview(extra) ++ ": " ++ projectLink
         )
         if projectLink != "" (
-            return actor ++ " commented on your project: " ++ projectLink
+            return actor ++ " commented on your project" ++ quotedPreview(extra) ++ ": " ++ projectLink
         )
-        return actor ++ " commented on your project"
+        return actor ++ " commented on your project" ++ quotedPreview(extra)
     )
     if notifType == "profile_comment" (
-        return actor ++ " commented on your profile"
+        string profileLink = editorOrigin ++ "/users/" ++ extra.profile.toStr()
+        if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
+            profileLink = profileLink ++ "#comment-id-" ++ extra.commentId.toStr()
+        )
+        return actor ++ " commented on your profile" ++ quotedPreview(extra) ++ ": " ++ profileLink
     )
     if notifType == "roadmap_comment" (
         string roadmapTitle = "your roadmap suggestion"
@@ -97,7 +109,7 @@ def notificationBody(string actor, string notifType, object extra) string (
         if extra.contains("roadmapId") (
             roadmapLink = roadmapLink ++ "#idea-" ++ extra.roadmapId.toStr()
         )
-        return actor ++ " commented on " ++ roadmapTitle ++ ": " ++ roadmapLink
+        return actor ++ " commented on " ++ roadmapTitle ++ quotedPreview(extra) ++ ": " ++ roadmapLink
     )
     if notifType == "reply" (
         if extra.contains("pull") and extra.pull != null and extra.pull.toStr() != "" (
@@ -107,14 +119,21 @@ def notificationBody(string actor, string notifType, object extra) string (
                 pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
             )
             if projectTitle != "" (
-                return actor ++ " replied to your comment on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+                return actor ++ " replied to your comment on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
             )
-            return actor ++ " replied to your comment on pr #" ++ pullIndex ++ ": " ++ pullLink
+            return actor ++ " replied to your comment on pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
         )
         if projectLink != "" (
-            return actor ++ " replied to your comment: " ++ projectLink
+            return actor ++ " replied to your comment" ++ quotedPreview(extra) ++ ": " ++ projectLink
         )
-        return actor ++ " replied to your comment"
+        if extra.contains("profile") and extra.profile != null and extra.profile.toStr() != "" (
+            string replyProfileLink = editorOrigin ++ "/users/" ++ extra.profile.toStr()
+            if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
+                replyProfileLink = replyProfileLink ++ "#comment-id-" ++ extra.commentId.toStr()
+            )
+            return actor ++ " replied to your comment" ++ quotedPreview(extra) ++ ": " ++ replyProfileLink
+        )
+        return actor ++ " replied to your comment" ++ quotedPreview(extra)
     )
     if notifType == "mention" (
         if extra.contains("pull") and extra.pull != null and extra.pull.toStr() != "" (
@@ -124,17 +143,17 @@ def notificationBody(string actor, string notifType, object extra) string (
                 pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
             )
             if projectTitle != "" (
-                return actor ++ " mentioned you on " ++ projectTitle ++ " pr #" ++ pullIndex ++ ": " ++ pullLink
+                return actor ++ " mentioned you on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
             )
-            return actor ++ " mentioned you on pr #" ++ pullIndex ++ ": " ++ pullLink
+            return actor ++ " mentioned you on pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
         )
         if projectTitle != "" (
-            return actor ++ " mentioned you on " ++ projectTitle ++ ": " ++ projectLink
+            return actor ++ " mentioned you on " ++ projectTitle ++ quotedPreview(extra) ++ ": " ++ projectLink
         )
         if projectLink != "" (
-            return actor ++ " mentioned you in a comment: " ++ projectLink
+            return actor ++ " mentioned you in a comment" ++ quotedPreview(extra) ++ ": " ++ projectLink
         )
-        return actor ++ " mentioned you in a comment"
+        return actor ++ " mentioned you in a comment" ++ quotedPreview(extra)
     )
     if notifType == "follow" (
         return actor ++ " followed you"
