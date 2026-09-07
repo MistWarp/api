@@ -1907,7 +1907,7 @@ def handleCreateSpaceComment(*serve.Context c) (
   string commenter = c.getString("username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
-  object notificationData = {spaceId: space["_id"], spaceTitle: space.title, commentId: newCommentId}
+  object notificationData = {spaceId: space["_id"], spaceTitle: space.title, commentId: newCommentId, preview: created.comment.content.toStr()}
   if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
     addNotification(parentAuthor, commenter, "reply", notificationData)
   )
@@ -2729,13 +2729,14 @@ def handleCreateIdeaComment(*serve.Context c) (
   putDocument(ideaDocs, idea["_id"].toStr(), idea)
   string commenter = c.getString("username")
   string parentAuthor = created.parentAuthor.toStr()
+  string preview = created.comment.content.toStr()
   if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
-    addNotification(parentAuthor, commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title})
+    addNotification(parentAuthor, commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
   )
   if normalizeUsername(idea.author.toStr()) != normalizeUsername(parentAuthor) (
-    addNotification(idea.author.toStr(), commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title})
+    addNotification(idea.author.toStr(), commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
   )
-  notifyMentions(created.comment.content.toStr(), commenter, [idea.author.toStr(), parentAuthor], {roadmapId: idea["_id"], roadmapTitle: idea.title})
+  notifyMentions(created.comment.content.toStr(), commenter, [idea.author.toStr(), parentAuthor], {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
   c.json(201, created)
 )
 

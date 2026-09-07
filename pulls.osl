@@ -537,7 +537,7 @@ def handleCreatePullComment(*serve.Context c) (
     )
     sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
     string commenter = c.getString("username")
-    object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id}
+    object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id, preview: created.comment.content.toStr()}
     if normalizeUsername(pull.author.toStr()) != normalizeUsername(commenter) (
         addNotification(pull.author.toStr(), commenter, "comment", notificationData)
     )
