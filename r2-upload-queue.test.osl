@@ -138,8 +138,29 @@ flushR2UploadQueue()
 testing.assert(fs.exists(localBlobPath(keys[1].toStr())), "unreadable project metadata prevents unsafe eviction")
 fs.remove(projectsDir ++ "unreadable.json")
 
+// A busy project gets a backup after one hour without losing its local cache.
+writeFile(r2UploadQueueFile, {items: []})
+active.edited = timestamp
+writeFile(projectsDir ++ "active.json", active)
+stageR2Blob("assets/busy.svg", "busy", "image/svg+xml", "")
+array busyItems = loadR2UploadQueue()
+object busyItem = busyItems[1].assert(object)
+busyItem.firstQueuedAt = timestamp - 3600001
+busyItems[1] = busyItem
+writeFile(r2UploadQueueFile, {items: busyItems})
+flushR2UploadQueue()
+testing.assert(puts.len == 7 and fs.exists(localBlobPath("assets/busy.svg")), "busy content is backed up within one hour and remains cached")
+
+fs.writeFile(r2UploadQueueFile, "invalid json")
+testing.assert(!stageR2Blob("assets/retry.svg", "retry", "image/svg+xml", ""), "queue read errors fail staging safely")
+flushR2UploadQueue()
+testing.assert(fs.readFile(r2UploadQueueFile) == "invalid json", "read failure never overwrites a queue")
+writeFile(r2UploadQueueFile, {items: [{key: "../unsafe"}]})
+flushR2UploadQueue()
+testing.assert(loadR2UploadQueue().len == 0, "invalid keys are dropped")
+
 r2Local = true
 stageR2Blob("assets/local.svg", "local", "image/svg+xml", "")
 flushR2UploadQueue()
-testing.assert(fs.exists(localBlobPath("assets/local.svg")) and puts.len == 6, "local-only mode retains files and never uploads")
+testing.assert(fs.exists(localBlobPath("assets/local.svg")) and puts.len == 7, "local-only mode retains files and never uploads")
 fs.remove(testDir)

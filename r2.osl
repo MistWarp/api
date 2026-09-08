@@ -323,16 +323,26 @@ def syncR2StorageInventory(boolean force) object (
 )
 
 def r2Remove(string key) boolean (
-    fs.remove(localBlobPath(key))
-    removeQueuedR2Upload(key)
-    if r2Local (
-        return true
+    if !isSafeBlobKey(key) (
+        return false
     )
-    auto result = r2Client.remove({"key": key})
-    boolean removed = result.ok == true or result.status.toNum() == 404
+    sync.lock("r2-upload-queue")
+    boolean removed = readR2UploadQueue().ok.assert(boolean)
+    if removed and !r2Local (
+        auto result = r2Client.remove({"key": key})
+        removed = result.ok == true or result.status.toNum() == 404
+        if removed (
+            recordR2Removed(key)
+        )
+    )
     if removed (
-        recordR2Removed(key)
+        removed = removeQueuedR2UploadLocked(key)
     )
+    if removed (
+        string path = localBlobPath(key)
+        removed = !fs.exists(path) or fs.remove(path)
+    )
+    sync.unlock("r2-upload-queue")
     return removed
 )
 
