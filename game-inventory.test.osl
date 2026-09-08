@@ -1,0 +1,29 @@
+import "std:testing"
+import "std:sync"
+import "std:serve"
+import "std:regex"
+import "./game-inventory.osl"
+
+def isSafePathPart(string value) boolean (
+    return value != "" and !value.contains("/") and !value.contains(".") and !value.contains("\\")
+)
+def loadProject(string id) object ( return {ok: false} )
+def gameDataUserKey(string userId) string ( return userId )
+def readFile(string path) object ( return {ok: false} )
+def assetsBaseUrl() string ( return "" )
+def writeFile(string path, object data) boolean ( return true )
+def mistwarpBenefitsForUserId(string userId) object ( return {maxGameInventoryItems: 100} )
+def paginate(array items, number offset, number limit) array ( return items )
+def canEditProject(object project, *serve.Context c) boolean ( return true )
+def loadGameDataProject(*serve.Context c) object ( return {ok: false} )
+def validGameSaveRequestId(string requestId) boolean ( return true )
+def rejectGameDataCapability(*serve.Context c, object result) boolean ( return true )
+string gameInventoryDir = "data/game-inventory/"
+
+testing.assert(gameInventoryUnfiltered({}), "empty filter means unfiltered global inventory")
+testing.assert(!gameInventoryUnfiltered({id: "p1"}), "project filter is not unfiltered")
+testing.assert(projectAllowsGlobalItem({id: "p1"}, "p1:hat"), "project always allows its own items")
+testing.assert(!projectAllowsGlobalItem({id: "p2"}, "p1:hat"), "default policy allows no outside items")
+testing.assert(projectAllowsGlobalItem({id: "p2", inventoryPolicy: {mode: "all", allowedItems: [], allowedProjects: []}}, "p1:hat"), "open policy allows outside items")
+testing.assert(projectAllowsGlobalItem({id: "p2", inventoryPolicy: {mode: "allowlist", allowedItems: ["p1:hat"], allowedProjects: []}}, "p1:hat"), "allowlisted item is allowed")
+testing.assert(projectAllowsGlobalItem({id: "p2", inventoryPolicy: {mode: "allowlist", allowedItems: [], allowedProjects: ["p1"]}}, "p1:hat"), "allowlisted project is allowed")

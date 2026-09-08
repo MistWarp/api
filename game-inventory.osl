@@ -90,6 +90,10 @@ def projectAllowsGlobalItem(object project, string globalId) boolean (
     return allowedItems.contains(globalId) or allowedProjects.contains(split.projectId.toStr())
 )
 
+def gameInventoryUnfiltered(object allowedProject) boolean (
+    return allowedProject.getKeys().len == 0
+)
+
 def gameInventoryItemResponse(string globalId, object owned) object (
     object resolved = resolveGlobalGameItem(globalId)
     if !resolved.ok (
@@ -98,7 +102,7 @@ def gameInventoryItemResponse(string globalId, object owned) object (
     object project = resolved.project.assert(object)
     object item = resolved.item.assert(object)
     object visual = item.visual.assertElse(object, {})
-    if visual.isEmpty() and item.image.toStr() != "" (
+    if visual.getKeys().len == 0 and item.image.toStr() != "" (
         visual = {type: "image", url: item.image.toStr()}
     )
     if visual.type.toStr() == "costume" (
@@ -129,7 +133,7 @@ def gameInventoryResponse(string userId, object allowedProject) object (
     array items = []
     for i ids.len (
         string globalId = ids[i].toStr()
-        if allowedProject.isEmpty() or projectAllowsGlobalItem(allowedProject, globalId) (
+        if gameInventoryUnfiltered(allowedProject) or projectAllowsGlobalItem(allowedProject, globalId) (
             object response = gameInventoryItemResponse(globalId, ownedItems[globalId].assert(object))
             if response.ok (
                 items.append(response.value)
