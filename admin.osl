@@ -484,6 +484,7 @@ def handleAdminStats(*serve.Context c) (
             openReports = openReports + 1
         )
     )
+    number openErrors = errorDocs.where("resolved", db.equal, false).count()
     object banData = loadBans()
     object bans = banData.bans
     number bannedUsers = bans.getKeys().len
@@ -505,6 +506,7 @@ def handleAdminStats(*serve.Context c) (
         totalLoves: totalLoves,
         activeSessions: activeSessions,
         openReports: openReports,
+        openErrors: openErrors,
         bannedUsers: bannedUsers,
         newsPosts: news.len,
         pendingPayouts: pendingPayouts.len,
