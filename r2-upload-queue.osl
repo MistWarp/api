@@ -48,26 +48,38 @@ def r2UploadReady(object item, object activity, number now) boolean (
     return now - lastActivity >= uploadDebounceMs
 )
 
-def loadR2UploadQueue() array (
+def readR2UploadQueue() object (
     auto loaded = readFile(r2UploadQueueFile)
     if loaded.ok (
         object data = loaded.data.assertElse(object, {})
-        if data.contains("items") (
-            return data.items.assertElse(array, [])
+        if data.contains("items") and typeof(data.items) == "array" (
+            return {ok: true, items: data.items}
         )
+        return {ok: false}
     )
-    return []
+    boolean missing = raw("func() bool { _, err := OSLos.Stat(r2UploadQueueFile); return OSLos.IsNotExist(err) }()")
+    return missing ? {ok: true, items: []} {ok: false}
+)
+
+def loadR2UploadQueue() array (
+    object loaded = readR2UploadQueue()
+    return loaded.ok ? loaded.items.assert(array) []
 )
 
 def queueR2UploadLocked(string key, string contentType, string contentEncoding) boolean (
-    array items = loadR2UploadQueue()
+    object queueResult = readR2UploadQueue()
+    if !queueResult.ok (
+        return false
+    )
+    array items = queueResult.items.assert(array)
     string path = localBlobPath(key)
     number size = fs.exists(path) ? fs.getSize(path) 0
-    object item = {key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp}
+    object item = {key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp, firstQueuedAt: timestamp}
     boolean found = false
     for i items.len (
         if items[i].assertElse(object, {}).key.toStr() == key (
-            // Saving the same content still restarts the inactivity window.
+            item.firstQueuedAt = items[i].assert(object).firstQueuedAt ?? items[i].assert(object).queuedAt ?? timestamp
+            // Keep upload age while restarting the local-cache inactivity window.
             items[i] = item
             found = true
         )
@@ -107,7 +119,12 @@ def flushR2UploadQueue() (
         return
     )
     object activity = activityResult.activity.assert(object)
-    array items = loadR2UploadQueue()
+    object queueResult = readR2UploadQueue()
+    if !queueResult.ok (
+        sync.unlock("r2-upload-queue")
+        return
+    )
+    array items = queueResult.items.assert(array)
     auto storedResult = readFile(r2StorageIndexFile)
     object stored = storedResult.ok ? (storedResult.data.assert(object).objects ?? {}).assertElse(object, {}) {}
     object queued = {}
@@ -132,10 +149,11 @@ def flushR2UploadQueue() (
         object item = items[i].assertElse(object, {})
         string key = item.key.toStr()
         string path = localBlobPath(key)
-        boolean removed = false
-        if isSafeBlobKey(key) and r2UploadReady(item, activity, now) (
+        boolean removed = !isSafeBlobKey(key)
+        number uploadAge = now - (item.firstQueuedAt ?? item.queuedAt ?? now).toNum()
+        if !removed and (r2UploadReady(item, activity, now) or uploadAge >= 3600000) (
             // Only immutable keys can use the inventory to skip an upload.
-            boolean uploaded = stored.contains(key) and !key.startsWith("projects/")
+            boolean uploaded = (item.uploaded ?? false).assert(boolean) or (stored.contains(key) and !key.startsWith("projects/"))
             if !uploaded and uploadedItems < 64 and uploadedBytes < 268435456 and fs.exists(path) (
                 byte[] body = fs.readFileBytes(path)
                 uploaded = r2PutEncoded(key, body, item.contentType.toStr(), item.contentEncoding.toStr())
@@ -145,7 +163,9 @@ def flushR2UploadQueue() (
                 )
             )
             if uploaded (
-                removed = !fs.exists(path) or fs.remove(path)
+                item.uploaded = true
+                // Active projects retain their fast local copy after cloud backup.
+                removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path)
             )
         )
         if !removed (
@@ -156,9 +176,12 @@ def flushR2UploadQueue() (
     sync.unlock("r2-upload-queue")
 )
 
-def removeQueuedR2Upload(string key) (
-    sync.lock("r2-upload-queue")
-    array items = loadR2UploadQueue()
+def removeQueuedR2UploadLocked(string key) boolean (
+    object queueResult = readR2UploadQueue()
+    if !queueResult.ok (
+        return false
+    )
+    array items = queueResult.items.assert(array)
     array remaining = []
     for i items.len (
         object item = items[i].assertElse(object, {})
@@ -166,6 +189,5 @@ def removeQueuedR2Upload(string key) (
             remaining.append(item)
         )
     )
-    writeFile(r2UploadQueueFile, {items: remaining})
-    sync.unlock("r2-upload-queue")
+    return writeFile(r2UploadQueueFile, {items: remaining})
 )
