@@ -2466,7 +2466,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
       string itemId = incomingItem.id.toStr().toLower().strip()
       string itemName = incomingItem.name.toStr().strip()
       object visual = incomingItem.visual.assertElse(object, {})
-      if visual.isEmpty() and incomingItem.image.toStr().strip() != "" (
+      if visual.getKeys().len == 0 and incomingItem.image.toStr().strip() != "" (
         visual = {type: "image", url: incomingItem.image.toStr().strip()}
       )
       string visualType = visual.type.toStr().toLower().strip()
