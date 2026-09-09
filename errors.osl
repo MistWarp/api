@@ -131,6 +131,22 @@ def handleAdminResolveSiteError(*serve.Context c) (
     c.internalError("could not update error")
 )
 
+def deleteAllSiteErrors() number (
+    sync.lock("site-errors")
+    array entries = errorDocs.all()
+    for i entries.len (
+        object entry = entries[i].assert(object)
+        errorDocs.deleteOne({_id: entry["_id"]})
+    )
+    sync.unlock("site-errors")
+    return entries.len
+)
+
+def handleAdminDeleteAllSiteErrors(*serve.Context c) (
+    number deleted = deleteAllSiteErrors()
+    c.json(200, {ok: true, deleted: deleted})
+)
+
 def handleAdminDeleteSiteError(*serve.Context c) (
     object body = c.bodyJSON()
     string id = body.id.toStr()

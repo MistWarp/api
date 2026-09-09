@@ -1,0 +1,23 @@
+import "std:testing"
+import "std:db"
+import "std:sync"
+import "std:serve"
+import "std:fs"
+
+string path = "/tmp/mistwarp-errors-" ++ timestamp.toStr() ++ ".db"
+auto testDb = db.open(path)
+*db.Collection errorDocs = testDb.collection("site_errors")
+
+def randomString(number length) string ( return "unused" )
+def putDocument(*db.Collection docs, string id, object entry) boolean ( return false )
+
+import "./errors.osl"
+
+for i 250 (
+    errorDocs.insertOne({_id: "e" ++ i.toStr(), resolved: i % 2 == 0, created: i})
+)
+testing.assert(deleteAllSiteErrors() == 250, "deletes beyond the 200-entry response limit")
+testing.assert(errorDocs.count({}) == 0, "deletes both open and resolved errors")
+testing.assert(deleteAllSiteErrors() == 0, "deleting an empty collection succeeds")
+testDb.close()
+fs.remove(path)
