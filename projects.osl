@@ -3183,6 +3183,33 @@ def handleExplore(*serve.Context c) (
   c.json(200, {ok: true, total: total, projects: paginate(entries, offset, limit)})
 )
 
+def handleRandomProject(*serve.Context c) (
+  array entries = snapshotIndexList(sharedIndexEntries())
+  string exclude = c.query("exclude").strip()
+  if exclude != "" and entries.len > 1 (
+    array kept = []
+    for i entries.len (
+      object entry = entries[i]
+      if entry.id.toStr() != exclude (
+        kept.append(entry)
+      )
+    )
+    if kept.len > 0 (
+      entries = kept
+    )
+  )
+  if entries.len == 0 (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  number nano = raw("func() int64 { return time.Now().UnixNano() }()")
+  if nano < 0 (
+    nano = nano * -1
+  )
+  number idx = nano % entries.len
+  c.json(200, {ok: true, project: entries[idx]})
+)
+
 def handleLeaderboard(*serve.Context c) (
   array entries = sharedIndexEntries()
   object totals = {}
