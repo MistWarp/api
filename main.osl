@@ -361,6 +361,7 @@ api.POST("/projects/:id/live", requireAuth, serve.rateLimit(120, 60), handleLive
 api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
 api.POST("/projects/:id/upload-parts", requireAuth, requireCurrentAgreement, handleCreateProjectUploadPart)
 api.POST("/projects/:id/upload-parts/:token/complete", requireAuth, requireCurrentAgreement, handleCompleteProjectUploadPart)
+api.GET("/projects/random", handleRandomProject)
 api.GET("/projects/:id/project.json", handleGetProjectJson)
 api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
 api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
