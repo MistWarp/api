@@ -58,7 +58,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
         historyCheckpoints: false,
         customProjectBranding: false,
         vanityProjectUrls: false,
-        collaborationLimit: 3,
         salesFeeBasisPoints: 1000,
         maxProjectPrice: 100
     }
@@ -74,7 +73,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.recoveryDays = 14
         benefits.analyticsDays = 30
         benefits.historyCheckpoints = true
-        benefits.collaborationLimit = 5
     ) else if tier == "Plus" (
         benefits.weeklyUploadBytes = 1073741824
         benefits.maxProjectAssetBytes = 52428800
@@ -91,7 +89,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.advancedHistory = true
         benefits.historyCheckpoints = true
         benefits.customProjectBranding = true
-        benefits.collaborationLimit = 10
         benefits.salesFeeBasisPoints = 700
         benefits.maxProjectPrice = 250
     ) else if tier == "Pro" (
@@ -111,7 +108,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
         benefits.historyCheckpoints = true
         benefits.customProjectBranding = true
         benefits.vanityProjectUrls = true
-        benefits.collaborationLimit = 25
         benefits.salesFeeBasisPoints = 500
         benefits.maxProjectPrice = 500
     )
