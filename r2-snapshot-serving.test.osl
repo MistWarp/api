@@ -15,21 +15,22 @@ string storageEndpoint = raw("storageServer.(*httptest.Server).URL")
 auto r2Client = s3.new({endpoint: storageEndpoint, bucket: "test", access_key_id: "test", secret_access_key: "test"})
 
 def isSafeBlobKey(string key) boolean (
-    return key != "" and !key.contains("..")
+  return key != "" and !key.contains("..")
 )
+
 def localBlobPath(string key) string (
-    return testDir ++ "/" ++ key
+  return testDir ++ "/" ++ key
 )
 
 import "./r2-snapshot-serving.osl"
 
 def requestSnapshot(string key, boolean gzip, string etag) object (
-    auto recorder = raw("httptest.NewRecorder()")
-    auto request = raw("httptest.NewRequest(\"GET\", \"http://snapshot.test/\", nil)")
-    raw("request.Header.Set(\"If-None-Match\", etag)")
-    *serve.Context context = raw("&OSLserveContext{w: &OSLserveResponseWriter{ResponseWriter: recorder}, r: request}")
-    serveProjectJsonStorageKey(context, key, gzip)
-    return raw("map[string]any{\"status\": recorder.Code, \"body\": recorder.Body.String(), \"encoding\": recorder.Header().Get(\"Content-Encoding\"), \"type\": recorder.Header().Get(\"Content-Type\"), \"etag\": recorder.Header().Get(\"ETag\")}")
+  auto recorder = raw("httptest.NewRecorder()")
+  auto request = raw("httptest.NewRequest(\"GET\", \"http://snapshot.test/\", nil)")
+  raw("request.Header.Set(\"If-None-Match\", etag)")
+  *serve.Context context = raw("&OSLserveContext{w: &OSLserveResponseWriter{ResponseWriter: recorder}, r: request}")
+  serveProjectJsonStorageKey(context, key, gzip)
+  return raw("map[string]any{\"status\": recorder.Code, \"body\": recorder.Body.String(), \"encoding\": recorder.Header().Get(\"Content-Encoding\"), \"type\": recorder.Header().Get(\"Content-Type\"), \"etag\": recorder.Header().Get(\"ETag\")}")
 )
 
 string plain = "{\"targets\":[],\"meta\":{\"name\":\"burger 🍔\"}}"

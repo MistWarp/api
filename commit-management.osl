@@ -1,126 +1,126 @@
 def projectCommitMetadata(object project) object (
-    if project.contains("commitMetadata") and project.commitMetadata != null (
-        return project.commitMetadata.assertElse(object, {})
-    )
-    return {}
+  if project.contains("commitMetadata") and project.commitMetadata != null (
+    return project.commitMetadata.assertElse(object, {})
+  )
+  return {}
 )
 
 def commitCoAuthors(object project, string sha) array (
-    object metadata = projectCommitMetadata(project)
-    if metadata.contains(sha) and metadata[sha] != null (
-        object entry = metadata[sha].assertElse(object, {})
-        if entry.contains("coAuthors") and entry.coAuthors != null (
-            return entry.coAuthors.assertElse(array, [])
-        )
-        if entry.contains("collaborators") and entry.collaborators != null (
-            return entry.collaborators.assertElse(array, [])
-        )
+  object metadata = projectCommitMetadata(project)
+  if metadata.contains(sha) and metadata[sha] != null (
+    object entry = metadata[sha].assertElse(object, {})
+    if entry.contains("coAuthors") and entry.coAuthors != null (
+      return entry.coAuthors.assertElse(array, [])
     )
-    return []
+    if entry.contains("collaborators") and entry.collaborators != null (
+      return entry.collaborators.assertElse(array, [])
+    )
+  )
+  return []
 )
 
 def normalizedCommitCoAuthors(array incoming) object (
-    if incoming.len > 25 (
-        return {ok: false, error: "a commit can credit at most 25 co-authors"}
+  if incoming.len > 25 (
+    return {ok: false, error: "a commit can credit at most 25 co-authors"}
+  )
+  array coAuthors = []
+  array identities = []
+  for i incoming.len (
+    string username = incoming[i].toStr().strip()
+    string normalized = normalizeUsername(username)
+    string userId = userIdForUsername(username)
+    if normalized == "" or userId == "" (
+      return {ok: false, error: "commit co-authors must be existing Rotur users"}
     )
-    array coAuthors = []
-    array identities = []
-    for i incoming.len (
-        string username = incoming[i].toStr().strip()
-        string normalized = normalizeUsername(username)
-        string userId = userIdForUsername(username)
-        if normalized == "" or userId == "" (
-            return {ok: false, error: "commit co-authors must be existing Rotur users"}
-        )
-        if !identities.contains(userId) (
-            identities.append(userId)
-            coAuthors.append({username: username, userId: userId})
-        )
+    if !identities.contains(userId) (
+      identities.append(userId)
+      coAuthors.append({username: username, userId: userId})
     )
-    return {ok: true, coAuthors: coAuthors}
+  )
+  return {ok: true, coAuthors: coAuthors}
 )
 
 def applyCommitPatch(string id, string sha, object body, string username, boolean isAdmin) object (
-    auto loaded = loadProject(id)
-    if !loaded.ok (
-        return {status: 404, error: "project not found"}
-    )
-    object project = loaded.project.assert(object)
-    string role = projectRole(project, username)
-    if !projectSourcePolicyAllows(project, projectPrice(project), role == "owner", hasBought(project, normalizeUsername(username))) (
-        return {status: 403, error: "only the owner can edit commits for this project"}
-    )
-    if !isAdmin and role != "owner" and role != "maintainer" (
-        return {status: 403, error: "only project owners and maintainers can edit commits"}
-    )
-    if !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
-        return {status: 404, error: "commit not found"}
-    )
-    if !body.contains("coAuthors") and !body.contains("collaborators") (
-        return {status: 400, error: "provide coAuthors"}
-    )
-    array incoming = body.contains("coAuthors") ? body.coAuthors.assertElse(array, []) body.collaborators.assertElse(array, [])
-    object coAuthorResult = normalizedCommitCoAuthors(incoming)
-    if !coAuthorResult.ok (
-        return {status: 400, error: coAuthorResult.error}
-    )
-    object metadata = projectCommitMetadata(project)
-    object commitMeta = {}
-    if metadata.contains(sha) and metadata[sha] != null (
-        commitMeta = metadata[sha].assertElse(object, {})
-    )
-    commitMeta.coAuthors = coAuthorResult.coAuthors
-    if commitMeta.contains("collaborators") (
-        commitMeta.delete("collaborators")
-    )
-    metadata[sha] = commitMeta
-    project.commitMetadata = metadata
-    project.edited = timestamp
-    if !saveProject(project) (
-        return {status: 500, error: "could not save commit co-authors"}
-    )
-    upsertIndexEntry(project)
-    return {
-        status: 200,
-        ok: true,
-        sha: sha,
-        coAuthors: commitCoAuthors(project, sha),
-        collaborators: commitCoAuthors(project, sha)
-    }
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    return {status: 404, error: "project not found"}
+  )
+  object project = loaded.project.assert(object)
+  string role = projectRole(project, username)
+  if !projectSourcePolicyAllows(project, projectPrice(project), role == "owner", hasBought(project, normalizeUsername(username))) (
+    return {status: 403, error: "only the owner can edit commits for this project"}
+  )
+  if !isAdmin and role != "owner" and role != "maintainer" (
+    return {status: 403, error: "only project owners and maintainers can edit commits"}
+  )
+  if !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
+    return {status: 404, error: "commit not found"}
+  )
+  if !body.contains("coAuthors") and !body.contains("collaborators") (
+    return {status: 400, error: "provide coAuthors"}
+  )
+  array incoming = body.contains("coAuthors") ? body.coAuthors.assertElse(array, []) body.collaborators.assertElse(array, [])
+  object coAuthorResult = normalizedCommitCoAuthors(incoming)
+  if !coAuthorResult.ok (
+    return {status: 400, error: coAuthorResult.error}
+  )
+  object metadata = projectCommitMetadata(project)
+  object commitMeta = {}
+  if metadata.contains(sha) and metadata[sha] != null (
+    commitMeta = metadata[sha].assertElse(object, {})
+  )
+  commitMeta.coAuthors = coAuthorResult.coAuthors
+  if commitMeta.contains("collaborators") (
+    commitMeta.delete("collaborators")
+  )
+  metadata[sha] = commitMeta
+  project.commitMetadata = metadata
+  project.edited = timestamp
+  if !saveProject(project) (
+    return {status: 500, error: "could not save commit co-authors"}
+  )
+  upsertIndexEntry(project)
+  return {
+    status: 200,
+    ok: true,
+    sha: sha,
+    coAuthors: commitCoAuthors(project, sha),
+    collaborators: commitCoAuthors(project, sha)
+  }
 )
 
 def handlePatchCommit(*serve.Context c) (
-    string lockName = "project-history-" ++ c.param("id")
-    sync.lock(lockName)
-    object result = applyCommitPatch(c.param("id"), c.param("sha"), c.bodyJSON(), c.getString("username"), c.getBool("isAdmin"))
-    sync.unlock(lockName)
-    if result.status.toInt() == 404 (
-        c.notFound(result.error.toStr())
-    ) else if result.status.toInt() == 403 (
-        c.forbidden(result.error.toStr())
-    ) else if result.status.toInt() == 400 (
-        c.badRequest(result.error.toStr())
-    ) else if result.status.toInt() != 200 (
-        c.internalError(result.error.toStr())
-    ) else (
-        c.json(200, result)
-    )
+  string lockName = "project-history-" ++ c.param("id")
+  sync.lock(lockName)
+  object result = applyCommitPatch(c.param("id"), c.param("sha"), c.bodyJSON(), c.getString("username"), c.getBool("isAdmin"))
+  sync.unlock(lockName)
+  if result.status.toInt() == 404 (
+    c.notFound(result.error.toStr())
+  ) else if result.status.toInt() == 403 (
+    c.forbidden(result.error.toStr())
+  ) else if result.status.toInt() == 400 (
+    c.badRequest(result.error.toStr())
+  ) else if result.status.toInt() != 200 (
+    c.internalError(result.error.toStr())
+  ) else (
+    c.json(200, result)
+  )
 )
 
 def handleGetCommitCollaborators(*serve.Context c) (
-    c.setHeader("Cache-Control", "private, no-store")
-    c.setHeader("CDN-Cache-Control", "private, no-store")
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = loaded.project.assert(object)
-    string sha = c.param("sha")
-    if !canViewProject(project, c) or !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
-        c.notFound("commit not found")
-        return
-    )
-    array coAuthors = commitCoAuthors(project, sha)
-    c.json(200, {ok: true, sha: sha, coAuthors: coAuthors, collaborators: coAuthors})
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  string sha = c.param("sha")
+  if !canViewProject(project, c) or !validGitObjectId(sha) or !projectRecordsCommit(project, sha) (
+    c.notFound("commit not found")
+    return
+  )
+  array coAuthors = commitCoAuthors(project, sha)
+  c.json(200, {ok: true, sha: sha, coAuthors: coAuthors, collaborators: coAuthors})
 )

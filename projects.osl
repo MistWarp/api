@@ -453,15 +453,20 @@ def handleGetMyQuota(*serve.Context c) (
     daily.append({day: dayKey.toNum(), bytes: dailyMap[dayKey].toNum()})
   )
 
+  array releases = quotaUpcomingForUser(username, 8)
+
   c.json(200, {
     ok: true,
     used: details.used,
     limit: details.limit,
+    remaining: details.remaining,
     windowMs: quotaWindowMs,
     oldestEventMs: details.oldestEventMs,
     nextExpiryInMs: details.nextExpiryInMs,
+    nextReleaseBytes: details.nextReleaseBytes,
     eventCount: details.eventCount,
-    daily: daily
+    daily: daily,
+    releases: releases
   })
 )
 
@@ -727,37 +732,44 @@ def reserveUploadBytes(string username, number bytes, number limit, boolean enfo
   return {ok: true, used: used}
 )
 
+// Give back a previous reservation, newest charges first. Used when an
+// upload fails validation or turns out to change nothing, so iterating on
+// a project does not burn the weekly budget.
+def refundUploadBytes(string username, number bytes) (
+  if bytes.toNum() <= 0 (
+    return
+  )
+  string lockName = "upload-quota-" ++ normalizeUsername(username)
+  sync.lock(lockName)
+  array events = []
+  auto result = readFile(quotaPath(username))
+  if result.ok (
+    object data = result.data.assert(object)
+    events = data.events.assert(array)
+  )
+  writeFile(quotaPath(username), {events: quotaApplyRefund(events, bytes, timestamp, quotaWindowMs)})
+  sync.unlock(lockName)
+)
+
+// Oldest-first list of upcoming expiries for one user.
+def quotaUpcomingForUser(string username, number maxN) array (
+  auto result = readFile(quotaPath(username))
+  if !result.ok (
+    return []
+  )
+  object data = result.data.assert(object)
+  return quotaUpcomingReleases(data.events.assert(array), timestamp, quotaWindowMs, maxN)
+)
+
 def quotaDetails(string username) object (
   number uploadLimit = mistwarpBenefitsForUsername(username).weeklyUploadBytes.toNum()
   auto result = readFile(quotaPath(username))
   if !result.ok (
-    return {used: 0, limit: uploadLimit, oldestEventMs: 0, nextExpiryInMs: 0, eventCount: 0}
+    return {used: 0, limit: uploadLimit, remaining: uploadLimit, oldestEventMs: 0, nextExpiryInMs: 0, nextReleaseBytes: 0, eventCount: 0}
   )
   object data = result.data.assert(object)
-  array events = data.events.assert(array)
-  number total = 0
-  number oldest = 0
-  number count = 0
-  boolean hasAny = false
-  for i events.len (
-    object event = events[i]
-    if timestamp - event.t.toNum() < quotaWindowMs (
-      total = total + event.bytes.toNum()
-      count = count + 1
-      if !hasAny or event.t.toNum() < oldest (
-        oldest = event.t.toNum()
-        hasAny = true
-      )
-    )
-  )
-  number msUntilExpiry = 0
-  if hasAny (
-    msUntilExpiry = (oldest + quotaWindowMs) - timestamp
-    if msUntilExpiry < 0 (
-      msUntilExpiry = 0
-    )
-  )
-  return {used: total, limit: uploadLimit, oldestEventMs: oldest, nextExpiryInMs: msUntilExpiry, eventCount: count}
+  object summary = quotaSummarize(data.events.assert(array), uploadLimit, timestamp, quotaWindowMs)
+  return {used: summary.used, limit: summary.limit, remaining: summary.remaining, oldestEventMs: summary.oldestEventMs, nextExpiryInMs: summary.nextExpiryInMs, nextReleaseBytes: summary.nextReleaseBytes, eventCount: summary.eventCount}
 )
 
 number stagedUploadPartTtlMs = 900000
@@ -875,10 +887,12 @@ def handleUploadProjectAsset(*serve.Context c) (
   object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum(), uploadLimit,!c.getBool("isAdmin"))
   if !reservation.ok (
     sync.unlock(assetLock)
-    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    object details = quotaDetails(c.getString("username"))
+    c.json(413, {ok: false, error: "weekly upload budget exceeded", code: "quota_exceeded", used: details.used, limit: details.limit, remaining: details.remaining, nextExpiryInMs: details.nextExpiryInMs, nextReleaseBytes: details.nextReleaseBytes})
     return
   )
   if !stageR2Blob(assetObjectKey(name), file.data, contentTypeForExt(extPartOf(name)), "") (
+    refundUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum())
     sync.unlock(assetLock)
     c.internalError("asset upload failed")
     return
@@ -930,7 +944,8 @@ def handleStageProjectUploadPart(*serve.Context c) (
   number uploadLimit = benefits.weeklyUploadBytes.toNum()
   object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum(), uploadLimit,!c.getBool("isAdmin"))
   if !reservation.ok (
-    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    object details = quotaDetails(c.getString("username"))
+    c.json(413, {ok: false, error: "weekly upload budget exceeded", code: "quota_exceeded", used: details.used, limit: details.limit, remaining: details.remaining, nextExpiryInMs: details.nextExpiryInMs, nextReleaseBytes: details.nextReleaseBytes})
     return
   )
   string token = randomString(32)
@@ -942,6 +957,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
     expires: timestamp + stagedUploadPartTtlMs
   }) (
   removeStagedUploadPart(token, {})
+  refundUploadBytes(normalizeUsername(c.getString("username")), file.size.toNum())
   c.internalError("could not stage upload part")
   return
 )
@@ -1002,7 +1018,8 @@ def handleCreateProjectUploadPart(*serve.Context c) (
   number uploadLimit = benefits.weeklyUploadBytes.toNum()
   object reservation = reserveUploadBytes(normalizeUsername(c.getString("username")), size, uploadLimit,!c.getBool("isAdmin"))
   if !reservation.ok (
-    c.json(413, {ok: false, error: "weekly upload budget exceeded"})
+    object details = quotaDetails(c.getString("username"))
+    c.json(413, {ok: false, error: "weekly upload budget exceeded", code: "quota_exceeded", used: details.used, limit: details.limit, remaining: details.remaining, nextExpiryInMs: details.nextExpiryInMs, nextReleaseBytes: details.nextReleaseBytes})
     return
   )
   string token = randomString(32)
@@ -1019,6 +1036,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     expires: timestamp + stagedUploadPartTtlMs
   }
   if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    refundUploadBytes(normalizeUsername(c.getString("username")), size)
     c.internalError("could not start upload")
     return
   )
@@ -1631,13 +1649,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     hasMergeTree = true
   )
   number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
-  object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
-  if !reservation.ok (
-    number usedMb = (reservation.used.toNum() / 1048576).toInt()
-    number limitMb = (uploadLimit / 1048576).toInt()
-    c.json(413, {ok: false, error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC."})
-    return
-  )
+  // The weekly budget is charged only once the upload has passed validation
+  // and is about to be stored, so failed saves and no-change saves never
+  // burn budget. See the reservation just before the snapshot is staged.
 
   string id = project.id.toStr()
   string workId = id ++ "." ++ randomString(8)
@@ -1933,6 +1947,21 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
+  // Everything above is validation: failed and no-change saves return before
+  // this point and never touch the budget. The charge lands only when the
+  // upload is actually about to be stored, so iterating stays cheap.
+  number uploadLimit = projectBenefits.weeklyUploadBytes.toNum()
+  object reservation = reserveUploadBytes(uploader, incomingBytes, uploadLimit,!c.getBool("isAdmin"))
+  if !reservation.ok (
+    object details = quotaDetails(c.getString("username"))
+    number usedMb = (reservation.used.toNum() / 1048576).toInt()
+    number limitMb = (uploadLimit / 1048576).toInt()
+    fs.remove(zipPath)
+    fs.remove(extractDir)
+    c.json(413, {ok: false, code: "quota_exceeded", error: "You've used " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB weekly upload budget. Usage frees up as uploads from the past 7 days age out, or you can reset it for 20 RC.", used: details.used, limit: details.limit, remaining: details.remaining, nextExpiryInMs: details.nextExpiryInMs, nextReleaseBytes: details.nextReleaseBytes})
+    return
+  )
+
   auto thumbResult = c.formFile("thumbnail")
   if !thumbResult.isErr() (
     object thumb = thumbResult.unwrap().assert(object)
@@ -1977,6 +2006,7 @@ def handleUploadProjectLocked(*serve.Context c) (
       )
     )
     c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+    refundUploadBytes(uploader, incomingBytes)
     fs.remove(zipPath)
     fs.remove(extractDir)
     return
@@ -1997,6 +2027,7 @@ def handleUploadProjectLocked(*serve.Context c) (
         )
       )
     )
+    refundUploadBytes(uploader, incomingBytes)
     fs.remove(zipPath)
     fs.remove(extractDir)
     c.internalError("failed to save project metadata")
@@ -3020,10 +3051,10 @@ def handleViewProject(*serve.Context c) (
 )
 
 def handleReactProject(*serve.Context c) (
-    string lockName = "project-reactions:" ++ c.param("id")
-    sync.lock(lockName)
-    handleReactProjectLocked(c)
-    sync.unlock(lockName)
+  string lockName = "project-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleReactProjectLocked(c)
+  sync.unlock(lockName)
 )
 
 def handleReactProjectLocked(*serve.Context c) (

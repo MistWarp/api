@@ -17,14 +17,24 @@ auto milestoneDb = db.open(path)
 string roturBase = "http://unused.invalid"
 auto remoteMilestoneChecks = cache.create(100, 10)
 array sent = []
-def isSafePathPart(string value) boolean ( return true )
-def profileExists(string name) boolean ( return true )
-def usernameForId(string id) string ( return id )
+
+def isSafePathPart(string value) boolean (
+  return true
+)
+
+def profileExists(string name) boolean (
+  return true
+)
+
+def usernameForId(string id) string (
+  return id
+)
 boolean failWrite = false
 
 def normalizeUsername(string name) string (
   return name.toLower()
 )
+
 def userIdForUsername(string name) string (
   // Simulate an account rename without changing identity.
   if name == "alice" or name == "renamed" (
@@ -32,12 +42,15 @@ def userIdForUsername(string name) string (
   )
   return name.toLower()
 )
+
 def sanitizeNotificationPayload(object extra, string notifType, string actor) object (
   return json.parse(json.stringify(extra), {type: "object"}).unwrap().assert(object)
 )
+
 def addNotification(string target, string actor, string notifType, object payload) (
   sent.append({target: target, actor: actor, type: notifType, data: payload})
 )
+
 def putDocument(*db.Collection collection, string id, object value) boolean (
   if failWrite (
     return false

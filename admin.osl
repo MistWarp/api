@@ -1,755 +1,755 @@
 def loadAdmins() array (
-    auto result = readFile(adminsFile)
-    if !result.ok (
-        return []
-    )
-    object data = result.data.assert(object)
-    return data.admins.assert(array)
+  auto result = readFile(adminsFile)
+  if !result.ok (
+    return []
+  )
+  object data = result.data.assert(object)
+  return data.admins.assert(array)
 )
 
 def saveAdmins(array admins) boolean (
-    adminsCache.delete("admins")
-    return writeFile(adminsFile, {admins: admins})
+  adminsCache.delete("admins")
+  return writeFile(adminsFile, {admins: admins})
 )
 
 def cachedAdmins() array (
-    if adminsCache.has("admins") (
-        return adminsCache.get("admins").assert(array)
-    )
-    array admins = loadAdmins()
-    adminsCache.set("admins", admins)
-    return admins
+  if adminsCache.has("admins") (
+    return adminsCache.get("admins").assert(array)
+  )
+  array admins = loadAdmins()
+  adminsCache.set("admins", admins)
+  return admins
 )
 
 def loadBans() object (
-    auto result = readFile(bansFile)
-    if !result.ok (
-        return {bans: {}}
-    )
-    return result.data.assert(object)
+  auto result = readFile(bansFile)
+  if !result.ok (
+    return {bans: {}}
+  )
+  return result.data.assert(object)
 )
 
 def saveBans(object data) boolean (
-    bansCache.delete("bans")
-    sharedProjectsCache.delete("projects")
-    return writeFile(bansFile, data)
+  bansCache.delete("bans")
+  sharedProjectsCache.delete("projects")
+  return writeFile(bansFile, data)
 )
 
 def cachedBans() object (
-    if bansCache.has("bans") (
-        return bansCache.get("bans").assert(object)
-    )
-    object data = loadBans()
-    bansCache.set("bans", data)
-    return data
+  if bansCache.has("bans") (
+    return bansCache.get("bans").assert(object)
+  )
+  object data = loadBans()
+  bansCache.set("bans", data)
+  return data
 )
 
 def isBannedUser(string username) boolean (
-    string key = normalizeUsername(username)
-    if key == "" (
-        return false
-    )
-    object data = cachedBans()
-    object bans = data.bans
-    return bans.contains(key)
+  string key = normalizeUsername(username)
+  if key == "" (
+    return false
+  )
+  object data = cachedBans()
+  object bans = data.bans
+  return bans.contains(key)
 )
 
 def banReasonFor(string username) string (
-    string key = normalizeUsername(username)
-    if key == "" (
-        return ""
-    )
-    object data = cachedBans()
-    object bans = data.bans
-    if !bans.contains(key) (
-        return ""
-    )
-    object entry = bans[key]
-    if entry.contains("reason") and entry.reason != null (
-        return entry.reason.toStr()
-    )
+  string key = normalizeUsername(username)
+  if key == "" (
     return ""
+  )
+  object data = cachedBans()
+  object bans = data.bans
+  if !bans.contains(key) (
+    return ""
+  )
+  object entry = bans[key]
+  if entry.contains("reason") and entry.reason != null (
+    return entry.reason.toStr()
+  )
+  return ""
 )
 
 def banUser(string username, string reason, string actor) boolean (
-    string key = normalizeUsername(username)
-    if !isSafePathPart(key) (
-        return false
-    )
-    object data = loadBans()
-    object bans = data.bans
-    bans[key] = {reason: reason, by: actor, created: timestamp}
-    return saveBans(data)
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    return false
+  )
+  object data = loadBans()
+  object bans = data.bans
+  bans[key] = {reason: reason, by: actor, created: timestamp}
+  return saveBans(data)
 )
 
 def unbanUser(string username) boolean (
-    string key = normalizeUsername(username)
-    object data = loadBans()
-    object bans = data.bans
-    if !bans.contains(key) (
-        return false
-    )
-    bans.delete(key)
-    return saveBans(data)
+  string key = normalizeUsername(username)
+  object data = loadBans()
+  object bans = data.bans
+  if !bans.contains(key) (
+    return false
+  )
+  bans.delete(key)
+  return saveBans(data)
 )
 
 def isSuperAdmin(string username) boolean (
-    return adminUsers.contains(normalizeUsername(username))
+  return adminUsers.contains(normalizeUsername(username))
 )
 
 def handleListAdmins(*serve.Context c) (
-    array stored = loadAdmins()
-    array all = []
-    for i adminUsers.len (
-        all.append({username: adminUsers[i], super: true})
+  array stored = loadAdmins()
+  array all = []
+  for i adminUsers.len (
+    all.append({username: adminUsers[i], super: true})
+  )
+  for i stored.len (
+    string name = stored[i].toStr()
+    if !adminUsers.contains(normalizeUsername(name)) (
+      all.append({username: name, super: false})
     )
-    for i stored.len (
-        string name = stored[i].toStr()
-        if !adminUsers.contains(normalizeUsername(name)) (
-            all.append({username: name, super: false})
-        )
-    )
-    c.json(200, {ok: true, admins: all})
+  )
+  c.json(200, {ok: true, admins: all})
 )
 
 def handleAddAdmin(*serve.Context c) (
-    if !isSuperAdmin(c.getString("username")) (
-        c.forbidden("only super admins can manage admins")
-        return
-    )
-    object body = c.bodyJSON()
-    string name = normalizeUsername(body.username.toStr())
-    if !isSafePathPart(name) (
-        c.badRequest("invalid username")
-        return
-    )
-    array admins = loadAdmins()
-    if admins.contains(name) (
-        c.json(200, {ok: true})
-        return
-    )
-    admins.append(name)
-    saveAdmins(admins)
+  if !isSuperAdmin(c.getString("username")) (
+    c.forbidden("only super admins can manage admins")
+    return
+  )
+  object body = c.bodyJSON()
+  string name = normalizeUsername(body.username.toStr())
+  if !isSafePathPart(name) (
+    c.badRequest("invalid username")
+    return
+  )
+  array admins = loadAdmins()
+  if admins.contains(name) (
     c.json(200, {ok: true})
+    return
+  )
+  admins.append(name)
+  saveAdmins(admins)
+  c.json(200, {ok: true})
 )
 
 def handleRemoveAdmin(*serve.Context c) (
-    if !isSuperAdmin(c.getString("username")) (
-        c.forbidden("only super admins can manage admins")
-        return
-    )
-    object body = c.bodyJSON()
-    string name = normalizeUsername(body.username.toStr())
-    array admins = loadAdmins()
-    if !admins.contains(name) (
-        c.notFound("not an admin")
-        return
-    )
-    saveAdmins(removeString(admins, name))
-    c.json(200, {ok: true})
+  if !isSuperAdmin(c.getString("username")) (
+    c.forbidden("only super admins can manage admins")
+    return
+  )
+  object body = c.bodyJSON()
+  string name = normalizeUsername(body.username.toStr())
+  array admins = loadAdmins()
+  if !admins.contains(name) (
+    c.notFound("not an admin")
+    return
+  )
+  saveAdmins(removeString(admins, name))
+  c.json(200, {ok: true})
 )
 
 def handleBanUser(*serve.Context c) (
-    object body = c.bodyJSON()
-    string name = body.username.toStr()
-    string reason = ""
-    if body.contains("reason") and body.reason != null (
-        reason = body.reason.toStr().strip()
-    )
-    if normalizeUsername(name) == "" (
-        c.badRequest("username is required")
-        return
-    )
-    if isAdminUser(name) (
-        c.badRequest("cannot ban an admin")
-        return
-    )
-    if !banUser(name, reason, c.getString("username")) (
-        c.badRequest("could not ban that user")
-        return
-    )
-    c.json(200, {ok: true})
+  object body = c.bodyJSON()
+  string name = body.username.toStr()
+  string reason = ""
+  if body.contains("reason") and body.reason != null (
+    reason = body.reason.toStr().strip()
+  )
+  if normalizeUsername(name) == "" (
+    c.badRequest("username is required")
+    return
+  )
+  if isAdminUser(name) (
+    c.badRequest("cannot ban an admin")
+    return
+  )
+  if !banUser(name, reason, c.getString("username")) (
+    c.badRequest("could not ban that user")
+    return
+  )
+  c.json(200, {ok: true})
 )
 
 def handleUnbanUser(*serve.Context c) (
-    object body = c.bodyJSON()
-    if !unbanUser(body.username.toStr()) (
-        c.notFound("that user is not banned")
-        return
-    )
-    c.json(200, {ok: true})
+  object body = c.bodyJSON()
+  if !unbanUser(body.username.toStr()) (
+    c.notFound("that user is not banned")
+    return
+  )
+  c.json(200, {ok: true})
 )
 
 def handleListBans(*serve.Context c) (
-    object data = loadBans()
-    object bans = data.bans
-    array keys = bans.getKeys()
-    array out = []
-    for i keys.len (
-        string key = keys[i].toStr()
-        object ban = bans[key]
-        out.append({username: key, reason: ban.reason, by: ban.by, created: ban.created})
-    )
-    c.json(200, {ok: true, bans: out})
+  object data = loadBans()
+  object bans = data.bans
+  array keys = bans.getKeys()
+  array out = []
+  for i keys.len (
+    string key = keys[i].toStr()
+    object ban = bans[key]
+    out.append({username: key, reason: ban.reason, by: ban.by, created: ban.created})
+  )
+  c.json(200, {ok: true, bans: out})
 )
 
 def handleListUsers(*serve.Context c) (
-    string q = normalizeUsername(c.query("q"))
-    string sort = c.query("sort").toLower().strip()
-    number offset = c.query("offset") == "" ? 0 c.query("offset").toNum().toInt()
-    number limit = c.query("limit") == "" ? 30 c.query("limit").toNum().toInt()
-    if offset < 0 (
-        offset = 0
-    )
-    if limit < 1 (
-        limit = 1
-    ) else if limit > 50 (
-        limit = 50
-    )
-    number total = 0
-    array stored = []
-    if q != "" (
-        total = profileSearchDocs.where("usernameKey", db.contains, q).count()
-        if sort == "followers" (
-            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("followers", db.desc).limit(offset + limit).all()
-        ) else if sort == "recent" (
-            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("created", db.desc).limit(offset + limit).all()
-        ) else (
-            stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("usernameKey", db.asc).limit(offset + limit).all()
-        )
+  string q = normalizeUsername(c.query("q"))
+  string sort = c.query("sort").toLower().strip()
+  number offset = c.query("offset") == "" ? 0 c.query("offset").toNum().toInt()
+  number limit = c.query("limit") == "" ? 30 c.query("limit").toNum().toInt()
+  if offset < 0 (
+    offset = 0
+  )
+  if limit < 1 (
+    limit = 1
+  ) else if limit > 50 (
+    limit = 50
+  )
+  number total = 0
+  array stored = []
+  if q != "" (
+    total = profileSearchDocs.where("usernameKey", db.contains, q).count()
+    if sort == "followers" (
+      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("followers", db.desc).limit(offset + limit).all()
+    ) else if sort == "recent" (
+      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("created", db.desc).limit(offset + limit).all()
     ) else (
-        total = profileSearchDocs.count({})
-        if sort == "followers" (
-            stored = profileSearchDocs.sort("followers", db.desc).limit(offset + limit).all()
-        ) else if sort == "recent" (
-            stored = profileSearchDocs.sort("created", db.desc).limit(offset + limit).all()
-        ) else (
-            stored = profileSearchDocs.sort("usernameKey", db.asc).limit(offset + limit).all()
-        )
+      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("usernameKey", db.asc).limit(offset + limit).all()
     )
-    array out = []
-    for i stored.len (
-        if i >= offset (
-            object entry = stored[i].assert(object)
-            string key = entry.usernameKey.toStr()
-            object profile = loadProfile(key)
-            object quota = quotaDetails(key)
-            object standing = standingInfo(key)
-            number projectCount = projectSearchDocs.where("ownerKey", db.equal, key).count()
-            out.append({
-                username: profile.username,
-                created: profile.created,
-                followerCount: profile.followers.assert(array).len,
-                projectCount: projectCount,
-                quotaUsed: quota.used,
-                quotaLimit: quota.limit,
-                quotaOldestEventMs: quota.oldestEventMs,
-                quotaEventCount: quota.eventCount,
-                standingLevel: standing.level,
-                banned: isBannedUser(key)
-            })
-        )
+  ) else (
+    total = profileSearchDocs.count({})
+    if sort == "followers" (
+      stored = profileSearchDocs.sort("followers", db.desc).limit(offset + limit).all()
+    ) else if sort == "recent" (
+      stored = profileSearchDocs.sort("created", db.desc).limit(offset + limit).all()
+    ) else (
+      stored = profileSearchDocs.sort("usernameKey", db.asc).limit(offset + limit).all()
     )
-    c.json(200, {ok: true, users: out, total: total, offset: offset, limit: limit})
+  )
+  array out = []
+  for i stored.len (
+    if i >= offset (
+      object entry = stored[i].assert(object)
+      string key = entry.usernameKey.toStr()
+      object profile = loadProfile(key)
+      object quota = quotaDetails(key)
+      object standing = standingInfo(key)
+      number projectCount = projectSearchDocs.where("ownerKey", db.equal, key).count()
+      out.append({
+        username: profile.username,
+        created: profile.created,
+        followerCount: profile.followers.assert(array).len,
+        projectCount: projectCount,
+        quotaUsed: quota.used,
+        quotaLimit: quota.limit,
+        quotaOldestEventMs: quota.oldestEventMs,
+        quotaEventCount: quota.eventCount,
+        standingLevel: standing.level,
+        banned: isBannedUser(key)
+      })
+    )
+  )
+  c.json(200, {ok: true, users: out, total: total, offset: offset, limit: limit})
 )
 
 def localRuntimeStorageStats() object (
-    string encoded = raw("runtimeinfo.StatsJSON(\"data\")")
-    auto parsed = json.parse(encoded, {type: "object"})
-    if parsed.isErr() (
-        return {bytes: 0, diskTotalBytes: 0, diskFreeBytes: 0, types: {}, memory: {heapBytes: 0, systemBytes: 0, stackBytes: 0, goroutines: 0}}
-    )
-    return parsed.unwrap().assert(object)
+  string encoded = raw("runtimeinfo.StatsJSON(\"data\")")
+  auto parsed = json.parse(encoded, {type: "object"})
+  if parsed.isErr() (
+    return {bytes: 0, diskTotalBytes: 0, diskFreeBytes: 0, types: {}, memory: {heapBytes: 0, systemBytes: 0, stackBytes: 0, goroutines: 0}}
+  )
+  return parsed.unwrap().assert(object)
 )
 
 def aggregateStorageObjects(object objects) object (
-    object types = {assets: 0, history: 0, projectData: 0, database: 0, cache: 0, thumbnails: 0, other: 0}
-    number total = 0
-    array keys = objects.getKeys()
-    for i keys.len (
-        object item = objects[keys[i].toStr()].assertElse(object, {})
-        string kind = item.type.toStr()
-        if !types.contains(kind) (
-            kind = "other"
-        )
-        number size = item.size.toNum()
-        types[kind] = types[kind].toNum() + size
-        total = total + size
+  object types = {assets: 0, history: 0, projectData: 0, database: 0, cache: 0, thumbnails: 0, other: 0}
+  number total = 0
+  array keys = objects.getKeys()
+  for i keys.len (
+    object item = objects[keys[i].toStr()].assertElse(object, {})
+    string kind = item.type.toStr()
+    if !types.contains(kind) (
+      kind = "other"
     )
-    return {bytes: total, objects: keys.len, types: types}
+    number size = item.size.toNum()
+    types[kind] = types[kind].toNum() + size
+    total = total + size
+  )
+  return {bytes: total, objects: keys.len, types: types}
 )
 
 def adminStorageStats() object (
-    object local = localRuntimeStorageStats()
-    object inventorySync = syncR2StorageInventory(false)
-    auto r2Loaded = readFile(r2StorageIndexFile)
-    object r2Data = r2Loaded.ok ? r2Loaded.data.assertElse(object, {}) {}
-    object r2Objects = r2Data.contains("objects") ? r2Data.objects.assertElse(object, {}) {}
-    object r2 = aggregateStorageObjects(r2Objects)
-    array queuedItems = loadR2UploadQueue()
-    object queuedObjects = {}
-    for i queuedItems.len (
-        object item = queuedItems[i].assertElse(object, {})
-        queuedObjects[item.key.toStr()] = item
-    )
-    object queued = aggregateStorageObjects(queuedObjects)
-    number r2SyncedAt = r2Data.contains("syncedAt") ? r2Data.syncedAt.toNum() 0
-    return {local: local, r2: r2, queued: queued, r2Configured: !r2Local, r2SyncedAt: r2SyncedAt, inventorySync: inventorySync}
+  object local = localRuntimeStorageStats()
+  object inventorySync = syncR2StorageInventory(false)
+  auto r2Loaded = readFile(r2StorageIndexFile)
+  object r2Data = r2Loaded.ok ? r2Loaded.data.assertElse(object, {}) {}
+  object r2Objects = r2Data.contains("objects") ? r2Data.objects.assertElse(object, {}) {}
+  object r2 = aggregateStorageObjects(r2Objects)
+  array queuedItems = loadR2UploadQueue()
+  object queuedObjects = {}
+  for i queuedItems.len (
+    object item = queuedItems[i].assertElse(object, {})
+    queuedObjects[item.key.toStr()] = item
+  )
+  object queued = aggregateStorageObjects(queuedObjects)
+  number r2SyncedAt = r2Data.contains("syncedAt") ? r2Data.syncedAt.toNum() 0
+  return {local: local, r2: r2, queued: queued, r2Configured:!r2Local, r2SyncedAt: r2SyncedAt, inventorySync: inventorySync}
 )
 
 def handleAdminStorageStats(*serve.Context c) (
-    c.json(200, {ok: true, storage: adminStorageStats()})
+  c.json(200, {ok: true, storage: adminStorageStats()})
 )
 
 def handleAdminSyncR2StorageStats(*serve.Context c) (
-    object result = syncR2StorageInventory(true)
-    if !result.ok (
-        c.json(502, {ok: false, error: result.error})
-        return
-    )
-    c.json(200, {ok: true, storage: adminStorageStats()})
+  object result = syncR2StorageInventory(true)
+  if !result.ok (
+    c.json(502, {ok: false, error: result.error})
+    return
+  )
+  c.json(200, {ok: true, storage: adminStorageStats()})
 )
 
 def handleAdminStats(*serve.Context c) (
-    number days = 30
-    if c.query("days") != "" (
-        days = c.query("days").toNum().toInt()
-        if days < 7 (
-            days = 7
-        )
-        if days > 365 (
-            days = 365
-        )
+  number days = 30
+  if c.query("days") != "" (
+    days = c.query("days").toNum().toInt()
+    if days < 7 (
+      days = 7
     )
-    number since = timestamp - (days * 86400000)
-    array projects = projectSearchDocs.all()
-    number totalProjects = projects.len
-    number sharedProjects = 0
-    number totalBytes = 0
-    number totalViews = 0
-    number totalLoves = 0
-    number totalRemixes = 0
-    object projectsByDay = {}
-    object projectUpdatesByDay = {}
-    for i projects.len (
-        object entry = projects[i].assert(object)
-        if entry.shared == true (
-            sharedProjects = sharedProjects + 1
+    if days > 365 (
+      days = 365
+    )
+  )
+  number since = timestamp - (days * 86400000)
+  array projects = projectSearchDocs.all()
+  number totalProjects = projects.len
+  number sharedProjects = 0
+  number totalBytes = 0
+  number totalViews = 0
+  number totalLoves = 0
+  number totalRemixes = 0
+  object projectsByDay = {}
+  object projectUpdatesByDay = {}
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    if entry.shared == true (
+      sharedProjects = sharedProjects + 1
+    )
+    if entry.contains("sizeBytes") and entry.sizeBytes != null (
+      totalBytes = totalBytes + entry.sizeBytes.toNum()
+    )
+    if entry.contains("views") and entry.views != null (
+      totalViews = totalViews + entry.views.toNum()
+    )
+    if entry.contains("loveCount") and entry.loveCount != null (
+      totalLoves = totalLoves + entry.loveCount.toNum()
+    )
+    if entry.contains("remixParent") and entry.remixParent != null and entry.remixParent.toStr() != "" (
+      totalRemixes = totalRemixes + 1
+    )
+    string dk = (entry.created.toNum() / 86400000).toInt().toStr()
+    number prev = 0
+    if projectsByDay.contains(dk) (
+      prev = projectsByDay[dk].toNum()
+    )
+    projectsByDay[dk] = prev + 1
+    string editKey = (entry.edited.toNum() / 86400000).toInt().toStr()
+    number previousUpdates = 0
+    if projectUpdatesByDay.contains(editKey) (
+      previousUpdates = projectUpdatesByDay[editKey].toNum()
+    )
+    projectUpdatesByDay[editKey] = previousUpdates + 1
+  )
+  array userFiles = fs.readDir(usersDir)
+  number totalUsers = 0
+  object usersByDay = {}
+  for i userFiles.len (
+    if userFiles[i].toStr().endsWith(".json") (
+      totalUsers = totalUsers + 1
+      object profile = loadProfile(userFiles[i].toStr().replace(".json", ""))
+      if profile.contains("created") and profile.created != null (
+        string userDay = (profile.created.toNum() / 86400000).toInt().toStr()
+        number previousUsers = 0
+        if usersByDay.contains(userDay) (
+          previousUsers = usersByDay[userDay].toNum()
         )
-        if entry.contains("sizeBytes") and entry.sizeBytes != null (
-            totalBytes = totalBytes + entry.sizeBytes.toNum()
-        )
-        if entry.contains("views") and entry.views != null (
-            totalViews = totalViews + entry.views.toNum()
-        )
-        if entry.contains("loveCount") and entry.loveCount != null (
-            totalLoves = totalLoves + entry.loveCount.toNum()
-        )
-        if entry.contains("remixParent") and entry.remixParent != null and entry.remixParent.toStr() != "" (
-            totalRemixes = totalRemixes + 1
-        )
-        string dk = (entry.created.toNum() / 86400000).toInt().toStr()
+        usersByDay[userDay] = previousUsers + 1
+      )
+    )
+  )
+  array sessionFiles = fs.readDir(sessionsDir)
+  object loginsByDay = {}
+  number activeSessions = 0
+  for i sessionFiles.len (
+    string sf = sessionFiles[i].toStr()
+    if sf.endsWith(".json") (
+      auto res = readFile(sessionsDir ++ sf)
+      if res.ok (
+        object s = res.data.assert(object)
+        activeSessions = activeSessions + 1
+        string dk = (s.createdAt.toNum() / 86400000).toInt().toStr()
         number prev = 0
-        if projectsByDay.contains(dk) (
-            prev = projectsByDay[dk].toNum()
+        if loginsByDay.contains(dk) (
+          prev = loginsByDay[dk].toNum()
         )
-        projectsByDay[dk] = prev + 1
-        string editKey = (entry.edited.toNum() / 86400000).toInt().toStr()
-        number previousUpdates = 0
-        if projectUpdatesByDay.contains(editKey) (
-            previousUpdates = projectUpdatesByDay[editKey].toNum()
+        loginsByDay[dk] = prev + 1
+      )
+    )
+  )
+  array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+  object loadsByDay = {}
+  object startsByDay = {}
+  object crashesByDay = {}
+  object loadTimeTotalsByDay = {}
+  object loadSamplesByDay = {}
+  object averageLoadMsByDay = {}
+  number totalLoads = 0
+  number totalStarts = 0
+  number totalCrashes = 0
+  number loadTimeTotal = 0
+  number loadTimeSamples = 0
+  number desktopLoads = 0
+  number touchLoads = 0
+  number otherLoads = 0
+  for i diagnostics.len (
+    object diagnostic = diagnostics[i].assert(object)
+    string diagnosticDay = (diagnostic.created.toNum() / 86400000).toInt().toStr()
+    string kind = diagnostic.type.toStr()
+    if kind == "load" (
+      totalLoads = totalLoads + 1
+      number previousLoads = 0
+      if loadsByDay.contains(diagnosticDay) (
+        previousLoads = loadsByDay[diagnosticDay].toNum()
+      )
+      loadsByDay[diagnosticDay] = previousLoads + 1
+      if diagnostic.device.toStr() == "desktop" (
+        desktopLoads = desktopLoads + 1
+      ) else if diagnostic.device.toStr() == "touch" (
+        touchLoads = touchLoads + 1
+      ) else (
+        otherLoads = otherLoads + 1
+      )
+      if diagnostic.loadMs.toNum() > 0 (
+        number loadMs = diagnostic.loadMs.toNum()
+        loadTimeTotal = loadTimeTotal + loadMs
+        loadTimeSamples = loadTimeSamples + 1
+        number previousLoadTime = 0
+        number previousSamples = 0
+        if loadTimeTotalsByDay.contains(diagnosticDay) (
+          previousLoadTime = loadTimeTotalsByDay[diagnosticDay].toNum()
         )
-        projectUpdatesByDay[editKey] = previousUpdates + 1
-    )
-    array userFiles = fs.readDir(usersDir)
-    number totalUsers = 0
-    object usersByDay = {}
-    for i userFiles.len (
-        if userFiles[i].toStr().endsWith(".json") (
-            totalUsers = totalUsers + 1
-            object profile = loadProfile(userFiles[i].toStr().replace(".json", ""))
-            if profile.contains("created") and profile.created != null (
-                string userDay = (profile.created.toNum() / 86400000).toInt().toStr()
-                number previousUsers = 0
-                if usersByDay.contains(userDay) (
-                    previousUsers = usersByDay[userDay].toNum()
-                )
-                usersByDay[userDay] = previousUsers + 1
-            )
+        if loadSamplesByDay.contains(diagnosticDay) (
+          previousSamples = loadSamplesByDay[diagnosticDay].toNum()
         )
+        loadTimeTotalsByDay[diagnosticDay] = previousLoadTime + loadMs
+        loadSamplesByDay[diagnosticDay] = previousSamples + 1
+      )
+    ) else if kind == "start" (
+      totalStarts = totalStarts + 1
+      number previousStarts = 0
+      if startsByDay.contains(diagnosticDay) (
+        previousStarts = startsByDay[diagnosticDay].toNum()
+      )
+      startsByDay[diagnosticDay] = previousStarts + 1
+    ) else if kind == "crash" (
+      totalCrashes = totalCrashes + 1
+      number previousCrashes = 0
+      if crashesByDay.contains(diagnosticDay) (
+        previousCrashes = crashesByDay[diagnosticDay].toNum()
+      )
+      crashesByDay[diagnosticDay] = previousCrashes + 1
     )
-    array sessionFiles = fs.readDir(sessionsDir)
-    object loginsByDay = {}
-    number activeSessions = 0
-    for i sessionFiles.len (
-        string sf = sessionFiles[i].toStr()
-        if sf.endsWith(".json") (
-            auto res = readFile(sessionsDir ++ sf)
-            if res.ok (
-                object s = res.data.assert(object)
-                activeSessions = activeSessions + 1
-                string dk = (s.createdAt.toNum() / 86400000).toInt().toStr()
-                number prev = 0
-                if loginsByDay.contains(dk) (
-                    prev = loginsByDay[dk].toNum()
-                )
-                loginsByDay[dk] = prev + 1
-            )
-        )
+  )
+  array loadDays = loadSamplesByDay.getKeys()
+  for i loadDays.len (
+    string loadDay = loadDays[i].toStr()
+    averageLoadMsByDay[loadDay] = loadTimeTotalsByDay[loadDay].toNum() / loadSamplesByDay[loadDay].toNum()
+  )
+  number averageLoadMs = 0
+  if loadTimeSamples > 0 (
+    averageLoadMs = loadTimeTotal / loadTimeSamples
+  )
+  number totalPlaytimeMs = 0
+  array playtime = playtimeDocs.all()
+  for i playtime.len (
+    totalPlaytimeMs = totalPlaytimeMs + playtime[i].duration.toNum()
+  )
+  array reports = loadReports()
+  number openReports = 0
+  for i reports.len (
+    object r = reports[i]
+    boolean isResolved = r.contains("resolved") and r.resolved == true
+    if !isResolved (
+      openReports = openReports + 1
     )
-    array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
-    object loadsByDay = {}
-    object startsByDay = {}
-    object crashesByDay = {}
-    object loadTimeTotalsByDay = {}
-    object loadSamplesByDay = {}
-    object averageLoadMsByDay = {}
-    number totalLoads = 0
-    number totalStarts = 0
-    number totalCrashes = 0
-    number loadTimeTotal = 0
-    number loadTimeSamples = 0
-    number desktopLoads = 0
-    number touchLoads = 0
-    number otherLoads = 0
-    for i diagnostics.len (
-        object diagnostic = diagnostics[i].assert(object)
-        string diagnosticDay = (diagnostic.created.toNum() / 86400000).toInt().toStr()
-        string kind = diagnostic.type.toStr()
-        if kind == "load" (
-            totalLoads = totalLoads + 1
-            number previousLoads = 0
-            if loadsByDay.contains(diagnosticDay) (
-                previousLoads = loadsByDay[diagnosticDay].toNum()
-            )
-            loadsByDay[diagnosticDay] = previousLoads + 1
-            if diagnostic.device.toStr() == "desktop" (
-                desktopLoads = desktopLoads + 1
-            ) else if diagnostic.device.toStr() == "touch" (
-                touchLoads = touchLoads + 1
-            ) else (
-                otherLoads = otherLoads + 1
-            )
-            if diagnostic.loadMs.toNum() > 0 (
-                number loadMs = diagnostic.loadMs.toNum()
-                loadTimeTotal = loadTimeTotal + loadMs
-                loadTimeSamples = loadTimeSamples + 1
-                number previousLoadTime = 0
-                number previousSamples = 0
-                if loadTimeTotalsByDay.contains(diagnosticDay) (
-                    previousLoadTime = loadTimeTotalsByDay[diagnosticDay].toNum()
-                )
-                if loadSamplesByDay.contains(diagnosticDay) (
-                    previousSamples = loadSamplesByDay[diagnosticDay].toNum()
-                )
-                loadTimeTotalsByDay[diagnosticDay] = previousLoadTime + loadMs
-                loadSamplesByDay[diagnosticDay] = previousSamples + 1
-            )
-        ) else if kind == "start" (
-            totalStarts = totalStarts + 1
-            number previousStarts = 0
-            if startsByDay.contains(diagnosticDay) (
-                previousStarts = startsByDay[diagnosticDay].toNum()
-            )
-            startsByDay[diagnosticDay] = previousStarts + 1
-        ) else if kind == "crash" (
-            totalCrashes = totalCrashes + 1
-            number previousCrashes = 0
-            if crashesByDay.contains(diagnosticDay) (
-                previousCrashes = crashesByDay[diagnosticDay].toNum()
-            )
-            crashesByDay[diagnosticDay] = previousCrashes + 1
-        )
-    )
-    array loadDays = loadSamplesByDay.getKeys()
-    for i loadDays.len (
-        string loadDay = loadDays[i].toStr()
-        averageLoadMsByDay[loadDay] = loadTimeTotalsByDay[loadDay].toNum() / loadSamplesByDay[loadDay].toNum()
-    )
-    number averageLoadMs = 0
-    if loadTimeSamples > 0 (
-        averageLoadMs = loadTimeTotal / loadTimeSamples
-    )
-    number totalPlaytimeMs = 0
-    array playtime = playtimeDocs.all()
-    for i playtime.len (
-        totalPlaytimeMs = totalPlaytimeMs + playtime[i].duration.toNum()
-    )
-    array reports = loadReports()
-    number openReports = 0
-    for i reports.len (
-        object r = reports[i]
-        boolean isResolved = r.contains("resolved") and r.resolved == true
-        if !isResolved (
-            openReports = openReports + 1
-        )
-    )
-    number openErrors = errorDocs.where("resolved", db.equal, false).count()
-    object banData = loadBans()
-    object bans = banData.bans
-    number bannedUsers = bans.getKeys().len
-    array news = loadNews()
-    object payoutStore = loadPendingPayouts()
-    array pendingPayouts = payoutStore.payouts.assert(array)
-    number pendingPayoutAmount = 0
-    for i pendingPayouts.len (
-        pendingPayoutAmount = pendingPayoutAmount + pendingPayouts[i].amount.toNum()
-    )
-    c.json(200, {
-        ok: true,
-        totalProjects: totalProjects,
-        sharedProjects: sharedProjects,
-        unsharedProjects: totalProjects - sharedProjects,
-        totalUsers: totalUsers,
-        totalBytes: totalBytes,
-        totalViews: totalViews,
-        totalLoves: totalLoves,
-        activeSessions: activeSessions,
-        openReports: openReports,
-        openErrors: openErrors,
-        bannedUsers: bannedUsers,
-        newsPosts: news.len,
-        pendingPayouts: pendingPayouts.len,
-        pendingPayoutAmount: pendingPayoutAmount,
-        days: days,
-        averageProjectBytes: totalProjects > 0 ? totalBytes / totalProjects 0,
-        averageViews: totalProjects > 0 ? totalViews / totalProjects 0,
-        averageLoves: totalProjects > 0 ? totalLoves / totalProjects 0,
-        totalRemixes: totalRemixes,
-        totalPlaytimeMs: totalPlaytimeMs,
-        totalLoads: totalLoads,
-        totalStarts: totalStarts,
-        totalCrashes: totalCrashes,
-        averageLoadMs: averageLoadMs,
-        loadTimeSamples: loadTimeSamples,
-        loadsByDevice: {desktop: desktopLoads, touch: touchLoads, other: otherLoads},
-        projectsByDay: projectsByDay,
-        projectUpdatesByDay: projectUpdatesByDay,
-        usersByDay: usersByDay,
-        loginsByDay: loginsByDay,
-        loadsByDay: loadsByDay,
-        startsByDay: startsByDay,
-        crashesByDay: crashesByDay,
-        averageLoadMsByDay: averageLoadMsByDay,
-        loadSamplesByDay: loadSamplesByDay
-    })
+  )
+  number openErrors = errorDocs.where("resolved", db.equal, false).count()
+  object banData = loadBans()
+  object bans = banData.bans
+  number bannedUsers = bans.getKeys().len
+  array news = loadNews()
+  object payoutStore = loadPendingPayouts()
+  array pendingPayouts = payoutStore.payouts.assert(array)
+  number pendingPayoutAmount = 0
+  for i pendingPayouts.len (
+    pendingPayoutAmount = pendingPayoutAmount + pendingPayouts[i].amount.toNum()
+  )
+  c.json(200, {
+    ok: true,
+    totalProjects: totalProjects,
+    sharedProjects: sharedProjects,
+    unsharedProjects: totalProjects - sharedProjects,
+    totalUsers: totalUsers,
+    totalBytes: totalBytes,
+    totalViews: totalViews,
+    totalLoves: totalLoves,
+    activeSessions: activeSessions,
+    openReports: openReports,
+    openErrors: openErrors,
+    bannedUsers: bannedUsers,
+    newsPosts: news.len,
+    pendingPayouts: pendingPayouts.len,
+    pendingPayoutAmount: pendingPayoutAmount,
+    days: days,
+    averageProjectBytes: totalProjects > 0 ? totalBytes / totalProjects 0,
+    averageViews: totalProjects > 0 ? totalViews / totalProjects 0,
+    averageLoves: totalProjects > 0 ? totalLoves / totalProjects 0,
+    totalRemixes: totalRemixes,
+    totalPlaytimeMs: totalPlaytimeMs,
+    totalLoads: totalLoads,
+    totalStarts: totalStarts,
+    totalCrashes: totalCrashes,
+    averageLoadMs: averageLoadMs,
+    loadTimeSamples: loadTimeSamples,
+    loadsByDevice: {desktop: desktopLoads, touch: touchLoads, other: otherLoads},
+    projectsByDay: projectsByDay,
+    projectUpdatesByDay: projectUpdatesByDay,
+    usersByDay: usersByDay,
+    loginsByDay: loginsByDay,
+    loadsByDay: loadsByDay,
+    startsByDay: startsByDay,
+    crashesByDay: crashesByDay,
+    averageLoadMsByDay: averageLoadMsByDay,
+    loadSamplesByDay: loadSamplesByDay
+  })
 )
 
 def handlePublicStats(*serve.Context c) (
-    number days = 30
-    if c.query("days") != "" (
-        days = c.query("days").toNum().toInt()
-        if days < 7 (
-            days = 7
-        )
-        if days > 365 (
-            days = 365
-        )
+  number days = 30
+  if c.query("days") != "" (
+    days = c.query("days").toNum().toInt()
+    if days < 7 (
+      days = 7
     )
-    number since = timestamp - (days * 86400000)
-    array projects = projectSearchDocs.all()
-    number sharedProjects = 0
-    number totalViews = 0
-    number totalLoves = 0
-    number totalRemixes = 0
-    object projectsByDay = {}
-    for i projects.len (
-        object project = projects[i].assert(object)
-        if project.shared == true (
-            sharedProjects = sharedProjects + 1
-            totalViews = totalViews + project.views.toNum()
-            totalLoves = totalLoves + project.loveCount.toNum()
-            if project.remixParent.toStr() != "" (
-                totalRemixes = totalRemixes + 1
-            )
-            string day = (project.created.toNum() / 86400000).toInt().toStr()
-            projectsByDay[day] = projectsByDay[day].toNum() + 1
-        )
+    if days > 365 (
+      days = 365
     )
-    number totalUsers = 0
-    object usersByDay = {}
-    array userFiles = fs.readDir(usersDir)
-    for i userFiles.len (
-        string filename = userFiles[i].toStr()
-        if filename.endsWith(".json") (
-            totalUsers = totalUsers + 1
-            object profile = loadProfile(filename.replace(".json", ""))
-            if profile.created.toNum() > 0 (
-                string day = (profile.created.toNum() / 86400000).toInt().toStr()
-                usersByDay[day] = usersByDay[day].toNum() + 1
-            )
-        )
+  )
+  number since = timestamp - (days * 86400000)
+  array projects = projectSearchDocs.all()
+  number sharedProjects = 0
+  number totalViews = 0
+  number totalLoves = 0
+  number totalRemixes = 0
+  object projectsByDay = {}
+  for i projects.len (
+    object project = projects[i].assert(object)
+    if project.shared == true (
+      sharedProjects = sharedProjects + 1
+      totalViews = totalViews + project.views.toNum()
+      totalLoves = totalLoves + project.loveCount.toNum()
+      if project.remixParent.toStr() != "" (
+        totalRemixes = totalRemixes + 1
+      )
+      string day = (project.created.toNum() / 86400000).toInt().toStr()
+      projectsByDay[day] = projectsByDay[day].toNum() + 1
     )
-    object loadsByDay = {}
-    object startsByDay = {}
-    number totalLoads = 0
-    number totalStarts = 0
-    array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
-    for i diagnostics.len (
-        object diagnostic = diagnostics[i].assert(object)
-        string day = (diagnostic.created.toNum() / 86400000).toInt().toStr()
-        if diagnostic.type.toStr() == "load" (
-            totalLoads = totalLoads + 1
-            loadsByDay[day] = loadsByDay[day].toNum() + 1
-        ) else if diagnostic.type.toStr() == "start" (
-            totalStarts = totalStarts + 1
-            startsByDay[day] = startsByDay[day].toNum() + 1
-        )
+  )
+  number totalUsers = 0
+  object usersByDay = {}
+  array userFiles = fs.readDir(usersDir)
+  for i userFiles.len (
+    string filename = userFiles[i].toStr()
+    if filename.endsWith(".json") (
+      totalUsers = totalUsers + 1
+      object profile = loadProfile(filename.replace(".json", ""))
+      if profile.created.toNum() > 0 (
+        string day = (profile.created.toNum() / 86400000).toInt().toStr()
+        usersByDay[day] = usersByDay[day].toNum() + 1
+      )
     )
-    c.setHeader("Cache-Control", "public, max-age=300, s-maxage=600, stale-while-revalidate=3600")
-    c.setHeader("CDN-Cache-Control", "public, max-age=600, stale-while-revalidate=3600")
-    c.json(200, {
-        ok: true,
-        days: days,
-        sharedProjects: sharedProjects,
-        totalUsers: totalUsers,
-        totalViews: totalViews,
-        totalLoves: totalLoves,
-        totalRemixes: totalRemixes,
-        totalLoads: totalLoads,
-        totalStarts: totalStarts,
-        projectsByDay: projectsByDay,
-        usersByDay: usersByDay,
-        loadsByDay: loadsByDay,
-        startsByDay: startsByDay
-    })
+  )
+  object loadsByDay = {}
+  object startsByDay = {}
+  number totalLoads = 0
+  number totalStarts = 0
+  array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+  for i diagnostics.len (
+    object diagnostic = diagnostics[i].assert(object)
+    string day = (diagnostic.created.toNum() / 86400000).toInt().toStr()
+    if diagnostic.type.toStr() == "load" (
+      totalLoads = totalLoads + 1
+      loadsByDay[day] = loadsByDay[day].toNum() + 1
+    ) else if diagnostic.type.toStr() == "start" (
+      totalStarts = totalStarts + 1
+      startsByDay[day] = startsByDay[day].toNum() + 1
+    )
+  )
+  c.setHeader("Cache-Control", "public, max-age=300, s-maxage=600, stale-while-revalidate=3600")
+  c.setHeader("CDN-Cache-Control", "public, max-age=600, stale-while-revalidate=3600")
+  c.json(200, {
+    ok: true,
+    days: days,
+    sharedProjects: sharedProjects,
+    totalUsers: totalUsers,
+    totalViews: totalViews,
+    totalLoves: totalLoves,
+    totalRemixes: totalRemixes,
+    totalLoads: totalLoads,
+    totalStarts: totalStarts,
+    projectsByDay: projectsByDay,
+    usersByDay: usersByDay,
+    loadsByDay: loadsByDay,
+    startsByDay: startsByDay
+  })
 )
 
 def handleAdminSearchProjects(*serve.Context c) (
-    string q = c.query("q").toLower().strip()
-    array projects = projectSearchDocs.all()
-    array matches = []
-    for i projects.len (
-        object entry = projects[i].assert(object)
-        string hay = (entry.title.toStr() ++ " " ++ entry.owner.toStr() ++ " " ++ entry.id.toStr()).toLower()
-        if q == "" or hay.contains(q) (
-            matches.append(entry)
-        )
+  string q = c.query("q").toLower().strip()
+  array projects = projectSearchDocs.all()
+  array matches = []
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    string hay = (entry.title.toStr() ++ " " ++ entry.owner.toStr() ++ " " ++ entry.id.toStr()).toLower()
+    if q == "" or hay.contains(q) (
+      matches.append(entry)
     )
-    matches.sortBy("edited", "descending")
-    if matches.len > 60 (
-        matches = matches.trim(1, 60)
-    )
-    c.json(200, {ok: true, projects: matches})
+  )
+  matches.sortBy("edited", "descending")
+  if matches.len > 60 (
+    matches = matches.trim(1, 60)
+  )
+  c.json(200, {ok: true, projects: matches})
 )
 
 def reportTargetUser(object found) string (
-    string name = found.target.toStr()
-    if found.contains("targetUser") and found.targetUser != null and found.targetUser.toStr() != "" (
-        return found.targetUser.toStr()
+  string name = found.target.toStr()
+  if found.contains("targetUser") and found.targetUser != null and found.targetUser.toStr() != "" (
+    return found.targetUser.toStr()
+  )
+  if found.type.toStr() == "project" (
+    auto result = loadProject(found.target.toStr())
+    if result.ok (
+      object project = result.project.assert(object)
+      name = project.owner.toStr()
     )
-    if found.type.toStr() == "project" (
-        auto result = loadProject(found.target.toStr())
-        if result.ok (
-            object project = result.project.assert(object)
-            name = project.owner.toStr()
-        )
-    )
-    return name
+  )
+  return name
 )
 
 def handleReportAction(*serve.Context c) (
-    object body = c.bodyJSON()
-    string id = body.id.toStr()
-    string action = body.action.toStr()
-    boolean validAction = action == "dismiss" or action == "unshare_project" or action == "ban_user" or action == "warn_user"
-    if !validAction (
-        c.badRequest("invalid action")
-        return
-    )
+  object body = c.bodyJSON()
+  string id = body.id.toStr()
+  string action = body.action.toStr()
+  boolean validAction = action == "dismiss" or action == "unshare_project" or action == "ban_user" or action == "warn_user"
+  if !validAction (
+    c.badRequest("invalid action")
+    return
+  )
 
-    array reports = loadReports()
-    object found = {}
-    boolean hasReport = false
-    for i reports.len (
-        object report = reports[i]
-        if report.id.toStr() == id (
-            found = report
-            hasReport = true
-        )
+  array reports = loadReports()
+  object found = {}
+  boolean hasReport = false
+  for i reports.len (
+    object report = reports[i]
+    if report.id.toStr() == id (
+      found = report
+      hasReport = true
     )
-    if !hasReport (
-        c.notFound("report not found")
-        return
-    )
+  )
+  if !hasReport (
+    c.notFound("report not found")
+    return
+  )
 
-    if action == "unshare_project" (
-        auto result = loadProject(found.target.toStr())
-        if !result.ok (
-            c.notFound("project not found")
-            return
-        )
-        object project = result.project.assert(object)
-        project.shared = false
-        project.visibility = "private"
-        project.viewKey = randomString(16)
-        project.edited = timestamp
-        saveProject(project)
-        upsertIndexEntry(project)
-        object ownerProfile = loadProfile(project.owner.toStr())
-        if ownerProfile.featuredProject.toStr() == project.id.toStr() (
-            ownerProfile.featuredProject = ""
-            saveProfile(ownerProfile)
-        )
+  if action == "unshare_project" (
+    auto result = loadProject(found.target.toStr())
+    if !result.ok (
+      c.notFound("project not found")
+      return
     )
-    if action == "ban_user" (
-        string name = reportTargetUser(found)
-        if isAdminUser(name) (
-            c.badRequest("cannot ban an admin")
-            return
-        )
-        banUser(name, "report " ++ id, c.getString("username"))
+    object project = result.project.assert(object)
+    project.shared = false
+    project.visibility = "private"
+    project.viewKey = randomString(16)
+    project.edited = timestamp
+    saveProject(project)
+    upsertIndexEntry(project)
+    object ownerProfile = loadProfile(project.owner.toStr())
+    if ownerProfile.featuredProject.toStr() == project.id.toStr() (
+      ownerProfile.featuredProject = ""
+      saveProfile(ownerProfile)
     )
-    if action == "warn_user" (
-        string name = reportTargetUser(found)
-        if isAdminUser(name) (
-            c.badRequest("cannot warn an admin")
-            return
-        )
-        string reason = ""
-        if body.contains("reason") and body.reason != null (
-            reason = body.reason.toStr().strip()
-        )
-        if reason == "" (
-            reason = "report " ++ id
-        )
-        setStanding(name, "warning", reason, c.getString("username"))
-        if found.type.toStr() == "project" (
-            auto pr = loadProject(found.target.toStr())
-            if pr.ok (
-                object removedProject = pr.project.assert(object)
-                purgeProject(removedProject)
-                deleteProjectCommunityRecords(found.target.toStr())
-                removeProjectFromSpaces(found.target.toStr())
-                object ownerProfile = loadProfile(removedProject.owner.toStr())
-                if ownerProfile.featuredProject.toStr() == removedProject.id.toStr() (
-                    ownerProfile.featuredProject = ""
-                    saveProfile(ownerProfile)
-                )
-            )
-        )
+  )
+  if action == "ban_user" (
+    string name = reportTargetUser(found)
+    if isAdminUser(name) (
+      c.badRequest("cannot ban an admin")
+      return
     )
-
-    sync.lock("reports-storage")
-    array currentReports = loadReports()
-    for i currentReports.len (
-        object currentReport = currentReports[i].assert(object)
-        if currentReport.id.toStr() == id (
-            currentReport.resolved = true
-            currentReport.resolvedBy = c.getString("username")
-            currentReport.action = action
-            currentReport.resolvedAt = timestamp
-        )
+    banUser(name, "report " ++ id, c.getString("username"))
+  )
+  if action == "warn_user" (
+    string name = reportTargetUser(found)
+    if isAdminUser(name) (
+      c.badRequest("cannot warn an admin")
+      return
     )
-    boolean reportsSaved = saveReports(currentReports)
-    sync.unlock("reports-storage")
-    if !reportsSaved (
-        c.internalError("could not update report")
-        return
+    string reason = ""
+    if body.contains("reason") and body.reason != null (
+      reason = body.reason.toStr().strip()
     )
+    if reason == "" (
+      reason = "report " ++ id
+    )
+    setStanding(name, "warning", reason, c.getString("username"))
     if found.type.toStr() == "project" (
-        maybeClearProjectEvidence(found.target.toStr())
+      auto pr = loadProject(found.target.toStr())
+      if pr.ok (
+        object removedProject = pr.project.assert(object)
+        purgeProject(removedProject)
+        deleteProjectCommunityRecords(found.target.toStr())
+        removeProjectFromSpaces(found.target.toStr())
+        object ownerProfile = loadProfile(removedProject.owner.toStr())
+        if ownerProfile.featuredProject.toStr() == removedProject.id.toStr() (
+          ownerProfile.featuredProject = ""
+          saveProfile(ownerProfile)
+        )
+      )
     )
-    addNotification(found.reporter.toStr(), c.getString("username"), "report_update", {action: action, reportType: found.type})
-    c.json(200, {ok: true})
+  )
+
+  sync.lock("reports-storage")
+  array currentReports = loadReports()
+  for i currentReports.len (
+    object currentReport = currentReports[i].assert(object)
+    if currentReport.id.toStr() == id (
+      currentReport.resolved = true
+      currentReport.resolvedBy = c.getString("username")
+      currentReport.action = action
+      currentReport.resolvedAt = timestamp
+    )
+  )
+  boolean reportsSaved = saveReports(currentReports)
+  sync.unlock("reports-storage")
+  if !reportsSaved (
+    c.internalError("could not update report")
+    return
+  )
+  if found.type.toStr() == "project" (
+    maybeClearProjectEvidence(found.target.toStr())
+  )
+  addNotification(found.reporter.toStr(), c.getString("username"), "report_update", {action: action, reportType: found.type})
+  c.json(200, {ok: true})
 )

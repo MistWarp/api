@@ -1,0 +1,33 @@
+import "std:testing"
+import "./quota-policy.osl"
+
+array events = [
+  {t: 1000, bytes: 50},
+  {t: 2000, bytes: 30},
+  {t: 3000, bytes: 20}
+]
+
+testing.assert(quotaTotalBytes(events, 4000, 100000) == 100, "totals all fresh events")
+testing.assert(quotaTotalBytes(events, 101000, 100000) == 50, "expired oldest event drops out")
+
+array refunded = quotaApplyRefund(events, 25, 4000, 100000)
+testing.assert(refunded.len == 2, "refund consumes the newest event first")
+testing.assert(refunded[2].bytes.toNum() == 25, "leftover refund trims the next-newest event")
+testing.assert(quotaTotalBytes(refunded, 4000, 100000) == 75, "partial refund lowers total")
+
+array emptied = quotaApplyRefund(events, 100, 4000, 100000)
+testing.assert(emptied.len == 0, "full refund clears every event")
+
+array releases = quotaUpcomingReleases(events, 4000, 10000, 5)
+testing.assert(releases.len == 3, "releases list every fresh event")
+testing.assert(releases[1].atMs.toNum() == 11000, "releases carry absolute expiry time")
+testing.assert(releases[1].inMs.toNum() == 7000, "releases carry time until expiry")
+testing.assert(releases[1].bytes.toNum() == 50, "releases carry byte amounts")
+
+object summary = quotaSummarize(events, 200, 4000, 10000)
+testing.assert(summary.used.toNum() == 100, "summary totals usage")
+testing.assert(summary.remaining.toNum() == 100, "summary reports remaining budget")
+testing.assert(summary.oldestEventMs.toNum() == 1000, "summary finds oldest event")
+testing.assert(summary.nextExpiryInMs.toNum() == 7000, "summary reports time until oldest expiry")
+testing.assert(summary.nextReleaseBytes.toNum() == 50, "summary reports bytes freed by oldest expiry")
+testing.assert(summary.eventCount.toNum() == 3, "summary counts events")

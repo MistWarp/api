@@ -1822,10 +1822,10 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
 )
 
 def handleReactSpace(*serve.Context c) (
-    string lockName = "space-reactions:" ++ c.param("id")
-    sync.lock(lockName)
-    handleReactSpaceLocked(c)
-    sync.unlock(lockName)
+  string lockName = "space-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleReactSpaceLocked(c)
+  sync.unlock(lockName)
 )
 
 def handleReactSpaceLocked(*serve.Context c) (
@@ -2632,10 +2632,10 @@ def handleCreateIdea(*serve.Context c) (
 )
 
 def handleVoteIdea(*serve.Context c) (
-    string lockName = "idea-reactions:" ++ c.param("id")
-    sync.lock(lockName)
-    handleVoteIdeaLocked(c)
-    sync.unlock(lockName)
+  string lockName = "idea-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleVoteIdeaLocked(c)
+  sync.unlock(lockName)
 )
 
 def handleVoteIdeaLocked(*serve.Context c) (

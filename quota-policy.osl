@@ -1,0 +1,134 @@
+def quotaPruneEvents(array events, number nowMs, number windowMs) array (
+  array kept = []
+  for i events.len (
+    object event = events[i].assert(object)
+    if nowMs - event.t.toNum() < windowMs (
+      kept.append(event)
+    )
+  )
+  return kept
+)
+
+def quotaTotalBytes(array events, number nowMs, number windowMs) number (
+  number total = 0
+  for i events.len (
+    object event = events[i].assert(object)
+    if nowMs - event.t.toNum() < windowMs (
+      total = total + event.bytes.toNum()
+    )
+  )
+  return total
+)
+
+// Remove refundBytes from the newest events first. Prunes expired entries.
+// Returns the new event list; callers persist it.
+def quotaApplyRefund(array events, number refundBytes, number nowMs, number windowMs) array (
+  array kept = quotaPruneEvents(events, nowMs, windowMs)
+  number remaining = refundBytes
+  if remaining <= 0 (
+    return kept
+  )
+  array rev = []
+  number i = kept.len
+  while i >= 1 (
+    object event = kept[i.toInt()].assert(object)
+    number bytes = event.bytes.toNum()
+    if remaining > 0 (
+      if bytes <= remaining (
+        remaining = remaining - bytes
+      ) else (
+        rev.append({t: event.t, bytes: bytes - remaining})
+        remaining = 0
+      )
+    ) else (
+      rev.append(event)
+    )
+    i = i - 1
+  )
+  array out = []
+  number j = rev.len
+  while j >= 1 (
+    out.append(rev[j.toInt()])
+    j = j - 1
+  )
+  return out
+)
+
+// Oldest-first list of upcoming expiries: {atMs, bytes, inMs}.
+def quotaUpcomingReleases(array events, number nowMs, number windowMs, number maxN) array (
+  array kept = quotaPruneEvents(events, nowMs, windowMs)
+  // insertion sort by t ascending; event lists are small
+  for i kept.len (
+    number j = i
+    while j > 1 (
+      object a = kept[(j - 1).toInt()].assert(object)
+      object b = kept[j.toInt()].assert(object)
+      if a.t.toNum() <= b.t.toNum() (
+        break
+      )
+      kept[(j - 1).toInt()] = b
+      kept[j.toInt()] = a
+      j = j - 1
+    )
+  )
+  array out = []
+  number limit = maxN.toInt()
+  if limit < 1 (
+    limit = 1
+  )
+  for i kept.len (
+    if out.len >= limit (
+      break
+    )
+    object event = kept[i].assert(object)
+    number atMs = event.t.toNum() + windowMs
+    number inMs = atMs - nowMs
+    if inMs < 0 (
+      inMs = 0
+    )
+    out.append({atMs: atMs, bytes: event.bytes.toNum(), inMs: inMs})
+  )
+  return out
+)
+
+def quotaSummarize(array events, number limit, number nowMs, number windowMs) object (
+  array kept = quotaPruneEvents(events, nowMs, windowMs)
+  number total = 0
+  number oldest = 0
+  boolean hasAny = false
+  for i kept.len (
+    object event = kept[i].assert(object)
+    total = total + event.bytes.toNum()
+    if !hasAny or event.t.toNum() < oldest (
+      oldest = event.t.toNum()
+      hasAny = true
+    )
+  )
+  number msUntilExpiry = 0
+  number nextBytes = 0
+  if hasAny (
+    msUntilExpiry = (oldest + windowMs) - nowMs
+    if msUntilExpiry < 0 (
+      msUntilExpiry = 0
+    )
+    for i kept.len (
+      object event = kept[i].assert(object)
+      if event.t.toNum() == oldest (
+        nextBytes = nextBytes + event.bytes.toNum()
+      )
+    )
+  )
+  number remaining = limit - total
+  if remaining < 0 (
+    remaining = 0
+  )
+  return {
+    used: total,
+    limit: limit,
+    remaining: remaining,
+    oldestEventMs: oldest,
+    nextExpiryInMs: msUntilExpiry,
+    nextReleaseBytes: nextBytes,
+    eventCount: kept.len
+  }
+)

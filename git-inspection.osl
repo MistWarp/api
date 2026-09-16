@@ -1,261 +1,261 @@
 def projectWorkspaceFingerprint(object project) string (
-    array keys = projectWorkspaceKeys(project)
-    string identity = ""
-    for i keys.len (
-        identity = identity ++ keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
-    )
-    return identity.hashSHA256()
+  array keys = projectWorkspaceKeys(project)
+  string identity = ""
+  for i keys.len (
+    identity = identity ++ keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
+  )
+  return identity.hashSHA256()
 )
 
 def gitInspectionCacheVersion() string (
-    return "v3"
+  return "v3"
 )
 
 def pruneGitInspectionCache(string cacheDir, string preserveName) (
-    number calls = 0
-    if gitInspectionPruneCache.has(cacheDir) (
-        calls = gitInspectionPruneCache.get(cacheDir).toNum()
-    )
-    calls = calls + 1
-    gitInspectionPruneCache.set(cacheDir, calls)
-    if !shouldPruneGitInspectionCache(calls) (
-        return
-    )
-    raw("func() { entries, err := OSLos.ReadDir(cacheDir); if err != nil { return }; type cachedFile struct { path string; name string; size int64; modified time.Time }; files := []cachedFile{}; var total int64; now := time.Now(); for _, entry := range entries { if entry.IsDir() || OSLstrings.Contains(entry.Name(), \".tmp.\") { continue }; info, infoErr := entry.Info(); if infoErr != nil { continue }; item := cachedFile{path: cacheDir+entry.Name(), name: entry.Name(), size: info.Size(), modified: info.ModTime()}; if entry.Name() != preserveName && now.Sub(info.ModTime()) > 24*time.Hour { OSLos.Remove(item.path); continue }; files = append(files, item); total += item.size }; OSLsort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) }); for (len(files) > 256 || total > 2147483648) && len(files) > 0 { removeAt := -1; for i, item := range files { if item.name != preserveName { removeAt = i; break } }; if removeAt < 0 { break }; item := files[removeAt]; OSLos.Remove(item.path); total -= item.size; files = append(files[:removeAt], files[removeAt+1:]...) } }()")
+  number calls = 0
+  if gitInspectionPruneCache.has(cacheDir) (
+    calls = gitInspectionPruneCache.get(cacheDir).toNum()
+  )
+  calls = calls + 1
+  gitInspectionPruneCache.set(cacheDir, calls)
+  if !shouldPruneGitInspectionCache(calls) (
+    return
+  )
+  raw("func() { entries, err := OSLos.ReadDir(cacheDir); if err != nil { return }; type cachedFile struct { path string; name string; size int64; modified time.Time }; files := []cachedFile{}; var total int64; now := time.Now(); for _, entry := range entries { if entry.IsDir() || OSLstrings.Contains(entry.Name(), \".tmp.\") { continue }; info, infoErr := entry.Info(); if infoErr != nil { continue }; item := cachedFile{path: cacheDir+entry.Name(), name: entry.Name(), size: info.Size(), modified: info.ModTime()}; if entry.Name() != preserveName && now.Sub(info.ModTime()) > 24*time.Hour { OSLos.Remove(item.path); continue }; files = append(files, item); total += item.size }; OSLsort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) }); for (len(files) > 256 || total > 2147483648) && len(files) > 0 { removeAt := -1; for i, item := range files { if item.name != preserveName { removeAt = i; break } }; if removeAt < 0 { break }; item := files[removeAt]; OSLos.Remove(item.path); total -= item.size; files = append(files[:removeAt], files[removeAt+1:]...) } }()")
 )
 
 def cachedProjectWorkspacePath(object project) string (
-    array keys = projectWorkspaceKeys(project)
-    if keys.len == 0 (
-        return ""
+  array keys = projectWorkspaceKeys(project)
+  if keys.len == 0 (
+    return ""
+  )
+  if keys.len == 1 (
+    string localPath = localBlobPath(keys[1].toStr())
+    if fs.exists(localPath) (
+      return localPath
     )
-    if keys.len == 1 (
-        string localPath = localBlobPath(keys[1].toStr())
-        if fs.exists(localPath) (
-            return localPath
-        )
-    )
-    string cacheDir = tmpDir ++ "git-inspection/"
-    fs.mkdirAll(cacheDir)
-    string cacheName = projectWorkspaceFingerprint(project) ++ ".mwp"
-    pruneGitInspectionCache(cacheDir, cacheName)
-    string cachedPath = cacheDir ++ cacheName
-    if fs.exists(cachedPath) (
-        return cachedPath
-    )
-    string lockName = "git-inspection-workspace-" ++ cacheName
-    sync.lock(lockName)
-    if fs.exists(cachedPath) (
-        sync.unlock(lockName)
-        return cachedPath
-    )
-    string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
-    if !copyProjectWorkspaceToPath(project, temporaryPath) (
-        fs.remove(temporaryPath)
-        sync.unlock(lockName)
-        return ""
-    )
-    if !fs.rename(temporaryPath, cachedPath) (
-        fs.remove(temporaryPath)
-        if !fs.exists(cachedPath) (
-            sync.unlock(lockName)
-            return ""
-        )
-    )
+  )
+  string cacheDir = tmpDir ++ "git-inspection/"
+  fs.mkdirAll(cacheDir)
+  string cacheName = projectWorkspaceFingerprint(project) ++ ".mwp"
+  pruneGitInspectionCache(cacheDir, cacheName)
+  string cachedPath = cacheDir ++ cacheName
+  if fs.exists(cachedPath) (
+    return cachedPath
+  )
+  string lockName = "git-inspection-workspace-" ++ cacheName
+  sync.lock(lockName)
+  if fs.exists(cachedPath) (
     sync.unlock(lockName)
     return cachedPath
+  )
+  string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
+  if !copyProjectWorkspaceToPath(project, temporaryPath) (
+    fs.remove(temporaryPath)
+    sync.unlock(lockName)
+    return ""
+  )
+  if !fs.rename(temporaryPath, cachedPath) (
+    fs.remove(temporaryPath)
+    if !fs.exists(cachedPath) (
+      sync.unlock(lockName)
+      return ""
+    )
+  )
+  sync.unlock(lockName)
+  return cachedPath
 )
 
 def validGitObjectId(string oid) boolean (
-    return regex.match("^[a-f0-9]{40}$", oid)
+  return regex.match("^[a-f0-9]{40}$", oid)
 )
 
 def projectGitAllowedHeads(object project) array (
-    array heads = []
-    string head = projectGitHead(project)
-    if validGitObjectId(head) (
-        heads.append(head)
-    )
-    if project.contains("gitGraph") and project.gitGraph != null (
-        object graph = project.gitGraph.assertElse(object, {})
-        if graph.contains("branchLogs") and graph.branchLogs != null (
-            array logs = graph.branchLogs.assertElse(array, [])
-            for i logs.len (
-                object branchLog = logs[i].assertElse(object, {})
-                if branchLog.contains("oids") and branchLog.oids != null (
-                    array oids = branchLog.oids.assertElse(array, [])
-                    if oids.len > 0 (
-                        string branchHead = oids[1].toStr()
-                        if validGitObjectId(branchHead) and !heads.contains(branchHead) (
-                            heads.append(branchHead)
-                        )
-                    )
-                )
+  array heads = []
+  string head = projectGitHead(project)
+  if validGitObjectId(head) (
+    heads.append(head)
+  )
+  if project.contains("gitGraph") and project.gitGraph != null (
+    object graph = project.gitGraph.assertElse(object, {})
+    if graph.contains("branchLogs") and graph.branchLogs != null (
+      array logs = graph.branchLogs.assertElse(array, [])
+      for i logs.len (
+        object branchLog = logs[i].assertElse(object, {})
+        if branchLog.contains("oids") and branchLog.oids != null (
+          array oids = branchLog.oids.assertElse(array, [])
+          if oids.len > 0 (
+            string branchHead = oids[1].toStr()
+            if validGitObjectId(branchHead) and !heads.contains(branchHead) (
+              heads.append(branchHead)
             )
+          )
         )
+      )
     )
-    return heads
+  )
+  return heads
 )
 
 def projectGitAllowedHeadsString(object project) string (
-    array heads = projectGitAllowedHeads(project)
-    string joined = ""
-    for i heads.len (
-        if joined != "" (
-            joined = joined ++ ","
-        )
-        joined = joined ++ heads[i].toStr()
+  array heads = projectGitAllowedHeads(project)
+  string joined = ""
+  for i heads.len (
+    if joined != "" (
+      joined = joined ++ ","
     )
-    return joined
+    joined = joined ++ heads[i].toStr()
+  )
+  return joined
 )
 
 def projectRecordsCommit(object project, string sha) boolean (
-    if projectGitHead(project) == sha (
+  if projectGitHead(project) == sha (
+    return true
+  )
+  if project.contains("gitCommits") and project.gitCommits != null (
+    array commits = project.gitCommits.assertElse(array, [])
+    for i commits.len (
+      object commit = commits[i].assertElse(object, {})
+      if commit.contains("sha") and commit.sha.toStr() == sha (
         return true
+      )
     )
-    if project.contains("gitCommits") and project.gitCommits != null (
-        array commits = project.gitCommits.assertElse(array, [])
-        for i commits.len (
-            object commit = commits[i].assertElse(object, {})
-            if commit.contains("sha") and commit.sha.toStr() == sha (
-                return true
-            )
+  )
+  if project.contains("gitGraph") and project.gitGraph != null (
+    object graph = project.gitGraph.assertElse(object, {})
+    if graph.contains("nodes") and graph.nodes != null (
+      array nodes = graph.nodes.assertElse(array, [])
+      for i nodes.len (
+        object node = nodes[i].assertElse(object, {})
+        if node.contains("sha") and node.sha.toStr() == sha (
+          return true
         )
+      )
     )
-    if project.contains("gitGraph") and project.gitGraph != null (
-        object graph = project.gitGraph.assertElse(object, {})
-        if graph.contains("nodes") and graph.nodes != null (
-            array nodes = graph.nodes.assertElse(array, [])
-            for i nodes.len (
-                object node = nodes[i].assertElse(object, {})
-                if node.contains("sha") and node.sha.toStr() == sha (
-                    return true
-                )
-            )
-        )
-    )
-    return false
+  )
+  return false
 )
 
 def validGitFilePath(string path) boolean (
-    if path == "" or path.len > 1024 or path.startsWith("/") or path.contains("\\") or path.contains("\x00") (
-        return false
+  if path == "" or path.len > 1024 or path.startsWith("/") or path.contains("\\") or path.contains("\x00") (
+    return false
+  )
+  array parts = path.split("/")
+  for i parts.len (
+    string part = parts[i].toStr()
+    if part == "" or part == "." or part == ".." (
+      return false
     )
-    array parts = path.split("/")
-    for i parts.len (
-        string part = parts[i].toStr()
-        if part == "" or part == "." or part == ".." (
-            return false
-        )
-    )
-    return true
+  )
+  return true
 )
 
 def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, string sha, string operation, string requestedPath, string allowedHeads) string (
-    string cacheDir = tmpDir ++ "git-inspection/"
-    fs.mkdirAll(cacheDir)
-    string cacheName = gitInspectionCacheVersion() ++ "." ++ projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256() ++ ".json"
-    pruneGitInspectionCache(cacheDir, cacheName)
-    string cachePath = cacheDir ++ cacheName
-    if fs.exists(cachePath) and fs.getSize(cachePath) <= 33554432 (
-        return fs.readFile(cachePath)
-    )
-    string resultJson = raw("gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)")
-    if resultJson.len <= 33554432 (
-        auto parsed = json.parse(resultJson, {type: "object"})
-        if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
-            string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-            if fs.writeFile(temporaryPath, resultJson) (
-                if !fs.rename(temporaryPath, cachePath) (
-                    fs.remove(temporaryPath)
-                )
-            )
+  string cacheDir = tmpDir ++ "git-inspection/"
+  fs.mkdirAll(cacheDir)
+  string cacheName = gitInspectionCacheVersion() ++ "." ++ projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256() ++ ".json"
+  pruneGitInspectionCache(cacheDir, cacheName)
+  string cachePath = cacheDir ++ cacheName
+  if fs.exists(cachePath) and fs.getSize(cachePath) <= 33554432 (
+    return fs.readFile(cachePath)
+  )
+  string resultJson = raw("gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)")
+  if resultJson.len <= 33554432 (
+    auto parsed = json.parse(resultJson, {type: "object"})
+    if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
+      string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
+      if fs.writeFile(temporaryPath, resultJson) (
+        if !fs.rename(temporaryPath, cachePath) (
+          fs.remove(temporaryPath)
         )
+      )
     )
-    return resultJson
+  )
+  return resultJson
 )
 
 def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
-    c.setHeader("Cache-Control", "private, no-store")
-    c.setHeader("CDN-Cache-Control", "private, no-store")
-    string pullIndex = c.query("pull")
-    string pullTarget = c.query("pullTarget")
-    boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
-    if !canSeeInsideProject(project, c) and !pullCommit (
-        c.notFound("commit not found")
-        return
-    )
-    if !validGitObjectId(sha) (
-        c.notFound("commit not found")
-        return
-    )
-    if !projectRecordsCommit(project, sha) and !pullCommit (
-        c.notFound("commit not found")
-        return
-    )
-    if operation == "file" and !validGitFilePath(requestedPath) (
-        c.badRequest("invalid file path")
-        return
-    )
-    string allowedHeads = projectGitAllowedHeadsString(project)
-    if allowedHeads == "" (
-        c.notFound("commit not found")
-        return
-    )
-    string fingerprint = projectWorkspaceFingerprint(project)
-    string historyFingerprint = allowedHeads.hashSHA256()
-    string etag = "\"git-" ++ gitInspectionCacheVersion() ++ "-" ++ fingerprint ++ "-" ++ historyFingerprint ++ "-" ++ sha ++ "-" ++ operation ++ "-" ++ requestedPath.hashSHA256() ++ "\""
-    c.setHeader("ETag", etag)
-    c.setHeader("Vary", "Authorization, Cookie")
-    c.setHeader("Cache-Control", "private, no-store")
-    c.setHeader("CDN-Cache-Control", "private, no-store")
-    if c.header("If-None-Match").contains(etag) (
-        c.status(304)
-        return
-    )
-    string workspacePath = cachedProjectWorkspacePath(project)
-    if workspacePath == "" (
-        c.notFound("workspace not found")
-        return
-    )
-    string resultJson = cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
-    auto parsed = json.parse(resultJson, {type: "object"})
-    if parsed.isErr() (
-        c.internalError("could not inspect project history")
-        return
-    )
-    object result = parsed.unwrap().assert(object)
-    if !result.contains("ok") or result.ok != true (
-        c.notFound((result.error ?? "commit not found").toStr())
-        return
-    )
-    c.json(200, result)
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  string pullIndex = c.query("pull")
+  string pullTarget = c.query("pullTarget")
+  boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
+  if !canSeeInsideProject(project, c) and !pullCommit (
+    c.notFound("commit not found")
+    return
+  )
+  if !validGitObjectId(sha) (
+    c.notFound("commit not found")
+    return
+  )
+  if !projectRecordsCommit(project, sha) and !pullCommit (
+    c.notFound("commit not found")
+    return
+  )
+  if operation == "file" and !validGitFilePath(requestedPath) (
+    c.badRequest("invalid file path")
+    return
+  )
+  string allowedHeads = projectGitAllowedHeadsString(project)
+  if allowedHeads == "" (
+    c.notFound("commit not found")
+    return
+  )
+  string fingerprint = projectWorkspaceFingerprint(project)
+  string historyFingerprint = allowedHeads.hashSHA256()
+  string etag = "\"git-" ++ gitInspectionCacheVersion() ++ "-" ++ fingerprint ++ "-" ++ historyFingerprint ++ "-" ++ sha ++ "-" ++ operation ++ "-" ++ requestedPath.hashSHA256() ++ "\""
+  c.setHeader("ETag", etag)
+  c.setHeader("Vary", "Authorization, Cookie")
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  if c.header("If-None-Match").contains(etag) (
+    c.status(304)
+    return
+  )
+  string workspacePath = cachedProjectWorkspacePath(project)
+  if workspacePath == "" (
+    c.notFound("workspace not found")
+    return
+  )
+  string resultJson = cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
+  auto parsed = json.parse(resultJson, {type: "object"})
+  if parsed.isErr() (
+    c.internalError("could not inspect project history")
+    return
+  )
+  object result = parsed.unwrap().assert(object)
+  if !result.contains("ok") or result.ok != true (
+    c.notFound((result.error ?? "commit not found").toStr())
+    return
+  )
+  c.json(200, result)
 )
 
 def handleGetCommitInspection(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    string operation = c.query("inline") == "1" ? "commit-inline" "commit"
-    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), operation, "")
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  string operation = c.query("inline") == "1" ? "commit-inline" "commit"
+  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), operation, "")
 )
 
 def handleGetCommitTree(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "tree", "")
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "tree", "")
 )
 
 def handleGetCommitFile(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", c.query("path"))
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", c.query("path"))
 )

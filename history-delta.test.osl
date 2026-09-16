@@ -2,7 +2,7 @@ import "std:regex"
 import "std:testing"
 
 def validGitObjectId(string oid) boolean (
-    return regex.match("^[a-f0-9]{40}$", oid)
+  return regex.match("^[a-f0-9]{40}$", oid)
 )
 
 import "./history-delta.osl"
@@ -13,39 +13,39 @@ string second = "cccccccccccccccccccccccccccccccccccccccc"
 string older = "dddddddddddddddddddddddddddddddddddddddd"
 
 object project = {
-    gitCommits: [
-        {sha: base, message: "Base"},
-        {sha: older, message: "Older"}
+  gitCommits: [
+    {sha: base, message: "Base"},
+    {sha: older, message: "Older"}
+  ],
+  gitGraph: {
+    branches: ["main", "release"],
+    branchLogs: [
+      {branch: "main", oids: [base, older]},
+      {branch: "release", oids: [older]}
     ],
-    gitGraph: {
-        branches: ["main", "release"],
-        branchLogs: [
-            {branch: "main", oids: [base, older]},
-            {branch: "release", oids: [older]}
-        ],
-        nodes: [
-            {sha: base, message: "Base", parents: [older]},
-            {sha: older, message: "Older", parents: []}
-        ]
-    }
+    nodes: [
+      {sha: base, message: "Base", parents: [older]},
+      {sha: older, message: "Older", parents: []}
+    ]
+  }
 }
 
 object delta = {
-    branch: "main",
-    commits: [
-        {sha: second, message: "Second"},
-        {sha: first, message: "First"},
-        {sha: base, message: "Client copy of base"}
-    ],
-    graph: {
-        branches: ["main"],
-        branchLogs: [{branch: "main", oids: [second, first, base, older]}],
-        nodes: [
-            {sha: second, message: "Second", parents: [first]},
-            {sha: first, message: "First", parents: [base]},
-            {sha: base, message: "Client copy of base", parents: [older]}
-        ]
-    }
+  branch: "main",
+  commits: [
+    {sha: second, message: "Second"},
+    {sha: first, message: "First"},
+    {sha: base, message: "Client copy of base"}
+  ],
+  graph: {
+    branches: ["main"],
+    branchLogs: [{branch: "main", oids: [second, first, base, older]}],
+    nodes: [
+      {sha: second, message: "Second", parents: [first]},
+      {sha: first, message: "First", parents: [base]},
+      {sha: base, message: "Client copy of base", parents: [older]}
+    ]
+  }
 }
 
 object merged = mergeDeltaHistory(project, delta, base)
@@ -68,27 +68,27 @@ testing.assert(releaseLog.len == 1 and releaseLog[1] == older, "unrelated inheri
 string pullHead = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 string mergeHead = "ffffffffffffffffffffffffffffffffffffffff"
 object sourceHistory = {
-    gitCommits: [
-        {sha: pullHead, message: "Pull change"},
-        {sha: base, message: "Base"}
-    ],
-    gitGraph: {
-        branches: ["main"],
-        branchLogs: [{branch: "main", oids: [pullHead, base]}],
-        nodes: [
-            {sha: pullHead, message: "Pull change", parents: [base], branches: ["main"]},
-            {sha: base, message: "Base", parents: [], branches: ["main"]}
-        ]
-    }
+  gitCommits: [
+    {sha: pullHead, message: "Pull change"},
+    {sha: base, message: "Base"}
+  ],
+  gitGraph: {
+    branches: ["main"],
+    branchLogs: [{branch: "main", oids: [pullHead, base]}],
+    nodes: [
+      {sha: pullHead, message: "Pull change", parents: [base], branches: ["main"]},
+      {sha: base, message: "Base", parents: [], branches: ["main"]}
+    ]
+  }
 }
 object mergeDelta = {
-    branch: "main",
-    commits: [{sha: mergeHead, message: "Merge pull request #1"}],
-    graph: {
-        branches: ["main"],
-        branchLogs: [{branch: "main", oids: [mergeHead, base]}],
-        nodes: [{sha: mergeHead, message: "Merge pull request #1", parents: [base, pullHead], branches: ["main"]}]
-    }
+  branch: "main",
+  commits: [{sha: mergeHead, message: "Merge pull request #1"}],
+  graph: {
+    branches: ["main"],
+    branchLogs: [{branch: "main", oids: [mergeHead, base]}],
+    nodes: [{sha: mergeHead, message: "Merge pull request #1", parents: [base, pullHead], branches: ["main"]}]
+  }
 }
 object pullMerged = mergeDeltaHistory(sourceHistory, mergeDelta, base)
 array pullMergedCommits = pullMerged.commits.assert(array)

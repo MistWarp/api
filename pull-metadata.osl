@@ -1,99 +1,99 @@
 def storedPullCommentCount(object pull) number (
-    if !pull.contains("commentCount") or pull.commentCount == null (
-        return -1
-    )
-    number count = pull.commentCount.toNum()
-    if count < 0 (
-        return 0
-    )
-    return count
+  if !pull.contains("commentCount") or pull.commentCount == null (
+    return -1
+  )
+  number count = pull.commentCount.toNum()
+  if count < 0 (
+    return 0
+  )
+  return count
 )
 
 def pullCommentCountAfterCreate(object pull, number actualCount) number (
-    number stored = storedPullCommentCount(pull)
-    if stored < 0 (
-        if actualCount < 0 (
-            return 0
-        )
-        return actualCount
+  number stored = storedPullCommentCount(pull)
+  if stored < 0 (
+    if actualCount < 0 (
+      return 0
     )
-    return stored + 1
+    return actualCount
+  )
+  return stored + 1
 )
 
 def pullCommentCountAfterDelete(object pull, number removed, number actualCount) number (
-    number stored = storedPullCommentCount(pull)
-    if stored < 0 (
-        if actualCount < 0 (
-            return 0
-        )
-        return actualCount
+  number stored = storedPullCommentCount(pull)
+  if stored < 0 (
+    if actualCount < 0 (
+      return 0
     )
-    if removed < 0 (
-        removed = 0
-    )
-    number next = stored - removed
-    if next < 0 (
-        return 0
-    )
-    return next
+    return actualCount
+  )
+  if removed < 0 (
+    removed = 0
+  )
+  number next = stored - removed
+  if next < 0 (
+    return 0
+  )
+  return next
 )
 
 def nextPullSequence(number legacySequence, array latestPulls) number (
-    number sequence = legacySequence
-    if latestPulls.len > 0 (
-        number latestSequence = latestPulls[1].assert(object).index.toNum()
-        if latestSequence > sequence (
-            sequence = latestSequence
-        )
+  number sequence = legacySequence
+  if latestPulls.len > 0 (
+    number latestSequence = latestPulls[1].assert(object).index.toNum()
+    if latestSequence > sequence (
+      sequence = latestSequence
     )
-    return sequence + 1
+  )
+  return sequence + 1
 )
 
 def canonicalHistoryHead(object metadata) string (
-    string branch = "main"
-    if metadata.contains("gitBranch") and metadata.gitBranch != null and metadata.gitBranch.toStr() != "" (
-        branch = metadata.gitBranch.toStr()
-    ) else if metadata.contains("branch") and metadata.branch != null and metadata.branch.toStr() != "" (
-        branch = metadata.branch.toStr()
-    )
+  string branch = "main"
+  if metadata.contains("gitBranch") and metadata.gitBranch != null and metadata.gitBranch.toStr() != "" (
+    branch = metadata.gitBranch.toStr()
+  ) else if metadata.contains("branch") and metadata.branch != null and metadata.branch.toStr() != "" (
+    branch = metadata.branch.toStr()
+  )
 
-    object graph = {}
-    if metadata.contains("gitGraph") and metadata.gitGraph != null (
-        graph = metadata.gitGraph.assertElse(object, {})
-    ) else if metadata.contains("graph") and metadata.graph != null (
-        graph = metadata.graph.assertElse(object, {})
-    )
-    if graph.contains("branchLogs") and graph.branchLogs != null (
-        array logs = graph.branchLogs.assertElse(array, [])
-        for i logs.len (
-            object branchLog = logs[i].assertElse(object, {})
-            if branchLog.contains("branch") and branchLog.branch.toStr() == branch and branchLog.contains("oids") and branchLog.oids != null (
-                array oids = branchLog.oids.assertElse(array, [])
-                if oids.len > 0 and oids[1].toStr() != "" (
-                    return oids[1].toStr()
-                )
-            )
+  object graph = {}
+  if metadata.contains("gitGraph") and metadata.gitGraph != null (
+    graph = metadata.gitGraph.assertElse(object, {})
+  ) else if metadata.contains("graph") and metadata.graph != null (
+    graph = metadata.graph.assertElse(object, {})
+  )
+  if graph.contains("branchLogs") and graph.branchLogs != null (
+    array logs = graph.branchLogs.assertElse(array, [])
+    for i logs.len (
+      object branchLog = logs[i].assertElse(object, {})
+      if branchLog.contains("branch") and branchLog.branch.toStr() == branch and branchLog.contains("oids") and branchLog.oids != null (
+        array oids = branchLog.oids.assertElse(array, [])
+        if oids.len > 0 and oids[1].toStr() != "" (
+          return oids[1].toStr()
         )
+      )
     )
+  )
 
-    if metadata.contains("gitHead") and metadata.gitHead != null and metadata.gitHead.toStr() != "" (
-        return metadata.gitHead.toStr()
-    )
-    if metadata.contains("head") and metadata.head != null and metadata.head.toStr() != "" (
-        return metadata.head.toStr()
-    )
+  if metadata.contains("gitHead") and metadata.gitHead != null and metadata.gitHead.toStr() != "" (
+    return metadata.gitHead.toStr()
+  )
+  if metadata.contains("head") and metadata.head != null and metadata.head.toStr() != "" (
+    return metadata.head.toStr()
+  )
 
-    array commits = []
-    if metadata.contains("gitCommits") and metadata.gitCommits != null (
-        commits = metadata.gitCommits.assertElse(array, [])
-    ) else if metadata.contains("commits") and metadata.commits != null (
-        commits = metadata.commits.assertElse(array, [])
+  array commits = []
+  if metadata.contains("gitCommits") and metadata.gitCommits != null (
+    commits = metadata.gitCommits.assertElse(array, [])
+  ) else if metadata.contains("commits") and metadata.commits != null (
+    commits = metadata.commits.assertElse(array, [])
+  )
+  if commits.len > 0 (
+    object commit = commits[1].assertElse(object, {})
+    if commit.contains("sha") and commit.sha.toStr() != "" (
+      return commit.sha.toStr()
     )
-    if commits.len > 0 (
-        object commit = commits[1].assertElse(object, {})
-        if commit.contains("sha") and commit.sha.toStr() != "" (
-            return commit.sha.toStr()
-        )
-    )
-    return ""
+  )
+  return ""
 )
