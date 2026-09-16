@@ -1,783 +1,783 @@
 def projectVisibility(object project) string (
-    if project.contains("visibility") and project.visibility != null (
-        string v = project.visibility.toStr()
-        if v == "public" or v == "unlisted" or v == "private" (
-            if v == "public" and project.shared != true (
-                return "private"
-            )
-            return v
-        )
+  if project.contains("visibility") and project.visibility != null (
+    string v = project.visibility.toStr()
+    if v == "public" or v == "unlisted" or v == "private" (
+      if v == "public" and project.shared != true (
+        return "private"
+      )
+      return v
     )
-    if project.shared == true (
-        return "public"
-    )
-    return "private"
+  )
+  if project.shared == true (
+    return "public"
+  )
+  return "private"
 )
 
 def projectIsViewable(object project) boolean (
-    if project.contains("owner") and project.owner != null (
-        if isBannedUser(project.owner.toStr()) (
-            return false
-        )
+  if project.contains("owner") and project.owner != null (
+    if isBannedUser(project.owner.toStr()) (
+      return false
     )
-    return projectVisibility(project) != "private"
+  )
+  return projectVisibility(project) != "private"
 )
 
 def projectPrice(object project) number (
-    if project.contains("price") and project.price != null (
-        number p = project.price.toNum()
-        if p > 0 (
-            number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
-            if p > priceLimit (
-                return priceLimit
-            )
-            return p
-        )
+  if project.contains("price") and project.price != null (
+    number p = project.price.toNum()
+    if p > 0 (
+      number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
+      if p > priceLimit (
+        return priceLimit
+      )
+      return p
     )
-    return 0
+  )
+  return 0
 )
 
 def projectRevenue(object project) number (
-    if project.contains("revenue") and project.revenue != null (
-        return project.revenue.toNum()
-    )
-    return 0
+  if project.contains("revenue") and project.revenue != null (
+    return project.revenue.toNum()
+  )
+  return 0
 )
 
 def projectSaves(object project) number (
-    if project.contains("saves") and project.saves != null (
-        return project.saves.toNum()
-    )
-    return 0
+  if project.contains("saves") and project.saves != null (
+    return project.saves.toNum()
+  )
+  return 0
 )
 
 def projectBuyers(object project) array (
-    if project.contains("buyers") and project.buyers != null (
-        return project.buyers.assert(array)
-    )
-    return []
+  if project.contains("buyers") and project.buyers != null (
+    return project.buyers.assert(array)
+  )
+  return []
 )
 
 def hasBought(object project, string userLower) boolean (
-    if userLower == "" (
-        return false
-    )
-    array buyers = projectBuyers(project)
-    for i buyers.len (
-        object entry = buyers[i]
-        if normalizeUsername(entry.user.toStr()) == userLower (
-            return true
-        )
-    )
+  if userLower == "" (
     return false
+  )
+  array buyers = projectBuyers(project)
+  for i buyers.len (
+    object entry = buyers[i]
+    if normalizeUsername(entry.user.toStr()) == userLower (
+      return true
+    )
+  )
+  return false
 )
 
-def canAccessPaidJson(object project, *serve.Context c) boolean (
-    if canEditProject(project, c) (
-        return true
-    )
-    return hasBought(project, normalizeUsername(c.getString("username")))
-)
-
-def canInteractProject(object project, *serve.Context c) boolean (
-    if projectPrice(project) > 0 (
-        return canAccessPaidJson(project, c)
-    )
+def canAccessPaidJson(object project,*serve.Context c) boolean (
+  if canEditProject(project, c) (
     return true
+  )
+  return hasBought(project, normalizeUsername(c.getString("username")))
+)
+
+def canInteractProject(object project,*serve.Context c) boolean (
+  if projectPrice(project) > 0 (
+    return canAccessPaidJson(project, c)
+  )
+  return true
 )
 
 def projectRemixable(object project) boolean (
-    if project.contains("remixable") and project.remixable == false (
-        return false
-    )
-    return true
+  if project.contains("remixable") and project.remixable == false (
+    return false
+  )
+  return true
 )
 
 def projectSeeInside(object project) boolean (
-    if project.contains("seeInside") and project.seeInside == false (
-        return false
-    )
+  if project.contains("seeInside") and project.seeInside == false (
+    return false
+  )
+  return true
+)
+
+def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
+  boolean owner = c.getBool("authenticated") and projectRole(project, c.getString("username")) == "owner"
+  boolean purchased = c.getBool("authenticated") and hasBought(project, normalizeUsername(c.getString("username")))
+  return projectSourcePolicyAllows(project, projectPrice(project), owner, purchased)
+)
+
+def canSeeInsideProject(object project,*serve.Context c) boolean (
+  if !canEditProject(project, c) and canSaveLiveProject(project, c) (
     return true
-)
-
-def sourcePolicyAllowsViewer(object project, *serve.Context c) boolean (
-    boolean owner = c.getBool("authenticated") and projectRole(project, c.getString("username")) == "owner"
-    boolean purchased = c.getBool("authenticated") and hasBought(project, normalizeUsername(c.getString("username")))
-    return projectSourcePolicyAllows(project, projectPrice(project), owner, purchased)
-)
-
-def canSeeInsideProject(object project, *serve.Context c) boolean (
-    if !canEditProject(project, c) and canSaveLiveProject(project, c) (
-        return true
-    )
-    if !sourcePolicyAllowsViewer(project, c) (
-        return false
-    )
-    if canEditProject(project, c) (
-        return true
-    )
-    if canViewForkProject(project, c) (
-        return true
-    )
-    if !projectSeeInside(project) (
-        return false
-    )
-    if !projectIsViewable(project) (
-        return false
-    )
-    if projectPrice(project) > 0 (
-        return canAccessPaidJson(project, c)
-    )
+  )
+  if !sourcePolicyAllowsViewer(project, c) (
+    return false
+  )
+  if canEditProject(project, c) (
     return true
+  )
+  if canViewForkProject(project, c) (
+    return true
+  )
+  if !projectSeeInside(project) (
+    return false
+  )
+  if !projectIsViewable(project) (
+    return false
+  )
+  if projectPrice(project) > 0 (
+    return canAccessPaidJson(project, c)
+  )
+  return true
 )
 
-def canRemixProject(object project, *serve.Context c) boolean (
-    if !sourcePolicyAllowsViewer(project, c) (
-        return false
-    )
-    if !projectRemixable(project) (
-        return canEditProject(project, c)
-    )
-    return canSeeInsideProject(project, c)
+def canRemixProject(object project,*serve.Context c) boolean (
+  if !sourcePolicyAllowsViewer(project, c) (
+    return false
+  )
+  if !projectRemixable(project) (
+    return canEditProject(project, c)
+  )
+  return canSeeInsideProject(project, c)
 )
 
 def roturGet(string path) object (
-    return requests.get(roturBase ++ path, {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}})
+  return requests.get(roturBase ++ path, {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}})
 )
 
 def roturPost(string path, object body) object (
-    return requests.post(roturBase ++ path, {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken, "Content-Type": "application/json"}, body: json.stringify(body)})
+  return requests.post(roturBase ++ path, {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken, "Content-Type": "application/json"}, body: json.stringify(body)})
 )
 
 def payoutTo(string recipient, number amount, string note) boolean (
-    object payResp = roturPost("/me/transfer", {to: recipient, amount: amount, note: note})
-    return payResp.success and payResp.status.toInt() == 200
+  object payResp = roturPost("/me/transfer", {to: recipient, amount: amount, note: note})
+  return payResp.success and payResp.status.toInt() == 200
 )
 
 def mistwarpAccountUser() string (
-    if mistwarpRoturUser != "" (
-        return mistwarpRoturUser
-    )
-    object resp = roturGet("/me")
-    if !resp.success or resp.status.toInt() != 200 (
-        return ""
-    )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return ""
-    )
-    object me = parsed.unwrap().assert(object)
-    if me.contains("username") and me.username != null (
-        return me.username.toStr()
-    )
+  if mistwarpRoturUser != "" (
+    return mistwarpRoturUser
+  )
+  object resp = roturGet("/me")
+  if !resp.success or resp.status.toInt() != 200 (
     return ""
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return ""
+  )
+  object me = parsed.unwrap().assert(object)
+  if me.contains("username") and me.username != null (
+    return me.username.toStr()
+  )
+  return ""
 )
 
 def verifyIncomingTransfer(string fromLower, string note, number minAmount) boolean (
-    object resp = roturGet("/me")
-    if !resp.success or resp.status.toInt() != 200 (
-        return false
-    )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return false
-    )
-    object me = parsed.unwrap().assert(object)
-    if !me.contains("sys.transactions") or me["sys.transactions"] == null (
-        return false
-    )
-    array txns = me["sys.transactions"].assert(array)
-    for i txns.len (
-        object tx = txns[i]
-        if tx.type.toStr() == "in" (
-            if tx.note.toStr() == note and normalizeUsername(tx.user.toStr()) == fromLower and tx.amount.toNum() + 0.001 >= minAmount (
-                return true
-            )
-        )
-    )
+  object resp = roturGet("/me")
+  if !resp.success or resp.status.toInt() != 200 (
     return false
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return false
+  )
+  object me = parsed.unwrap().assert(object)
+  if !me.contains("sys.transactions") or me["sys.transactions"] == null (
+    return false
+  )
+  array txns = me["sys.transactions"].assert(array)
+  for i txns.len (
+    object tx = txns[i]
+    if tx.type.toStr() == "in" (
+      if tx.note.toStr() == note and normalizeUsername(tx.user.toStr()) == fromLower and tx.amount.toNum() + 0.001 >= minAmount (
+        return true
+      )
+    )
+  )
+  return false
 )
 
 def addCommerceSplit(object totals, string username, number basisPoints) (
-    string normalized = normalizeUsername(username)
-    if normalized == "" or basisPoints <= 0 (
-        return
-    )
-    number current = 0
-    if totals.contains(normalized) (
-        current = totals[normalized].toNum()
-    )
-    totals[normalized] = current + basisPoints
+  string normalized = normalizeUsername(username)
+  if normalized == "" or basisPoints <= 0 (
+    return
+  )
+  number current = 0
+  if totals.contains(normalized) (
+    current = totals[normalized].toNum()
+  )
+  totals[normalized] = current + basisPoints
 )
 
 def projectCommerceSplits(object project) array (
-    object totals = {}
-    number platformPoints = mistwarpBenefitsForProject(project).salesFeeBasisPoints.toNum().toInt()
-    if platformPoints < 0 (
-        platformPoints = 0
+  object totals = {}
+  number platformPoints = mistwarpBenefitsForProject(project).salesFeeBasisPoints.toNum().toInt()
+  if platformPoints < 0 (
+    platformPoints = 0
+  )
+  if platformPoints > 5000 (
+    platformPoints = 5000
+  )
+  string platformUser = mistwarpAccountUser()
+  number allocated = 0
+  if platformUser != "" and platformPoints > 0 (
+    addCommerceSplit(totals, platformUser, platformPoints)
+    allocated = platformPoints
+  )
+  if project.contains("collaborators") and project.collaborators != null (
+    array collaborators = project.collaborators.assert(array)
+    for i collaborators.len (
+      object collaborator = collaborators[i].assert(object)
+      number share = 0
+      if collaborator.contains("share") and collaborator.share != null (
+        share = (collaborator.share.toNum() * 100).toInt()
+      )
+      if share > 0 and allocated + share <= 9000 (
+        addCommerceSplit(totals, collaborator.username.toStr(), share)
+        allocated = allocated + share
+      )
     )
-    if platformPoints > 5000 (
-        platformPoints = 5000
-    )
-    string platformUser = mistwarpAccountUser()
-    number allocated = 0
-    if platformUser != "" and platformPoints > 0 (
-        addCommerceSplit(totals, platformUser, platformPoints)
-        allocated = platformPoints
-    )
-    if project.contains("collaborators") and project.collaborators != null (
-        array collaborators = project.collaborators.assert(array)
-        for i collaborators.len (
-            object collaborator = collaborators[i].assert(object)
-            number share = 0
-            if collaborator.contains("share") and collaborator.share != null (
-                share = (collaborator.share.toNum() * 100).toInt()
-            )
-            if share > 0 and allocated + share <= 9000 (
-                addCommerceSplit(totals, collaborator.username.toStr(), share)
-                allocated = allocated + share
-            )
-        )
-    )
+  )
 
-    if project.contains("remixParent") and project.remixParent.toStr() != "" (
-        number remixPoints = 1000
-        if project.contains("remixShare") and project.remixShare != null (
-            remixPoints = (project.remixShare.toNum() * 100).toInt()
-        )
-        auto parentResult = loadProject(project.remixParent.toStr())
-        if parentResult.ok and remixPoints > 0 and allocated + remixPoints <= 9000 (
-            addCommerceSplit(totals, parentResult.project.owner.toStr(), remixPoints)
-            allocated = allocated + remixPoints
-        )
+  if project.contains("remixParent") and project.remixParent.toStr() != "" (
+    number remixPoints = 1000
+    if project.contains("remixShare") and project.remixShare != null (
+      remixPoints = (project.remixShare.toNum() * 100).toInt()
     )
+    auto parentResult = loadProject(project.remixParent.toStr())
+    if parentResult.ok and remixPoints > 0 and allocated + remixPoints <= 9000 (
+      addCommerceSplit(totals, parentResult.project.owner.toStr(), remixPoints)
+      allocated = allocated + remixPoints
+    )
+  )
 
-    addCommerceSplit(totals, project.owner.toStr(), 10000 - allocated)
-    array result = []
-    array usernames = totals.getKeys()
-    for i usernames.len (
-        string username = usernames[i].toStr()
-        result.append({username: username, basis_points: totals[username].toNum().toInt()})
-    )
-    return result
+  addCommerceSplit(totals, project.owner.toStr(), 10000 - allocated)
+  array result = []
+  array usernames = totals.getKeys()
+  for i usernames.len (
+    string username = usernames[i].toStr()
+    result.append({username: username, basis_points: totals[username].toNum().toInt()})
+  )
+  return result
 )
 
 def ownerAmountFromSplits(object project, number amount, array splits) number (
-    string owner = normalizeUsername(project.owner.toStr())
-    for i splits.len (
-        object split = splits[i].assert(object)
-        if normalizeUsername(split.username.toStr()) == owner (
-            return (amount * split.basis_points.toNum()) / 10000
-        )
+  string owner = normalizeUsername(project.owner.toStr())
+  for i splits.len (
+    object split = splits[i].assert(object)
+    if normalizeUsername(split.username.toStr()) == owner (
+      return (amount * split.basis_points.toNum()) / 10000
     )
-    return 0
+  )
+  return 0
 )
 
 def verifyCommerceProjectPayment(string paymentId, string buyer, object project, number amount, array expectedSplits) boolean (
-    if commerceServiceKey == "" or paymentId == "" (
-        return false
+  if commerceServiceKey == "" or paymentId == "" (
+    return false
+  )
+  string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+  object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+  if !resp.success or resp.status.toInt() != 200 (
+    return false
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return false
+  )
+  object payload = parsed.unwrap().assert(object)
+  if !payload.contains("payment") or payload.payment == null (
+    return false
+  )
+  object payment = payload.payment.assert(object)
+  if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "project_sale" (
+    return false
+  )
+  if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
+    return false
+  )
+  if normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < amount (
+    return false
+  )
+  array actual = payment.recipients.assert(array)
+  if actual.len != expectedSplits.len (
+    return false
+  )
+  for i expectedSplits.len (
+    object expected = expectedSplits[i].assert(object)
+    boolean found = false
+    for j actual.len (
+      object recipient = actual[j].assert(object)
+      if normalizeUsername(recipient.username.toStr()) == normalizeUsername(expected.username.toStr()) and recipient.basis_points.toNum().toInt() == expected.basis_points.toNum().toInt() (
+        found = true
+      )
     )
-    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
-    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
-    if !resp.success or resp.status.toInt() != 200 (
-        return false
+    if !found (
+      return false
     )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return false
-    )
-    object payload = parsed.unwrap().assert(object)
-    if !payload.contains("payment") or payload.payment == null (
-        return false
-    )
-    object payment = payload.payment.assert(object)
-    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "project_sale" (
-        return false
-    )
-    if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
-        return false
-    )
-    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < amount (
-        return false
-    )
-    array actual = payment.recipients.assert(array)
-    if actual.len != expectedSplits.len (
-        return false
-    )
-    for i expectedSplits.len (
-        object expected = expectedSplits[i].assert(object)
-        boolean found = false
-        for j actual.len (
-            object recipient = actual[j].assert(object)
-            if normalizeUsername(recipient.username.toStr()) == normalizeUsername(expected.username.toStr()) and recipient.basis_points.toNum().toInt() == expected.basis_points.toNum().toInt() (
-                found = true
-            )
-        )
-        if !found (
-            return false
-        )
-    )
-    return true
+  )
+  return true
 )
 
 def verifyCommerceCommentDonation(string paymentId, string donor, object project, number amount) boolean (
-    if commerceServiceKey == "" or paymentId == "" (
-        return false
-    )
-    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
-    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
-    if !resp.success or resp.status.toInt() != 200 (
-        return false
-    )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return false
-    )
-    object payload = parsed.unwrap().assert(object)
-    if !payload.contains("payment") or payload.payment == null (
-        return false
-    )
-    object payment = payload.payment.assert(object)
-    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "comment_donation" (
-        return false
-    )
-    if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
-        return false
-    )
-    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(donor) (
-        return false
-    )
-    number paidAmount = payment.amount.toNum()
-    if paidAmount + 0.001 < amount or paidAmount - 0.001 > amount (
-        return false
-    )
-    array recipients = payment.recipients.assert(array)
-    if recipients.len != 1 (
-        return false
-    )
-    object recipient = recipients[1].assert(object)
-    return normalizeUsername(recipient.username.toStr()) == normalizeUsername(project.owner.toStr()) and recipient.basis_points.toNum().toInt() == 10000
+  if commerceServiceKey == "" or paymentId == "" (
+    return false
+  )
+  string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+  object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+  if !resp.success or resp.status.toInt() != 200 (
+    return false
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return false
+  )
+  object payload = parsed.unwrap().assert(object)
+  if !payload.contains("payment") or payload.payment == null (
+    return false
+  )
+  object payment = payload.payment.assert(object)
+  if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "comment_donation" (
+    return false
+  )
+  if payment.resource_type.toStr() != "project" or payment.resource_id.toStr() != project.id.toStr() (
+    return false
+  )
+  if normalizeUsername(payment.payer.toStr()) != normalizeUsername(donor) (
+    return false
+  )
+  number paidAmount = payment.amount.toNum()
+  if paidAmount + 0.001 < amount or paidAmount - 0.001 > amount (
+    return false
+  )
+  array recipients = payment.recipients.assert(array)
+  if recipients.len != 1 (
+    return false
+  )
+  object recipient = recipients[1].assert(object)
+  return normalizeUsername(recipient.username.toStr()) == normalizeUsername(project.owner.toStr()) and recipient.basis_points.toNum().toInt() == 10000
 )
 
 def awardContributionBounty(string bountyId, string projectId, string recipient) boolean (
-    if bountyId == "" or commerceServiceKey == "" (
-        return false
-    )
-    object response = requests.post(
-        roturBase ++ "/v2/commerce/bounties/" ++ url.escape(bountyId) ++ "/service-award",
-        {
-            headers: {"X-Commerce-Key": commerceServiceKey, "Content-Type": "application/json"},
-            body: json.stringify({
-                source: "mistwarp",
-                recipient: recipient,
-                resource_type: "project",
-                resource_id: projectId
-            })
-        }
-    )
-    return response.success and response.status.toInt() == 200
+  if bountyId == "" or commerceServiceKey == "" (
+    return false
+  )
+  object response = requests.post(
+    roturBase ++ "/v2/commerce/bounties/" ++ url.escape(bountyId) ++ "/service-award",
+    {
+      headers: {"X-Commerce-Key": commerceServiceKey, "Content-Type": "application/json"},
+      body: json.stringify({
+        source: "mistwarp",
+        recipient: recipient,
+        resource_type: "project",
+        resource_id: projectId
+      })
+    }
+  )
+  return response.success and response.status.toInt() == 200
 )
 
 def loadPurchaseKeys() object (
-    auto result = readFile(purchaseKeysFile)
-    if !result.ok (
-        return {keys: {}}
-    )
-    return result.data.assert(object)
+  auto result = readFile(purchaseKeysFile)
+  if !result.ok (
+    return {keys: {}}
+  )
+  return result.data.assert(object)
 )
 
 def savePurchaseKeys(object store) boolean (
-    return writeFile(purchaseKeysFile, store)
+  return writeFile(purchaseKeysFile, store)
 )
 
 def loadPendingPayouts() object (
-    auto result = readFile(pendingPayoutsFile)
-    if !result.ok (
-        return {payouts: []}
-    )
-    return result.data.assert(object)
+  auto result = readFile(pendingPayoutsFile)
+  if !result.ok (
+    return {payouts: []}
+  )
+  return result.data.assert(object)
 )
 
 def renameUserMonetization(string oldKey, string newName) boolean (
-    string newKey = normalizeUsername(newName)
-    object purchaseStore = loadPurchaseKeys()
-    object keys = purchaseStore.keys
-    array purchaseKeys = keys.getKeys()
-    for i purchaseKeys.len (
-        string purchaseKey = purchaseKeys[i].toStr()
-        object purchase = keys[purchaseKey].assert(object)
-        if normalizeUsername(purchase.buyer.toStr()) == oldKey (
-            purchase.buyer = newKey
-            keys[purchaseKey] = purchase
-        )
+  string newKey = normalizeUsername(newName)
+  object purchaseStore = loadPurchaseKeys()
+  object keys = purchaseStore.keys
+  array purchaseKeys = keys.getKeys()
+  for i purchaseKeys.len (
+    string purchaseKey = purchaseKeys[i].toStr()
+    object purchase = keys[purchaseKey].assert(object)
+    if normalizeUsername(purchase.buyer.toStr()) == oldKey (
+      purchase.buyer = newKey
+      keys[purchaseKey] = purchase
     )
-    purchaseStore.keys = keys
-    savePurchaseKeys(purchaseStore)
+  )
+  purchaseStore.keys = keys
+  savePurchaseKeys(purchaseStore)
 
-    object payoutStore = loadPendingPayouts()
-    array payouts = payoutStore.payouts.assertElse(array, [])
-    for i payouts.len (
-        object payout = payouts[i].assert(object)
-        if normalizeUsername(payout.seller.toStr()) == oldKey (
-            payout.seller = newName
-        )
-        if normalizeUsername(payout.buyer.toStr()) == oldKey (
-            payout.buyer = newName
-        )
-        payouts[i] = payout
+  object payoutStore = loadPendingPayouts()
+  array payouts = payoutStore.payouts.assertElse(array, [])
+  for i payouts.len (
+    object payout = payouts[i].assert(object)
+    if normalizeUsername(payout.seller.toStr()) == oldKey (
+      payout.seller = newName
     )
-    payoutStore.payouts = payouts
-    return writeFile(pendingPayoutsFile, payoutStore)
+    if normalizeUsername(payout.buyer.toStr()) == oldKey (
+      payout.buyer = newName
+    )
+    payouts[i] = payout
+  )
+  payoutStore.payouts = payouts
+  return writeFile(pendingPayoutsFile, payoutStore)
 )
 
 def recordPendingPayout(string projectId, string seller, string buyer, number amount) (
-    object store = loadPendingPayouts()
-    array payouts = store.payouts.assert(array)
-    payouts.append({projectId: projectId, seller: seller, buyer: buyer, amount: amount, at: timestamp})
-    store.payouts = payouts
-    writeFile(pendingPayoutsFile, store)
+  object store = loadPendingPayouts()
+  array payouts = store.payouts.assert(array)
+  payouts.append({projectId: projectId, seller: seller, buyer: buyer, amount: amount, at: timestamp})
+  store.payouts = payouts
+  writeFile(pendingPayoutsFile, store)
 )
 
 def retryPendingPayouts() object (
-    object store = loadPendingPayouts()
-    array payouts = store.payouts.assert(array)
-    array remaining = []
-    number paid = 0
-    for i payouts.len (
-        object p = payouts[i]
-        boolean ok = payoutTo(p.seller.toStr(), p.amount.toNum(), "MistWarp sale (retry)")
-        if ok (
-            paid = paid + 1
-        ) else (
-            remaining.append(p)
-        )
+  object store = loadPendingPayouts()
+  array payouts = store.payouts.assert(array)
+  array remaining = []
+  number paid = 0
+  for i payouts.len (
+    object p = payouts[i]
+    boolean ok = payoutTo(p.seller.toStr(), p.amount.toNum(), "MistWarp sale (retry)")
+    if ok (
+      paid = paid + 1
+    ) else (
+      remaining.append(p)
     )
-    store.payouts = remaining
-    writeFile(pendingPayoutsFile, store)
-    return {paid: paid, remaining: remaining.len}
+  )
+  store.payouts = remaining
+  writeFile(pendingPayoutsFile, store)
+  return {paid: paid, remaining: remaining.len}
 )
 
 def handleListPendingPayouts(*serve.Context c) (
-    object store = loadPendingPayouts()
-    c.json(200, {ok: true, payouts: store.payouts.assert(array)})
+  object store = loadPendingPayouts()
+  c.json(200, {ok: true, payouts: store.payouts.assert(array)})
 )
 
 def handleRetryPendingPayouts(*serve.Context c) (
-    if mistwarpRoturToken == "" (
-        c.json(503, {ok: false, error: "payouts are not available right now"})
-        return
-    )
-    object result = retryPendingPayouts()
-    c.json(200, {ok: true, paid: result.paid, remaining: result.remaining})
+  if mistwarpRoturToken == "" (
+    c.json(503, {ok: false, error: "payouts are not available right now"})
+    return
+  )
+  object result = retryPendingPayouts()
+  c.json(200, {ok: true, paid: result.paid, remaining: result.remaining})
 )
 
 def prunePurchaseKeys(object store) object (
-    object keys = store.keys
-    array names = keys.getKeys()
-    object kept = {}
-    for i names.len (
-        string k = names[i].toStr()
-        object entry = keys[k]
-        if timestamp - entry.at.toNum() < 3600000 (
-            kept[k] = entry
-        )
+  object keys = store.keys
+  array names = keys.getKeys()
+  object kept = {}
+  for i names.len (
+    string k = names[i].toStr()
+    object entry = keys[k]
+    if timestamp - entry.at.toNum() < 3600000 (
+      kept[k] = entry
     )
-    store.keys = kept
-    return store
+  )
+  store.keys = kept
+  return store
 )
 
 def mergeDayHistory(object into, object from) (
-    array days = from.getKeys()
-    for i days.len (
-        string k = days[i].toStr()
-        number cur = 0
-        if into.contains(k) (
-            cur = into[k].toNum()
-        )
-        into[k] = cur + from[k].toNum()
+  array days = from.getKeys()
+  for i days.len (
+    string k = days[i].toStr()
+    number cur = 0
+    if into.contains(k) (
+      cur = into[k].toNum()
     )
+    into[k] = cur + from[k].toNum()
+  )
 )
 
 def handleGetMyStats(*serve.Context c) (
-    string owner = normalizeUsername(c.getString("username"))
-    number analyticsDays = mistwarpBenefitsForUserId(c.getString("userId")).analyticsDays.toNum()
-    array projects = projectSearchDocs.where("ownerKey", db.equal, owner).all()
-    number today = (timestamp / 86400000).toInt()
+  string owner = normalizeUsername(c.getString("username"))
+  number analyticsDays = mistwarpBenefitsForUserId(c.getString("userId")).analyticsDays.toNum()
+  array projects = projectSearchDocs.where("ownerKey", db.equal, owner).all()
+  number today = (timestamp / 86400000).toInt()
 
-    number totalViews = 0
-    number totalHearts = 0
-    number totalRevenue = 0
-    number totalBuyers = 0
-    number projectCount = 0
-    number sharedCount = 0
-    object viewHistory = {}
-    object saleHistory = {}
+  number totalViews = 0
+  number totalHearts = 0
+  number totalRevenue = 0
+  number totalBuyers = 0
+  number projectCount = 0
+  number sharedCount = 0
+  object viewHistory = {}
+  object saleHistory = {}
 
-    for i projects.len (
-        object entry = projects[i].assert(object)
-        auto res = loadProject(entry.id.toStr())
-        if res.ok (
-            object p = res.project.assert(object)
-            projectCount = projectCount + 1
-            if projectVisibility(p) == "public" (
-                sharedCount = sharedCount + 1
-            )
-            totalViews = totalViews + p.views.toNum()
-            totalHearts = totalHearts + p.loves.assert(array).len
-            totalRevenue = totalRevenue + projectRevenue(p)
-            totalBuyers = totalBuyers + projectBuyers(p).len
-            if p.contains("viewHistory") and p.viewHistory != null (
-                mergeDayHistory(viewHistory, p.viewHistory.assert(object))
-            )
-            if p.contains("saleHistory") and p.saleHistory != null (
-                mergeDayHistory(saleHistory, p.saleHistory.assert(object))
-            )
-        )
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    auto res = loadProject(entry.id.toStr())
+    if res.ok (
+      object p = res.project.assert(object)
+      projectCount = projectCount + 1
+      if projectVisibility(p) == "public" (
+        sharedCount = sharedCount + 1
+      )
+      totalViews = totalViews + p.views.toNum()
+      totalHearts = totalHearts + p.loves.assert(array).len
+      totalRevenue = totalRevenue + projectRevenue(p)
+      totalBuyers = totalBuyers + projectBuyers(p).len
+      if p.contains("viewHistory") and p.viewHistory != null (
+        mergeDayHistory(viewHistory, p.viewHistory.assert(object))
+      )
+      if p.contains("saleHistory") and p.saleHistory != null (
+        mergeDayHistory(saleHistory, p.saleHistory.assert(object))
+      )
     )
+  )
 
-    number viewsThisMonth = 0
-    array vk = viewHistory.getKeys()
-    for i vk.len (
-        if today - vk[i].toNum() < 30 (
-            viewsThisMonth = viewsThisMonth + viewHistory[vk[i].toStr()].toNum()
-        )
+  number viewsThisMonth = 0
+  array vk = viewHistory.getKeys()
+  for i vk.len (
+    if today - vk[i].toNum() < 30 (
+      viewsThisMonth = viewsThisMonth + viewHistory[vk[i].toStr()].toNum()
     )
+  )
 
-    object stats = {
-        totalViews: totalViews,
-        viewsThisMonth: viewsThisMonth,
-        totalHearts: totalHearts,
-        totalRevenue: totalRevenue,
-        totalBuyers: totalBuyers,
-        projectCount: projectCount,
-        sharedCount: sharedCount,
-        viewHistory: trimDayHistory(viewHistory, analyticsDays),
-        saleHistory: trimDayHistory(saleHistory, analyticsDays),
-        historyDays: analyticsDays
-    }
-    c.json(200, {ok: true, stats: stats})
+  object stats = {
+    totalViews: totalViews,
+    viewsThisMonth: viewsThisMonth,
+    totalHearts: totalHearts,
+    totalRevenue: totalRevenue,
+    totalBuyers: totalBuyers,
+    projectCount: projectCount,
+    sharedCount: sharedCount,
+    viewHistory: trimDayHistory(viewHistory, analyticsDays),
+    saleHistory: trimDayHistory(saleHistory, analyticsDays),
+    historyDays: analyticsDays
+  }
+  c.json(200, {ok: true, stats: stats})
 )
 
 def handleSetVisibility(*serve.Context c) (
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    if !canEditProject(project, c) (
-        c.forbidden("not your project")
-        return
-    )
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
 
-    object body = c.bodyJSON()
-    string target = ""
-    if body.contains("visibility") and body.visibility != null (
-        target = body.visibility.toStr()
-    )
-    if target != "public" and target != "unlisted" and target != "private" (
-        c.badRequest("visibility must be public, unlisted, or private")
-        return
-    )
-    if target != "private" and projectMustStayPrivate(project) (
-        c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
-        return
-    )
-    if projectVisibility(project) == target (
-        c.json(200, {ok: true, project: projectResponse(project, c)})
-        return
-    )
-
-    boolean firstShare = false
-    if target == "public" or target == "unlisted" (
-        string blockedExtension = projectBlockedExtension(project)
-        if blockedExtension != "" (
-            c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
-            return
-        )
-        boolean everUploaded = project.lastUploadAt.toNum() > 0
-        everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
-        if !everUploaded (
-            c.badRequest("upload the project before sharing it")
-            return
-        )
-    )
-
-    if target == "public" (
-        firstShare = project.sharedAt.toNum() == 0
-        project.shared = true
-        project.visibility = "public"
-        if firstShare (
-            project.sharedAt = timestamp
-        )
-    ) else if target == "unlisted" (
-        project.shared = false
-        project.visibility = "unlisted"
-    ) else (
-        project.shared = false
-        project.visibility = "private"
-        project.viewKey = randomString(16)
-    )
-
-    project.edited = timestamp
-    saveProject(project)
-    upsertIndexEntry(project)
-
-    if target == "private" (
-        object profile = loadProfile(project.owner.toStr())
-        if profile.featuredProject.toStr() == project.id.toStr() (
-            profile.featuredProject = ""
-            saveProfile(profile)
-        )
-    )
-    if firstShare (
-        addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
-        notifyPublishedRemix(project)
-    )
+  object body = c.bodyJSON()
+  string target = ""
+  if body.contains("visibility") and body.visibility != null (
+    target = body.visibility.toStr()
+  )
+  if target != "public" and target != "unlisted" and target != "private" (
+    c.badRequest("visibility must be public, unlisted, or private")
+    return
+  )
+  if target != "private" and projectMustStayPrivate(project) (
+    c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
+    return
+  )
+  if projectVisibility(project) == target (
     c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+
+  boolean firstShare = false
+  if target == "public" or target == "unlisted" (
+    string blockedExtension = projectBlockedExtension(project)
+    if blockedExtension != "" (
+      c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
+      return
+    )
+    boolean everUploaded = project.lastUploadAt.toNum() > 0
+    everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
+    if !everUploaded (
+      c.badRequest("upload the project before sharing it")
+      return
+    )
+  )
+
+  if target == "public" (
+    firstShare = project.sharedAt.toNum() == 0
+    project.shared = true
+    project.visibility = "public"
+    if firstShare (
+      project.sharedAt = timestamp
+    )
+  ) else if target == "unlisted" (
+    project.shared = false
+    project.visibility = "unlisted"
+  ) else (
+    project.shared = false
+    project.visibility = "private"
+    project.viewKey = randomString(16)
+  )
+
+  project.edited = timestamp
+  saveProject(project)
+  upsertIndexEntry(project)
+
+  if target == "private" (
+    object profile = loadProfile(project.owner.toStr())
+    if profile.featuredProject.toStr() == project.id.toStr() (
+      profile.featuredProject = ""
+      saveProfile(profile)
+    )
+  )
+  if firstShare (
+    addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+    notifyPublishedRemix(project)
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
 def recordSale(object project, string buyer, number price, number sellerAmount) (
-    array buyers = projectBuyers(project)
-    buyers.append({user: buyer, at: timestamp, amount: price})
-    project.buyers = buyers
-    project.revenue = projectRevenue(project) + sellerAmount
+  array buyers = projectBuyers(project)
+  buyers.append({user: buyer, at: timestamp, amount: price})
+  project.buyers = buyers
+  project.revenue = projectRevenue(project) + sellerAmount
 
-    object sales = {}
-    if project.contains("saleHistory") and project.saleHistory != null (
-        sales = project.saleHistory.assert(object)
-    )
-    number today = (timestamp / 86400000).toInt()
-    string dayKey = today.toStr()
-    number dayTotal = 0
-    if sales.contains(dayKey) (
-        dayTotal = sales[dayKey].toNum()
-    )
-    sales[dayKey] = dayTotal + sellerAmount
-    project.saleHistory = sales
+  object sales = {}
+  if project.contains("saleHistory") and project.saleHistory != null (
+    sales = project.saleHistory.assert(object)
+  )
+  number today = (timestamp / 86400000).toInt()
+  string dayKey = today.toStr()
+  number dayTotal = 0
+  if sales.contains(dayKey) (
+    dayTotal = sales[dayKey].toNum()
+  )
+  sales[dayKey] = dayTotal + sellerAmount
+  project.saleHistory = sales
 )
 
 def handlePurchaseIntent(*serve.Context c) (
-    if commerceServiceKey == "" (
-        c.json(503, {ok: false, error: "purchases are not available right now"})
-        return
-    )
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    if !projectIsViewable(project) (
-        c.notFound("project not found")
-        return
-    )
-    number price = projectPrice(project)
-    if price <= 0 (
-        c.badRequest("this project is not for sale")
-        return
-    )
-    if canEditProject(project, c) (
-        c.badRequest("you already own this project")
-        return
-    )
-    string buyerLower = normalizeUsername(c.getString("username"))
-    if hasBought(project, buyerLower) (
-        c.json(200, {ok: true, already: true, project: projectResponse(project, c)})
-        return
-    )
+  if commerceServiceKey == "" (
+    c.json(503, {ok: false, error: "purchases are not available right now"})
+    return
+  )
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !projectIsViewable(project) (
+    c.notFound("project not found")
+    return
+  )
+  number price = projectPrice(project)
+  if price <= 0 (
+    c.badRequest("this project is not for sale")
+    return
+  )
+  if canEditProject(project, c) (
+    c.badRequest("you already own this project")
+    return
+  )
+  string buyerLower = normalizeUsername(c.getString("username"))
+  if hasBought(project, buyerLower) (
+    c.json(200, {ok: true, already: true, project: projectResponse(project, c)})
+    return
+  )
 
-    string key = "mwbuy_" ++ randomString(16)
-    object store = prunePurchaseKeys(loadPurchaseKeys())
-    object keys = store.keys
-    keys[key] = {projectId: project.id.toStr(), buyer: buyerLower, price: price, at: timestamp}
-    store.keys = keys
-    savePurchaseKeys(store)
+  string key = "mwbuy_" ++ randomString(16)
+  object store = prunePurchaseKeys(loadPurchaseKeys())
+  object keys = store.keys
+  keys[key] = {projectId: project.id.toStr(), buyer: buyerLower, price: price, at: timestamp}
+  store.keys = keys
+  savePurchaseKeys(store)
 
-    c.json(200, {ok: true, key: key, amount: price, title: project.title, splits: projectCommerceSplits(project)})
+  c.json(200, {ok: true, key: key, amount: price, title: project.title, splits: projectCommerceSplits(project)})
 )
 
 def handlePurchaseConfirm(*serve.Context c) (
-    if commerceServiceKey == "" (
-        c.json(503, {ok: false, error: "purchases are not available right now"})
-        return
-    )
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    number price = projectPrice(project)
-    if price <= 0 (
-        c.badRequest("this project is not for sale")
-        return
-    )
-    string buyer = c.getString("username")
-    string buyerLower = normalizeUsername(buyer)
-    if hasBought(project, buyerLower) (
-        c.json(200, {ok: true, already: true, project: projectResponse(project, c)})
-        return
-    )
+  if commerceServiceKey == "" (
+    c.json(503, {ok: false, error: "purchases are not available right now"})
+    return
+  )
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  number price = projectPrice(project)
+  if price <= 0 (
+    c.badRequest("this project is not for sale")
+    return
+  )
+  string buyer = c.getString("username")
+  string buyerLower = normalizeUsername(buyer)
+  if hasBought(project, buyerLower) (
+    c.json(200, {ok: true, already: true, project: projectResponse(project, c)})
+    return
+  )
 
-    object body = c.bodyJSON()
-    string key = ""
-    if body.contains("key") and body.key != null (
-        key = body.key.toStr().strip()
-    )
-    if key == "" (
-        c.badRequest("missing purchase key")
-        return
-    )
-    string paymentId = ""
-    if body.contains("paymentId") and body.paymentId != null (
-        paymentId = body.paymentId.toStr().strip()
-    )
-    if paymentId == "" (
-        c.badRequest("missing payment id")
-        return
-    )
+  object body = c.bodyJSON()
+  string key = ""
+  if body.contains("key") and body.key != null (
+    key = body.key.toStr().strip()
+  )
+  if key == "" (
+    c.badRequest("missing purchase key")
+    return
+  )
+  string paymentId = ""
+  if body.contains("paymentId") and body.paymentId != null (
+    paymentId = body.paymentId.toStr().strip()
+  )
+  if paymentId == "" (
+    c.badRequest("missing payment id")
+    return
+  )
 
-    object store = loadPurchaseKeys()
-    object keys = store.keys
-    if !keys.contains(key) (
-        c.badRequest("this purchase expired, start again")
-        return
-    )
-    object pending = keys[key]
-    if pending.projectId.toStr() != project.id.toStr() or normalizeUsername(pending.buyer.toStr()) != buyerLower (
-        c.badRequest("this purchase key does not match")
-        return
-    )
-    number owed = pending.price.toNum()
-    number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
-    if owed > priceLimit (
-        owed = priceLimit
-    )
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  if !keys.contains(key) (
+    c.badRequest("this purchase expired, start again")
+    return
+  )
+  object pending = keys[key]
+  if pending.projectId.toStr() != project.id.toStr() or normalizeUsername(pending.buyer.toStr()) != buyerLower (
+    c.badRequest("this purchase key does not match")
+    return
+  )
+  number owed = pending.price.toNum()
+  number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
+  if owed > priceLimit (
+    owed = priceLimit
+  )
 
-    array splits = projectCommerceSplits(project)
-    if !verifyCommerceProjectPayment(paymentId, buyerLower, project, owed, splits) (
-        c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
-        return
-    )
+  array splits = projectCommerceSplits(project)
+  if !verifyCommerceProjectPayment(paymentId, buyerLower, project, owed, splits) (
+    c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
+    return
+  )
 
-    string seller = project.owner.toStr()
-    number sellerAmount = ownerAmountFromSplits(project, owed, splits)
+  string seller = project.owner.toStr()
+  number sellerAmount = ownerAmountFromSplits(project, owed, splits)
 
-    keys.delete(key)
-    store.keys = keys
-    savePurchaseKeys(store)
+  keys.delete(key)
+  store.keys = keys
+  savePurchaseKeys(store)
 
-    recordSale(project, buyer, owed, sellerAmount)
-    if addToLibrary(buyerLower, project.id.toStr()) (
-        number savesNow = projectSaves(project)
-        project.saves = savesNow + 1
-    )
-    saveProject(project)
-    upsertIndexEntry(project)
-    siteBroadcastStats(project.id.toStr(), buyer, {saved: true})
-    addPurchaseRecord(buyerLower, {projectId: project.id.toStr(), title: project.title, seller: seller, amount: owed, at: timestamp})
-    addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
+  recordSale(project, buyer, owed, sellerAmount)
+  if addToLibrary(buyerLower, project.id.toStr()) (
+    number savesNow = projectSaves(project)
+    project.saves = savesNow + 1
+  )
+  saveProject(project)
+  upsertIndexEntry(project)
+  siteBroadcastStats(project.id.toStr(), buyer, {saved: true})
+  addPurchaseRecord(buyerLower, {projectId: project.id.toStr(), title: project.title, seller: seller, amount: owed, at: timestamp})
+  addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
 
-    c.json(200, {ok: true, paidOut: true, project: projectResponse(project, c)})
+  c.json(200, {ok: true, paidOut: true, project: projectResponse(project, c)})
 )

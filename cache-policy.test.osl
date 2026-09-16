@@ -1,7 +1,7 @@
 import "std:testing"
 
 def projectWorkspaceFingerprint(object project) string (
-    return project.fingerprint.toStr()
+  return project.fingerprint.toStr()
 )
 
 import "./cache-policy.osl"

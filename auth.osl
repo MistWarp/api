@@ -1,249 +1,249 @@
 def setAuthCookie(*serve.Context c, string sessionId) (
-    c.setCookie("auth_token", sessionId, 604800, "/", "", appURL.startsWith("https://"), true)
+  c.setCookie("auth_token", sessionId, 604800, "/", "", appURL.startsWith("https://"), true)
 )
 
 def clearAuthCookie(*serve.Context c) (
-    c.clearCookie("auth_token")
+  c.clearCookie("auth_token")
 )
 
 def createSession(string username, string userId) string (
-    string sessionId = randomString(32)
-    object session = {
-        username: username,
-        userId: userId,
-        createdAt: timestamp
-    }
-    writeFile(sessionsDir ++ sessionId ++ ".json", session)
-    sessionCache.set(sessionId, session)
-    return sessionId
+  string sessionId = randomString(32)
+  object session = {
+    username: username,
+    userId: userId,
+    createdAt: timestamp
+  }
+  writeFile(sessionsDir ++ sessionId ++ ".json", session)
+  sessionCache.set(sessionId, session)
+  return sessionId
 )
 
 def getSession(string token) object (
-    if !isSafePathPart(token) (
-        return {ok: false, error: "invalid token"}
+  if !isSafePathPart(token) (
+    return {ok: false, error: "invalid token"}
+  )
+  string path = sessionsDir ++ token ++ ".json"
+  object session = {}
+  if sessionCache.has(token) (
+    session = sessionCache.get(token).assert(object)
+  ) else (
+    auto result = readFile(path)
+    if !result.ok (
+      return {ok: false, error: "session not found"}
     )
-    string path = sessionsDir ++ token ++ ".json"
-    object session = {}
-    if sessionCache.has(token) (
-        session = sessionCache.get(token).assert(object)
-    ) else (
-        auto result = readFile(path)
-        if !result.ok (
-            return {ok: false, error: "session not found"}
-        )
-        session = result.data.assert(object)
-        sessionCache.set(token, session)
-    )
-    if timestamp - session.createdAt.toNum() > 604800000 (
-        fs.remove(path)
-        sessionCache.delete(token)
-        return {ok: false, error: "session expired"}
-    )
-    string username = session.username.toStr()
-    string userId = session.userId.toStr()
-    string mapped = refreshUsernameForId(userId)
-    if mapped != "" (
-        username = mapped
-    )
-    return {ok: true, username: username, userId: userId}
+    session = result.data.assert(object)
+    sessionCache.set(token, session)
+  )
+  if timestamp - session.createdAt.toNum() > 604800000 (
+    fs.remove(path)
+    sessionCache.delete(token)
+    return {ok: false, error: "session expired"}
+  )
+  string username = session.username.toStr()
+  string userId = session.userId.toStr()
+  string mapped = refreshUsernameForId(userId)
+  if mapped != "" (
+    username = mapped
+  )
+  return {ok: true, username: username, userId: userId}
 )
 
 def deleteSession(string token) boolean (
-    if !isSafePathPart(token) (
-        return false
-    )
-    sessionCache.delete(token)
-    return fs.remove(sessionsDir ++ token ++ ".json")
+  if !isSafePathPart(token) (
+    return false
+  )
+  sessionCache.delete(token)
+  return fs.remove(sessionsDir ++ token ++ ".json")
 )
 
 def cleanupExpiredSessions() (
-    array files = fs.readDir(sessionsDir)
-    for i files.len (
-        string path = sessionsDir ++ files[i].toStr()
-        auto res = readFile(path)
-        if res.ok (
-            object session = res.data.assert(object)
-            if timestamp - session.createdAt.toNum() > 604800000 (
-                fs.remove(path)
-            )
-        )
+  array files = fs.readDir(sessionsDir)
+  for i files.len (
+    string path = sessionsDir ++ files[i].toStr()
+    auto res = readFile(path)
+    if res.ok (
+      object session = res.data.assert(object)
+      if timestamp - session.createdAt.toNum() > 604800000 (
+        fs.remove(path)
+      )
     )
+  )
 )
 
 def requestToken(*serve.Context c) string (
-    string token = c.bearer()
-    if token != "" (
-        return token
-    )
-    return c.cookie("auth_token")
+  string token = c.bearer()
+  if token != "" (
+    return token
+  )
+  return c.cookie("auth_token")
 )
 
 def isAdminUser(string username) boolean (
-    string key = normalizeUsername(username)
-    if adminUsers.contains(key) (
-        return true
-    )
-    return cachedAdmins().contains(key)
+  string key = normalizeUsername(username)
+  if adminUsers.contains(key) (
+    return true
+  )
+  return cachedAdmins().contains(key)
 )
 
 def handleRoturAuth(*serve.Context c) (
-    string validator = c.query("v")
-    if validator == "" (
-        c.json(401, {ok: false, error: "missing validator"})
-        return
+  string validator = c.query("v")
+  if validator == "" (
+    c.json(401, {ok: false, error: "missing validator"})
+    return
+  )
+
+  object resp = requests.get("https://api.rotur.dev/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
+  if !resp.success (
+    c.json(401, {ok: false, error: "failed to validate token"})
+    return
+  )
+
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    c.json(401, {ok: false, error: "invalid response from rotur"})
+    return
+  )
+  object data = parsed.unwrap().assert(object)
+
+  if data.contains("error") and data.error != null (
+    string code = "error"
+    if data.contains("code") and data.code != null (
+      code = data.code.toStr()
     )
-
-    object resp = requests.get("https://api.rotur.dev/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
-    if !resp.success (
-        c.json(401, {ok: false, error: "failed to validate token"})
-        return
+    string redirectUrl = "https://rotur.dev/me"
+    if data.contains("redirect_url") and data.redirect_url != null (
+      redirectUrl = data.redirect_url.toStr()
     )
-
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        c.json(401, {ok: false, error: "invalid response from rotur"})
-        return
+    if data.contains("username") and data.username != null and data.username.toStr() != "" (
+      string uname = data.username.toStr()
+      string reason = "Account restricted on Rotur"
+      if data.contains("reason") and data.reason != null (
+        reason = data.reason.toStr()
+      )
+      banUser(uname, reason, "rotur_sync")
     )
-    object data = parsed.unwrap().assert(object)
+    c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
+    return
+  )
 
-    if data.contains("error") and data.error != null (
-        string code = "error"
-        if data.contains("code") and data.code != null (
-            code = data.code.toStr()
-        )
-        string redirectUrl = "https://rotur.dev/me"
-        if data.contains("redirect_url") and data.redirect_url != null (
-            redirectUrl = data.redirect_url.toStr()
-        )
-        if data.contains("username") and data.username != null and data.username.toStr() != "" (
-            string uname = data.username.toStr()
-            string reason = "Account restricted on Rotur"
-            if data.contains("reason") and data.reason != null (
-                reason = data.reason.toStr()
-            )
-            banUser(uname, reason, "rotur_sync")
-        )
-        c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
-        return
+  if !data.contains("valid") or data.valid == false (
+    c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
+    return
+  )
+
+  string userId = data.id.toStr()
+  string username = data.username.toStr()
+
+  ensureUserIdentity(userId, username)
+
+  if isBannedUser(username) (
+    string reason = banReasonFor(username)
+    string banError = "This account is banned from MistWarp."
+    if reason != "" (
+      banError = "This account is banned from MistWarp: " ++ reason
     )
+    c.json(403, {ok: false, code: "banned", error: banError, redirectUrl: "https://rotur.dev/me"})
+    return
+  )
 
-    if !data.contains("valid") or data.valid == false (
-        c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
-        return
-    )
+  object profile = loadProfile(username)
+  profile.userId = userId
+  profile.username = username
+  saveProfile(profile)
 
-    string userId = data.id.toStr()
-    string username = data.username.toStr()
+  string sessionId = createSession(username, userId)
+  setAuthCookie(c, sessionId)
 
-    ensureUserIdentity(userId, username)
-
-    if isBannedUser(username) (
-        string reason = banReasonFor(username)
-        string banError = "This account is banned from MistWarp."
-        if reason != "" (
-            banError = "This account is banned from MistWarp: " ++ reason
-        )
-        c.json(403, {ok: false, code: "banned", error: banError, redirectUrl: "https://rotur.dev/me"})
-        return
-    )
-
-    object profile = loadProfile(username)
-    profile.userId = userId
-    profile.username = username
-    saveProfile(profile)
-
-    string sessionId = createSession(username, userId)
-    setAuthCookie(c, sessionId)
-
-    c.json(200, {
-        ok: true,
-        token: sessionId,
-        username: username,
-        isAdmin: isAdminUser(username)
-    })
+  c.json(200, {
+    ok: true,
+    token: sessionId,
+    username: username,
+    isAdmin: isAdminUser(username)
+  })
 )
 
 def handleLogout(*serve.Context c) (
-    string token = requestToken(c)
-    if token != "" (
-        deleteSession(token)
-    )
-    clearAuthCookie(c)
-    c.json(200, {ok: true})
+  string token = requestToken(c)
+  if token != "" (
+    deleteSession(token)
+  )
+  clearAuthCookie(c)
+  c.json(200, {ok: true})
 )
 
 def handleGetMe(*serve.Context c) (
-    if !c.getBool("authenticated") (
-        c.json(401, {ok: false, error: "not authenticated"})
-        return
-    )
-    string username = c.getString("username")
-    object profile = loadProfile(username)
-    c.json(200, {
-        ok: true,
-        username: username,
-        bio: profile.bio,
-        featuredProject: profile.featuredProject,
-        isAdmin: c.getBool("isAdmin"),
-        standing: standingLevel(username)
-    })
+  if !c.getBool("authenticated") (
+    c.json(401, {ok: false, error: "not authenticated"})
+    return
+  )
+  string username = c.getString("username")
+  object profile = loadProfile(username)
+  c.json(200, {
+    ok: true,
+    username: username,
+    bio: profile.bio,
+    featuredProject: profile.featuredProject,
+    isAdmin: c.getBool("isAdmin"),
+    standing: standingLevel(username)
+  })
 )
 
 def handleHealth(*serve.Context c) (
-    c.json(200, {ok: true, status: "operational", checkedAt: timestamp})
+  c.json(200, {ok: true, status: "operational", checkedAt: timestamp})
 )
 
 def externalDependency(string url) object (
-    number started = timestamp
-    object resp = requests.get(url)
-    string status = "unavailable"
-    if resp.success (
-        status = "operational"
-    )
-    return {
-        status: status,
-        latencyMs: timestamp - started
-    }
+  number started = timestamp
+  object resp = requests.get(url)
+  string status = "unavailable"
+  if resp.success (
+    status = "operational"
+  )
+  return {
+    status: status,
+    latencyMs: timestamp - started
+  }
 )
 
 def handleDependencyHealth(*serve.Context c) (
-    string probePath = tmpDir ++ "health-" ++ randomString(8)
-    boolean storageOk = fs.writeFile(probePath, "ok")
-    if storageOk (
-        storageOk = fs.readFile(probePath) == "ok"
-        fs.remove(probePath)
-    )
+  string probePath = tmpDir ++ "health-" ++ randomString(8)
+  boolean storageOk = fs.writeFile(probePath, "ok")
+  if storageOk (
+    storageOk = fs.readFile(probePath) == "ok"
+    fs.remove(probePath)
+  )
 
-    object roturStatus = externalDependency(roturBase)
-    object giteaStatus = externalDependency(giteaURL ++ "/api/v1/version")
-    string assetMode = "r2"
-    if r2Local (
-        assetMode = "local"
-    )
-    object assetStatus = {status: "operational", mode: assetMode}
-    if !r2Local and (r2PublicBase == "" or r2Bucket == "") (
-        assetStatus.status = "misconfigured"
-    )
+  object roturStatus = externalDependency(roturBase)
+  object giteaStatus = externalDependency(giteaURL ++ "/api/v1/version")
+  string assetMode = "r2"
+  if r2Local (
+    assetMode = "local"
+  )
+  object assetStatus = {status: "operational", mode: assetMode}
+  if !r2Local and (r2PublicBase == "" or r2Bucket == "") (
+    assetStatus.status = "misconfigured"
+  )
 
-    string overall = "operational"
-    if !storageOk or roturStatus.status != "operational" or assetStatus.status != "operational" (
-        overall = "degraded"
-    )
-    string storageStatus = "unavailable"
-    if storageOk (
-        storageStatus = "operational"
-    )
-    giteaStatus.optional = true
-    c.json(200, {
-        ok: true,
-        status: overall,
-        checkedAt: timestamp,
-        dependencies: {
-            api: {status: "operational"},
-            storage: {status: storageStatus},
-            assets: assetStatus,
-            rotur: roturStatus,
-            gitea: giteaStatus
-        }
-    })
+  string overall = "operational"
+  if !storageOk or roturStatus.status != "operational" or assetStatus.status != "operational" (
+    overall = "degraded"
+  )
+  string storageStatus = "unavailable"
+  if storageOk (
+    storageStatus = "operational"
+  )
+  giteaStatus.optional = true
+  c.json(200, {
+    ok: true,
+    status: overall,
+    checkedAt: timestamp,
+    dependencies: {
+      api: {status: "operational"},
+      storage: {status: storageStatus},
+      assets: assetStatus,
+      rotur: roturStatus,
+      gitea: giteaStatus
+    }
+  })
 )

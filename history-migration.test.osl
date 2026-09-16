@@ -20,6 +20,7 @@ def randomString(number length) string (
   serial += 1
   return serial.toStr()
 )
+
 def loadProject(string id) object (
   if readFailures > 0 (
     readFailures -= 1
@@ -33,12 +34,15 @@ def loadProject(string id) object (
   )
   return {ok: false, missing: true}
 )
+
 def projectHasWorkspace(object project) boolean (
   return (project.workspaceKey ?? "").toStr() != ""
 )
+
 def projectGitHead(object project) string (
   return (project.gitHead ?? "").toStr()
 )
+
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   string plain = outputPath ++ ".json"
   fs.writeFile(plain, "{\"targets\":[]}")
@@ -46,41 +50,52 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   fs.remove(plain)
   return ok
 )
+
 def isValidMd5Ext(string name) boolean (
   return true
 )
+
 def assetObjectKey(string name) string (
   return name
 )
+
 def copyStorageKeyToPath(string name, string path) boolean (
   return false
 )
+
 def copyProjectWorkspaceToPath(object project, string path) boolean (
   if failCopy (
     return false
   )
   return zip.copyFile(tmpDir ++ project.workspaceKey.toStr(), path)
 )
+
 def contentHash(byte[] data) string (
   return randomString(8)
 )
+
 def projectWorkspaceSnapshotKey(string hash) string (
   return hash ++ ".mwp"
 )
+
 def stageR2Blob(string key, byte[] data, string contentType, string encoding) boolean (
   return fs.writeFileBytes(tmpDir ++ key, data)
 )
+
 def removeProjectStorageKeyIfOrphaned(string key, string id, boolean workspace) (
   return
 )
+
 def saveProject(object project) boolean (
   saves += 1
   records[project.id.toStr()] = project
   return true
 )
+
 def upsertIndexEntry(object project) (
   return
 )
+
 def readFile(string path) object (
   return {ok: false}
 )

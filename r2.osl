@@ -1,594 +1,594 @@
 def projectJsonKey(string id) string (
-    return "projects/" ++ id ++ "/project.json"
+  return "projects/" ++ id ++ "/project.json"
 )
 
 def projectWorkspaceKey(string id) string (
-    return "projects/" ++ id ++ "/project.mwp"
+  return "projects/" ++ id ++ "/project.mwp"
 )
 
 def assetObjectKey(string md5ext) string (
-    return "assets/" ++ md5ext
+  return "assets/" ++ md5ext
 )
 
 def stagingJsonPath(string id) string (
-    return stagingDir ++ id ++ ".json"
+  return stagingDir ++ id ++ ".json"
 )
 
 def projectJsonIsGzip(object project) boolean (
-    return project.contains("jsonGzip") and project.jsonGzip == true
+  return project.contains("jsonGzip") and project.jsonGzip == true
 )
 
 def thumbnailPath(string id) string (
-    return thumbnailsDir ++ id ++ ".png"
+  return thumbnailsDir ++ id ++ ".png"
 )
 
 def thumbUrlFor(object project) string (
-    return thumbUrlForChain(project, 0)
+  return thumbUrlForChain(project, 0)
 )
 
 def thumbUrlForChain(object project, number hops) string (
-    string id = project.id.toStr()
-    if fs.exists(thumbnailPath(id)) (
-        return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
-    )
+  string id = project.id.toStr()
+  if fs.exists(thumbnailPath(id)) (
+    return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
+  )
 
-    if hops >= 100 or !project.contains("remixParent") or project.remixParent.toStr() == "" (
-        return ""
-    )
+  if hops >= 100 or !project.contains("remixParent") or project.remixParent.toStr() == "" (
+    return ""
+  )
 
-    string parentId = project.remixParent.toStr()
-    if parentId == id (
-        return ""
-    )
-    auto parentResult = loadProject(parentId)
-    if !parentResult.ok (
-        return ""
-    )
-    object parentProject = parentResult.project.assert(object)
-    if projectPrice(parentProject) > 0 (
-        return ""
-    )
-    return thumbUrlForChain(parentProject, hops + 1)
+  string parentId = project.remixParent.toStr()
+  if parentId == id (
+    return ""
+  )
+  auto parentResult = loadProject(parentId)
+  if !parentResult.ok (
+    return ""
+  )
+  object parentProject = parentResult.project.assert(object)
+  if projectPrice(parentProject) > 0 (
+    return ""
+  )
+  return thumbUrlForChain(parentProject, hops + 1)
 )
 
 def isUntouchedRemix(object project) boolean (
-    if !project.contains("remixParent") or project.remixParent.toStr() == "" (
-        return false
-    )
-    if project.contains("inheritedJson") and project.inheritedJson == true (
-        return project.created.toNum() == project.edited.toNum()
-    )
-    if project.contains("lastUploadAt") and project.lastUploadAt.toNum() > 0 (
-        return project.created.toNum() == project.edited.toNum()
-    )
+  if !project.contains("remixParent") or project.remixParent.toStr() == "" (
     return false
+  )
+  if project.contains("inheritedJson") and project.inheritedJson == true (
+    return project.created.toNum() == project.edited.toNum()
+  )
+  if project.contains("lastUploadAt") and project.lastUploadAt.toNum() > 0 (
+    return project.created.toNum() == project.edited.toNum()
+  )
+  return false
 )
 
 def localProjectJsonPathFor(object project, number hops) string (
-    string id = project.id.toStr()
-    string stagedPath = stagingJsonPath(id)
-    if fs.exists(stagedPath) (
-        return stagedPath
-    )
+  string id = project.id.toStr()
+  string stagedPath = stagingJsonPath(id)
+  if fs.exists(stagedPath) (
+    return stagedPath
+  )
 
-    string blobPath = localBlobPath(project.jsonKey.toStr())
-    if fs.exists(blobPath) (
-        return blobPath
-    )
+  string blobPath = localBlobPath(project.jsonKey.toStr())
+  if fs.exists(blobPath) (
+    return blobPath
+  )
 
-    if hops >= 100 or !isUntouchedRemix(project) (
-        return ""
-    )
+  if hops >= 100 or !isUntouchedRemix(project) (
+    return ""
+  )
 
-    string parentId = project.remixParent.toStr()
-    if parentId == id (
-        return ""
-    )
-    auto parentResult = loadProject(parentId)
-    if !parentResult.ok (
-        return ""
-    )
-    object parentProject = parentResult.project.assert(object)
-    if projectPrice(parentProject) > 0 (
-        return ""
-    )
-    return localProjectJsonPathFor(parentProject, hops + 1)
+  string parentId = project.remixParent.toStr()
+  if parentId == id (
+    return ""
+  )
+  auto parentResult = loadProject(parentId)
+  if !parentResult.ok (
+    return ""
+  )
+  object parentProject = parentResult.project.assert(object)
+  if projectPrice(parentProject) > 0 (
+    return ""
+  )
+  return localProjectJsonPathFor(parentProject, hops + 1)
 )
 
 def projectViewKey(object project) string (
-    if project.contains("viewKey") and project.viewKey != null (
-        return project.viewKey.toStr()
-    )
-    return ""
+  if project.contains("viewKey") and project.viewKey != null (
+    return project.viewKey.toStr()
+  )
+  return ""
 )
 
 def projectJsonBaseUrl(object project) string (
-    string base = publicUrl(project.jsonKey.toStr())
-    if project.jsonKey.toStr().startsWith("project-json/") or localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
-        base = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/project.json"
-    )
-    return base
+  string base = publicUrl(project.jsonKey.toStr())
+  if project.jsonKey.toStr().startsWith("project-json/") or localProjectJsonPathFor(project, 0) != "" or (project.contains("pendingJson") and project.pendingJson == true) (
+    base = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/project.json"
+  )
+  return base
 )
 
 def projectJsonUrlFor(object project) string (
-    string base = projectJsonBaseUrl(project)
-    if project.shared != true (
-        string k = projectViewKey(project)
-        if k != "" (
-            return base ++ "?k=" ++ k
-        )
+  string base = projectJsonBaseUrl(project)
+  if project.shared != true (
+    string k = projectViewKey(project)
+    if k != "" (
+      return base ++ "?k=" ++ k
     )
-    return base
+  )
+  return base
 )
 
 def blobBase() string (
-    return appURL ++ "/blobs"
+  return appURL ++ "/blobs"
 )
 
 def r2DirectUrl(string key) string (
-    if key == "" or r2PublicBase == "" (
-        return ""
-    )
-    return r2PublicBase ++ "/" ++ key
+  if key == "" or r2PublicBase == "" (
+    return ""
+  )
+  return r2PublicBase ++ "/" ++ key
 )
 
 def publicUrl(string key) string (
-    if key == "" (
-        return ""
-    )
-    return blobBase() ++ "/" ++ key
+  if key == "" (
+    return ""
+  )
+  return blobBase() ++ "/" ++ key
 )
 
 def assetsBaseUrl() string (
-    return blobBase() ++ "/assets"
+  return blobBase() ++ "/assets"
 )
 
 def contentTypeForExt(string ext) string (
-    object types = {
-        "json": "application/json",
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "gif": "image/gif",
-        "bmp": "image/bmp",
-        "svg": "image/svg+xml",
-        "wav": "audio/wav",
-        "mp3": "audio/mpeg",
-        "ogg": "audio/ogg",
-        "ttf": "font/ttf",
-        "otf": "font/otf",
-        "woff": "font/woff",
-        "woff2": "font/woff2"
-    }
-    string lower = ext.toLower()
-    if types.contains(lower) (
-        return types[lower].toStr()
-    )
-    return "application/octet-stream"
+  object types = {
+    "json": "application/json",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "bmp": "image/bmp",
+    "svg": "image/svg+xml",
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+    "ttf": "font/ttf",
+    "otf": "font/otf",
+    "woff": "font/woff",
+    "woff2": "font/woff2"
+  }
+  string lower = ext.toLower()
+  if types.contains(lower) (
+    return types[lower].toStr()
+  )
+  return "application/octet-stream"
 )
 
 def localBlobPath(string key) string (
-    return localBlobsDir ++ key
+  return localBlobsDir ++ key
 )
 
 def isSafeBlobKey(string key) boolean (
-    if key.contains("..") or key.contains("\\") or key.startsWith("/") (
-        return false
-    )
-    if key.startsWith("assets/") (
-        string name = key.replace("assets/", "")
-        return isValidMd5Ext(name)
-    )
-    if regex.match("^project-json/[a-f0-9]{64}\\.json\\.gz$", key) (
-        return true
-    )
-    if regex.match("^project-workspaces/[a-f0-9]{64}\\.mwp$", key) (
-        return true
-    )
-    return regex.match("^projects/[A-Za-z0-9]+/project\\.json$", key)
+  if key.contains("..") or key.contains("\\") or key.startsWith("/") (
+    return false
+  )
+  if key.startsWith("assets/") (
+    string name = key.replace("assets/", "")
+    return isValidMd5Ext(name)
+  )
+  if regex.match("^project-json/[a-f0-9]{64}\\.json\\.gz$", key) (
+    return true
+  )
+  if regex.match("^project-workspaces/[a-f0-9]{64}\\.mwp$", key) (
+    return true
+  )
+  return regex.match("^projects/[A-Za-z0-9]+/project\\.json$", key)
 )
 
 def contentTypeForKey(string key) string (
-    array parts = key.split(".")
-    return contentTypeForExt(parts[parts.len].toStr())
+  array parts = key.split(".")
+  return contentTypeForExt(parts[parts.len].toStr())
 )
 
 def parentDirOf(string path) string (
-    array parts = path.split("/")
-    string dir = ""
-    for i parts.len - 1 (
-        if i == 1 (
-            dir = parts[1].toStr()
-        ) else (
-            dir = dir ++ "/" ++ parts[i].toStr()
-        )
+  array parts = path.split("/")
+  string dir = ""
+  for i parts.len - 1 (
+    if i == 1 (
+      dir = parts[1].toStr()
+    ) else (
+      dir = dir ++ "/" ++ parts[i].toStr()
     )
-    return dir
+  )
+  return dir
 )
 
 def r2PutEncoded(string key, any body, string contentType, string contentEncoding) boolean (
-    if r2Local (
-        string path = localBlobPath(key)
-        fs.mkdirAll(parentDirOf(path))
-        return fs.writeFileBytes(path, body)
-    )
-    object input = {"key": key, "body": body, "content_type": contentType}
-    if contentEncoding != "" (
-        input.content_encoding = contentEncoding
-    )
-    auto result = r2Client.put(input)
-    boolean stored = result.ok == true
-    if stored (
-        recordR2Stored({key: key, type: r2ObjectType(key), size: body.len})
-    )
-    return stored
+  if r2Local (
+    string path = localBlobPath(key)
+    fs.mkdirAll(parentDirOf(path))
+    return fs.writeFileBytes(path, body)
+  )
+  object input = {"key": key, "body": body, "content_type": contentType}
+  if contentEncoding != "" (
+    input.content_encoding = contentEncoding
+  )
+  auto result = r2Client.put(input)
+  boolean stored = result.ok == true
+  if stored (
+    recordR2Stored({key: key, type: r2ObjectType(key), size: body.len})
+  )
+  return stored
 )
 
 def r2Put(string key, any body, string contentType) boolean (
-    return r2PutEncoded(key, body, contentType, "")
+  return r2PutEncoded(key, body, contentType, "")
 )
 
 string r2UploadQueueFile = "data/r2-upload-queue.json"
 string r2StorageIndexFile = "data/r2-storage-index.json"
 
 def r2ObjectType(string key) string (
-    if key.startsWith("assets/") (
-        return "assets"
-    )
-    if key.startsWith("project-workspaces/") (
-        return "history"
-    )
-    if key.contains("project.json") or key.startsWith("project-json/") (
-        return "projectData"
-    )
-    return "other"
+  if key.startsWith("assets/") (
+    return "assets"
+  )
+  if key.startsWith("project-workspaces/") (
+    return "history"
+  )
+  if key.contains("project.json") or key.startsWith("project-json/") (
+    return "projectData"
+  )
+  return "other"
 )
 
 def recordR2Stored(object item) (
-    sync.lock("r2-storage-index")
-    auto loaded = readFile(r2StorageIndexFile)
-    object data = loaded.ok ? loaded.data.assertElse(object, {}) {}
-    if !data.contains("objects") (
-        data.objects = {}
-    )
-    object objects = data.objects
-    objects[item.key.toStr()] = {
-        type: item.type.toStr() == "" ? r2ObjectType(item.key.toStr()) item.type,
-        size: item.size.toNum(),
-        storedAt: timestamp
-    }
-    writeFile(r2StorageIndexFile, data)
-    sync.unlock("r2-storage-index")
+  sync.lock("r2-storage-index")
+  auto loaded = readFile(r2StorageIndexFile)
+  object data = loaded.ok ? loaded.data.assertElse(object, {}) {}
+  if !data.contains("objects") (
+    data.objects = {}
+  )
+  object objects = data.objects
+  objects[item.key.toStr()] = {
+    type: item.type.toStr() == "" ? r2ObjectType(item.key.toStr()) item.type,
+    size: item.size.toNum(),
+    storedAt: timestamp
+  }
+  writeFile(r2StorageIndexFile, data)
+  sync.unlock("r2-storage-index")
 )
 
 def recordR2Removed(string key) (
-    sync.lock("r2-storage-index")
-    auto loaded = readFile(r2StorageIndexFile)
-    if loaded.ok (
-        object data = loaded.data.assertElse(object, {})
-        if data.contains("objects") (
-            object objects = data.objects.assertElse(object, {})
-            objects.delete(key)
-            data.objects = objects
-            writeFile(r2StorageIndexFile, data)
-        )
+  sync.lock("r2-storage-index")
+  auto loaded = readFile(r2StorageIndexFile)
+  if loaded.ok (
+    object data = loaded.data.assertElse(object, {})
+    if data.contains("objects") (
+      object objects = data.objects.assertElse(object, {})
+      objects.delete(key)
+      data.objects = objects
+      writeFile(r2StorageIndexFile, data)
     )
-    sync.unlock("r2-storage-index")
+  )
+  sync.unlock("r2-storage-index")
 )
 
 def syncR2StorageInventory(boolean force) object (
-    if r2Local (
-        return {ok: true, skipped: true, reason: "local_mode"}
-    )
-    sync.lock("r2-storage-inventory-sync")
-    auto loaded = readFile(r2StorageIndexFile)
-    object current = loaded.ok ? loaded.data.assertElse(object, {}) {}
-    if !force and current.contains("syncedAt") and current.syncedAt.toNum() > 0 (
-        sync.unlock("r2-storage-inventory-sync")
-        return {ok: true, skipped: true, syncedAt: current.syncedAt}
-    )
-    number scanStartedAt = timestamp
-    string encoded = raw("r2inventory.ScanJSON(r2Endpoint, r2Bucket, r2AccessKeyId, r2SecretAccessKey, \"auto\")")
-    auto parsed = json.parse(encoded, {type: "object"})
-    if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
-        string errorMessage = parsed.isErr() ? "could not read the R2 inventory" parsed.unwrap().assert(object).error.toStr()
-        sync.unlock("r2-storage-inventory-sync")
-        return {ok: false, error: errorMessage}
-    )
-    object inventory = parsed.unwrap().assert(object)
-    sync.lock("r2-storage-index")
-    auto latestLoaded = readFile(r2StorageIndexFile)
-    object latest = latestLoaded.ok ? latestLoaded.data.assertElse(object, {}) {}
-    object inventoryObjects = inventory.objects.assertElse(object, {})
-    object latestObjects = latest.contains("objects") ? latest.objects.assertElse(object, {}) {}
-    array latestKeys = latestObjects.getKeys()
-    for i latestKeys.len (
-        string key = latestKeys[i].toStr()
-        object item = latestObjects[key].assertElse(object, {})
-        if item.storedAt.toNum() >= scanStartedAt (
-            inventoryObjects[key] = item
-        )
-    )
-    boolean saved = writeFile(r2StorageIndexFile, {
-        objects: inventoryObjects,
-        syncedAt: inventory.syncedAt,
-        pages: inventory.pages
-    })
-    sync.unlock("r2-storage-index")
+  if r2Local (
+    return {ok: true, skipped: true, reason: "local_mode"}
+  )
+  sync.lock("r2-storage-inventory-sync")
+  auto loaded = readFile(r2StorageIndexFile)
+  object current = loaded.ok ? loaded.data.assertElse(object, {}) {}
+  if !force and current.contains("syncedAt") and current.syncedAt.toNum() > 0 (
     sync.unlock("r2-storage-inventory-sync")
-    if !saved (
-        return {ok: false, error: "could not save the R2 inventory"}
+    return {ok: true, skipped: true, syncedAt: current.syncedAt}
+  )
+  number scanStartedAt = timestamp
+  string encoded = raw("r2inventory.ScanJSON(r2Endpoint, r2Bucket, r2AccessKeyId, r2SecretAccessKey, \"auto\")")
+  auto parsed = json.parse(encoded, {type: "object"})
+  if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
+    string errorMessage = parsed.isErr() ? "could not read the R2 inventory" parsed.unwrap().assert(object).error.toStr()
+    sync.unlock("r2-storage-inventory-sync")
+    return {ok: false, error: errorMessage}
+  )
+  object inventory = parsed.unwrap().assert(object)
+  sync.lock("r2-storage-index")
+  auto latestLoaded = readFile(r2StorageIndexFile)
+  object latest = latestLoaded.ok ? latestLoaded.data.assertElse(object, {}) {}
+  object inventoryObjects = inventory.objects.assertElse(object, {})
+  object latestObjects = latest.contains("objects") ? latest.objects.assertElse(object, {}) {}
+  array latestKeys = latestObjects.getKeys()
+  for i latestKeys.len (
+    string key = latestKeys[i].toStr()
+    object item = latestObjects[key].assertElse(object, {})
+    if item.storedAt.toNum() >= scanStartedAt (
+      inventoryObjects[key] = item
     )
-    return {ok: true, syncedAt: inventory.syncedAt, pages: inventory.pages}
+  )
+  boolean saved = writeFile(r2StorageIndexFile, {
+    objects: inventoryObjects,
+    syncedAt: inventory.syncedAt,
+    pages: inventory.pages
+  })
+  sync.unlock("r2-storage-index")
+  sync.unlock("r2-storage-inventory-sync")
+  if !saved (
+    return {ok: false, error: "could not save the R2 inventory"}
+  )
+  return {ok: true, syncedAt: inventory.syncedAt, pages: inventory.pages}
 )
 
 def r2Remove(string key) boolean (
-    if !isSafeBlobKey(key) (
-        return false
-    )
-    sync.lock("r2-upload-queue")
-    boolean removed = readR2UploadQueue().ok.assert(boolean)
-    if removed and !r2Local (
-        auto result = r2Client.remove({"key": key})
-        removed = result.ok == true or result.status.toNum() == 404
-        if removed (
-            recordR2Removed(key)
-        )
-    )
+  if !isSafeBlobKey(key) (
+    return false
+  )
+  sync.lock("r2-upload-queue")
+  boolean removed = readR2UploadQueue().ok.assert(boolean)
+  if removed and !r2Local (
+    auto result = r2Client.remove({"key": key})
+    removed = result.ok == true or result.status.toNum() == 404
     if removed (
-        removed = removeQueuedR2UploadLocked(key)
+      recordR2Removed(key)
     )
-    if removed (
-        string path = localBlobPath(key)
-        removed = !fs.exists(path) or fs.remove(path)
-    )
-    sync.unlock("r2-upload-queue")
-    return removed
+  )
+  if removed (
+    removed = removeQueuedR2UploadLocked(key)
+  )
+  if removed (
+    string path = localBlobPath(key)
+    removed = !fs.exists(path) or fs.remove(path)
+  )
+  sync.unlock("r2-upload-queue")
+  return removed
 )
 
 def copyStorageKeyToPath(string key, string outputPath) boolean (
-    string localPath = localBlobPath(key)
-    if fs.exists(localPath) and zip.copyFile(localPath, outputPath) (
-        return true
-    )
-    if r2Local (
-        return false
-    )
-    auto existing = r2Client.get({key: key})
-    if !existing.ok or existing.status.toInt() != 200 (
-        return false
-    )
-    return fs.writeFileBytes(outputPath, existing.body)
+  string localPath = localBlobPath(key)
+  if fs.exists(localPath) and zip.copyFile(localPath, outputPath) (
+    return true
+  )
+  if r2Local (
+    return false
+  )
+  auto existing = r2Client.get({key: key})
+  if !existing.ok or existing.status.toInt() != 200 (
+    return false
+  )
+  return fs.writeFileBytes(outputPath, existing.body)
 )
 
 def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
-    array keys = projectWorkspaceKeys(project)
-    if keys.len == 0 (
+  array keys = projectWorkspaceKeys(project)
+  if keys.len == 0 (
+    return false
+  )
+  string currentPath = outputPath ++ ".layer.0"
+  if !copyStorageKeyToPath(keys[1].toStr(), currentPath) (
+    return false
+  )
+  for i keys.len (
+    if i > 1 (
+      string deltaPath = outputPath ++ ".delta." ++ i.toStr()
+      string mergedPath = outputPath ++ ".layer." ++ i.toStr()
+      boolean ok = copyStorageKeyToPath(keys[i].toStr(), deltaPath)
+      ok = ok and mergeWorkspaceArchives(currentPath, deltaPath, mergedPath, maxProjectJsonBytes + 1073741824)
+      fs.remove(deltaPath)
+      fs.remove(currentPath)
+      if !ok (
+        fs.remove(mergedPath)
         return false
+      )
+      currentPath = mergedPath
     )
-    string currentPath = outputPath ++ ".layer.0"
-    if !copyStorageKeyToPath(keys[1].toStr(), currentPath) (
-        return false
-    )
-    for i keys.len (
-        if i > 1 (
-            string deltaPath = outputPath ++ ".delta." ++ i.toStr()
-            string mergedPath = outputPath ++ ".layer." ++ i.toStr()
-            boolean ok = copyStorageKeyToPath(keys[i].toStr(), deltaPath)
-            ok = ok and mergeWorkspaceArchives(currentPath, deltaPath, mergedPath, maxProjectJsonBytes + 1073741824)
-            fs.remove(deltaPath)
-            fs.remove(currentPath)
-            if !ok (
-                fs.remove(mergedPath)
-                return false
-            )
-            currentPath = mergedPath
-        )
-    )
-    boolean copied = zip.copyFile(currentPath, outputPath)
-    fs.remove(currentPath)
-    return copied
+  )
+  boolean copied = zip.copyFile(currentPath, outputPath)
+  fs.remove(currentPath)
+  return copied
 )
 
 def mergeWorkspaceArchives(string basePath, string deltaPath, string outputPath, number maxExpandedBytes) boolean (
-    return raw("func() bool { output, err := OSLos.Create(outputPath); if err != nil { return false }; writer := OSLgozip.NewWriter(output); paths := map[string]bool{}; requiredDirs := map[string]bool{}; fileCount := 0; var expandedBytes uint64; expandedLimit := uint64(maxExpandedBytes); fileLimit := int(maxWorkspaceFiles); copyArchive := func(sourcePath string) bool { reader, openErr := OSLgozip.OpenReader(sourcePath); if openErr != nil { return false }; defer reader.Close(); for _, item := range reader.File { name := item.Name; cleanName := OSLstrings.TrimSuffix(name, \"/\"); unsafe := cleanName == \"\" || len(name) > 1024 || OSLstrings.HasPrefix(cleanName, \"/\") || OSLstrings.Contains(cleanName, \"\\\\\") || OSLstrings.ContainsRune(cleanName, 0); parts := OSLstrings.Split(cleanName, \"/\"); for _, part := range parts { if part == \"\" || part == \".\" || part == \"..\" { unsafe = true } }; directory := item.FileInfo().IsDir(); if unsafe || item.Mode()&OSLos.ModeSymlink != 0 { return false }; if _, exists := paths[cleanName]; exists { continue }; if !directory && requiredDirs[cleanName] { return false }; parent := \"\"; for index := 0; index < len(parts)-1; index++ { if parent == \"\" { parent = parts[index] } else { parent += \"/\" + parts[index] }; if parentDirectory, exists := paths[parent]; exists && !parentDirectory { return false }; requiredDirs[parent] = true }; paths[cleanName] = directory; fileCount++; if fileCount > fileLimit || item.UncompressedSize64 > expandedLimit-expandedBytes { return false }; if directory { if item.UncompressedSize64 != 0 { return false }; header := item.FileHeader; if _, createErr := writer.CreateHeader(&header); createErr != nil { return false }; continue }; if !item.Mode().IsRegular() || item.Method != OSLgozip.Store && item.Method != OSLgozip.Deflate { return false }; source, readErr := item.Open(); if readErr != nil { return false }; header := item.FileHeader; target, createErr := writer.CreateHeader(&header); if createErr != nil { source.Close(); return false }; copied, copyErr := OSLio.Copy(target, OSLio.LimitReader(source, int64(expandedLimit-expandedBytes)+1)); closeErr := source.Close(); if copyErr != nil || closeErr != nil || copied < 0 || uint64(copied) != item.UncompressedSize64 || uint64(copied) > expandedLimit-expandedBytes { return false }; expandedBytes += uint64(copied) }; return true }; ok := copyArchive(deltaPath) && copyArchive(basePath); closeErr := writer.Close(); fileCloseErr := output.Close(); if !ok || closeErr != nil || fileCloseErr != nil { OSLos.Remove(outputPath); return false }; return true }()")
+  return raw("func() bool { output, err := OSLos.Create(outputPath); if err != nil { return false }; writer := OSLgozip.NewWriter(output); paths := map[string]bool{}; requiredDirs := map[string]bool{}; fileCount := 0; var expandedBytes uint64; expandedLimit := uint64(maxExpandedBytes); fileLimit := int(maxWorkspaceFiles); copyArchive := func(sourcePath string) bool { reader, openErr := OSLgozip.OpenReader(sourcePath); if openErr != nil { return false }; defer reader.Close(); for _, item := range reader.File { name := item.Name; cleanName := OSLstrings.TrimSuffix(name, \"/\"); unsafe := cleanName == \"\" || len(name) > 1024 || OSLstrings.HasPrefix(cleanName, \"/\") || OSLstrings.Contains(cleanName, \"\\\\\") || OSLstrings.ContainsRune(cleanName, 0); parts := OSLstrings.Split(cleanName, \"/\"); for _, part := range parts { if part == \"\" || part == \".\" || part == \"..\" { unsafe = true } }; directory := item.FileInfo().IsDir(); if unsafe || item.Mode()&OSLos.ModeSymlink != 0 { return false }; if _, exists := paths[cleanName]; exists { continue }; if !directory && requiredDirs[cleanName] { return false }; parent := \"\"; for index := 0; index < len(parts)-1; index++ { if parent == \"\" { parent = parts[index] } else { parent += \"/\" + parts[index] }; if parentDirectory, exists := paths[parent]; exists && !parentDirectory { return false }; requiredDirs[parent] = true }; paths[cleanName] = directory; fileCount++; if fileCount > fileLimit || item.UncompressedSize64 > expandedLimit-expandedBytes { return false }; if directory { if item.UncompressedSize64 != 0 { return false }; header := item.FileHeader; if _, createErr := writer.CreateHeader(&header); createErr != nil { return false }; continue }; if !item.Mode().IsRegular() || item.Method != OSLgozip.Store && item.Method != OSLgozip.Deflate { return false }; source, readErr := item.Open(); if readErr != nil { return false }; header := item.FileHeader; target, createErr := writer.CreateHeader(&header); if createErr != nil { source.Close(); return false }; copied, copyErr := OSLio.Copy(target, OSLio.LimitReader(source, int64(expandedLimit-expandedBytes)+1)); closeErr := source.Close(); if copyErr != nil || closeErr != nil || copied < 0 || uint64(copied) != item.UncompressedSize64 || uint64(copied) > expandedLimit-expandedBytes { return false }; expandedBytes += uint64(copied) }; return true }; ok := copyArchive(deltaPath) && copyArchive(basePath); closeErr := writer.Close(); fileCloseErr := output.Close(); if !ok || closeErr != nil || fileCloseErr != nil { OSLos.Remove(outputPath); return false }; return true }()")
 )
 
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
-    string localPath = localProjectJsonPathFor(project, 0)
-    if localPath != "" (
-        if projectJsonIsGzip(project) (
-            if fs.getSize(localPath) > maxStoredProjectJsonBytes (
-                return false
-            )
-            return zip.copyFile(localPath, outputPath)
-        )
-        return zip.gzipLimited(localPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
-    )
-    if r2Local (
-        return false
-    )
-    auto signed = r2Client.presign({key: project.jsonKey.toStr(), expires: 60})
-    if !signed.ok (
-        return false
-    )
-    auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
-    if !fetched.success or fetched.status.toInt() != 200 (
-        return false
-    )
+  string localPath = localProjectJsonPathFor(project, 0)
+  if localPath != "" (
     if projectJsonIsGzip(project) (
-        if fetched.body.toStr().len > maxStoredProjectJsonBytes (
-            return false
-        )
-        return fs.writeFileBytes(outputPath, fetched.body)
-    )
-    string plainPath = outputPath ++ ".plain"
-    if !fs.writeFileBytes(plainPath, fetched.body) (
+      if fs.getSize(localPath) > maxStoredProjectJsonBytes (
         return false
+      )
+      return zip.copyFile(localPath, outputPath)
     )
-    boolean compressed = zip.gzipLimited(plainPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
-    fs.remove(plainPath)
-    return compressed
+    return zip.gzipLimited(localPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+  )
+  if r2Local (
+    return false
+  )
+  auto signed = r2Client.presign({key: project.jsonKey.toStr(), expires: 60})
+  if !signed.ok (
+    return false
+  )
+  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
+  if !fetched.success or fetched.status.toInt() != 200 (
+    return false
+  )
+  if projectJsonIsGzip(project) (
+    if fetched.body.toStr().len > maxStoredProjectJsonBytes (
+      return false
+    )
+    return fs.writeFileBytes(outputPath, fetched.body)
+  )
+  string plainPath = outputPath ++ ".plain"
+  if !fs.writeFileBytes(plainPath, fetched.body) (
+    return false
+  )
+  boolean compressed = zip.gzipLimited(plainPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+  fs.remove(plainPath)
+  return compressed
 )
 
 def blobCacheHeader(string key) string (
-    if key.startsWith("assets/") (
-        return "public, max-age=31536000, immutable"
-    )
-    return "no-cache"
+  if key.startsWith("assets/") (
+    return "public, max-age=31536000, immutable"
+  )
+  return "no-cache"
 )
 
 def projectJsonEtag(object project) string (
-    return "\"" ++ project.id.toStr() ++ "-" ++ project.edited.toStr() ++ "\""
+  return "\"" ++ project.id.toStr() ++ "-" ++ project.edited.toStr() ++ "\""
 )
 
 def serveNotModified(*serve.Context c, object project) boolean (
-    string etag = projectJsonEtag(project)
-    c.setHeader("ETag", etag)
-    c.setHeader("Cache-Control", "no-cache")
-    if c.header("If-None-Match").contains(etag) (
-        c.status(304)
-        return true
-    )
-    return false
+  string etag = projectJsonEtag(project)
+  c.setHeader("ETag", etag)
+  c.setHeader("Cache-Control", "no-cache")
+  if c.header("If-None-Match").contains(etag) (
+    c.status(304)
+    return true
+  )
+  return false
 )
 
 def serveBlobKey(*serve.Context c, string key) (
-    if !isSafeBlobKey(key) (
-        c.notFound("blob not found")
-        return
-    )
+  if !isSafeBlobKey(key) (
+    c.notFound("blob not found")
+    return
+  )
 
-    string path = localBlobPath(key)
-    if fs.exists(path) (
-        c.setHeader("Content-Type", contentTypeForKey(key))
-        c.setHeader("Cache-Control", blobCacheHeader(key))
-        c.file(path)
-        return
-    )
-
-    if r2Local (
-        c.notFound("blob not found")
-        return
-    )
-
-    auto fetched = r2Client.get({key: key})
-    if !fetched.ok or fetched.status.toInt() != 200 (
-        c.notFound("blob not found")
-        return
-    )
-
-    string body = fetched.body.toStr()
+  string path = localBlobPath(key)
+  if fs.exists(path) (
+    c.setHeader("Content-Type", contentTypeForKey(key))
     c.setHeader("Cache-Control", blobCacheHeader(key))
-    c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
+    c.file(path)
+    return
+  )
+
+  if r2Local (
+    c.notFound("blob not found")
+    return
+  )
+
+  auto fetched = r2Client.get({key: key})
+  if !fetched.ok or fetched.status.toInt() != 200 (
+    c.notFound("blob not found")
+    return
+  )
+
+  string body = fetched.body.toStr()
+  c.setHeader("Cache-Control", blobCacheHeader(key))
+  c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
 )
 
 def serveProjectJson(*serve.Context c, object project) (
-    string etag = projectJsonEtag(project)
-    c.setHeader("ETag", etag)
-    c.setHeader("Cache-Control", "no-cache")
-    string localPath = localProjectJsonPathFor(project, 0)
-    if localPath != "" (
-        c.setHeader("Content-Type", "application/json")
-        if projectJsonIsGzip(project) (
-            c.setHeader("Content-Encoding", "gzip")
-        )
-        c.file(localPath)
-        return
+  string etag = projectJsonEtag(project)
+  c.setHeader("ETag", etag)
+  c.setHeader("Cache-Control", "no-cache")
+  string localPath = localProjectJsonPathFor(project, 0)
+  if localPath != "" (
+    c.setHeader("Content-Type", "application/json")
+    if projectJsonIsGzip(project) (
+      c.setHeader("Content-Encoding", "gzip")
     )
-    serveProjectJsonStorageKey(c, project.jsonKey.toStr(), projectJsonIsGzip(project))
+    c.file(localPath)
+    return
+  )
+  serveProjectJsonStorageKey(c, project.jsonKey.toStr(), projectJsonIsGzip(project))
 )
 
 import "./r2-snapshot-serving.osl"
 
 def handleGetAssetBlob(*serve.Context c) (
-    string name = c.param("name")
-    string key = assetObjectKey(name)
-    if !isSafeBlobKey(key) (
-        c.notFound("blob not found")
-        return
-    )
+  string name = c.param("name")
+  string key = assetObjectKey(name)
+  if !isSafeBlobKey(key) (
+    c.notFound("blob not found")
+    return
+  )
 
-    string localUrl = publicUrl(key)
-    string remoteBase = r2Local ? "" r2PublicBase
-    string assetUrl = assetUrlForLocation(name, fs.exists(localBlobPath(key)), blobBase() ++ "/assets", remoteBase)
-    if assetUrl != localUrl (
-        c.setHeader("Location", assetUrl)
-        c.setHeader("Cache-Control", "no-cache")
-        c.status(307)
-        return
-    )
+  string localUrl = publicUrl(key)
+  string remoteBase = r2Local ? "" r2PublicBase
+  string assetUrl = assetUrlForLocation(name, fs.exists(localBlobPath(key)), blobBase() ++ "/assets", remoteBase)
+  if assetUrl != localUrl (
+    c.setHeader("Location", assetUrl)
+    c.setHeader("Cache-Control", "no-cache")
+    c.status(307)
+    return
+  )
 
-    serveBlobKey(c, key)
+  serveBlobKey(c, key)
 )
 
 def handleGetProjectBlob(*serve.Context c) (
-    string id = c.param("id")
-    if !isSafePathPart(id) (
-        c.notFound("blob not found")
-        return
-    )
+  string id = c.param("id")
+  if !isSafePathPart(id) (
+    c.notFound("blob not found")
+    return
+  )
 
-    auto projectResult = loadProject(id)
-    if !projectResult.ok (
-        c.notFound("blob not found")
-        return
+  auto projectResult = loadProject(id)
+  if !projectResult.ok (
+    c.notFound("blob not found")
+    return
+  )
+  object project = projectResult.project.assert(object)
+  if projectPrice(project) > 0 (
+    string pk = projectViewKey(project)
+    if pk == "" or c.query("k") != pk (
+      c.notFound("blob not found")
+      return
     )
-    object project = projectResult.project.assert(object)
-    if projectPrice(project) > 0 (
-        string pk = projectViewKey(project)
-        if pk == "" or c.query("k") != pk (
-            c.notFound("blob not found")
-            return
-        )
-    ) else if project.shared != true and projectVisibility(project) != "unlisted" (
-        string k = projectViewKey(project)
-        if k == "" or c.query("k") != k (
-            c.notFound("blob not found")
-            return
-        )
+  ) else if project.shared != true and projectVisibility(project) != "unlisted" (
+    string k = projectViewKey(project)
+    if k == "" or c.query("k") != k (
+      c.notFound("blob not found")
+      return
     )
+  )
 
-    if serveNotModified(c, project) (
-        return
-    )
+  if serveNotModified(c, project) (
+    return
+  )
 
-    serveProjectJson(c, project)
+  serveProjectJson(c, project)
 )
 
 def handleGetProjectWorkspace(*serve.Context c) (
-    c.setHeader("Cache-Control", "private, no-store")
-    c.setHeader("CDN-Cache-Control", "private, no-store")
-    auto result = loadProject(c.param("id"))
-    if !result.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = result.project.assert(object)
-    boolean allowed = canSeeInsideProject(project, c)
-    if !allowed and c.query("pull") != "" (
-        allowed = canAccessPullWorkspace(project, c.query("pull"), c)
-    )
-    array keys = projectWorkspaceKeys(project)
-    if !allowed or keys.len == 0 (
-        c.notFound("workspace not found")
-        return
-    )
-    string etag = projectWorkspaceEtag(project)
-    c.setHeader("ETag", etag)
-    c.setHeader("Vary", "Authorization, Cookie")
-    c.setHeader("Cache-Control", "private, no-store")
-    c.setHeader("CDN-Cache-Control", "private, no-store")
-    if c.header("If-None-Match").contains(etag) (
-        c.status(304)
-        return
-    )
-    c.setHeader("Content-Type", "application/x-mistwarp-project")
-    string workspacePath = cachedProjectWorkspacePath(project)
-    if workspacePath == "" (
-        c.internalError("could not assemble project history")
-        return
-    )
-    c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
-    c.file(workspacePath)
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  boolean allowed = canSeeInsideProject(project, c)
+  if !allowed and c.query("pull") != "" (
+    allowed = canAccessPullWorkspace(project, c.query("pull"), c)
+  )
+  array keys = projectWorkspaceKeys(project)
+  if !allowed or keys.len == 0 (
+    c.notFound("workspace not found")
+    return
+  )
+  string etag = projectWorkspaceEtag(project)
+  c.setHeader("ETag", etag)
+  c.setHeader("Vary", "Authorization, Cookie")
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  if c.header("If-None-Match").contains(etag) (
+    c.status(304)
+    return
+  )
+  c.setHeader("Content-Type", "application/x-mistwarp-project")
+  string workspacePath = cachedProjectWorkspacePath(project)
+  if workspacePath == "" (
+    c.internalError("could not assemble project history")
+    return
+  )
+  c.setHeader("Content-Disposition", "attachment; filename=project.mwp")
+  c.file(workspacePath)
 )

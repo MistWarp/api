@@ -1,402 +1,402 @@
 def projectGameProducts(object project) array (
-    if project.contains("gameProducts") and project.gameProducts != null (
-        return project.gameProducts.assertElse(array, [])
-    )
-    return []
+  if project.contains("gameProducts") and project.gameProducts != null (
+    return project.gameProducts.assertElse(array, [])
+  )
+  return []
 )
 
 def findGameProduct(object project, string productId) object (
-    array products = projectGameProducts(project)
-    for i products.len (
-        object product = products[i].assertElse(object, {})
-        if product.id.toStr() == productId (
-            return {ok: true, product: product}
-        )
+  array products = projectGameProducts(project)
+  for i products.len (
+    object product = products[i].assertElse(object, {})
+    if product.id.toStr() == productId (
+      return {ok: true, product: product}
     )
-    return {ok: false}
+  )
+  return {ok: false}
 )
 
 def gameEntitlementPath(string projectId, string userId) string (
-    return gameEntitlementsDir ++ projectId ++ "/" ++ gameDataUserKey(userId) ++ ".json"
+  return gameEntitlementsDir ++ projectId ++ "/" ++ gameDataUserKey(userId) ++ ".json"
 )
 
 def loadGameEntitlements(string projectId, string userId) object (
-    auto loaded = readFile(gameEntitlementPath(projectId, userId))
-    if !loaded.ok (
-        return {products: {}, updatedAt: 0}
-    )
-    return loaded.data.assert(object)
+  auto loaded = readFile(gameEntitlementPath(projectId, userId))
+  if !loaded.ok (
+    return {products: {}, updatedAt: 0}
+  )
+  return loaded.data.assert(object)
 )
 
 def ownsGameProduct(string projectId, string userId, string productId) boolean (
-    object entitlements = loadGameEntitlements(projectId, userId)
-    object products = entitlements.products.assertElse(object, {})
-    return products.contains(productId)
+  object entitlements = loadGameEntitlements(projectId, userId)
+  object products = entitlements.products.assertElse(object, {})
+  return products.contains(productId)
 )
 
-def gameProductResponse(object project, object product, *serve.Context c) object (
-    string grantsItem = product.grantsItem.toStr()
-    if grantsItem != "" (
-        grantsItem = globalGameItemId(project.id.toStr(), grantsItem)
-    )
-    return {
-        id: product.id,
-        name: product.name,
-        description: product.description,
-        price: product.price,
-        grantsItem: grantsItem,
-        icon: product.icon.toStr(),
-        owned: c.getBool("authenticated") and ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr())
-    }
+def gameProductResponse(object project, object product,*serve.Context c) object (
+  string grantsItem = product.grantsItem.toStr()
+  if grantsItem != "" (
+    grantsItem = globalGameItemId(project.id.toStr(), grantsItem)
+  )
+  return {
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    price: product.price,
+    grantsItem: grantsItem,
+    icon: product.icon.toStr(),
+    owned: c.getBool("authenticated") and ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr())
+  }
 )
 
 def grantGameProductItem(object project, object product, string userId, string paymentId) boolean (
-    string itemId = product.grantsItem.toStr()
-    if itemId == "" (
-        return true
-    )
-    object found = findProjectGameItem(project, itemId)
-    if !found.ok (
-        return false
-    )
-    object granted = grantInventoryItem(userId, project, found.item.assert(object), 1, "purchase", "payment:" ++ paymentId)
-    return granted.ok == true
+  string itemId = product.grantsItem.toStr()
+  if itemId == "" (
+    return true
+  )
+  object found = findProjectGameItem(project, itemId)
+  if !found.ok (
+    return false
+  )
+  object granted = grantInventoryItem(userId, project, found.item.assert(object), 1, "purchase", "payment:" ++ paymentId)
+  return granted.ok == true
 )
 
 def saveGameProductEntitlement(string projectId, string userId, string productId, string paymentId) boolean (
-    string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
-    sync.lock(lockName)
-    object entitlements = loadGameEntitlements(projectId, userId)
-    object products = entitlements.products.assertElse(object, {})
-    products[productId] = {purchasedAt: timestamp, paymentId: paymentId}
-    entitlements.products = products
-    entitlements.updatedAt = timestamp
-    fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
-    boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
-    sync.unlock(lockName)
-    return saved
+  string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
+  sync.lock(lockName)
+  object entitlements = loadGameEntitlements(projectId, userId)
+  object products = entitlements.products.assertElse(object, {})
+  products[productId] = {purchasedAt: timestamp, paymentId: paymentId}
+  entitlements.products = products
+  entitlements.updatedAt = timestamp
+  fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+  boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
+  sync.unlock(lockName)
+  return saved
 )
 
 def removeGameProductEntitlement(string projectId, string userId, string productId) boolean (
-    if !ownsGameProduct(projectId, userId, productId) (
-        return true
-    )
-    string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
-    sync.lock(lockName)
-    object entitlements = loadGameEntitlements(projectId, userId)
-    object products = entitlements.products.assertElse(object, {})
-    products.delete(productId)
-    entitlements.products = products
-    entitlements.updatedAt = timestamp
-    fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
-    boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
-    sync.unlock(lockName)
-    return saved
+  if !ownsGameProduct(projectId, userId, productId) (
+    return true
+  )
+  string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
+  sync.lock(lockName)
+  object entitlements = loadGameEntitlements(projectId, userId)
+  object products = entitlements.products.assertElse(object, {})
+  products.delete(productId)
+  entitlements.products = products
+  entitlements.updatedAt = timestamp
+  fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+  boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
+  sync.unlock(lockName)
+  return saved
 )
 
 def handleListGameProducts(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
-        c.notFound("project not found")
-        return
-    )
-    object project = loaded.project.assert(object)
-    array source = projectGameProducts(project)
-    array products = []
-    for i source.len (
-        products.append(gameProductResponse(project, source[i].assert(object), c))
-    )
-    c.json(200, {ok: true, products: products})
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  array source = projectGameProducts(project)
+  array products = []
+  for i source.len (
+    products.append(gameProductResponse(project, source[i].assert(object), c))
+  )
+  c.json(200, {ok: true, products: products})
 )
 
 def handleOwnsGameProduct(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok (
-        c.notFound("project not found")
-        return
-    )
-    object found = findGameProduct(loaded.project.assert(object), c.param("product"))
-    if !found.ok (
-        c.notFound("game product not found")
-        return
-    )
-    c.json(200, {ok: true, owned: ownsGameProduct(c.param("id"), c.getString("userId"), c.param("product"))})
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object found = findGameProduct(loaded.project.assert(object), c.param("product"))
+  if !found.ok (
+    c.notFound("game product not found")
+    return
+  )
+  c.json(200, {ok: true, owned: ownsGameProduct(c.param("id"), c.getString("userId"), c.param("product"))})
 )
 
 def handleGameProductIntent(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
-        c.notFound("project not found")
-        return
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  object found = findGameProduct(project, c.param("product"))
+  if !found.ok (
+    c.notFound("game product not found")
+    return
+  )
+  object product = found.product.assert(object)
+  if product.price.toNum() <= 0 (
+    if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), "free-claim") (
+      c.internalError("failed to grant game product")
+      return
     )
-    object project = loaded.project.assert(object)
-    object found = findGameProduct(project, c.param("product"))
-    if !found.ok (
-        c.notFound("game product not found")
-        return
+    if !grantGameProductItem(project, product, c.getString("userId"), "free-claim") (
+      c.internalError("failed to grant the product's portable item")
+      return
     )
-    object product = found.product.assert(object)
-    if product.price.toNum() <= 0 (
-        if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), "free-claim") (
-            c.internalError("failed to grant game product")
-            return
-        )
-        if !grantGameProductItem(project, product, c.getString("userId"), "free-claim") (
-            c.internalError("failed to grant the product's portable item")
-            return
-        )
-        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
-        return
+    c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+    return
+  )
+  if commerceServiceKey == "" (
+    c.json(503, {ok: false, error: "purchases are not available right now"})
+    return
+  )
+  if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
+    object entitlements = loadGameEntitlements(project.id.toStr(), c.getString("userId"))
+    object products = entitlements.products.assertElse(object, {})
+    object ownedProduct = products[product.id.toStr()].assertElse(object, {})
+    if !grantGameProductItem(project, product, c.getString("userId"), ownedProduct.paymentId.toStr()) (
+      c.internalError("failed to grant the product's portable item")
+      return
     )
-    if commerceServiceKey == "" (
-        c.json(503, {ok: false, error: "purchases are not available right now"})
-        return
-    )
-    if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
-        object entitlements = loadGameEntitlements(project.id.toStr(), c.getString("userId"))
-        object products = entitlements.products.assertElse(object, {})
-        object ownedProduct = products[product.id.toStr()].assertElse(object, {})
-        if !grantGameProductItem(project, product, c.getString("userId"), ownedProduct.paymentId.toStr()) (
-            c.internalError("failed to grant the product's portable item")
-            return
-        )
-        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
-        return
-    )
-    string key = "mwgame_" ++ randomString(16)
-    object store = prunePurchaseKeys(loadPurchaseKeys())
-    object keys = store.keys
-    keys[key] = {
-        type: "game_product",
-        projectId: project.id.toStr(),
-        productId: product.id.toStr(),
-        buyer: normalizeUsername(c.getString("username")),
-        price: product.price,
-        at: timestamp
-    }
-    store.keys = keys
-    savePurchaseKeys(store)
-    c.json(200, {
-        ok: true,
-        key: key,
-        amount: product.price,
-        title: product.name,
-        resourceId: project.id.toStr() ++ ":" ++ product.id.toStr(),
-        splits: projectCommerceSplits(project)
-    })
+    c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+    return
+  )
+  string key = "mwgame_" ++ randomString(16)
+  object store = prunePurchaseKeys(loadPurchaseKeys())
+  object keys = store.keys
+  keys[key] = {
+    type: "game_product",
+    projectId: project.id.toStr(),
+    productId: product.id.toStr(),
+    buyer: normalizeUsername(c.getString("username")),
+    price: product.price,
+    at: timestamp
+  }
+  store.keys = keys
+  savePurchaseKeys(store)
+  c.json(200, {
+    ok: true,
+    key: key,
+    amount: product.price,
+    title: product.name,
+    resourceId: project.id.toStr() ++ ":" ++ product.id.toStr(),
+    splits: projectCommerceSplits(project)
+  })
 )
 
 def verifyGameProductPayment(string paymentId, string buyer, object project, object product, array expectedSplits) boolean (
-    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
-    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
-    if !resp.success or resp.status.toInt() != 200 (
-        return false
+  string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+  object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+  if !resp.success or resp.status.toInt() != 200 (
+    return false
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return false
+  )
+  object payload = parsed.unwrap().assert(object)
+  object payment = payload.payment.assertElse(object, {})
+  if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "game_product" (
+    return false
+  )
+  string resourceId = project.id.toStr() ++ ":" ++ product.id.toStr()
+  if payment.resource_type.toStr() != "game_product" or payment.resource_id.toStr() != resourceId (
+    return false
+  )
+  if normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < product.price.toNum() (
+    return false
+  )
+  array actual = payment.recipients.assertElse(array, [])
+  if actual.len != expectedSplits.len (
+    return false
+  )
+  for i expectedSplits.len (
+    object expected = expectedSplits[i].assert(object)
+    boolean matched = false
+    for j actual.len (
+      object recipient = actual[j].assert(object)
+      if normalizeUsername(recipient.username.toStr()) == normalizeUsername(expected.username.toStr()) and recipient.basis_points.toNum().toInt() == expected.basis_points.toNum().toInt() (
+        matched = true
+      )
     )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return false
+    if !matched (
+      return false
     )
-    object payload = parsed.unwrap().assert(object)
-    object payment = payload.payment.assertElse(object, {})
-    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" or payment.kind.toStr() != "game_product" (
-        return false
-    )
-    string resourceId = project.id.toStr() ++ ":" ++ product.id.toStr()
-    if payment.resource_type.toStr() != "game_product" or payment.resource_id.toStr() != resourceId (
-        return false
-    )
-    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(buyer) or payment.amount.toNum() + 0.001 < product.price.toNum() (
-        return false
-    )
-    array actual = payment.recipients.assertElse(array, [])
-    if actual.len != expectedSplits.len (
-        return false
-    )
-    for i expectedSplits.len (
-        object expected = expectedSplits[i].assert(object)
-        boolean matched = false
-        for j actual.len (
-            object recipient = actual[j].assert(object)
-            if normalizeUsername(recipient.username.toStr()) == normalizeUsername(expected.username.toStr()) and recipient.basis_points.toNum().toInt() == expected.basis_points.toNum().toInt() (
-                matched = true
-            )
-        )
-        if !matched (
-            return false
-        )
-    )
-    return true
+  )
+  return true
 )
 
 def handleGameProductConfirm(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = loaded.project.assert(object)
-    object found = findGameProduct(project, c.param("product"))
-    if !found.ok (
-        c.notFound("game product not found")
-        return
-    )
-    object product = found.product.assert(object)
-    if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
-        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
-        return
-    )
-    object body = c.bodyJSON()
-    string key = body.key.toStr().strip()
-    string paymentId = body.paymentId.toStr().strip()
-    object store = loadPurchaseKeys()
-    object keys = store.keys
-    if key == "" or paymentId == "" or !keys.contains(key) (
-        c.badRequest("this purchase expired, start again")
-        return
-    )
-    object pending = keys[key].assert(object)
-    string buyer = c.getString("username")
-    if pending.type.toStr() != "game_product" or pending.projectId.toStr() != project.id.toStr() or pending.productId.toStr() != product.id.toStr() or normalizeUsername(pending.buyer.toStr()) != normalizeUsername(buyer) (
-        c.badRequest("this purchase key does not match")
-        return
-    )
-    array splits = projectCommerceSplits(project)
-    if !verifyGameProductPayment(paymentId, buyer, project, product, splits) (
-        c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
-        return
-    )
-    if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), paymentId) (
-        c.internalError("failed to grant game product")
-        return
-    )
-    if !grantGameProductItem(project, product, c.getString("userId"), paymentId) (
-        c.internalError("failed to grant the product's portable item")
-        return
-    )
-    keys.delete(key)
-    store.keys = keys
-    savePurchaseKeys(store)
-    addPurchaseRecord(normalizeUsername(buyer), {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: product.price, at: timestamp, type: "game_product"})
-    addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: product.price})
-    c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  object found = findGameProduct(project, c.param("product"))
+  if !found.ok (
+    c.notFound("game product not found")
+    return
+  )
+  object product = found.product.assert(object)
+  if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
+    c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+    return
+  )
+  object body = c.bodyJSON()
+  string key = body.key.toStr().strip()
+  string paymentId = body.paymentId.toStr().strip()
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  if key == "" or paymentId == "" or !keys.contains(key) (
+    c.badRequest("this purchase expired, start again")
+    return
+  )
+  object pending = keys[key].assert(object)
+  string buyer = c.getString("username")
+  if pending.type.toStr() != "game_product" or pending.projectId.toStr() != project.id.toStr() or pending.productId.toStr() != product.id.toStr() or normalizeUsername(pending.buyer.toStr()) != normalizeUsername(buyer) (
+    c.badRequest("this purchase key does not match")
+    return
+  )
+  array splits = projectCommerceSplits(project)
+  if !verifyGameProductPayment(paymentId, buyer, project, product, splits) (
+    c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
+    return
+  )
+  if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), paymentId) (
+    c.internalError("failed to grant game product")
+    return
+  )
+  if !grantGameProductItem(project, product, c.getString("userId"), paymentId) (
+    c.internalError("failed to grant the product's portable item")
+    return
+  )
+  keys.delete(key)
+  store.keys = keys
+  savePurchaseKeys(store)
+  addPurchaseRecord(normalizeUsername(buyer), {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: product.price, at: timestamp, type: "game_product"})
+  addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: product.price})
+  c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
 )
 
 def verifyGameProductRefund(string paymentId, string creator, string buyer, string projectId, string productId, number price) boolean (
-    if commerceServiceKey == "" or paymentId == "" (
-        return false
-    )
-    string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
-    object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
-    if !resp.success or resp.status.toInt() != 200 (
-        return false
-    )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return false
-    )
-    object payload = parsed.unwrap().assert(object)
-    object payment = payload.payment.assertElse(object, {})
-    if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" (
-        return false
-    )
-    if normalizeUsername(payment.payer.toStr()) != normalizeUsername(creator) or payment.amount.toNum() + 0.001 < price (
-        return false
-    )
-    if payment.resource_type.toStr() != "game_product" or payment.resource_id.toStr() != projectId ++ ":" ++ productId (
-        return false
-    )
-    array actual = payment.recipients.assertElse(array, [])
-    if actual.len == 0 (
-        return true
-    )
-    for i actual.len (
-        object recipient = actual[i].assert(object)
-        if normalizeUsername(recipient.username.toStr()) == normalizeUsername(buyer) (
-            return true
-        )
-    )
+  if commerceServiceKey == "" or paymentId == "" (
     return false
+  )
+  string endpoint = roturBase ++ "/v2/commerce/payments/" ++ url.escape(paymentId) ++ "/verify?source=mistwarp"
+  object resp = requests.get(endpoint, {headers: {"X-Commerce-Key": commerceServiceKey}})
+  if !resp.success or resp.status.toInt() != 200 (
+    return false
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return false
+  )
+  object payload = parsed.unwrap().assert(object)
+  object payment = payload.payment.assertElse(object, {})
+  if payment.status.toStr() != "completed" or payment.source.toStr() != "mistwarp" (
+    return false
+  )
+  if normalizeUsername(payment.payer.toStr()) != normalizeUsername(creator) or payment.amount.toNum() + 0.001 < price (
+    return false
+  )
+  if payment.resource_type.toStr() != "game_product" or payment.resource_id.toStr() != projectId ++ ":" ++ productId (
+    return false
+  )
+  array actual = payment.recipients.assertElse(array, [])
+  if actual.len == 0 (
+    return true
+  )
+  for i actual.len (
+    object recipient = actual[i].assert(object)
+    if normalizeUsername(recipient.username.toStr()) == normalizeUsername(buyer) (
+      return true
+    )
+  )
+  return false
 )
 
 def handleGrantGameProduct(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok (
-        c.notFound("project not found")
-        return
-    )
-    object project = loaded.project.assert(object)
-    if !canEditProject(project, c) (
-        c.forbidden("only the project creator can grant products")
-        return
-    )
-    object found = findGameProduct(project, c.param("product"))
-    if !found.ok (
-        c.notFound("game product not found")
-        return
-    )
-    object product = found.product.assert(object)
-    object body = c.bodyJSON()
-    string targetId = userIdForUsername(body.username.toStr())
-    if targetId == "" (
-        c.badRequest("could not find that user")
-        return
-    )
-    if ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
-        c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
-        return
-    )
-    if !saveGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr(), "creator-grant") (
-        c.internalError("failed to grant game product")
-        return
-    )
-    if !grantGameProductItem(project, product, targetId, "creator-grant") (
-        c.internalError("failed to grant the product's portable item")
-        return
-    )
-    c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("only the project creator can grant products")
+    return
+  )
+  object found = findGameProduct(project, c.param("product"))
+  if !found.ok (
+    c.notFound("game product not found")
+    return
+  )
+  object product = found.product.assert(object)
+  object body = c.bodyJSON()
+  string targetId = userIdForUsername(body.username.toStr())
+  if targetId == "" (
+    c.badRequest("could not find that user")
+    return
+  )
+  if ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
+    c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
+    return
+  )
+  if !saveGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr(), "creator-grant") (
+    c.internalError("failed to grant game product")
+    return
+  )
+  if !grantGameProductItem(project, product, targetId, "creator-grant") (
+    c.internalError("failed to grant the product's portable item")
+    return
+  )
+  c.json(200, {ok: true, product: gameProductResponse(project, product, c)})
 )
 
 def handleRevokeGameProduct(*serve.Context c) (
-    auto loaded = loadProject(c.param("id"))
-    if !loaded.ok (
-        c.notFound("project not found")
-        return
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("only the project creator can revoke products")
+    return
+  )
+  object found = findGameProduct(project, c.param("product"))
+  if !found.ok (
+    c.notFound("game product not found")
+    return
+  )
+  object product = found.product.assert(object)
+  object body = c.bodyJSON()
+  string targetUsername = body.username.toStr()
+  string targetId = userIdForUsername(targetUsername)
+  if targetId == "" (
+    c.badRequest("could not find that user")
+    return
+  )
+  if !ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
+    c.json(200, {ok: true, removed: false})
+    return
+  )
+  number price = product.price.toNum()
+  boolean refunded = false
+  if price > 0 and body.noRefund != true (
+    string paymentId = body.paymentId.toStr().strip()
+    if !verifyGameProductRefund(paymentId, c.getString("username"), targetUsername, project.id.toStr(), product.id.toStr(), price) (
+      c.json(402, {ok: false, error: "refund payment not received yet, send the refund first or revoke without refund"})
+      return
     )
-    object project = loaded.project.assert(object)
-    if !canEditProject(project, c) (
-        c.forbidden("only the project creator can revoke products")
-        return
-    )
-    object found = findGameProduct(project, c.param("product"))
-    if !found.ok (
-        c.notFound("game product not found")
-        return
-    )
-    object product = found.product.assert(object)
-    object body = c.bodyJSON()
-    string targetUsername = body.username.toStr()
-    string targetId = userIdForUsername(targetUsername)
-    if targetId == "" (
-        c.badRequest("could not find that user")
-        return
-    )
-    if !ownsGameProduct(project.id.toStr(), targetId, product.id.toStr()) (
-        c.json(200, {ok: true, removed: false})
-        return
-    )
-    number price = product.price.toNum()
-    boolean refunded = false
-    if price > 0 and body.noRefund != true (
-        string paymentId = body.paymentId.toStr().strip()
-        if !verifyGameProductRefund(paymentId, c.getString("username"), targetUsername, project.id.toStr(), product.id.toStr(), price) (
-            c.json(402, {ok: false, error: "refund payment not received yet, send the refund first or revoke without refund"})
-            return
-        )
-        refunded = true
-    )
-    if !removeGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr()) (
-        c.internalError("failed to revoke game product")
-        return
-    )
-    c.json(200, {ok: true, removed: true, refunded: refunded})
+    refunded = true
+  )
+  if !removeGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr()) (
+    c.internalError("failed to revoke game product")
+    return
+  )
+  c.json(200, {ok: true, removed: true, refunded: refunded})
 )

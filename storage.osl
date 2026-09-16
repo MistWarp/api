@@ -1,378 +1,378 @@
 def ensureDirectories() boolean (
-    boolean result = fs.mkdirAll(projectsDir)
-    result = result and fs.mkdirAll(usersDir)
-    result = result and fs.mkdirAll(sessionsDir)
-    result = result and fs.mkdirAll(commentsDir)
-    result = result and fs.mkdirAll(reportsDir)
-    result = result and fs.mkdirAll(notificationsDir)
-    result = result and fs.mkdirAll(activityDir)
-    result = result and fs.mkdirAll(userSettingsDir)
-    result = result and fs.mkdirAll(tmpDir)
-    result = result and fs.mkdirAll(stagingDir)
-    result = result and fs.mkdirAll(thumbnailsDir)
-    result = result and fs.mkdirAll(quotaDir)
-    result = result and fs.mkdirAll(agreementAcceptDir)
-    result = result and fs.mkdirAll(extensionsDir)
-    result = result and fs.mkdirAll(releasesDir)
-    result = result and fs.mkdirAll(safetyDir)
-    result = result and fs.mkdirAll(trashDir)
-    result = result and fs.mkdirAll(gameSavesDir)
-    result = result and fs.mkdirAll(gameSaveUsageDir)
-    result = result and fs.mkdirAll(gameEntitlementsDir)
-    result = result and fs.mkdirAll(gameInventoryDir)
-    return result
+  boolean result = fs.mkdirAll(projectsDir)
+  result = result and fs.mkdirAll(usersDir)
+  result = result and fs.mkdirAll(sessionsDir)
+  result = result and fs.mkdirAll(commentsDir)
+  result = result and fs.mkdirAll(reportsDir)
+  result = result and fs.mkdirAll(notificationsDir)
+  result = result and fs.mkdirAll(activityDir)
+  result = result and fs.mkdirAll(userSettingsDir)
+  result = result and fs.mkdirAll(tmpDir)
+  result = result and fs.mkdirAll(stagingDir)
+  result = result and fs.mkdirAll(thumbnailsDir)
+  result = result and fs.mkdirAll(quotaDir)
+  result = result and fs.mkdirAll(agreementAcceptDir)
+  result = result and fs.mkdirAll(extensionsDir)
+  result = result and fs.mkdirAll(releasesDir)
+  result = result and fs.mkdirAll(safetyDir)
+  result = result and fs.mkdirAll(trashDir)
+  result = result and fs.mkdirAll(gameSavesDir)
+  result = result and fs.mkdirAll(gameSaveUsageDir)
+  result = result and fs.mkdirAll(gameEntitlementsDir)
+  result = result and fs.mkdirAll(gameInventoryDir)
+  return result
 )
 
 def projectSizeBytes(object project) number (
-    if project.contains("sizeBytes") and project.sizeBytes != null (
-        return project.sizeBytes.toNum()
-    )
-    return 0
+  if project.contains("sizeBytes") and project.sizeBytes != null (
+    return project.sizeBytes.toNum()
+  )
+  return 0
 )
 
 def weekViewsOf(object project) number (
-    if !project.contains("viewHistory") or project.viewHistory == null (
-        return 0
+  if !project.contains("viewHistory") or project.viewHistory == null (
+    return 0
+  )
+  object history = project.viewHistory.assert(object)
+  array keys = history.getKeys()
+  number today = (timestamp / 86400000).toInt()
+  number total = 0
+  for i keys.len (
+    string k = keys[i].toStr()
+    if today - k.toNum() < 7 (
+      total = total + history[k].toNum()
     )
-    object history = project.viewHistory.assert(object)
-    array keys = history.getKeys()
-    number today = (timestamp / 86400000).toInt()
-    number total = 0
-    for i keys.len (
-        string k = keys[i].toStr()
-        if today - k.toNum() < 7 (
-            total = total + history[k].toNum()
-        )
-    )
-    return total
+  )
+  return total
 )
 
 def loadAssetsIndex() object (
-    auto result = readFile(assetsIndexFile)
-    if !result.ok (
-        return {assets: {}}
-    )
-    return result.data.assert(object)
+  auto result = readFile(assetsIndexFile)
+  if !result.ok (
+    return {assets: {}}
+  )
+  return result.data.assert(object)
 )
 
 def saveAssetsIndex(object index) boolean (
-    return writeFile(assetsIndexFile, index)
+  return writeFile(assetsIndexFile, index)
 )
 
 def readFile(string path) object (
-    if !fs.exists(path) (
-        return {ok: false, error: "file not found"}
-    )
-    string content = fs.readFile(path)
-    auto parsed = json.parse(content, {type: "object"})
-    if parsed.isErr() (
-        return {ok: false, error: "invalid json"}
-    )
-    return {ok: true, data: parsed.unwrap()}
+  if !fs.exists(path) (
+    return {ok: false, error: "file not found"}
+  )
+  string content = fs.readFile(path)
+  auto parsed = json.parse(content, {type: "object"})
+  if parsed.isErr() (
+    return {ok: false, error: "invalid json"}
+  )
+  return {ok: true, data: parsed.unwrap()}
 )
 
 def writeFile(string path, object data) boolean (
-    string tmpPath = path ++ ".tmp." ++ randomString(8)
-    if !fs.writeFile(tmpPath, json.stringify(data)) (
-        return false
-    )
-    if !fs.rename(tmpPath, path) (
-        fs.remove(tmpPath)
-        return false
-    )
-    return true
+  string tmpPath = path ++ ".tmp." ++ randomString(8)
+  if !fs.writeFile(tmpPath, json.stringify(data)) (
+    return false
+  )
+  if !fs.rename(tmpPath, path) (
+    fs.remove(tmpPath)
+    return false
+  )
+  return true
 )
 
 def loadIndex() object (
-    auto result = readFile(indexFile)
-    if !result.ok (
-        return {projects: {}}
-    )
-    return result.data.assert(object)
+  auto result = readFile(indexFile)
+  if !result.ok (
+    return {projects: {}}
+  )
+  return result.data.assert(object)
 )
 
 def saveIndex(object index) boolean (
-    return writeFile(indexFile, index)
+  return writeFile(indexFile, index)
 )
 
 def indexEntryFromProject(object project) object (
-    array loves = project.loves.assert(array)
-    array broken = []
-    if project.contains("brokenhearts") (
-        broken = project.brokenhearts.assert(array)
+  array loves = project.loves.assert(array)
+  array broken = []
+  if project.contains("brokenhearts") (
+    broken = project.brokenhearts.assert(array)
+  )
+  array tags = []
+  if project.contains("tags") and project.tags != null (
+    tags = project.tags.assert(array)
+  )
+  array contributors = []
+  if project.contains("collaborators") and project.collaborators != null (
+    array collaborators = project.collaborators.assert(array)
+    for i collaborators.len (
+      object collaborator = collaborators[i].assert(object)
+      string username = collaborator.username.toStr().strip()
+      if username != "" and !contributors.contains(username) (
+        contributors.append(username)
+      )
     )
-    array tags = []
-    if project.contains("tags") and project.tags != null (
-        tags = project.tags.assert(array)
+  )
+  if project.contains("mergedContributors") and project.mergedContributors != null (
+    array merged = project.mergedContributors.assert(array)
+    for i merged.len (
+      string username = merged[i].toStr().strip()
+      if username != "" and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) and !contributors.contains(username) (
+        contributors.append(username)
+      )
     )
-    array contributors = []
-    if project.contains("collaborators") and project.collaborators != null (
-        array collaborators = project.collaborators.assert(array)
-        for i collaborators.len (
-            object collaborator = collaborators[i].assert(object)
-            string username = collaborator.username.toStr().strip()
-            if username != "" and !contributors.contains(username) (
-                contributors.append(username)
-            )
-        )
-    )
-    if project.contains("mergedContributors") and project.mergedContributors != null (
-        array merged = project.mergedContributors.assert(array)
-        for i merged.len (
-            string username = merged[i].toStr().strip()
-            if username != "" and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) and !contributors.contains(username) (
-                contributors.append(username)
-            )
-        )
-    )
-    number acceptedChanges = 0
-    if project.contains("acceptedChanges") and project.acceptedChanges != null (
-        acceptedChanges = project.acceptedChanges.toNum()
-    )
-    string ownerId = ""
-    if project.contains("ownerId") and project.ownerId != null (
-        ownerId = project.ownerId.toStr()
-    )
-    if ownerId == "" and project.contains("owner") and project.owner != null (
-        ownerId = userIdForUsername(project.owner.toStr())
-    )
-    string remixRoot = ""
-    if project.contains("remixRoot") and project.remixRoot != null (
-        remixRoot = project.remixRoot.toStr()
-    )
-    string groupTag = ""
-    if project.contains("groupTag") and project.groupTag != null (
-        groupTag = normalizeGroupTag(project.groupTag.toStr())
-    )
-    string vanitySlug = ""
-    if project.contains("vanitySlug") and project.vanitySlug != null (
-        vanitySlug = project.vanitySlug.toStr()
-    )
-    return {
-        id: project.id,
-        owner: project.owner,
-        ownerId: ownerId,
-        ownerKey: normalizeUsername(project.owner.toStr()),
-        groupTag: groupTag,
-        vanitySlug: vanitySlug,
-        title: project.title,
-        thumbUrl: thumbUrlFor(project),
-        views: project.views,
-        loveCount: loves.len,
-        brokenHeartCount: broken.len,
-        remixParent: project.remixParent,
-        remixRoot: remixRoot,
-        contributionOnly: projectContributionOnlyFlag(project),
-        shared: project.shared,
-        visibility: projectVisibility(project),
-        price: projectPrice(project),
-        revenue: projectRevenue(project),
-        created: project.created,
-        edited: project.edited,
-        sharedAt: project.sharedAt,
-        sizeBytes: projectSizeBytes(project),
-        weekViews: weekViewsOf(project),
-        teamSize: contributors.len + 1,
-        contributors: contributors,
-        acceptedChanges: acceptedChanges,
-        tags: tags
-    }
+  )
+  number acceptedChanges = 0
+  if project.contains("acceptedChanges") and project.acceptedChanges != null (
+    acceptedChanges = project.acceptedChanges.toNum()
+  )
+  string ownerId = ""
+  if project.contains("ownerId") and project.ownerId != null (
+    ownerId = project.ownerId.toStr()
+  )
+  if ownerId == "" and project.contains("owner") and project.owner != null (
+    ownerId = userIdForUsername(project.owner.toStr())
+  )
+  string remixRoot = ""
+  if project.contains("remixRoot") and project.remixRoot != null (
+    remixRoot = project.remixRoot.toStr()
+  )
+  string groupTag = ""
+  if project.contains("groupTag") and project.groupTag != null (
+    groupTag = normalizeGroupTag(project.groupTag.toStr())
+  )
+  string vanitySlug = ""
+  if project.contains("vanitySlug") and project.vanitySlug != null (
+    vanitySlug = project.vanitySlug.toStr()
+  )
+  return {
+    id: project.id,
+    owner: project.owner,
+    ownerId: ownerId,
+    ownerKey: normalizeUsername(project.owner.toStr()),
+    groupTag: groupTag,
+    vanitySlug: vanitySlug,
+    title: project.title,
+    thumbUrl: thumbUrlFor(project),
+    views: project.views,
+    loveCount: loves.len,
+    brokenHeartCount: broken.len,
+    remixParent: project.remixParent,
+    remixRoot: remixRoot,
+    contributionOnly: projectContributionOnlyFlag(project),
+    shared: project.shared,
+    visibility: projectVisibility(project),
+    price: projectPrice(project),
+    revenue: projectRevenue(project),
+    created: project.created,
+    edited: project.edited,
+    sharedAt: project.sharedAt,
+    sizeBytes: projectSizeBytes(project),
+    weekViews: weekViewsOf(project),
+    teamSize: contributors.len + 1,
+    contributors: contributors,
+    acceptedChanges: acceptedChanges,
+    tags: tags
+  }
 )
 
 def refreshIndexUrls() boolean (
-    array projects = projectSearchDocs.all()
-    boolean changed = false
-    for i projects.len (
-        object entry = projects[i].assert(object)
-        string thumbUrl = thumbUrlFor(entry)
-        if entry.thumbUrl.toStr() != thumbUrl (
-            entry.thumbUrl = thumbUrl
-            putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
-            changed = true
-        )
+  array projects = projectSearchDocs.all()
+  boolean changed = false
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    string thumbUrl = thumbUrlFor(entry)
+    if entry.thumbUrl.toStr() != thumbUrl (
+      entry.thumbUrl = thumbUrl
+      putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+      changed = true
     )
-    if changed (
-        sharedProjectsCache.delete("projects")
-    )
-    return true
+  )
+  if changed (
+    sharedProjectsCache.delete("projects")
+  )
+  return true
 )
 
 def upsertIndexEntry(object project) boolean (
-    return syncSearchProject(project)
+  return syncSearchProject(project)
 )
 
 def removeFromIndex(string id) boolean (
-    return removeSearchProject(id)
+  return removeSearchProject(id)
 )
 
 def loadProject(string id) object (
-    if !isSafePathPart(id) (
-        return {ok: false, error: "invalid project id"}
+  if !isSafePathPart(id) (
+    return {ok: false, error: "invalid project id"}
+  )
+  auto result = readFile(projectsDir ++ id ++ ".json")
+  if !result.ok (
+    string projectPath = projectsDir ++ id ++ ".json"
+    boolean missing = raw("func() bool { _, err := OSLos.Stat(projectPath); return OSLos.IsNotExist(err) }()")
+    return {ok: false, error: missing ? "project not found" "project read failed", missing: missing, retryable:!missing}
+  )
+  object project = result.data.assert(object)
+  if (!project.contains("ownerId") or project.ownerId == null or project.ownerId.toStr() == "") and project.contains("owner") and project.owner != null (
+    string uid = userIdForUsername(project.owner.toStr())
+    if uid != "" (
+      project.ownerId = uid
     )
-    auto result = readFile(projectsDir ++ id ++ ".json")
-    if !result.ok (
-        string projectPath = projectsDir ++ id ++ ".json"
-        boolean missing = raw("func() bool { _, err := OSLos.Stat(projectPath); return OSLos.IsNotExist(err) }()")
-        return {ok: false, error: missing ? "project not found" "project read failed", missing: missing, retryable: !missing}
-    )
-    object project = result.data.assert(object)
-    if (!project.contains("ownerId") or project.ownerId == null or project.ownerId.toStr() == "") and project.contains("owner") and project.owner != null (
-        string uid = userIdForUsername(project.owner.toStr())
-        if uid != "" (
-            project.ownerId = uid
-        )
-    )
-    return {ok: true, project: project}
+  )
+  return {ok: true, project: project}
 )
 
 def saveProject(object project) boolean (
-    string id = project.id.toStr()
-    if !isSafePathPart(id) (
-        return false
-    )
-    // Keep the inactivity scan and eviction consistent with published edits.
-    sync.lock("r2-upload-queue")
-    boolean saved = writeFile(projectsDir ++ id ++ ".json", project)
-    sync.unlock("r2-upload-queue")
-    return saved
+  string id = project.id.toStr()
+  if !isSafePathPart(id) (
+    return false
+  )
+  // Keep the inactivity scan and eviction consistent with published edits.
+  sync.lock("r2-upload-queue")
+  boolean saved = writeFile(projectsDir ++ id ++ ".json", project)
+  sync.unlock("r2-upload-queue")
+  return saved
 )
 
 def deleteProjectFile(string id) boolean (
-    if !isSafePathPart(id) (
-        return false
-    )
-    return fs.remove(projectsDir ++ id ++ ".json")
+  if !isSafePathPart(id) (
+    return false
+  )
+  return fs.remove(projectsDir ++ id ++ ".json")
 )
 
 def defaultProfile(string username) object (
-    return {
-        userId: "",
-        username: username,
-        bio: "",
-        featuredProject: "",
-        followers: [],
-        following: [],
-        created: timestamp
-    }
+  return {
+    userId: "",
+    username: username,
+    bio: "",
+    featuredProject: "",
+    followers: [],
+    following: [],
+    created: timestamp
+  }
 )
 
 def profileExists(string username) boolean (
-    string key = normalizeUsername(username)
-    return isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
+  string key = normalizeUsername(username)
+  return isSafePathPart(key) and fs.exists(usersDir ++ key ++ ".json")
 )
 
 def loadProfile(string username) object (
-    string key = normalizeUsername(username)
-    if !isSafePathPart(key) (
-        return defaultProfile(username)
-    )
-    auto result = readFile(usersDir ++ key ++ ".json")
-    if !result.ok (
-        return defaultProfile(username)
-    )
-    return result.data.assert(object)
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    return defaultProfile(username)
+  )
+  auto result = readFile(usersDir ++ key ++ ".json")
+  if !result.ok (
+    return defaultProfile(username)
+  )
+  return result.data.assert(object)
 )
 
 def saveProfile(object profile) boolean (
-    string key = normalizeUsername(profile.username.toStr())
-    if !isSafePathPart(key) (
-        return false
-    )
-    boolean saved = writeFile(usersDir ++ key ++ ".json", profile)
-    syncSearchProfile(profile)
-    return saved
+  string key = normalizeUsername(profile.username.toStr())
+  if !isSafePathPart(key) (
+    return false
+  )
+  boolean saved = writeFile(usersDir ++ key ++ ".json", profile)
+  syncSearchProfile(profile)
+  return saved
 )
 
 def loadActivity(string username) array (
-    string key = normalizeUsername(username)
-    if !isSafePathPart(key) (
-        return []
-    )
-    auto result = readFile(activityDir ++ key ++ ".json")
-    if !result.ok (
-        return []
-    )
-    object data = result.data.assert(object)
-    return data.items.assert(array)
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    return []
+  )
+  auto result = readFile(activityDir ++ key ++ ".json")
+  if !result.ok (
+    return []
+  )
+  object data = result.data.assert(object)
+  return data.items.assert(array)
 )
 
 def addActivity(string username, string activityType, object extra) (
-    string key = normalizeUsername(username)
-    if !isSafePathPart(key) (
-        return
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    return
+  )
+  object item = {type: activityType, actor: key, created: timestamp}
+  array extraKeys = extra.getKeys()
+  for i extraKeys.len (
+    string k = extraKeys[i].toStr()
+    item[k] = extra[k]
+  )
+  array items = [item]
+  array existing = loadActivity(key)
+  for i existing.len (
+    if items.len < 50 (
+      items.append(existing[i])
     )
-    object item = {type: activityType, actor: key, created: timestamp}
-    array extraKeys = extra.getKeys()
-    for i extraKeys.len (
-        string k = extraKeys[i].toStr()
-        item[k] = extra[k]
-    )
-    array items = [item]
-    array existing = loadActivity(key)
-    for i existing.len (
-        if items.len < 50 (
-            items.append(existing[i])
-        )
-    )
-    writeFile(activityDir ++ key ++ ".json", {items: items})
+  )
+  writeFile(activityDir ++ key ++ ".json", {items: items})
 )
 
 def loadCommentsLegacy(string key) array (
-    auto result = readFile(commentsDir ++ key ++ ".json")
-    if !result.ok (
-        return []
-    )
-    object data = result.data.assert(object)
-    return data.comments.assert(array)
+  auto result = readFile(commentsDir ++ key ++ ".json")
+  if !result.ok (
+    return []
+  )
+  object data = result.data.assert(object)
+  return data.comments.assert(array)
 )
 
 def loadComments(string key) array (
-    if !isSafePathPart(key) (
-        return []
+  if !isSafePathPart(key) (
+    return []
+  )
+  string path = commentsDir ++ key ++ ".jsonl"
+  if !fs.exists(path) (
+    return loadCommentsLegacy(key)
+  )
+  array lines = fs.readFile(path).split("\n")
+  array out = []
+  for i lines.len (
+    string line = lines[i].toStr().strip()
+    if line != "" (
+      auto parsed = json.parse(line, {type: "object"})
+      if !parsed.isErr() (
+        out.append(parsed.unwrap())
+      )
     )
-    string path = commentsDir ++ key ++ ".jsonl"
-    if !fs.exists(path) (
-        return loadCommentsLegacy(key)
-    )
-    array lines = fs.readFile(path).split("\n")
-    array out = []
-    for i lines.len (
-        string line = lines[i].toStr().strip()
-        if line != "" (
-            auto parsed = json.parse(line, {type: "object"})
-            if !parsed.isErr() (
-                out.append(parsed.unwrap())
-            )
-        )
-    )
-    return out
+  )
+  return out
 )
 
 def saveComments(string key, array comments) boolean (
-    if !isSafePathPart(key) (
-        return false
-    )
-    string out = ""
-    for i comments.len (
-        out = out ++ json.stringify(comments[i]) ++ "\n"
-    )
-    string path = commentsDir ++ key ++ ".jsonl"
-    string tmpPath = path ++ ".tmp." ++ randomString(8)
-    if !fs.writeFile(tmpPath, out) (
-        return false
-    )
-    boolean ok = fs.rename(tmpPath, path)
-    if !ok (
-        fs.remove(tmpPath)
-        return false
-    )
-    fs.remove(commentsDir ++ key ++ ".json")
-    return true
+  if !isSafePathPart(key) (
+    return false
+  )
+  string out = ""
+  for i comments.len (
+    out = out ++ json.stringify(comments[i]) ++ "\n"
+  )
+  string path = commentsDir ++ key ++ ".jsonl"
+  string tmpPath = path ++ ".tmp." ++ randomString(8)
+  if !fs.writeFile(tmpPath, out) (
+    return false
+  )
+  boolean ok = fs.rename(tmpPath, path)
+  if !ok (
+    fs.remove(tmpPath)
+    return false
+  )
+  fs.remove(commentsDir ++ key ++ ".json")
+  return true
 )
 
 def appendComment(string key, object comment) boolean (
-    if !isSafePathPart(key) (
-        return false
-    )
-    return fs.appendToFile(commentsDir ++ key ++ ".jsonl", json.stringify(comment) ++ "\n")
+  if !isSafePathPart(key) (
+    return false
+  )
+  return fs.appendToFile(commentsDir ++ key ++ ".jsonl", json.stringify(comment) ++ "\n")
 )

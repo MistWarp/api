@@ -1,873 +1,873 @@
 def loadUserIds() object (
-    auto result = readFile(userIdsFile)
-    if !result.ok (
-        return {users: {}}
-    )
-    return result.data.assert(object)
+  auto result = readFile(userIdsFile)
+  if !result.ok (
+    return {users: {}}
+  )
+  return result.data.assert(object)
 )
 
 def saveUserIds(object data) boolean (
-    return writeFile(userIdsFile, data)
+  return writeFile(userIdsFile, data)
 )
 
 def replaceUserInArray(array items, string oldKey, string newKey) array (
-    array next = []
-    for i items.len (
-        string value = items[i].toStr()
-        if normalizeUsername(value) == oldKey (
-            next.append(newKey)
-        ) else (
-            next.append(value)
-        )
+  array next = []
+  for i items.len (
+    string value = items[i].toStr()
+    if normalizeUsername(value) == oldKey (
+      next.append(newKey)
+    ) else (
+      next.append(value)
     )
-    return next
+  )
+  return next
 )
 
 def arrayContainsUserKey(array items, string key) boolean (
-    for i items.len (
-        if normalizeUsername(items[i].toStr()) == key (
-            return true
-        )
+  for i items.len (
+    if normalizeUsername(items[i].toStr()) == key (
+      return true
     )
-    return false
+  )
+  return false
 )
 
 def userIdForUsername(string username) string (
-    string wanted = normalizeUsername(username)
-    if wanted == "" (
-        return ""
-    )
-    string cacheKey = "username:" ++ wanted
-    if userIdsCache.has(cacheKey) (
-        return userIdsCache.get(cacheKey).toStr()
-    )
-    object data = loadUserIds()
-    object users = data.users
-    array ids = users.getKeys()
-    for i ids.len (
-        string userId = ids[i].toStr()
-        if normalizeUsername(users[userId].toStr()) == wanted (
-            userIdsCache.set(cacheKey, userId)
-            return userId
-        )
-    )
-    userIdsCache.set(cacheKey, "")
+  string wanted = normalizeUsername(username)
+  if wanted == "" (
     return ""
+  )
+  string cacheKey = "username:" ++ wanted
+  if userIdsCache.has(cacheKey) (
+    return userIdsCache.get(cacheKey).toStr()
+  )
+  object data = loadUserIds()
+  object users = data.users
+  array ids = users.getKeys()
+  for i ids.len (
+    string userId = ids[i].toStr()
+    if normalizeUsername(users[userId].toStr()) == wanted (
+      userIdsCache.set(cacheKey, userId)
+      return userId
+    )
+  )
+  userIdsCache.set(cacheKey, "")
+  return ""
 )
 
 def identityMatches(string storedId, string storedUsername, string userId, string username) boolean (
-    if storedId != "" and userId != "" (
-        return storedId == userId
-    )
-    return normalizeUsername(storedUsername) == normalizeUsername(username)
+  if storedId != "" and userId != "" (
+    return storedId == userId
+  )
+  return normalizeUsername(storedUsername) == normalizeUsername(username)
 )
 
 def renameUserFile(string dir, string oldKey, string newKey) (
-    if oldKey != newKey and fs.exists(dir ++ oldKey ++ ".json") (
-        fs.rename(dir ++ oldKey ++ ".json", dir ++ newKey ++ ".json")
-    )
+  if oldKey != newKey and fs.exists(dir ++ oldKey ++ ".json") (
+    fs.rename(dir ++ oldKey ++ ".json", dir ++ newKey ++ ".json")
+  )
 )
 
 def renameUserInProfiles(string oldKey, string newKey, string newName) (
-    renameUserFile(usersDir, oldKey, newKey)
-    object profile = loadProfile(newName)
-    string userId = userIdForUsername(oldKey)
-    if userId != "" (
-        profile.userId = userId
-    )
-    profile.username = newName
-    saveProfile(profile)
-    if oldKey != newKey (
-        profileSearchDocs.deleteOne({_id: oldKey})
-    )
-    array files = fs.readDir(usersDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") and name != newKey ++ ".json" (
-            auto result = readFile(usersDir ++ name)
-            if result.ok (
-                object other = result.data.assert(object)
-                boolean changed = false
-                array followers = other.followers.assert(array)
-                if arrayContainsUserKey(followers, oldKey) (
-                    other.followers = replaceUserInArray(followers, oldKey, newName)
-                    changed = true
-                )
-                array following = other.following.assert(array)
-                if arrayContainsUserKey(following, oldKey) (
-                    other.following = replaceUserInArray(following, oldKey, newName)
-                    changed = true
-                )
-                if other.contains("purchases") and other.purchases != null (
-                    array purchases = other.purchases.assert(array)
-                    for j purchases.len (
-                        object purchase = purchases[j].assert(object)
-                        if normalizeUsername(purchase.seller.toStr()) == oldKey (
-                            purchase.seller = newName
-                            purchases[j] = purchase
-                            changed = true
-                        )
-                    )
-                    other.purchases = purchases
-                )
-                if changed (
-                    saveProfile(other)
-                )
-            )
+  renameUserFile(usersDir, oldKey, newKey)
+  object profile = loadProfile(newName)
+  string userId = userIdForUsername(oldKey)
+  if userId != "" (
+    profile.userId = userId
+  )
+  profile.username = newName
+  saveProfile(profile)
+  if oldKey != newKey (
+    profileSearchDocs.deleteOne({_id: oldKey})
+  )
+  array files = fs.readDir(usersDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") and name != newKey ++ ".json" (
+      auto result = readFile(usersDir ++ name)
+      if result.ok (
+        object other = result.data.assert(object)
+        boolean changed = false
+        array followers = other.followers.assert(array)
+        if arrayContainsUserKey(followers, oldKey) (
+          other.followers = replaceUserInArray(followers, oldKey, newName)
+          changed = true
         )
+        array following = other.following.assert(array)
+        if arrayContainsUserKey(following, oldKey) (
+          other.following = replaceUserInArray(following, oldKey, newName)
+          changed = true
+        )
+        if other.contains("purchases") and other.purchases != null (
+          array purchases = other.purchases.assert(array)
+          for j purchases.len (
+            object purchase = purchases[j].assert(object)
+            if normalizeUsername(purchase.seller.toStr()) == oldKey (
+              purchase.seller = newName
+              purchases[j] = purchase
+              changed = true
+            )
+          )
+          other.purchases = purchases
+        )
+        if changed (
+          saveProfile(other)
+        )
+      )
     )
+  )
 )
 
 def renameUserInProjects(string oldKey, string newKey, string newName, string userId) (
-    array files = fs.readDir(projectsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = loadProject(name.replace(".json", ""))
-            if result.ok (
-                object project = result.project.assert(object)
-                boolean changed = false
-                if normalizeUsername(project.owner.toStr()) == oldKey (
-                    project.owner = newName
-                    project.ownerId = userId
-                    changed = true
-                )
-                array loves = project.loves.assert(array)
-                if arrayContainsUserKey(loves, oldKey) (
-                    project.loves = replaceUserInArray(loves, oldKey, newName)
-                    changed = true
-                )
-                if project.contains("brokenhearts") and project.brokenhearts != null (
-                    array broken = project.brokenhearts.assert(array)
-                    if arrayContainsUserKey(broken, oldKey) (
-                        project.brokenhearts = replaceUserInArray(broken, oldKey, newName)
-                        changed = true
-                    )
-                )
-                if project.contains("buyers") and project.buyers != null (
-                    array buyers = project.buyers.assert(array)
-                    for j buyers.len (
-                        object buyer = buyers[j].assert(object)
-                        if normalizeUsername(buyer.user.toStr()) == oldKey (
-                            buyer.user = newName
-                            buyers[j] = buyer
-                            changed = true
-                        )
-                    )
-                    project.buyers = buyers
-                )
-                if project.contains("collaborators") and project.collaborators != null (
-                    array collaborators = project.collaborators.assert(array)
-                    for j collaborators.len (
-                        object collaborator = collaborators[j].assert(object)
-                        if normalizeUsername(collaborator.username.toStr()) == oldKey (
-                            collaborator.username = newName
-                            collaborator.userId = userId
-                            collaborators[j] = collaborator
-                            changed = true
-                        )
-                    )
-                    project.collaborators = collaborators
-                )
-                if project.contains("mergedContributors") and project.mergedContributors != null (
-                    array contributors = project.mergedContributors.assert(array)
-                    if stringArrayContainsUser(contributors, oldKey) (
-                        project.mergedContributors = replaceUserInArray(contributors, oldKey, newName)
-                        changed = true
-                    )
-                )
-                if changed (
-                    saveProject(project)
-                    upsertIndexEntry(project)
-                )
-            )
+  array files = fs.readDir(projectsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto result = loadProject(name.replace(".json", ""))
+      if result.ok (
+        object project = result.project.assert(object)
+        boolean changed = false
+        if normalizeUsername(project.owner.toStr()) == oldKey (
+          project.owner = newName
+          project.ownerId = userId
+          changed = true
         )
+        array loves = project.loves.assert(array)
+        if arrayContainsUserKey(loves, oldKey) (
+          project.loves = replaceUserInArray(loves, oldKey, newName)
+          changed = true
+        )
+        if project.contains("brokenhearts") and project.brokenhearts != null (
+          array broken = project.brokenhearts.assert(array)
+          if arrayContainsUserKey(broken, oldKey) (
+            project.brokenhearts = replaceUserInArray(broken, oldKey, newName)
+            changed = true
+          )
+        )
+        if project.contains("buyers") and project.buyers != null (
+          array buyers = project.buyers.assert(array)
+          for j buyers.len (
+            object buyer = buyers[j].assert(object)
+            if normalizeUsername(buyer.user.toStr()) == oldKey (
+              buyer.user = newName
+              buyers[j] = buyer
+              changed = true
+            )
+          )
+          project.buyers = buyers
+        )
+        if project.contains("collaborators") and project.collaborators != null (
+          array collaborators = project.collaborators.assert(array)
+          for j collaborators.len (
+            object collaborator = collaborators[j].assert(object)
+            if normalizeUsername(collaborator.username.toStr()) == oldKey (
+              collaborator.username = newName
+              collaborator.userId = userId
+              collaborators[j] = collaborator
+              changed = true
+            )
+          )
+          project.collaborators = collaborators
+        )
+        if project.contains("mergedContributors") and project.mergedContributors != null (
+          array contributors = project.mergedContributors.assert(array)
+          if stringArrayContainsUser(contributors, oldKey) (
+            project.mergedContributors = replaceUserInArray(contributors, oldKey, newName)
+            changed = true
+          )
+        )
+        if changed (
+          saveProject(project)
+          upsertIndexEntry(project)
+        )
+      )
     )
+  )
 )
 
 def renameIdentityFieldInCollection(*db.Collection collection, string nameField, string idField, string oldKey, string newName, string userId) (
-    array documents = collection.all()
-    for i documents.len (
-        object document = documents[i].assert(object)
-        if document.contains(nameField) and document[nameField] != null and normalizeUsername(document[nameField].toStr()) == oldKey (
-            document[nameField] = newName
-            document[idField] = userId
-            putDocument(collection, document["_id"].toStr(), document)
-        )
+  array documents = collection.all()
+  for i documents.len (
+    object document = documents[i].assert(object)
+    if document.contains(nameField) and document[nameField] != null and normalizeUsername(document[nameField].toStr()) == oldKey (
+      document[nameField] = newName
+      document[idField] = userId
+      putDocument(collection, document["_id"].toStr(), document)
     )
+  )
 )
 
 def renameArrayFieldInCollection(*db.Collection collection, string field, string oldKey, string newName) (
-    array documents = collection.all()
-    for i documents.len (
-        object document = documents[i].assert(object)
-        if document.contains(field) and document[field] != null (
-            array items = document[field].assert(array)
-            if arrayContainsUserKey(items, oldKey) (
-                document[field] = replaceUserInArray(items, oldKey, newName)
-                putDocument(collection, document["_id"].toStr(), document)
-            )
-        )
+  array documents = collection.all()
+  for i documents.len (
+    object document = documents[i].assert(object)
+    if document.contains(field) and document[field] != null (
+      array items = document[field].assert(array)
+      if arrayContainsUserKey(items, oldKey) (
+        document[field] = replaceUserInArray(items, oldKey, newName)
+        putDocument(collection, document["_id"].toStr(), document)
+      )
     )
+  )
 )
 
 def renameUserInSpaces(string oldKey, string newName, string userId) (
-    renameIdentityFieldInCollection(spaceDocs, "owner", "ownerId", oldKey, newName, userId)
-    renameArrayFieldInCollection(spaceDocs, "followers", oldKey, newName)
-    renameArrayFieldInCollection(spaceDocs, "managers", oldKey, newName)
-    renameArrayFieldInCollection(spaceDocs, "participants", oldKey, newName)
-    renameArrayFieldInCollection(spaceDocs, "judges", oldKey, newName)
-    renameArrayFieldInCollection(spaceDocs, "likes", oldKey, newName)
-    renameArrayFieldInCollection(spaceDocs, "brokenHearts", oldKey, newName)
-    array spaces = spaceDocs.all()
-    for i spaces.len (
-        object space = spaces[i].assert(object)
-        boolean changed = false
-        array objectArrays = ["curatorInvites", "judgeInvites", "scores", "audienceVotes", "submissions"]
-        for a objectArrays.len (
-            string field = objectArrays[a].toStr()
-            if space.contains(field) and space[field] != null (
-                array entries = space[field].assert(array)
-                for j entries.len (
-                    object entry = entries[j].assert(object)
-                    array nameFields = ["username", "invitedBy", "judge", "owner"]
-                    for f nameFields.len (
-                        string nameField = nameFields[f].toStr()
-                        if entry.contains(nameField) and entry[nameField] != null and normalizeUsername(entry[nameField].toStr()) == oldKey (
-                            entry[nameField] = newName
-                            entry[nameField ++ "Id"] = userId
-                            changed = true
-                        )
-                    )
-                )
+  renameIdentityFieldInCollection(spaceDocs, "owner", "ownerId", oldKey, newName, userId)
+  renameArrayFieldInCollection(spaceDocs, "followers", oldKey, newName)
+  renameArrayFieldInCollection(spaceDocs, "managers", oldKey, newName)
+  renameArrayFieldInCollection(spaceDocs, "participants", oldKey, newName)
+  renameArrayFieldInCollection(spaceDocs, "judges", oldKey, newName)
+  renameArrayFieldInCollection(spaceDocs, "likes", oldKey, newName)
+  renameArrayFieldInCollection(spaceDocs, "brokenHearts", oldKey, newName)
+  array spaces = spaceDocs.all()
+  for i spaces.len (
+    object space = spaces[i].assert(object)
+    boolean changed = false
+    array objectArrays = ["curatorInvites", "judgeInvites", "scores", "audienceVotes", "submissions"]
+    for a objectArrays.len (
+      string field = objectArrays[a].toStr()
+      if space.contains(field) and space[field] != null (
+        array entries = space[field].assert(array)
+        for j entries.len (
+          object entry = entries[j].assert(object)
+          array nameFields = ["username", "invitedBy", "judge", "owner"]
+          for f nameFields.len (
+            string nameField = nameFields[f].toStr()
+            if entry.contains(nameField) and entry[nameField] != null and normalizeUsername(entry[nameField].toStr()) == oldKey (
+              entry[nameField] = newName
+              entry[nameField ++ "Id"] = userId
+              changed = true
             )
+          )
         )
-        if changed (
-            putDocument(spaceDocs, space["_id"].toStr(), space)
-        )
-        syncSpaceMemberships(space)
+      )
     )
+    if changed (
+      putDocument(spaceDocs, space["_id"].toStr(), space)
+    )
+    syncSpaceMemberships(space)
+  )
 )
 
 def rekeyUserDocuments(*db.Collection collection, string nameField, string idField, string oldKey, string newName, string userId) (
-    array documents = collection.all()
-    for i documents.len (
-        object document = documents[i].assert(object)
-        string oldId = document["_id"].toStr()
-        if oldId.endsWith(":" ++ oldKey) or oldId == oldKey (
-            string newId = userId
-            if oldId != oldKey (
-                newId = oldId.replace(":" ++ oldKey, ":" ++ userId)
-            )
-            if nameField != "" (
-                document[nameField] = newName
-            )
-            document[idField] = userId
-            putDocument(collection, newId, document)
-            if newId != oldId (
-                collection.deleteOne({_id: oldId})
-            )
-        )
+  array documents = collection.all()
+  for i documents.len (
+    object document = documents[i].assert(object)
+    string oldId = document["_id"].toStr()
+    if oldId.endsWith(":" ++ oldKey) or oldId == oldKey (
+      string newId = userId
+      if oldId != oldKey (
+        newId = oldId.replace(":" ++ oldKey, ":" ++ userId)
+      )
+      if nameField != "" (
+        document[nameField] = newName
+      )
+      document[idField] = userId
+      putDocument(collection, newId, document)
+      if newId != oldId (
+        collection.deleteOne({_id: oldId})
+      )
     )
+  )
 )
 
 def renameUserInCommunityDatabase(string oldKey, string newName, string userId) (
-    renameUserInSpaces(oldKey, newName, userId)
-    renameIdentityFieldInCollection(releaseDocs, "creator", "creatorId", oldKey, newName, userId)
-    renameIdentityFieldInCollection(previewDocs, "owner", "ownerId", oldKey, newName, userId)
-    renameIdentityFieldInCollection(feedbackDocs, "author", "authorId", oldKey, newName, userId)
-    renameIdentityFieldInCollection(ideaDocs, "author", "authorId", oldKey, newName, userId)
-    renameArrayFieldInCollection(ideaDocs, "likes", oldKey, newName)
-    renameArrayFieldInCollection(ideaDocs, "dislikes", oldKey, newName)
-    renameIdentityFieldInCollection(pullDocs, "author", "authorId", oldKey, newName, userId)
-    renameIdentityFieldInCollection(pullDocs, "creator", "creatorId", oldKey, newName, userId)
-    rekeyUserDocuments(bountyWorkerDocs, "username", "userId", oldKey, newName, userId)
-    rekeyUserDocuments(playtimeDocs, "username", "userId", oldKey, newName, userId)
-    rekeyUserDocuments(playtimeSessionDocs, "username", "userId", oldKey, newName, userId)
-    rekeyUserDocuments(reviewDocs, "author", "authorId", oldKey, newName, userId)
+  renameUserInSpaces(oldKey, newName, userId)
+  renameIdentityFieldInCollection(releaseDocs, "creator", "creatorId", oldKey, newName, userId)
+  renameIdentityFieldInCollection(previewDocs, "owner", "ownerId", oldKey, newName, userId)
+  renameIdentityFieldInCollection(feedbackDocs, "author", "authorId", oldKey, newName, userId)
+  renameIdentityFieldInCollection(ideaDocs, "author", "authorId", oldKey, newName, userId)
+  renameArrayFieldInCollection(ideaDocs, "likes", oldKey, newName)
+  renameArrayFieldInCollection(ideaDocs, "dislikes", oldKey, newName)
+  renameIdentityFieldInCollection(pullDocs, "author", "authorId", oldKey, newName, userId)
+  renameIdentityFieldInCollection(pullDocs, "creator", "creatorId", oldKey, newName, userId)
+  rekeyUserDocuments(bountyWorkerDocs, "username", "userId", oldKey, newName, userId)
+  rekeyUserDocuments(playtimeDocs, "username", "userId", oldKey, newName, userId)
+  rekeyUserDocuments(playtimeSessionDocs, "username", "userId", oldKey, newName, userId)
+  rekeyUserDocuments(reviewDocs, "author", "authorId", oldKey, newName, userId)
 )
 
 def renameUserInComments(string oldKey, string newKey, string newName, string userId) (
-    if oldKey != newKey (
-        renameUserFile(commentsDir, "profile-" ++ oldKey, "profile-" ++ newKey)
-        if fs.exists(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl") (
-            fs.rename(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl", commentsDir ++ "profile-" ++ newKey ++ ".jsonl")
-        )
+  if oldKey != newKey (
+    renameUserFile(commentsDir, "profile-" ++ oldKey, "profile-" ++ newKey)
+    if fs.exists(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl") (
+      fs.rename(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl", commentsDir ++ "profile-" ++ newKey ++ ".jsonl")
     )
-    array files = fs.readDir(commentsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        string key = name.replace(".jsonl", "").replace(".json", "")
-        array comments = loadComments(key)
-        boolean changed = false
-        for j comments.len (
-            object comment = comments[j]
-            if normalizeUsername(comment.author.toStr()) == oldKey (
-                comment.author = newName
-                comment.authorId = userId
-                changed = true
-            )
-        )
-        if changed (
-            saveComments(key, comments)
-        )
+  )
+  array files = fs.readDir(commentsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    string key = name.replace(".jsonl", "").replace(".json", "")
+    array comments = loadComments(key)
+    boolean changed = false
+    for j comments.len (
+      object comment = comments[j]
+      if normalizeUsername(comment.author.toStr()) == oldKey (
+        comment.author = newName
+        comment.authorId = userId
+        changed = true
+      )
     )
+    if changed (
+      saveComments(key, comments)
+    )
+  )
 )
 
 def rewriteNotificationIdentityFields(object data, string oldKey, string newName) boolean (
-    boolean changed = false
-    array identityFields = ["actor", "from", "author", "user", "follower", "buyer", "seller", "kicked_by", "banned_by"]
-    for i identityFields.len (
-        string field = identityFields[i].toStr()
-        if data.contains(field) and data[field] != null and normalizeUsername(data[field].toStr()) == oldKey (
-            data[field] = newName
-            changed = true
-        )
+  boolean changed = false
+  array identityFields = ["actor", "from", "author", "user", "follower", "buyer", "seller", "kicked_by", "banned_by"]
+  for i identityFields.len (
+    string field = identityFields[i].toStr()
+    if data.contains(field) and data[field] != null and normalizeUsername(data[field].toStr()) == oldKey (
+      data[field] = newName
+      changed = true
     )
-    return changed
+  )
+  return changed
 )
 
 def renameUserInNotifications(string userId, string oldKey, string newKey, string newName) (
-    renameUserFile(notificationsDir, oldKey, newKey)
-    array files = fs.readDir(notificationsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = readFile(notificationsDir ++ name)
-            if result.ok (
-                object data = result.data.assert(object)
-                array items = data.items.assert(array)
-                boolean changed = false
-                for j items.len (
-                    object item = items[j]
-                    boolean sameActorId = item.contains("actorId") and item.actorId != null and item.actorId.toStr() == userId
-                    boolean sameActorName = item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == oldKey
-                    if sameActorId or sameActorName (
-                        item.actor = newName
-                        item.actorId = userId
-                        changed = true
-                    )
-                    if item.contains("platform_data") and item.platform_data != null and typeof(item.platform_data) == "object" (
-                        if rewriteNotificationIdentityFields(item.platform_data, oldKey, newName) (
-                            changed = true
-                        )
-                    )
-                )
-                if changed (
-                    writeFile(notificationsDir ++ name, data)
-                )
+  renameUserFile(notificationsDir, oldKey, newKey)
+  array files = fs.readDir(notificationsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto result = readFile(notificationsDir ++ name)
+      if result.ok (
+        object data = result.data.assert(object)
+        array items = data.items.assert(array)
+        boolean changed = false
+        for j items.len (
+          object item = items[j]
+          boolean sameActorId = item.contains("actorId") and item.actorId != null and item.actorId.toStr() == userId
+          boolean sameActorName = item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == oldKey
+          if sameActorId or sameActorName (
+            item.actor = newName
+            item.actorId = userId
+            changed = true
+          )
+          if item.contains("platform_data") and item.platform_data != null and typeof(item.platform_data) == "object" (
+            if rewriteNotificationIdentityFields(item.platform_data, oldKey, newName) (
+              changed = true
             )
+          )
         )
+        if changed (
+          writeFile(notificationsDir ++ name, data)
+        )
+      )
     )
+  )
 )
 
 def renameUserInActivity(string oldKey, string newKey, string newName) (
-    renameUserFile(activityDir, oldKey, newKey)
-    string path = activityDir ++ newKey ++ ".json"
-    auto result = readFile(path)
-    if result.ok (
-        object data = result.data.assert(object)
-        array items = data.items.assert(array)
-        for i items.len (
-            object item = items[i]
-            if normalizeUsername(item.actor.toStr()) == oldKey (
-                item.actor = newName
-            )
-        )
-        writeFile(path, data)
+  renameUserFile(activityDir, oldKey, newKey)
+  string path = activityDir ++ newKey ++ ".json"
+  auto result = readFile(path)
+  if result.ok (
+    object data = result.data.assert(object)
+    array items = data.items.assert(array)
+    for i items.len (
+      object item = items[i]
+      if normalizeUsername(item.actor.toStr()) == oldKey (
+        item.actor = newName
+      )
     )
+    writeFile(path, data)
+  )
 )
 
 def renameUser(string userId, string oldName, string newName) (
-    string oldKey = normalizeUsername(oldName)
-    string newKey = normalizeUsername(newName)
-    if !isSafePathPart(oldKey) or !isSafePathPart(newKey) (
-        return
-    )
-    userIdsCache.delete("username:" ++ oldKey)
-    userIdsCache.set("username:" ++ newKey, userId)
-    renameUserInProfiles(oldKey, newKey, newName)
-    renameUserInProjects(oldKey, newKey, newName, userId)
-    renameUserInComments(oldKey, newKey, newName, userId)
-    renameUserInNotifications(userId, oldKey, newKey, newName)
-    renameUserInActivity(oldKey, newKey, newName)
-    renameUserInCommunityDatabase(oldKey, newName, userId)
-    renameUserSafety(oldKey, newKey)
-    renameUserInNews(oldKey, newName)
-    renameUserMonetization(oldKey, newName)
-    renameUserFile(userSettingsDir, oldKey, newKey)
-    renameUserFile(quotaDir, oldKey, newKey)
-    renameUserFile(agreementAcceptDir, oldKey, newKey)
-    array admins = loadAdmins()
-    if admins.contains(oldKey) (
-        saveAdmins(replaceUserInArray(admins, oldKey, newKey))
-    )
-    object banData = loadBans()
-    object bans = banData.bans
-    if bans.contains(oldKey) (
-        bans[newKey] = bans[oldKey]
-        bans.delete(oldKey)
-        saveBans(banData)
-    )
+  string oldKey = normalizeUsername(oldName)
+  string newKey = normalizeUsername(newName)
+  if !isSafePathPart(oldKey) or !isSafePathPart(newKey) (
+    return
+  )
+  userIdsCache.delete("username:" ++ oldKey)
+  userIdsCache.set("username:" ++ newKey, userId)
+  renameUserInProfiles(oldKey, newKey, newName)
+  renameUserInProjects(oldKey, newKey, newName, userId)
+  renameUserInComments(oldKey, newKey, newName, userId)
+  renameUserInNotifications(userId, oldKey, newKey, newName)
+  renameUserInActivity(oldKey, newKey, newName)
+  renameUserInCommunityDatabase(oldKey, newName, userId)
+  renameUserSafety(oldKey, newKey)
+  renameUserInNews(oldKey, newName)
+  renameUserMonetization(oldKey, newName)
+  renameUserFile(userSettingsDir, oldKey, newKey)
+  renameUserFile(quotaDir, oldKey, newKey)
+  renameUserFile(agreementAcceptDir, oldKey, newKey)
+  array admins = loadAdmins()
+  if admins.contains(oldKey) (
+    saveAdmins(replaceUserInArray(admins, oldKey, newKey))
+  )
+  object banData = loadBans()
+  object bans = banData.bans
+  if bans.contains(oldKey) (
+    bans[newKey] = bans[oldKey]
+    bans.delete(oldKey)
+    saveBans(banData)
+  )
 )
 
 def backfillOwnerIdForUserProjects(string userId, string username) (
-    string ownerKey = normalizeUsername(username)
-    if userId == "" or ownerKey == "" (
-        return
-    )
-    array matches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).all()
-    for i matches.len (
-        object entry = matches[i].assert(object)
-        if (entry.ownerId ?? "").toStr() != userId (
-            entry.ownerId = userId
-            putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
-            auto loaded = loadProject(entry.id.toStr())
-            if loaded.ok (
-                object project = loaded.project.assert(object)
-                if (project.ownerId ?? "").toStr() != userId (
-                    project.ownerId = userId
-                    saveProject(project)
-                )
-            )
+  string ownerKey = normalizeUsername(username)
+  if userId == "" or ownerKey == "" (
+    return
+  )
+  array matches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).all()
+  for i matches.len (
+    object entry = matches[i].assert(object)
+    if (entry.ownerId ?? "").toStr() != userId (
+      entry.ownerId = userId
+      putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
+      auto loaded = loadProject(entry.id.toStr())
+      if loaded.ok (
+        object project = loaded.project.assert(object)
+        if (project.ownerId ?? "").toStr() != userId (
+          project.ownerId = userId
+          saveProject(project)
         )
+      )
     )
+  )
 )
 
 def ensureUserIdentity(string userId, string username) (
-    if userId == "" or username == "" (
-        return
-    )
-    object data = loadUserIds()
-    object users = data.users
-    string current = ""
-    if users.contains(userId) (
-        current = users[userId].toStr()
-    )
-    if current != "" and current != username (
-        renameUser(userId, current, username)
-    ) else (
-        backfillOwnerIdForUserProjects(userId, username)
-    )
-    if current != username (
-        users[userId] = username
-        saveUserIds(data)
-        userIdsCache.set(userId, username)
-    )
-    userIdsCache.set("username:" ++ normalizeUsername(username), userId)
+  if userId == "" or username == "" (
+    return
+  )
+  object data = loadUserIds()
+  object users = data.users
+  string current = ""
+  if users.contains(userId) (
+    current = users[userId].toStr()
+  )
+  if current != "" and current != username (
+    renameUser(userId, current, username)
+  ) else (
+    backfillOwnerIdForUserProjects(userId, username)
+  )
+  if current != username (
+    users[userId] = username
+    saveUserIds(data)
+    userIdsCache.set(userId, username)
+  )
+  userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
 def refreshUsernameForId(string userId) string (
-    if userId == "" (
-        return ""
+  if userId == "" (
+    return ""
+  )
+  if identityRefreshCache.has(userId) (
+    return identityRefreshCache.get(userId).toStr()
+  )
+  object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
+  if resp.success and resp.status.toInt() == 200 (
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if !parsed.isErr() (
+      object profile = parsed.unwrap().assert(object)
+      string username = profile.username.toStr()
+      if username != "" (
+        ensureUserIdentity(userId, username)
+        identityRefreshCache.set(userId, username)
+        return username
+      )
     )
-    if identityRefreshCache.has(userId) (
-        return identityRefreshCache.get(userId).toStr()
-    )
-    object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
-    if resp.success and resp.status.toInt() == 200 (
-        auto parsed = json.parse(resp.body, {type: "object"})
-        if !parsed.isErr() (
-            object profile = parsed.unwrap().assert(object)
-            string username = profile.username.toStr()
-            if username != "" (
-                ensureUserIdentity(userId, username)
-                identityRefreshCache.set(userId, username)
-                return username
-            )
-        )
-    )
-    if resp.status.toInt() == 404 (
-        string fallback = usernameForId(userId)
-        if fallback != "" (
-            log "Lazy detection: purging deleted rotur user " ++ userId ++ " (" ++ fallback ++ ")"
-            purgeUser(userId, fallback)
-        )
-        identityRefreshCache.set(userId, "")
-        return ""
-    )
+  )
+  if resp.status.toInt() == 404 (
     string fallback = usernameForId(userId)
     if fallback != "" (
-        identityRefreshCache.set(userId, fallback)
+      log "Lazy detection: purging deleted rotur user " ++ userId ++ " (" ++ fallback ++ ")"
+      purgeUser(userId, fallback)
     )
-    return fallback
+    identityRefreshCache.set(userId, "")
+    return ""
+  )
+  string fallback = usernameForId(userId)
+  if fallback != "" (
+    identityRefreshCache.set(userId, fallback)
+  )
+  return fallback
 )
 
 def discoverUserIdentity(string username) string (
-    string key = normalizeUsername(username)
-    if key == "" (
-        return ""
+  string key = normalizeUsername(username)
+  if key == "" (
+    return ""
+  )
+  object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0")
+  if !resp.success (
+    if resp.status.toInt() == 404 (
+      string uid = userIdForUsername(username)
+      if uid != "" (
+        identityRefreshCache.delete(uid)
+        refreshUsernameForId(uid)
+      )
     )
-    object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0")
-    if !resp.success (
-        if resp.status.toInt() == 404 (
-            string uid = userIdForUsername(username)
-            if uid != "" (
-                identityRefreshCache.delete(uid)
-                refreshUsernameForId(uid)
-            )
-        )
-        return ""
-    )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        return ""
-    )
-    object profile = parsed.unwrap().assert(object)
-    string userId = profile.id.toStr()
-    string currentUsername = profile.username.toStr()
-    if userId == "" or currentUsername == "" (
-        return ""
-    )
-    ensureUserIdentity(userId, currentUsername)
-    identityRefreshCache.set(userId, currentUsername)
-    return userId
+    return ""
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    return ""
+  )
+  object profile = parsed.unwrap().assert(object)
+  string userId = profile.id.toStr()
+  string currentUsername = profile.username.toStr()
+  if userId == "" or currentUsername == "" (
+    return ""
+  )
+  ensureUserIdentity(userId, currentUsername)
+  identityRefreshCache.set(userId, currentUsername)
+  return userId
 )
 
 def usernameForId(string userId) string (
-    if userIdsCache.has(userId) (
-        return userIdsCache.get(userId).toStr()
-    )
-    object data = loadUserIds()
-    object users = data.users
-    if users.contains(userId) (
-        string name = users[userId].toStr()
-        userIdsCache.set(userId, name)
-        return name
-    )
-    return ""
+  if userIdsCache.has(userId) (
+    return userIdsCache.get(userId).toStr()
+  )
+  object data = loadUserIds()
+  object users = data.users
+  if users.contains(userId) (
+    string name = users[userId].toStr()
+    userIdsCache.set(userId, name)
+    return name
+  )
+  return ""
 )
 
 def removeUserFromArray(array items, string key) array (
-    array next = []
-    for i items.len (
-        string value = items[i].toStr()
-        if normalizeUsername(value) != key (
-            next.append(value)
-        )
+  array next = []
+  for i items.len (
+    string value = items[i].toStr()
+    if normalizeUsername(value) != key (
+      next.append(value)
     )
-    return next
+  )
+  return next
 )
 
 def purgeUserFromProfiles(string key) (
-    fs.remove(usersDir ++ key ++ ".json")
-    profileSearchDocs.deleteOne({_id: key})
-    array files = fs.readDir(usersDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = readFile(usersDir ++ name)
-            if result.ok (
-                object other = result.data.assert(object)
-                boolean changed = false
-                array followers = other.followers.assert(array)
-                if stringArrayContainsUser(followers, key) (
-                    other.followers = removeUserFromArray(followers, key)
-                    changed = true
-                )
-                array following = other.following.assert(array)
-                if stringArrayContainsUser(following, key) (
-                    other.following = removeUserFromArray(following, key)
-                    changed = true
-                )
-                if other.contains("purchases") and other.purchases != null (
-                    array purchases = other.purchases.assert(array)
-                    for j purchases.len (
-                        object purchase = purchases[j].assert(object)
-                        if normalizeUsername(purchase.seller.toStr()) == key (
-                            purchase.seller = "Deleted User"
-                            purchases[j] = purchase
-                            changed = true
-                        )
-                    )
-                    other.purchases = purchases
-                )
-                if changed (
-                    saveProfile(other)
-                )
-            )
+  fs.remove(usersDir ++ key ++ ".json")
+  profileSearchDocs.deleteOne({_id: key})
+  array files = fs.readDir(usersDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto result = readFile(usersDir ++ name)
+      if result.ok (
+        object other = result.data.assert(object)
+        boolean changed = false
+        array followers = other.followers.assert(array)
+        if stringArrayContainsUser(followers, key) (
+          other.followers = removeUserFromArray(followers, key)
+          changed = true
         )
+        array following = other.following.assert(array)
+        if stringArrayContainsUser(following, key) (
+          other.following = removeUserFromArray(following, key)
+          changed = true
+        )
+        if other.contains("purchases") and other.purchases != null (
+          array purchases = other.purchases.assert(array)
+          for j purchases.len (
+            object purchase = purchases[j].assert(object)
+            if normalizeUsername(purchase.seller.toStr()) == key (
+              purchase.seller = "Deleted User"
+              purchases[j] = purchase
+              changed = true
+            )
+          )
+          other.purchases = purchases
+        )
+        if changed (
+          saveProfile(other)
+        )
+      )
     )
+  )
 )
 
 def purgeUserFromProjects(string key, string userId) (
-    array files = fs.readDir(projectsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = loadProject(name.replace(".json", ""))
-            if result.ok (
-                object project = result.project.assert(object)
-                if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
-                    purgeProject(project)
-                    continue
-                )
-                boolean changed = false
-                array loves = project.loves.assert(array)
-                if stringArrayContainsUser(loves, key) (
-                    project.loves = removeUserFromArray(loves, key)
-                    changed = true
-                )
-                if project.contains("brokenhearts") and project.brokenhearts != null (
-                    array broken = project.brokenhearts.assert(array)
-                    if stringArrayContainsUser(broken, key) (
-                        project.brokenhearts = removeUserFromArray(broken, key)
-                        changed = true
-                    )
-                )
-                if project.contains("buyers") and project.buyers != null (
-                    array buyers = project.buyers.assert(array)
-                    array keptBuyers = []
-                    for j buyers.len (
-                        object buyer = buyers[j].assert(object)
-                        if normalizeUsername(buyer.user.toStr()) != key (
-                            keptBuyers.append(buyer)
-                        ) else (
-                            changed = true
-                        )
-                    )
-                    project.buyers = keptBuyers
-                )
-                if project.contains("collaborators") and project.collaborators != null (
-                    array collaborators = project.collaborators.assert(array)
-                    array keptCollaborators = []
-                    for j collaborators.len (
-                        object collaborator = collaborators[j].assert(object)
-                        if normalizeUsername(collaborator.username.toStr()) != key (
-                            keptCollaborators.append(collaborator)
-                        ) else (
-                            changed = true
-                        )
-                    )
-                    project.collaborators = keptCollaborators
-                )
-                if project.contains("mergedContributors") and project.mergedContributors != null (
-                    array contributors = project.mergedContributors.assert(array)
-                    array keptContributors = removeUserFromArray(contributors, key)
-                    if keptContributors.len != contributors.len (
-                        project.mergedContributors = keptContributors
-                        changed = true
-                    )
-                )
-                if changed (
-                    saveProject(project)
-                    upsertIndexEntry(project)
-                )
-            )
+  array files = fs.readDir(projectsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto result = loadProject(name.replace(".json", ""))
+      if result.ok (
+        object project = result.project.assert(object)
+        if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
+          purgeProject(project)
+          continue
         )
-    )
-    array trashFiles = fs.readDir(trashDir)
-    for i trashFiles.len (
-        string name = trashFiles[i].toStr()
-        if name.endsWith(".json") (
-            auto result = readFile(trashDir ++ name)
-            if result.ok (
-                object project = result.data.assert(object)
-                if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
-                    purgeProject(project)
-                )
-            )
+        boolean changed = false
+        array loves = project.loves.assert(array)
+        if stringArrayContainsUser(loves, key) (
+          project.loves = removeUserFromArray(loves, key)
+          changed = true
         )
+        if project.contains("brokenhearts") and project.brokenhearts != null (
+          array broken = project.brokenhearts.assert(array)
+          if stringArrayContainsUser(broken, key) (
+            project.brokenhearts = removeUserFromArray(broken, key)
+            changed = true
+          )
+        )
+        if project.contains("buyers") and project.buyers != null (
+          array buyers = project.buyers.assert(array)
+          array keptBuyers = []
+          for j buyers.len (
+            object buyer = buyers[j].assert(object)
+            if normalizeUsername(buyer.user.toStr()) != key (
+              keptBuyers.append(buyer)
+            ) else (
+              changed = true
+            )
+          )
+          project.buyers = keptBuyers
+        )
+        if project.contains("collaborators") and project.collaborators != null (
+          array collaborators = project.collaborators.assert(array)
+          array keptCollaborators = []
+          for j collaborators.len (
+            object collaborator = collaborators[j].assert(object)
+            if normalizeUsername(collaborator.username.toStr()) != key (
+              keptCollaborators.append(collaborator)
+            ) else (
+              changed = true
+            )
+          )
+          project.collaborators = keptCollaborators
+        )
+        if project.contains("mergedContributors") and project.mergedContributors != null (
+          array contributors = project.mergedContributors.assert(array)
+          array keptContributors = removeUserFromArray(contributors, key)
+          if keptContributors.len != contributors.len (
+            project.mergedContributors = keptContributors
+            changed = true
+          )
+        )
+        if changed (
+          saveProject(project)
+          upsertIndexEntry(project)
+        )
+      )
     )
+  )
+  array trashFiles = fs.readDir(trashDir)
+  for i trashFiles.len (
+    string name = trashFiles[i].toStr()
+    if name.endsWith(".json") (
+      auto result = readFile(trashDir ++ name)
+      if result.ok (
+        object project = result.data.assert(object)
+        if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
+          purgeProject(project)
+        )
+      )
+    )
+  )
 )
 
 def purgeUserFromComments(string key) (
-    fs.remove(commentsDir ++ "profile-" ++ key ++ ".jsonl")
-    fs.remove(commentsDir ++ "profile-" ++ key ++ ".json")
-    array files = fs.readDir(commentsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        string ckey = name.replace(".jsonl", "").replace(".json", "")
-        array comments = loadComments(ckey)
-        boolean changed = false
-        for j comments.len (
-            object comment = comments[j]
-            if normalizeUsername(comment.author.toStr()) == key (
-                comment.author = "Deleted User"
-                comment.authorId = ""
-                changed = true
-            )
-        )
-        if changed (
-            saveComments(ckey, comments)
-        )
+  fs.remove(commentsDir ++ "profile-" ++ key ++ ".jsonl")
+  fs.remove(commentsDir ++ "profile-" ++ key ++ ".json")
+  array files = fs.readDir(commentsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    string ckey = name.replace(".jsonl", "").replace(".json", "")
+    array comments = loadComments(ckey)
+    boolean changed = false
+    for j comments.len (
+      object comment = comments[j]
+      if normalizeUsername(comment.author.toStr()) == key (
+        comment.author = "Deleted User"
+        comment.authorId = ""
+        changed = true
+      )
     )
+    if changed (
+      saveComments(ckey, comments)
+    )
+  )
 )
 
 def purgeUserFromNotifications(string key) (
-    fs.remove(notificationsDir ++ key ++ ".json")
-    array files = fs.readDir(notificationsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto result = readFile(notificationsDir ++ name)
-            if result.ok (
-                object data = result.data.assert(object)
-                array items = data.items.assert(array)
-                array kept = []
-                boolean changed = false
-                for j items.len (
-                    object item = items[j]
-                    if item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == key (
-                        changed = true
-                    ) else (
-                        kept.append(item)
-                    )
-                )
-                if changed (
-                    data.items = kept
-                    writeFile(notificationsDir ++ name, data)
-                )
-            )
+  fs.remove(notificationsDir ++ key ++ ".json")
+  array files = fs.readDir(notificationsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto result = readFile(notificationsDir ++ name)
+      if result.ok (
+        object data = result.data.assert(object)
+        array items = data.items.assert(array)
+        array kept = []
+        boolean changed = false
+        for j items.len (
+          object item = items[j]
+          if item.contains("actor") and item.actor != null and normalizeUsername(item.actor.toStr()) == key (
+            changed = true
+          ) else (
+            kept.append(item)
+          )
         )
+        if changed (
+          data.items = kept
+          writeFile(notificationsDir ++ name, data)
+        )
+      )
     )
+  )
 )
 
 def purgeUserSessions(string userId) (
-    array files = fs.readDir(sessionsDir)
-    for i files.len (
-        string name = files[i].toStr()
-        if name.endsWith(".json") (
-            auto res = readFile(sessionsDir ++ name)
-            if res.ok (
-                object session = res.data.assert(object)
-                if session.userId.toStr() == userId (
-                    fs.remove(sessionsDir ++ name)
-                )
-            )
+  array files = fs.readDir(sessionsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto res = readFile(sessionsDir ++ name)
+      if res.ok (
+        object session = res.data.assert(object)
+        if session.userId.toStr() == userId (
+          fs.remove(sessionsDir ++ name)
         )
+      )
     )
+  )
 )
 
 def purgeUser(string userId, string username) (
-    string key = normalizeUsername(username)
-    if !isSafePathPart(key) (
-        return
-    )
-    purgeUserFromProfiles(key)
-    purgeUserFromProjects(key, userId)
-    purgeUserFromComments(key)
-    purgeUserFromNotifications(key)
-    purgeGameDataForUser(userId)
-    purgeUserFromSpaces(username)
-    purgeUserCommunityRecords(username, userId)
-    purgeUserFromNews(username)
-    removeUserFromSafetyLists(username)
-    fs.remove(activityDir ++ key ++ ".json")
-    fs.remove(userSettingsDir ++ key ++ ".json")
-    fs.remove(quotaDir ++ key ++ ".json")
-    fs.remove(agreementAcceptDir ++ key ++ ".json")
-    fs.remove(safetyDir ++ key ++ ".json")
-    array admins = loadAdmins()
-    if admins.contains(key) (
-        saveAdmins(removeUserFromArray(admins, key))
-    )
-    object banData = loadBans()
-    object bans = banData.bans
-    if bans.contains(key) (
-        bans.delete(key)
-        saveBans(banData)
-    )
-    purgeUserSessions(userId)
-    object idData = loadUserIds()
-    object idUsers = idData.users
-    if idUsers.contains(userId) (
-        idUsers.delete(userId)
-        saveUserIds(idData)
-    )
-    userIdsCache.set(userId, "")
-    userIdsCache.set("username:" ++ key, "")
-    identityRefreshCache.set(userId, "")
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    return
+  )
+  purgeUserFromProfiles(key)
+  purgeUserFromProjects(key, userId)
+  purgeUserFromComments(key)
+  purgeUserFromNotifications(key)
+  purgeGameDataForUser(userId)
+  purgeUserFromSpaces(username)
+  purgeUserCommunityRecords(username, userId)
+  purgeUserFromNews(username)
+  removeUserFromSafetyLists(username)
+  fs.remove(activityDir ++ key ++ ".json")
+  fs.remove(userSettingsDir ++ key ++ ".json")
+  fs.remove(quotaDir ++ key ++ ".json")
+  fs.remove(agreementAcceptDir ++ key ++ ".json")
+  fs.remove(safetyDir ++ key ++ ".json")
+  array admins = loadAdmins()
+  if admins.contains(key) (
+    saveAdmins(removeUserFromArray(admins, key))
+  )
+  object banData = loadBans()
+  object bans = banData.bans
+  if bans.contains(key) (
+    bans.delete(key)
+    saveBans(banData)
+  )
+  purgeUserSessions(userId)
+  object idData = loadUserIds()
+  object idUsers = idData.users
+  if idUsers.contains(userId) (
+    idUsers.delete(userId)
+    saveUserIds(idData)
+  )
+  userIdsCache.set(userId, "")
+  userIdsCache.set("username:" ++ key, "")
+  identityRefreshCache.set(userId, "")
 )
 
 def reconcileDeletedUsers() (
-    object idData = loadUserIds()
-    object idUsers = idData.users
-    array ids = idUsers.getKeys()
-    object fallbackUsernames = {}
-    array profileFiles = fs.readDir(usersDir)
-    for i profileFiles.len (
-        string name = profileFiles[i].toStr()
-        if name.endsWith(".json") (
-            string uname = name.replace(".json", "")
-            string uid = userIdForUsername(uname)
-            if uid != "" (
-                fallbackUsernames[uid] = uname
-                if !ids.contains(uid) (
-                    ids.append(uid)
-                )
+  object idData = loadUserIds()
+  object idUsers = idData.users
+  array ids = idUsers.getKeys()
+  object fallbackUsernames = {}
+  array profileFiles = fs.readDir(usersDir)
+  for i profileFiles.len (
+    string name = profileFiles[i].toStr()
+    if name.endsWith(".json") (
+      string uname = name.replace(".json", "")
+      string uid = userIdForUsername(uname)
+      if uid != "" (
+        fallbackUsernames[uid] = uname
+        if !ids.contains(uid) (
+          ids.append(uid)
+        )
+      )
+    )
+  )
+  array projectDirectories = [projectsDir, trashDir]
+  for d projectDirectories.len (
+    string directory = projectDirectories[d].toStr()
+    array projectFiles = fs.readDir(directory)
+    for i projectFiles.len (
+      string name = projectFiles[i].toStr()
+      if name.endsWith(".json") (
+        auto result = readFile(directory ++ name)
+        if result.ok (
+          object project = result.data.assert(object)
+          string uid = (project.ownerId ?? "").toStr()
+          string uname = project.owner.toStr()
+          if uid != "" (
+            if !ids.contains(uid) (
+              ids.append(uid)
             )
-        )
-    )
-    array projectDirectories = [projectsDir, trashDir]
-    for d projectDirectories.len (
-        string directory = projectDirectories[d].toStr()
-        array projectFiles = fs.readDir(directory)
-        for i projectFiles.len (
-            string name = projectFiles[i].toStr()
-            if name.endsWith(".json") (
-                auto result = readFile(directory ++ name)
-                if result.ok (
-                    object project = result.data.assert(object)
-                    string uid = (project.ownerId ?? "").toStr()
-                    string uname = project.owner.toStr()
-                    if uid != "" (
-                        if !ids.contains(uid) (
-                            ids.append(uid)
-                        )
-                        if uname != "" (
-                            fallbackUsernames[uid] = uname
-                        )
-                    )
-                )
+            if uname != "" (
+              fallbackUsernames[uid] = uname
             )
+          )
         )
+      )
     )
-    if ids.len == 0 (
-        return
+  )
+  if ids.len == 0 (
+    return
+  )
+  object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})})
+  if !resp.success (
+    log "reconcileDeletedUsers: rotur request failed"
+    return
+  )
+  auto parsed = json.parse(resp.body, {type: "object"})
+  if parsed.isErr() (
+    log "reconcileDeletedUsers: invalid response from rotur"
+    return
+  )
+  object data = parsed.unwrap().assert(object)
+  if !data.contains("deleted") or data.deleted == null (
+    return
+  )
+  array deleted = data.deleted.assert(array)
+  for i deleted.len (
+    string uid = deleted[i].toStr()
+    string uname = ""
+    if idUsers.contains(uid) (
+      uname = idUsers[uid].toStr()
     )
-    object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})})
-    if !resp.success (
-        log "reconcileDeletedUsers: rotur request failed"
-        return
+    if uname == "" (
+      uname = usernameForId(uid)
     )
-    auto parsed = json.parse(resp.body, {type: "object"})
-    if parsed.isErr() (
-        log "reconcileDeletedUsers: invalid response from rotur"
-        return
+    if uname == "" and fallbackUsernames.contains(uid) (
+      uname = fallbackUsernames[uid].toStr()
     )
-    object data = parsed.unwrap().assert(object)
-    if !data.contains("deleted") or data.deleted == null (
-        return
+    if uname != "" (
+      log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
+      purgeUser(uid, uname)
     )
-    array deleted = data.deleted.assert(array)
-    for i deleted.len (
-        string uid = deleted[i].toStr()
-        string uname = ""
-        if idUsers.contains(uid) (
-            uname = idUsers[uid].toStr()
-        )
-        if uname == "" (
-            uname = usernameForId(uid)
-        )
-        if uname == "" and fallbackUsernames.contains(uid) (
-            uname = fallbackUsernames[uid].toStr()
-        )
-        if uname != "" (
-            log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
-            purgeUser(uid, uname)
-        )
-    )
+  )
 )
 
 def reconcileLoop() (
-    while true (
-        reconcileDeletedUsers()
-        process.sleep(300)
-    )
+  while true (
+    reconcileDeletedUsers()
+    process.sleep(300)
+  )
 )
 
 def handleReconcileDeletions(*serve.Context c) (
-    reconcileDeletedUsers()
-    c.json(200, {ok: true})
+  reconcileDeletedUsers()
+  c.json(200, {ok: true})
 )
