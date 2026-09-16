@@ -21,9 +21,6 @@ def saveNotifications(string username, array items) boolean (
 
 def sanitizeNotificationPayload(object payload, string notifType, string actor) object (
   object data = {}
-  if typeof(payload) != "object" (
-    return data
-  )
   array keys = payload.getKeys()
   for i keys.len (
     string key = keys[i].toStr()
@@ -270,12 +267,10 @@ def notificationBody(string actor, string notifType, object extra) string (
 
 def notifyRequestBody(string target, string actor, string notifType, object extra) object (
   object data = {}
-  if typeof(extra) == "object" (
-    array keys = extra.getKeys()
-    for i keys.len (
-      string key = keys[i].toStr()
-      data[key] = extra[key]
-    )
+  array keys = extra.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    data[key] = extra[key]
   )
   data.from = actor
   return {

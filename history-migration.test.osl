@@ -6,7 +6,8 @@ import "std:sync"
 import "std:thread"
 import "go:mistwarp.local/gitinspection"
 
-string tmpDir = raw("func() string { p, _ := OSLos.MkdirTemp(\"\", \"mistwarp-history-test-\"); return p+\"/\" }()")
+string tmpDir = "/tmp/mistwarp-history-test-" ++ timestamp.toStr() ++ "/"
+fs.mkdirAll(tmpDir)
 string projectsDir = tmpDir ++ "projects/"
 number historyMigrationWorkers = 1
 object records = {}

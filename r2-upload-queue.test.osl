@@ -4,7 +4,8 @@ import "std:json"
 import "std:sync"
 import "./storage-addressing.osl"
 
-string testDir = raw("func() string { p, _ := OSLos.MkdirTemp(\"\", \"mistwarp-r2-queue-test-\"); return p+\"/\" }()")
+string testDir = "/tmp/mistwarp-r2-queue-test-" ++ timestamp.toStr() ++ "/"
+fs.mkdirAll(testDir)
 string projectsDir = testDir ++ "projects/"
 string trashDir = testDir ++ "trash/"
 string r2UploadQueueFile = testDir ++ "queue.json"
@@ -32,7 +33,14 @@ def localBlobPath(string key) string (
 )
 
 def parentDirOf(string path) string (
-  return raw("OSLstrings.TrimSuffix(path, OSLstrings.Split(path, \"/\")[len(OSLstrings.Split(path, \"/\"))-1])")
+  array parts = path.split("/")
+  string parent = ""
+  if parts.len > 1 (
+    for i in 1 to (parts.len - 1) (
+      parent = parent ++ parts[i] ++ "/"
+    )
+  )
+  return parent
 )
 
 def assetObjectKey(string name) string (

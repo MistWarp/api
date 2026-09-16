@@ -736,7 +736,7 @@ def reserveUploadBytes(string username, number bytes, number limit, boolean enfo
 // upload fails validation or turns out to change nothing, so iterating on
 // a project does not burn the weekly budget.
 def refundUploadBytes(string username, number bytes) (
-  if bytes.toNum() <= 0 (
+  if bytes <= 0 (
     return
   )
   string lockName = "upload-quota-" ++ normalizeUsername(username)

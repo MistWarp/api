@@ -1,9 +1,162 @@
 import "std:zip"
+import "std:fs"
 import "std:testing"
 import "./archive-security.osl"
 
-def zipFixture(string kind) any (
-  return raw("func() []byte { var buffer OSLbytes.Buffer; writer := OSLgozip.NewWriter(&buffer); add := func(name string, data []byte, mode OSLos.FileMode) { header := &OSLgozip.FileHeader{Name: name, Method: OSLgozip.Deflate}; header.SetMode(mode); entry, err := writer.CreateHeader(header); if err == nil { entry.Write(data) } }; if kind == \"valid\" { add(\"project.json\", []byte(\"{}\"), 0644) }; if kind == \"duplicate\" { add(\"same\", []byte(\"a\"), 0644); add(\"same\", []byte(\"b\"), 0644) }; if kind == \"traversal\" { add(\"../escape\", []byte(\"x\"), 0644) }; if kind == \"symlink\" { add(\"link\", []byte(\"target\"), OSLos.ModeSymlink|0777) }; if kind == \"bomb\" { add(\"huge\", make([]byte, 2097152), 0644) }; if kind == \"many\" || kind == \"count-lie\" { add(\"one\", []byte(\"1\"), 0644); add(\"two\", []byte(\"2\"), 0644) }; if kind == \"file-parent\" { add(\"parent/child\", []byte(\"1\"), 0644); add(\"parent\", []byte(\"2\"), 0644) }; if kind == \"corrupt\" { add(\"corrupt\", OSLbytes.Repeat([]byte(\"x\"), 100), 0644) }; writer.Close(); data := buffer.Bytes(); if kind == \"corrupt\" && len(data) > 37 { data[37] ^= 255 }; if kind == \"count-lie\" && len(data) >= 22 { data[len(data)-14] = 1; data[len(data)-13] = 0; data[len(data)-12] = 1; data[len(data)-11] = 0 }; return data }()")
+string fixtureDir = "/tmp/mistwarp-zip-fixtures-" ++ timestamp.toStr()
+fs.mkdirAll(fixtureDir)
+
+def stageParent(string stage, string name) (
+  array parts = name.split("/")
+  if parts.len > 1 (
+    string parent = stage
+    for i in 1 to (parts.len - 1) (
+      parent = parent ++ "/" ++ parts[i]
+    )
+    fs.mkdirAll(parent)
+  )
+)
+
+def stageText(string kind, string name, string content) (
+  string stage = fixtureDir ++ "/" ++ kind
+  fs.mkdirAll(stage)
+  stageParent(stage, name)
+  fs.writeFile(stage ++ "/" ++ name, content)
+)
+
+def stageBytes(string kind, string name, byte[] content) (
+  string stage = fixtureDir ++ "/" ++ kind
+  fs.mkdirAll(stage)
+  stageParent(stage, name)
+  fs.writeFileBytes(stage ++ "/" ++ name, content)
+)
+
+def compressFixture(string kind) byte[] (
+  string outPath = fixtureDir ++ "/" ++ kind ++ ".zip"
+  testing.assert(zip.compress(fixtureDir ++ "/" ++ kind, outPath), "fixture compresses: " ++ kind)
+  return fs.readFileBytes(outPath)
+)
+
+// Little-endian reads over 1-based byte arrays. Positions are 1-based, so
+// 0-based offset N of a header starting at H becomes H + N.
+def read16le(byte[] data, number pos) number (
+  return data[pos] + (data[(pos + 1)] * 256)
+)
+
+def read32le(byte[] data, number pos) number (
+  return read16le(data, pos) + (read16le(data, (pos + 2)) * 65536)
+)
+
+// Byte search over 1-based OSL byte arrays. Returns the first match at or after
+// from, or 0.
+def findBytes(byte[] data, array needle, number from) number (
+  for i in 1 to ((data.len - needle.len - from) + 2) (
+    number pos = (from + i) - 1
+    boolean found = true
+    for j in 1 to needle.len (
+      if data[(pos + j) - 1] != needle[j] (
+        found = false
+        break
+      )
+    )
+    if found (
+      return pos
+    )
+  )
+  return 0
+)
+
+// Overwrite every occurrence of orig with replacement. Both stay the same
+// length, so offsets elsewhere in the archive are untouched.
+def patchAll(byte[] data, array orig, array replacement) byte[] (
+  number pos = findBytes(data, orig, 1)
+  while pos != 0 (
+    for i in 1 to replacement.len (
+      data[(pos + i) - 1] = replacement[i]
+    )
+    pos = findBytes(data, orig, pos + 1)
+  )
+  return data
+)
+
+// Malformed fixtures start as honest archives and get byte patches, since no
+// honest writer emits duplicates, traversal names, or symlink entries.
+def zipFixture(string kind) byte[] (
+  if kind == "valid" (
+    stageText(kind, "project.json", "{}")
+    return compressFixture(kind)
+  )
+  if kind == "duplicate" (
+    stageText(kind, "one", "a")
+    stageText(kind, "two", "b")
+    return patchAll(compressFixture(kind), [116, 119, 111], [111, 110, 101])
+  )
+  if kind == "traversal" (
+    stageText(kind, "XXXXXXXXX", "x")
+    return patchAll(compressFixture(kind), [88, 88, 88, 88, 88, 88, 88, 88, 88], [46, 46, 47, 101, 115, 99, 97, 112, 101])
+  )
+  if kind == "symlink" (
+    stageText(kind, "link", "target")
+    byte[] data = compressFixture(kind)
+    number header = findBytes(data, [80, 75, 1, 2], 1)
+    while header != 0 (
+      number nameLen = read16le(data, (header + 28))
+      number nameEnd = ((header + 46) + nameLen) - 1
+      if data[(nameEnd - 3)] == 108 and data[(nameEnd - 2)] == 105 and data[(nameEnd - 1)] == 110 and data[nameEnd] == 107 (
+        data[(header + 5)] = 3
+        data[(header + 38)] = 0
+        data[(header + 39)] = 0
+        data[(header + 40)] = 255
+        data[(header + 41)] = 161
+        return data
+      )
+      header = findBytes(data, [80, 75, 1, 2], header + 1)
+    )
+    testing.assert(false, "symlink entry not found")
+    return data
+  )
+  if kind == "bomb" (
+    stageBytes(kind, "huge", make(byte[], 2097152).fill(0))
+    return compressFixture(kind)
+  )
+  if kind == "many" (
+    stageText(kind, "one", "1")
+    stageText(kind, "two", "2")
+    return compressFixture(kind)
+  )
+  if kind == "count-lie" (
+    stageText(kind, "one", "1")
+    stageText(kind, "two", "2")
+    byte[] data = compressFixture(kind)
+    data[data.len - 13] = 1
+    data[data.len - 12] = 0
+    data[data.len - 11] = 1
+    data[data.len - 10] = 0
+    return data
+  )
+  if kind == "file-parent" (
+    stageText(kind, "parent/child", "1")
+    stageText(kind, "zzzzzz", "2")
+    return patchAll(compressFixture(kind), [122, 122, 122, 122, 122, 122], [112, 97, 114, 101, 110, 116])
+  )
+  stageText(kind, "corrupt", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+  byte[] data = compressFixture(kind)
+  // Flip the first payload byte of the file entry: directories have no payload
+  // and only corrupt payload bytes trip the CRC check on read.
+  number entry = findBytes(data, [80, 75, 1, 2], 1)
+  while entry != 0 (
+    number entryNameLen = read16le(data, (entry + 28))
+    number entryNameEnd = ((entry + 46) + entryNameLen) - 1
+    if data[entryNameEnd] != 47 (
+      number localStart = read32le(data, (entry + 42)) + 1
+      number payloadStart = ((localStart + 30) + read16le(data, (localStart + 26))) + read16le(data, (localStart + 28))
+      data[payloadStart] = 255 - data[payloadStart]
+      return data
+    )
+    entry = findBytes(data, [80, 75, 1, 2], (entry + 1))
+  )
+  testing.assert(false, "file entry not found")
+  return data
 )
 
 testing.assert(validateZipArchive(zipFixture("valid"), 1048576, 1048576, 10, true), "accepts a normal ZIP")
@@ -18,3 +171,4 @@ testing.assert(!validateZipArchive(zipFixture("file-parent"), 1048576, 1048576, 
 testing.assert(!validateZipArchive(zipFixture("corrupt"), 1048576, 1048576, 10, true), "rejects corrupt entry data")
 testing.assert(!validateZipArchive(zipFixture("valid"), 1, 1048576, 10, true), "rejects oversized compressed input")
 testing.assert(!validateZipArchive(zipFixture("valid"), 1048576, 1, 10, true), "rejects oversized expanded input")
+fs.remove(fixtureDir)
