@@ -1,0 +1,22 @@
+import "std:testing"
+import "./search-ranking.osl"
+
+testing.assert(searchMatchScore("Mist", "mist") == 4, "an exact name match scores highest")
+testing.assert(searchMatchScore("MistWarp", "mist") > searchMatchScore("Bader_The_MistWarper", "mist"), "a prefix match beats a match buried mid-word")
+testing.assert(searchMatchScore("Random_Idiot_On_Mist", "mist") > searchMatchScore("Malwares mistwarp", "warp"), "a word-start match beats a mid-word match")
+testing.assert(searchMatchScore("Wonder wizard", "mist") == 0, "text without the query does not score")
+
+number buriedTitle = projectSearchScore("Refined MistBloks Physics Demo", "Twotanium", [], "mist")
+number leadingTitle = projectSearchScore("MistBloks default player sprite", "Twotanium", [], "mist")
+number ownerOnly = projectSearchScore("??", "zerbs4-mistwarpacc", [], "mist")
+number titleMatch = projectSearchScore("Claim your mistwarp!!!", "Mist", [], "mist")
+
+testing.assert(leadingTitle > buriedTitle, "a title that starts with the query outranks one that mentions it later")
+testing.assert(titleMatch > ownerOnly, "a title match outranks an owner-only match")
+testing.assert(projectSearchScore("Physics demo", "Twotanium", ["mist"], "mist") > 0, "a tag match still counts")
+testing.assert(spaceSearchScore("MistWarp jam", "a jam", "Mist", "mist") > spaceSearchScore("Malwares mistwarp", "stuff", "xdmalware", "mist"), "a studio whose title starts with the query comes first")
+
+testing.assert(searchRank(4, 0) > searchRank(3, 999999), "a better match always outranks a more popular weaker match")
+testing.assert(searchRank(2, 50) > searchRank(2, 10), "popularity breaks ties inside one match tier")
+testing.assert(searchRank(1, -5) == 1000000, "negative popularity does not drag a match below the tier floor")
+testing.assert(searchRank(1, 5000000) == 1999999, "runaway popularity cannot jump a match tier")

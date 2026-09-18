@@ -964,15 +964,18 @@ def handleListSpaces(*serve.Context c) (
       include = space.title.toStr().toLower().contains(q) or space.description.toStr().toLower().contains(q)
     )
     if include (
-      matches.append(space)
+      number score = spaceSearchScore(space.title.toStr(), space.description.toStr(), space.owner.toStr(), q)
+      matches.append({rank: searchRank(score, spaceFollowers(space).len), space: space})
     )
   )
+  matches.sortBy("rank", "descending")
   number total = matches.len
   offset = clampNumber(offset, 0, total)
   array page = paginate(matches, offset, limit)
   array spaces = []
   for i page.len (
-    spaces.append(spaceListResponse(page[i].assert(object), c))
+    object row = page[i].assert(object)
+    spaces.append(spaceListResponse(row.space.assert(object), c))
   )
   c.json(200, {ok: true, total: total, spaces: spaces})
 )

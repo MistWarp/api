@@ -318,14 +318,25 @@ def handleSearchUsers(*serve.Context c) (
     c.json(200, {ok: true, users: []})
     return
   )
-  array matches = []
-  array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(8).all()
+  number limit = clampNumber(c.queryInt("limit", 8), 1, 50)
+  number total = profileSearchDocs.where("usernameKey", db.contains, q).count()
+  array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(200).all()
+  array ranked = []
   for i found.len (
     object profile = found[i].assert(object)
+    number score = searchMatchScore(profile.username.toStr(), q)
+    ranked.append({rank: searchRank(score, profile.followers.toNum()), profile: profile})
+  )
+  ranked.sortBy("rank", "descending")
+  array page = paginate(ranked, 0, limit)
+  array matches = []
+  for i page.len (
+    object row = page[i].assert(object)
+    object profile = row.profile.assert(object)
     number projectCount = projectSearchDocs.where("ownerKey", db.equal, profile.usernameKey).and("shared", db.equal, true).count()
     matches.append({username: profile.username, followers: profile.followers, projects: projectCount})
   )
-  c.json(200, {ok: true, users: matches})
+  c.json(200, {ok: true, users: matches, total: total})
 )
 
 def handleUpdateProfile(*serve.Context c) (

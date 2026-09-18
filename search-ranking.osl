@@ -1,0 +1,49 @@
+def searchMatchScore(string text, string query) number (
+  string value = text.toLower().strip()
+  if value == "" or query == "" (
+    return 0
+  )
+  if value == query (
+    return 4
+  )
+  if value.startsWith(query) (
+    return 3
+  )
+  if value.contains(" " ++ query) or value.contains("-" ++ query) or value.contains("_" ++ query) (
+    return 2
+  )
+  if value.contains(query) (
+    return 1
+  )
+  return 0
+)
+
+def bestSearchMatchScore(array values, string query) number (
+  number best = 0
+  for i values.len (
+    number score = searchMatchScore(values[i].toStr(), query)
+    if score > best (
+      best = score
+    )
+  )
+  return best
+)
+
+def projectSearchScore(string title, string owner, array tags, string query) number (
+  return (searchMatchScore(title, query) * 2) + searchMatchScore(owner, query) + bestSearchMatchScore(tags, query)
+)
+
+def spaceSearchScore(string title, string description, string owner, string query) number (
+  return (searchMatchScore(title, query) * 2) + searchMatchScore(owner, query) + searchMatchScore(description, query)
+)
+
+def searchRank(number score, number popularity) number (
+  number weight = popularity
+  if weight < 0 (
+    weight = 0
+  )
+  if weight > 999999 (
+    weight = 999999
+  )
+  return (score * 1000000) + weight
+)
