@@ -1,0 +1,25 @@
+import "std:testing"
+import "./related-projects.osl"
+
+array entries = [
+  {id: "a", owner: "Mist", tags: ["games"]},
+  {id: "b", owner: "mist", tags: ["art"]},
+  {id: "c", owner: "mist", tags: ["art"]},
+  {id: "d", owner: "other", tags: ["games"]},
+  {id: "e", owner: "other", tags: ["music"]},
+  {id: "f", owner: "third", tags: []}
+]
+
+def ids(array projects) string (
+  string result = ""
+  for i projects.len (
+    object project = projects[i]
+    result = result ++ project.id.toStr()
+  )
+  return result
+)
+
+testing.assert(ids(relatedProjectEntries(entries, "a", [], 4)) == "bcde", "same owner fills half, then shared tags, then trending")
+testing.assert(ids(relatedProjectEntries(entries, "a", ["b", "d"], 3)) == "cef", "excluded projects are skipped")
+testing.assert(ids(relatedProjectEntries(entries, "missing", [], 2)) == "ab", "unknown projects fall back to trending order")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], 24)) == "bcdef", "the current project never appears")

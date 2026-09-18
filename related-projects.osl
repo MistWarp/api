@@ -1,0 +1,60 @@
+def relatedProjectEntries(array entries, string id, array excluded, number limit) array (
+  object seen = {}
+  seen[id] = true
+  for i excluded.len (
+    string excludedId = excluded[i].toStr().strip()
+    if excludedId != "" (
+      seen[excludedId] = true
+    )
+  )
+  string ownerKey = ""
+  array tags = []
+  for i entries.len (
+    object entry = entries[i]
+    if entry.id.toStr() == id (
+      ownerKey = entry.owner.toStr().toLower()
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+    )
+  )
+  number ownerLimit = (limit / 2).toInt()
+  if ownerLimit < 1 (
+    ownerLimit = 1
+  )
+  array related = []
+  for i entries.len (
+    object entry = entries[i]
+    string entryId = entry.id.toStr()
+    if related.len < ownerLimit and !seen.contains(entryId) and ownerKey != "" and entry.owner.toStr().toLower() == ownerKey (
+      seen[entryId] = true
+      related.append(entry)
+    )
+  )
+  for i entries.len (
+    object entry = entries[i]
+    string entryId = entry.id.toStr()
+    if related.len < limit and !seen.contains(entryId) and entry.contains("tags") and entry.tags != null (
+      array entryTags = entry.tags.assert(array)
+      boolean shares = false
+      for j tags.len (
+        if entryTags.contains(tags[j]) (
+          shares = true
+        )
+      )
+      if shares (
+        seen[entryId] = true
+        related.append(entry)
+      )
+    )
+  )
+  for i entries.len (
+    object entry = entries[i]
+    string entryId = entry.id.toStr()
+    if related.len < limit and !seen.contains(entryId) (
+      seen[entryId] = true
+      related.append(entry)
+    )
+  )
+  return related
+)

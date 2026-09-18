@@ -3197,7 +3197,25 @@ def handleExplore(*serve.Context c) (
   )
 
   string sort = c.queryDefault("sort", "recent")
-  if sort == "loved" (
+  if q != "" and sort == "relevance" (
+    array ranked = []
+    for i entries.len (
+      object entry = entries[i]
+      array tags = []
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+      number score = projectSearchScore(entry.title.toStr(), entry.owner.toStr(), tags, q)
+      ranked.append({rank: searchRank(score, entry.weekViews.toNum()), entry: entry})
+    )
+    ranked.sortBy("rank", "descending")
+    array ordered = []
+    for i ranked.len (
+      object row = ranked[i].assert(object)
+      ordered.append(row.entry)
+    )
+    entries = ordered
+  ) else if sort == "loved" (
     entries.sortBy("loveCount", "descending")
   ) else if sort == "undiscovered" (
     entries.sortBy("views", "ascending")
@@ -3239,6 +3257,70 @@ def handleRandomProject(*serve.Context c) (
   )
   number idx = nano % entries.len
   c.json(200, {ok: true, project: entries[idx]})
+)
+
+def handleRelatedProjects(*serve.Context c) (
+  array entries = snapshotIndexList(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
+  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), c.query("exclude").split(","), limit)})
+)
+
+def handleFeaturedProject(*serve.Context c) (
+  array entries = snapshotIndexList(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  array pool = []
+  for i entries.len (
+    object entry = entries[i]
+    if pool.len < 14 and entry.thumbUrl != null and entry.thumbUrl.toStr() != "" (
+      pool.append(entry)
+    )
+  )
+  if pool.len == 0 (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  number today = (timestamp / 86400000).toInt()
+  number idx = (today % pool.len) + 1
+  c.setHeader("Cache-Control", "public, max-age=300")
+  c.json(200, {ok: true, day: today, project: pool[idx]})
+)
+
+def sitemapUrl(string path) string (
+  return "<url><loc>" ++ xmlEscape(editorOrigin ++ path) ++ "</loc></url>"
+)
+
+def handleSitemap(*serve.Context c) (
+  array entries = snapshotIndexList(sharedIndexEntries())
+  entries.sortBy("views", "descending")
+  array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
+  string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+  for i staticPaths.len (
+    xml = xml ++ sitemapUrl(staticPaths[i].toStr())
+  )
+  object owners = {}
+  number count = 0
+  for i entries.len (
+    object entry = entries[i]
+    if count < 20000 (
+      string path = "/project/" ++ entry.id.toStr()
+      if entry.contains("vanitySlug") and entry.vanitySlug != null and entry.vanitySlug.toStr() != "" (
+        path = "/p/" ++ entry.vanitySlug.toStr()
+      )
+      xml = xml ++ sitemapUrl(path)
+      count = count + 1
+      string ownerKey = normalizeUsername(entry.owner.toStr())
+      if ownerKey != "" and !owners.contains(ownerKey) (
+        owners[ownerKey] = true
+        xml = xml ++ sitemapUrl("/users/" ++ entry.owner.toStr())
+        count = count + 1
+      )
+    )
+  )
+  xml = xml ++ "</urlset>"
+  c.setHeader("Content-Type", "application/xml; charset=utf-8")
+  c.setHeader("Cache-Control", "public, max-age=3600")
+  c.text(200, xml)
 )
 
 def handleLeaderboard(*serve.Context c) (

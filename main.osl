@@ -143,6 +143,7 @@ auto r2Client = s3.new({
 fs.mkdirAll("data/")
 
 import "./utils.osl"
+import "./search-ranking.osl"
 import "./request-limits.osl"
 import "./project-sharing-policy.osl"
 import "./archive-security.osl"
@@ -161,6 +162,7 @@ import "./middleware.osl"
 import "./perks.osl"
 import "./quota-policy.osl"
 import "./groups.osl"
+import "./related-projects.osl"
 import "./projects.osl"
 import "./live-collaboration.osl"
 import "./history-delta.osl"
@@ -363,6 +365,9 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/projects/:id/upload-parts", requireAuth, requireCurrentAgreement, handleCreateProjectUploadPart)
   api.POST("/projects/:id/upload-parts/:token/complete", requireAuth, requireCurrentAgreement, handleCompleteProjectUploadPart)
   api.GET("/projects/random", handleRandomProject)
+  api.GET("/projects/featured", handleFeaturedProject)
+  api.GET("/projects/:id/related", handleRelatedProjects)
+  api.GET("/sitemap.xml", handleSitemap)
   api.GET("/projects/:id/project.json", handleGetProjectJson)
   api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
   api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)

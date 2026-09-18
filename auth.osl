@@ -179,9 +179,14 @@ def handleGetMe(*serve.Context c) (
   )
   string username = c.getString("username")
   object profile = loadProfile(username)
+  number created = 0
+  if profile.contains("created") and profile.created != null (
+    created = profile.created.toNum()
+  )
   c.json(200, {
     ok: true,
     username: username,
+    created: created,
     bio: profile.bio,
     featuredProject: profile.featuredProject,
     isAdmin: c.getBool("isAdmin"),
