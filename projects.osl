@@ -3233,30 +3233,12 @@ def handleExplore(*serve.Context c) (
 )
 
 def handleRandomProject(*serve.Context c) (
-  array entries = snapshotIndexList(sharedIndexEntries())
-  string exclude = c.query("exclude").strip()
-  if exclude != "" and entries.len > 1 (
-    array kept = []
-    for i entries.len (
-      object entry = entries[i]
-      if entry.id.toStr() != exclude (
-        kept.append(entry)
-      )
-    )
-    if kept.len > 0 (
-      entries = kept
-    )
-  )
-  if entries.len == 0 (
+  object project = randomProjectEntry(sharedIndexEntries(), c.query("exclude").strip())
+  if !project.contains("id") (
     c.json(404, {ok: false, error: "no shared projects yet"})
     return
   )
-  number nano = raw("func() int64 { return time.Now().UnixNano() }()")
-  if nano < 0 (
-    nano = nano * -1
-  )
-  number idx = nano % entries.len
-  c.json(200, {ok: true, project: entries[idx]})
+  c.json(200, {ok: true, project: project})
 )
 
 def handleRelatedProjects(*serve.Context c) (
