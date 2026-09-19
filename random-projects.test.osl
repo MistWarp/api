@@ -1,0 +1,23 @@
+import "std:testing"
+import "./random-projects.osl"
+
+testing.assert(!randomProjectEntry([], "").contains("id"), "an empty catalog has no random project")
+testing.assert(randomProjectEntry([{id: "a"}], "").id == "a", "a single project never produces a null selection")
+testing.assert(randomProjectEntry([{id: "a"}], "a").id == "a", "the only project remains available when excluded")
+
+array entries = [{id: "a"}, {id: "b"}]
+testing.assert(randomProjectEntry(entries, "a").id == "b", "the current project is excluded when another exists")
+testing.assert(randomProjectEntry(entries, "b").id == "a", "either project can be selected")
+testing.assert(entries.len == 2 and entries[1].id == "a" and entries[2].id == "b", "selection leaves the shared catalog unchanged")
+
+array catalog = []
+for i 192 (
+  catalog.append({id: i.toStr()})
+)
+object seen = {}
+for i 256 (
+  object project = randomProjectEntry(catalog, "missing")
+  testing.assert(project.contains("id"), "every random selection is an existing project")
+  seen[project.id.toStr()] = true
+)
+testing.assert(seen.getKeys().len > 3, "selection is not restricted to the three indices reachable by rounded nanosecond timestamps")

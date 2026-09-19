@@ -1,0 +1,16 @@
+def randomProjectEntry(array entries, string exclude) object (
+  array candidates = []
+  for i entries.len (
+    object entry = entries[i]
+    if entry.id.toStr() != exclude (
+      candidates.append(entry)
+    )
+  )
+  if candidates.len == 0 (
+    candidates = entries
+  )
+  if candidates.len == 0 (
+    return {}
+  )
+  return candidates.randomOf().assert(object)
+)
