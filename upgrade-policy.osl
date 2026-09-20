@@ -1,0 +1,20 @@
+def tierRank(string tier) number (
+  string key = tier.toLower().strip()
+  if key == "lite" (
+    return 1
+  )
+  if key == "plus" (
+    return 2
+  )
+  if key == "pro" or key == "drive" or key == "max" (
+    return 3
+  )
+  return 0
+)
+
+def pendingUpgradeFrom(string seenTier, string tier, boolean verified) string (
+  if verified and tierRank(tier) > tierRank(seenTier) (
+    return seenTier
+  )
+  return ""
+)

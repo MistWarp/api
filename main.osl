@@ -159,6 +159,7 @@ import "./git-inspection.osl"
 import "./gitea.osl"
 import "./auth.osl"
 import "./middleware.osl"
+import "./upgrade-policy.osl"
 import "./perks.osl"
 import "./quota-policy.osl"
 import "./groups.osl"
@@ -282,6 +283,8 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/health", handleHealth)
   api.GET("/health/dependencies", handleDependencyHealth)
   api.GET("/perks", handleGetPerks)
+  api.POST("/perks/refresh", requireAuth, handleRefreshPerks)
+  api.POST("/perks/seen", requireAuth, handlePerksSeen)
   api.POST("/auth", handleRoturAuth)
   api.GET("/me", handleGetMe)
   api.POST("/logout", handleLogout)

@@ -260,3 +260,42 @@ def handleGetPerks(*serve.Context c) (
     roturMembershipUrl: "https://rotur.dev/premium"
   })
 )
+
+def seenTierForProfile(object profile) string (
+  if profile.contains("seenTier") and profile.seenTier != null (
+    return normalizeRoturTier(profile.seenTier.toStr())
+  )
+  return "Free"
+)
+
+def handleRefreshPerks(*serve.Context c) (
+  string userId = c.getString("userId")
+  string key = "perks:" ++ userId
+  if !remoteMilestoneChecks.has(key) (
+    remoteMilestoneChecks.set(key, true)
+    paidPerksCache.delete(userId)
+  )
+  object current = currentPerks(c)
+  boolean verified = paidPerksCache.has(userId)
+  object profile = loadProfile(c.getString("username"))
+  string seenTier = seenTierForProfile(profile)
+  string upgradedFrom = pendingUpgradeFrom(seenTier, current.tier.toStr(), verified)
+  if verified and upgradedFrom == "" and seenTier != current.tier.toStr() (
+    profile.seenTier = current.tier
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true, current: current, upgradedFrom: upgradedFrom})
+)
+
+def handlePerksSeen(*serve.Context c) (
+  string userId = c.getString("userId")
+  string tier = roturTierForUser(userId)
+  if paidPerksCache.has(userId) (
+    object profile = loadProfile(c.getString("username"))
+    if seenTierForProfile(profile) != tier or !profile.contains("seenTier") (
+      profile.seenTier = tier
+      saveProfile(profile)
+    )
+  )
+  c.json(200, {ok: true})
+)

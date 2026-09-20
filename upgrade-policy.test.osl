@@ -1,0 +1,9 @@
+import "std:testing"
+import "./upgrade-policy.osl"
+
+testing.assert(pendingUpgradeFrom("Free", "Plus", true) == "Free", "first subscription since the last visit is pending")
+testing.assert(pendingUpgradeFrom("Lite", "Pro", true) == "Lite", "moving up a paid tier is pending")
+testing.assert(pendingUpgradeFrom("Plus", "Plus", true) == "", "an acknowledged tier is not celebrated again")
+testing.assert(pendingUpgradeFrom("Pro", "Free", true) == "", "a downgrade is never celebrated")
+testing.assert(pendingUpgradeFrom("Free", "Plus", false) == "", "an unverified tier is never celebrated")
+testing.assert(pendingUpgradeFrom("Free", "Max", true) == "Free", "legacy tier names rank as Pro")
