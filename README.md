@@ -30,6 +30,8 @@ The server loads `.env` automatically. Real environment variables override `.env
 | GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
 | EDITOR_ORIGIN | https://mistwarp.org | Public editor base URL used in links |
 | ADMIN_USERS | mist | Comma separated admin usernames |
+| GITHUB_ORG | MistWarp | GitHub org whose pull requests appear on the roadmap's Changes tab |
+| GITHUB_TOKEN | | Optional GitHub token; only raises the search rate limit, the feed works without one |
 | REALTIME_URL | wss://api.mistwarp.org/v1/connect | Public multiplayer WebSocket endpoint |
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It

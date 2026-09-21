@@ -1,0 +1,103 @@
+// MistWarp's own source lives in public GitHub repositories, so the work in
+// flight there is invisible from inside the site. This pulls the org's open
+// and recently merged pull requests into the community API and links them to
+// roadmap entries, so a reader can follow a feature from "planned" to the
+// change that delivers it.
+//
+// The GitHub search API answers for the whole org in one request, so a refresh
+// costs two calls rather than one per repository. That keeps the unauthorised
+// rate limit comfortable; GITHUB_TOKEN only raises the ceiling.
+
+number developmentOpenLimit = 100
+number developmentMergedLimit = 40
+number developmentRefreshSeconds = 300
+
+def githubHeaders() object (
+  object headers = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "mistwarp-api"
+  }
+  if githubToken != "" (
+    headers["Authorization"] = "Bearer " ++ githubToken
+  )
+  return headers
+)
+
+def githubSearchPulls(string query, number limit) object (
+  string endpoint = "https://api.github.com/search/issues?q=" ++ url.escape(query) ++ "&sort=updated&order=desc&per_page=" ++ limit.toStr()
+  object response = requests.get(endpoint, {headers: githubHeaders(), timeout: 10, max_bytes: 8388608})
+  if !response.success or response.status.toInt() != 200 (
+    return {ok: false, items: []}
+  )
+  auto parsed = json.parse(response.body, {type: "object"})
+  if parsed.isErr() (
+    return {ok: false, items: []}
+  )
+  object data = parsed.unwrap().assert(object)
+  if !data.contains("items") or typeof(data.items) != "array" (
+    return {ok: false, items: []}
+  )
+  return {ok: true, items: data.items.assert(array)}
+)
+
+def fetchDevelopmentPulls() object (
+  object openPulls = githubSearchPulls("org:" ++ githubOrg ++ " is:pr is:open", developmentOpenLimit)
+  object mergedPulls = githubSearchPulls("org:" ++ githubOrg ++ " is:pr is:merged", developmentMergedLimit)
+  // A total failure must not overwrite the last good snapshot with nothing.
+  if !openPulls.ok and !mergedPulls.ok (
+    return {ok: false, pulls: []}
+  )
+  array pulls = dedupeDevelopmentPulls(
+    collectDevelopmentPulls(openPulls.items.assertElse(array, [])),
+    collectDevelopmentPulls(mergedPulls.items.assertElse(array, []))
+  )
+  return {ok: true, pulls: pulls}
+)
+
+def developmentSnapshot() object (
+  if developmentCache.has("pulls") (
+    return developmentCache.get("pulls").assertElse(object, {pulls: [], updated: 0})
+  )
+  object stored = developmentDocs.findById("pulls")
+  if stored.isEmpty() == true (
+    return {pulls: [], updated: 0}
+  )
+  developmentCache.set("pulls", stored)
+  return stored
+)
+
+def developmentPulls() array (
+  object snapshot = developmentSnapshot()
+  return snapshot.pulls.assertElse(array, [])
+)
+
+def refreshDevelopmentPulls() object (
+  object fetched = fetchDevelopmentPulls()
+  if !fetched.ok (
+    return developmentSnapshot()
+  )
+  object snapshot = {pulls: fetched.pulls.assertElse(array, []), updated: timestamp}
+  putDocument(developmentDocs, "pulls", snapshot)
+  developmentCache.set("pulls", snapshot)
+  return snapshot
+)
+
+def developmentFeedLoop() (
+  while true (
+    refreshDevelopmentPulls()
+    process.sleep(developmentRefreshSeconds)
+  )
+)
+
+def handleDevelopmentPulls(*serve.Context c) (
+  object snapshot = developmentSnapshot()
+  array pulls = snapshot.pulls.assertElse(array, [])
+  c.setHeader("Cache-Control", "public, max-age=60")
+  c.json(200, {
+    ok: true,
+    org: githubOrg,
+    pulls: pulls,
+    updated: (snapshot.updated ?? 0)
+  })
+)

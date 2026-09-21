@@ -112,6 +112,8 @@ string r2SecretAccessKey = configValue("R2_SECRET_ACCESS_KEY", "")
 string r2PublicBase = configValue("R2_PUBLIC_BASE", "")
 string giteaURL = configValue("GITEA_URL", "https://git.rotur.dev")
 string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
+string githubOrg = configValue("GITHUB_ORG", "MistWarp")
+string githubToken = configValue("GITHUB_TOKEN", "")
 string editorOrigin = configValue("EDITOR_ORIGIN", "https://mistwarp.org")
 array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
 string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
@@ -190,6 +192,8 @@ import "./like-milestones.osl"
 import "./notifications.osl"
 import "./remote-milestones.osl"
 import "./news.osl"
+import "./development-links.osl"
+import "./development.osl"
 import "./standing.osl"
 import "./settings.osl"
 import "./agreement.osl"
@@ -213,6 +217,7 @@ auto groupSnapshotCache = cache.create(10000, 60)
 auto gameDataCapabilityCache = cache.create(100000, 300)
 auto multiplayerTicketCache = cache.create(100000, 120)
 auto realtimeHandshakeCache = cache.create(100000, 30)
+auto developmentCache = cache.create(4, 300)
 
 ensureDirectories()
 initCommunityDatabase()
@@ -245,6 +250,7 @@ cleanupExpiredCommunityRecords()
 thread.new(reconcileLoop)
 thread.new(stagedFlushLoop)
 thread.new(generateMissingProjectHistories)
+thread.new(developmentFeedLoop)
 
 *serve.Router app = serve.new()
 *ws.Server gameRealtimeSocket = ws.New()
@@ -324,6 +330,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/vanity/:slug", handleResolveVanityProject)
   api.GET("/groups/:tag", handleGetMistWarpGroup)
   api.GET("/leaderboard", handleLeaderboard)
+  api.GET("/development/pulls", handleDevelopmentPulls)
   api.GET("/roadmap", handleListIdeas)
   api.POST("/roadmap", requireAuth, requireGoodStanding, handleCreateIdea)
   api.POST("/roadmap/:id/vote", requireAuth, handleVoteIdea)
