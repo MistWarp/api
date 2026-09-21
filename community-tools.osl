@@ -2544,6 +2544,7 @@ def handleDeleteProjectReview(*serve.Context c) (
 def handleListIdeas(*serve.Context c) (
   array ideas = ideaDocs.sort("created", db.desc).all()
   string username = c.getString("username")
+  array developmentFeed = developmentPulls()
   for i ideas.len (
     object idea = ideas[i].assert(object)
     boolean needsSave = false
@@ -2591,6 +2592,7 @@ def handleListIdeas(*serve.Context c) (
     idea.likes = []
     idea.dislikes = []
     idea.voters = []
+    idea.pullRequests = resolveIdeaPulls(idea, developmentFeed)
     ideas[i] = idea
   )
   ideas.sortBy("score", "descending")
@@ -2622,7 +2624,7 @@ def handleCreateIdea(*serve.Context c) (
   if c.getBool("isAdmin") (
     source = "mistwarp"
   )
-  object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", likes: [c.getString("username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
+  object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", pulls: [], likes: [c.getString("username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
   ideaDocs.insertOne(idea)
   idea.myVote = "like"
   idea.likesCount = 1
@@ -2631,6 +2633,7 @@ def handleCreateIdea(*serve.Context c) (
   idea.commentCount = 0
   idea.likes = []
   idea.dislikes = []
+  idea.pullRequests = []
   c.json(201, {ok: true, idea: idea})
 )
 
@@ -2811,8 +2814,12 @@ def handleUpdateIdea(*serve.Context c) (
   if body.contains("interested") (
     idea.interested = body.interested == true
   )
+  if body.contains("pulls") and typeof(body.pulls) == "array" (
+    idea.pulls = normalizePullLinks(body.pulls.assert(array))
+  )
   idea.edited = timestamp
   putDocument(ideaDocs, idea["_id"].toStr(), idea)
+  idea.pullRequests = resolveIdeaPulls(idea, developmentPulls())
   c.json(200, {ok: true, idea: idea})
 )
 
