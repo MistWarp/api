@@ -1,0 +1,127 @@
+import "std:testing"
+import "std:regex"
+
+string githubOrg = "MistWarp"
+
+import "./development-links.osl"
+
+testing.assert(pullLinkKey("scratch-gui", 218) == "scratch-gui#218", "a link key names the repository and number")
+testing.assert(pullWebUrl("scratch-vm", 12) == "https://github.com/MistWarp/scratch-vm/pull/12", "pull URLs point at the configured org")
+testing.assert(githubRepoName("https://api.github.com/repos/MistWarp/scratch-gui") == "scratch-gui", "the repository name comes off the search result URL")
+testing.assert(githubRepoName("") == "", "a missing repository URL yields no name")
+
+// Roadmap references written by contributors
+array linked = roadmapReferencesIn("Fixes https://mistwarp.org/roadmap/entry/iAbCdEf1234567X please review")
+testing.assert(linked.len == 1 and linked[1].toStr() == "iAbCdEf1234567X", "a roadmap entry link is recognised")
+array shorthand = roadmapReferencesIn("Roadmap: iAbCdEf1234567X")
+testing.assert(shorthand.len == 1 and shorthand[1].toStr() == "iAbCdEf1234567X", "the Roadmap: shorthand is recognised")
+array hashRef = roadmapReferencesIn("closes #iAbCdEf1234567X")
+testing.assert(hashRef.len == 1, "a bare #<id> reference is recognised")
+array repeated = roadmapReferencesIn("Roadmap: iAbCdEf1234567X and again /roadmap/entry/iAbCdEf1234567X")
+testing.assert(repeated.len == 1, "the same entry is only referenced once")
+testing.assert(roadmapReferencesIn("fixes #218 in the editor").len == 0, "a plain GitHub issue number is not a roadmap reference")
+testing.assert(roadmapReferencesIn("").len == 0, "an empty body references nothing")
+
+// Pull request state
+testing.assert(developmentPullState({state: "open", pull_request: {}}) == "open", "an open pull request reads as open")
+testing.assert(developmentPullState({state: "open", draft: true, pull_request: {}}) == "draft", "drafts are called out separately")
+testing.assert(developmentPullState({state: "closed", pull_request: {merged_at: "2026-09-01T00:00:00Z"}}) == "merged", "a merged pull request reads as merged")
+testing.assert(developmentPullState({state: "closed", pull_request: {merged_at: null}}) == "closed", "a closed but unmerged pull request reads as closed")
+testing.assert(developmentPullState({state: "closed", draft: true, pull_request: {merged_at: "2026-09-01T00:00:00Z"}}) == "merged", "merging wins over a stale draft flag")
+
+// Admin-typed references
+testing.assert(parsePullLink("scratch-gui#218").ok == true, "the short form parses")
+testing.assert(parsePullLink("scratch-gui#218").repo.toStr() == "scratch-gui", "the short form keeps the repository")
+testing.assert(parsePullLink("scratch-gui#218").number.toNum() == 218, "the short form keeps the number")
+testing.assert(parsePullLink("MistWarp/scratch-gui#218").repo.toStr() == "scratch-gui", "an owner prefix is dropped")
+testing.assert(parsePullLink("https://github.com/MistWarp/scratch-vm/pull/7").repo.toStr() == "scratch-vm", "a pasted URL parses")
+testing.assert(parsePullLink("https://github.com/MistWarp/scratch-vm/pull/7").number.toNum() == 7, "a pasted URL keeps the number")
+testing.assert(parsePullLink("scratch-gui").ok == false, "a repository without a number is rejected")
+testing.assert(parsePullLink("scratch-gui#0").ok == false, "pull request numbers start at one")
+testing.assert(parsePullLink("scratch-gui#abc").ok == false, "a non-numeric number is rejected")
+testing.assert(parsePullLink("../etc#1").ok == false, "a path-like repository name is rejected")
+testing.assert(parsePullLink("   ").ok == false, "blank input is rejected")
+
+array normalized = normalizePullLinks(["scratch-gui#218", "https://github.com/MistWarp/scratch-gui/pull/218", "nonsense", {repo: "scratch-vm", number: 7}])
+testing.assert(normalized.len == 2, "duplicates collapse and unparseable entries drop out")
+testing.assert(normalized[1].assert(object).repo.toStr() == "scratch-gui", "the first link is kept")
+testing.assert(normalized[2].assert(object).number.toNum() == 7, "a stored object link round-trips")
+
+array manyLinks = []
+for i 20 (
+  manyLinks.append("scratch-gui#" ++ i.toStr())
+)
+testing.assert(normalizePullLinks(manyLinks).len == developmentMaxLinksPerIdea, "an entry cannot accumulate unbounded links")
+
+// Feed assembly
+object openItem = {
+  number: 218,
+  title: "Sprite pane redesign",
+  body: "Roadmap: iAbCdEf1234567X",
+  state: "open",
+  draft: false,
+  comments: 3,
+  html_url: "https://github.com/MistWarp/scratch-gui/pull/218",
+  repository_url: "https://api.github.com/repos/MistWarp/scratch-gui",
+  user: {login: "mist", html_url: "https://github.com/mist", avatar_url: "https://avatars/mist"},
+  labels: [{name: "editor"}, {name: "editor"}],
+  created_at: "2026-09-01T00:00:00Z",
+  updated_at: "2026-09-14T00:00:00Z",
+  pull_request: {merged_at: null}
+}
+object pull = normalizeDevelopmentPull(openItem)
+testing.assert(pull.id.toStr() == "scratch-gui#218", "a feed entry is keyed by repository and number")
+testing.assert(pull.state.toStr() == "open", "the feed entry carries its state")
+testing.assert(pull.author.toStr() == "mist", "the feed entry carries its author")
+testing.assert(pull.labels.assert(array).len == 1, "duplicate labels collapse")
+testing.assert(pull.roadmapIds.assert(array).len == 1, "the body reference is captured on the feed entry")
+
+array collected = collectDevelopmentPulls([openItem, {number: 9, title: "An issue", repository_url: "https://api.github.com/repos/MistWarp/scratch-gui"}])
+testing.assert(collected.len == 1, "search results that are issues rather than pull requests are skipped")
+
+array merged = dedupeDevelopmentPulls([pull], [pull, {id: "scratch-vm#7"}])
+testing.assert(merged.len == 2, "a pull request appearing in both searches is listed once")
+
+// Resolving an entry's pull requests
+object idea = {_id: "iAbCdEf1234567X", pulls: [{repo: "scratch-vm", number: 7}]}
+array resolved = resolveIdeaPulls(idea, [pull])
+testing.assert(resolved.len == 2, "manual links and body references both attach")
+testing.assert(resolved[1].assert(object).linkedBy.toStr() == "manual", "manual links are listed first")
+testing.assert(resolved[1].assert(object).state.toStr() == "unknown", "a manual link outside the feed window still renders")
+testing.assert(resolved[1].assert(object).url.toStr() == "https://github.com/MistWarp/scratch-vm/pull/7", "an unknown manual link still points at GitHub")
+testing.assert(resolved[2].assert(object).linkedBy.toStr() == "reference", "a body reference is marked as such")
+
+object alsoManual = {_id: "iAbCdEf1234567X", pulls: [{repo: "scratch-gui", number: 218}]}
+array once = resolveIdeaPulls(alsoManual, [pull])
+testing.assert(once.len == 1, "a pull request that is both linked and referenced appears once")
+testing.assert(once[1].assert(object).linkedBy.toStr() == "manual", "an explicit link wins over the body reference")
+
+array otherEntry = resolveIdeaPulls({_id: "iZzZzZz9999999Z", pulls: []}, [pull])
+testing.assert(otherEntry.len == 0, "an unrelated entry picks up nothing")
+
+// Staying inside GitHub's search quota
+testing.assert(snapshotIsFresh(1000000, 1000000 + 60000, 300), "a snapshot a minute old is still fresh")
+testing.assert(snapshotIsFresh(1000000, 1000000 + 299999, 300), "a snapshot is fresh right up to the refresh interval")
+testing.assert(!snapshotIsFresh(1000000, 1000000 + 300000, 300), "a snapshot older than the interval is stale")
+testing.assert(!snapshotIsFresh(0, 1000000, 300), "no snapshot is never fresh")
+testing.assert(!snapshotIsFresh(1000000, 500000, 300), "a snapshot from the future is not trusted")
+
+object headers = {"X-Ratelimit-Remaining": "7", "X-Ratelimit-Reset": "2000"}
+object quota = quotaFromHeaders(headers, 1900)
+testing.assert(quota.ok == true and quota.remaining.toNum() == 7, "the remaining budget is read from the response")
+testing.assert(quota.reset.toNum() == 2000, "the reset time is read from the response")
+testing.assert(quotaFromHeaders({}, 1900).ok == false, "a response without quota headers tells us nothing")
+testing.assert(quotaFromHeaders({"X-Ratelimit-Remaining": "7", "X-Ratelimit-Reset": "100"}, 1900).reset.toNum() == 1900, "a reset already past is clamped to now")
+
+object limited = quotaAfterRateLimit({"Retry-After": "30"}, 1000, 60)
+testing.assert(limited.remaining.toNum() == 0 and limited.reset.toNum() == 1030, "Retry-After sets when the window reopens")
+testing.assert(quotaAfterRateLimit({"X-Ratelimit-Reset": "1500"}, 1000, 60).reset.toNum() == 1500, "without Retry-After the reported reset is used")
+testing.assert(quotaAfterRateLimit({}, 1000, 60).reset.toNum() == 1060, "a bare 403 still backs off")
+testing.assert(quotaAfterRateLimit({"Retry-After": "0"}, 1000, 60).reset.toNum() == 1060, "a useless Retry-After falls back to the backoff")
+
+testing.assert(searchAffordable({remaining: -1, reset: 0}, 1000, 2, 2), "a first refresh is allowed before anything is observed")
+testing.assert(searchAffordable({remaining: 0, reset: 2000}, 2000, 2, 2), "a rolled-over window restores the budget")
+testing.assert(!searchAffordable({remaining: 0, reset: 2000}, 1999, 2, 2), "a spent window is not retried early")
+testing.assert(searchAffordable({remaining: 4, reset: 2000}, 1000, 2, 2), "a refresh runs when the budget covers it and the reserve")
+testing.assert(!searchAffordable({remaining: 3, reset: 2000}, 1000, 2, 2), "the reserve is kept for anything else on this address")
+testing.assert(searchAffordable({}, 1000, 2, 2), "missing quota state does not block the first look")
