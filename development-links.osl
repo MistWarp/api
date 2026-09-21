@@ -1,0 +1,326 @@
+// Pure helpers behind the development feed: normalising a GitHub search item
+// into a feed entry, parsing the pull request references an admin types, and
+// resolving which pull requests belong to a roadmap entry. Kept separate from
+// development.osl so the linking rules can be tested without HTTP or a cache.
+
+number developmentMaxLinksPerIdea = 12
+
+def pullLinkKey(string repo, number index) string (
+  return repo ++ "#" ++ index.toStr()
+)
+
+def pullWebUrl(string repo, number index) string (
+  return "https://github.com/" ++ githubOrg ++ "/" ++ repo ++ "/pull/" ++ index.toStr()
+)
+
+// Contributors link their own work by naming the entry in the pull request:
+// a /roadmap/entry/<id> link, "Roadmap: <id>", or a bare "#<id>".
+def roadmapReferencesIn(string text) array (
+  array found = []
+  array matches = regex.findAll("(roadmap/entry/|[Rr]oadmap: *|#)i[A-Za-z0-9]{14}", text)
+  for i matches.len (
+    string hit = matches[i].toStr()
+    string id = hit.trim(hit.len - 14, hit.len)
+    if !found.contains(id) and found.len < 8 (
+      found.append(id)
+    )
+  )
+  return found
+)
+
+def githubRepoName(string repositoryUrl) string (
+  array parts = repositoryUrl.split("/")
+  if parts.len == 0 (
+    return ""
+  )
+  return parts[parts.len].toStr().strip()
+)
+
+def developmentPullState(object item) string (
+  object pullInfo = item.pull_request.assertElse(object, {})
+  if pullInfo.contains("merged_at") and pullInfo.merged_at != null and pullInfo.merged_at.toStr() != "" (
+    return "merged"
+  )
+  if item.contains("draft") and item.draft == true (
+    return "draft"
+  )
+  if item.contains("state") and item.state.toStr() == "closed" (
+    return "closed"
+  )
+  return "open"
+)
+
+def developmentPullLabels(object item) array (
+  array labels = []
+  array rawLabels = item.labels.assertElse(array, [])
+  for i rawLabels.len (
+    object label = rawLabels[i].assertElse(object, {})
+    string name = label.name.toStr().strip()
+    if name != "" and !labels.contains(name) and labels.len < 6 (
+      labels.append(name)
+    )
+  )
+  return labels
+)
+
+def normalizeDevelopmentPull(object item) object (
+  object pullInfo = item.pull_request.assertElse(object, {})
+  object author = item.user.assertElse(object, {})
+  string repo = githubRepoName(item.repository_url.toStr())
+  number index = item.number.toNum()
+  string title = item.title.toStr().strip().trim(1, 200)
+  string body = ""
+  if item.contains("body") and item.body != null (
+    body = item.body.toStr()
+  )
+  string mergedAt = ""
+  if pullInfo.contains("merged_at") and pullInfo.merged_at != null (
+    mergedAt = pullInfo.merged_at.toStr()
+  )
+  return {
+    id: pullLinkKey(repo, index),
+    repo: repo,
+    number: index,
+    title: title,
+    url: item.html_url.toStr(),
+    state: developmentPullState(item),
+    author: author.login.toStr(),
+    authorUrl: author.html_url.toStr(),
+    authorAvatar: author.avatar_url.toStr(),
+    comments: item.comments.toNum(),
+    labels: developmentPullLabels(item),
+    createdAt: item.created_at.toStr(),
+    updatedAt: item.updated_at.toStr(),
+    mergedAt: mergedAt,
+    roadmapIds: roadmapReferencesIn(title ++ "\n" ++ body)
+  }
+)
+
+def collectDevelopmentPulls(array items) array (
+  array pulls = []
+  for i items.len (
+    object item = items[i].assertElse(object, {})
+    // Search also matches issues; only entries carrying a pull_request are ours.
+    if item.contains("pull_request") and item.pull_request != null and item.contains("number") (
+      object pull = normalizeDevelopmentPull(item)
+      if pull.repo.toStr() != "" (
+        pulls.append(pull)
+      )
+    )
+  )
+  return pulls
+)
+
+def dedupeDevelopmentPulls(array first, array second) array (
+  array pulls = []
+  array seen = []
+  for i first.len (
+    object pull = first[i].assertElse(object, {})
+    if !seen.contains(pull.id.toStr()) (
+      seen.append(pull.id.toStr())
+      pulls.append(pull)
+    )
+  )
+  for i second.len (
+    object pull = second[i].assertElse(object, {})
+    if !seen.contains(pull.id.toStr()) (
+      seen.append(pull.id.toStr())
+      pulls.append(pull)
+    )
+  )
+  return pulls
+)
+
+// Accepts "scratch-gui#218", "MistWarp/scratch-gui#218", or a pasted
+// https://github.com/MistWarp/scratch-gui/pull/218 link.
+def parsePullLink(string raw) object (
+  string value = raw.strip()
+  if value == "" or value.len > 300 (
+    return {ok: false}
+  )
+  value = value.replace("https://github.com/", "").replace("http://github.com/", "")
+  value = value.replace("/pull/", "#").replace("/pulls/", "#")
+  array parts = value.split("#")
+  if parts.len != 2 (
+    return {ok: false}
+  )
+  // Either "repo" or "owner/repo"; anything else is not a reference we wrote.
+  array repoSegments = parts[1].toStr().strip().split("/")
+  if repoSegments.len < 1 or repoSegments.len > 2 (
+    return {ok: false}
+  )
+  for i repoSegments.len (
+    string segment = repoSegments[i].toStr().strip()
+    if !regex.match("^[A-Za-z0-9._-]{1,100}$", segment) or segment == "." or segment == ".." (
+      return {ok: false}
+    )
+  )
+  string repo = repoSegments[repoSegments.len].toStr().strip()
+  string digits = parts[2].toStr().strip()
+  if !regex.match("^[0-9]{1,7}$", digits) (
+    return {ok: false}
+  )
+  number index = digits.toNum()
+  if index < 1 (
+    return {ok: false}
+  )
+  return {ok: true, repo: repo, number: index}
+)
+
+def normalizePullLinks(array raw) array (
+  array links = []
+  array seen = []
+  for i raw.len (
+    // Clients send strings; stored links round-trip as {repo, number} objects.
+    string reference = ""
+    if typeof(raw[i]) == "object" (
+      object link = raw[i].assertElse(object, {})
+      if link.contains("repo") and link.contains("number") (
+        reference = link.repo.toStr() ++ "#" ++ link.number.toStr()
+      )
+    ) else (
+      reference = raw[i].toStr()
+    )
+    object parsed = parsePullLink(reference)
+    if parsed.ok == true and links.len < developmentMaxLinksPerIdea (
+      string key = pullLinkKey(parsed.repo.toStr(), parsed.number.toNum())
+      if !seen.contains(key) (
+        seen.append(key)
+        links.append({repo: parsed.repo, number: parsed.number})
+      )
+    )
+  )
+  return links
+)
+
+// A manual link stays visible even when the feed has not seen that pull
+// request — an older merge drops out of the window, but the entry still
+// deserves to show what shipped it.
+def developmentPullFor(array pulls, string key, string repo, number index) object (
+  for i pulls.len (
+    object pull = pulls[i].assertElse(object, {})
+    if pull.id.toStr() == key (
+      return pull
+    )
+  )
+  return {
+    id: key,
+    repo: repo,
+    number: index,
+    title: key,
+    url: pullWebUrl(repo, index),
+    state: "unknown",
+    author: "",
+    authorUrl: "",
+    authorAvatar: "",
+    comments: 0,
+    labels: [],
+    createdAt: "",
+    updatedAt: "",
+    mergedAt: "",
+    roadmapIds: []
+  }
+)
+
+// Copied rather than tagged in place: the same pull request can be a manual
+// link on one entry and a reference match on another, and the feed entries are
+// shared with the cached snapshot.
+def withLinkSource(object pull, string source) object (
+  return {
+    id: pull.id,
+    repo: pull.repo,
+    number: pull.number,
+    title: pull.title,
+    url: pull.url,
+    state: pull.state,
+    author: pull.author,
+    authorUrl: pull.authorUrl,
+    authorAvatar: pull.authorAvatar,
+    comments: pull.comments,
+    labels: pull.labels,
+    createdAt: pull.createdAt,
+    updatedAt: pull.updatedAt,
+    mergedAt: pull.mergedAt,
+    linkedBy: source
+  }
+)
+
+def resolveIdeaPulls(object idea, array pulls) array (
+  string ideaId = idea["_id"].toStr()
+  array resolved = []
+  array seen = []
+  array manual = idea.pulls.assertElse(array, [])
+  for i manual.len (
+    object link = manual[i].assertElse(object, {})
+    string repo = link.repo.toStr()
+    number index = link.number.toNum()
+    string key = pullLinkKey(repo, index)
+    if repo != "" and index > 0 and !seen.contains(key) (
+      seen.append(key)
+      resolved.append(withLinkSource(developmentPullFor(pulls, key, repo, index), "manual"))
+    )
+  )
+  for i pulls.len (
+    object pull = pulls[i].assertElse(object, {})
+    string key = pull.id.toStr()
+    array references = pull.roadmapIds.assertElse(array, [])
+    if references.contains(ideaId) and !seen.contains(key) (
+      seen.append(key)
+      resolved.append(withLinkSource(pull, "reference"))
+    )
+  )
+  return resolved
+)
+
+// GitHub's search quota is separate from the core REST quota: ten requests a
+// minute for an unauthenticated caller, and no ETag on search responses, so a
+// conditional request cannot buy a free 304. The only way to stay inside the
+// budget is to never spend a request we do not need or cannot afford.
+
+def snapshotIsFresh(number updated, number now, number refreshSeconds) boolean (
+  if updated <= 0 or now < updated (
+    return false
+  )
+  return now - updated < refreshSeconds * 1000
+)
+
+def quotaFromHeaders(object headers, number nowSeconds) object (
+  if !headers.contains("X-Ratelimit-Remaining") or !headers.contains("X-Ratelimit-Reset") (
+    return {ok: false}
+  )
+  number reset = headers["X-Ratelimit-Reset"].toNum()
+  // A reset already in the past tells us nothing about the window ahead.
+  if reset < nowSeconds (
+    reset = nowSeconds
+  )
+  return {ok: true, remaining: headers["X-Ratelimit-Remaining"].toNum(), reset: reset}
+)
+
+// Retry-After is seconds from now; a 403 without one still means the window is
+// spent, so hold off until the reset GitHub last reported.
+def quotaAfterRateLimit(object headers, number nowSeconds, number fallbackSeconds) object (
+  number reset = nowSeconds + fallbackSeconds
+  if headers.contains("Retry-After") (
+    number retryAfter = headers["Retry-After"].toNum()
+    if retryAfter > 0 (
+      reset = nowSeconds + retryAfter
+    )
+  ) else if headers.contains("X-Ratelimit-Reset") (
+    number reported = headers["X-Ratelimit-Reset"].toNum()
+    if reported > nowSeconds (
+      reset = reported
+    )
+  )
+  return {ok: true, remaining: 0, reset: reset}
+)
+
+def searchAffordable(object quota, number nowSeconds, number calls, number reserve) boolean (
+  // Nothing observed yet, or the window has rolled over since we last looked.
+  if !quota.contains("remaining") or quota.remaining.toNum() < 0 (
+    return true
+  )
+  if nowSeconds >= quota.reset.toNum() (
+    return true
+  )
+  return quota.remaining.toNum() - reserve >= calls
+)
