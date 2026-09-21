@@ -271,3 +271,56 @@ def resolveIdeaPulls(object idea, array pulls) array (
   )
   return resolved
 )
+
+// GitHub's search quota is separate from the core REST quota: ten requests a
+// minute for an unauthenticated caller, and no ETag on search responses, so a
+// conditional request cannot buy a free 304. The only way to stay inside the
+// budget is to never spend a request we do not need or cannot afford.
+
+def snapshotIsFresh(number updated, number now, number refreshSeconds) boolean (
+  if updated <= 0 or now < updated (
+    return false
+  )
+  return now - updated < refreshSeconds * 1000
+)
+
+def quotaFromHeaders(object headers, number nowSeconds) object (
+  if !headers.contains("X-Ratelimit-Remaining") or !headers.contains("X-Ratelimit-Reset") (
+    return {ok: false}
+  )
+  number reset = headers["X-Ratelimit-Reset"].toNum()
+  // A reset already in the past tells us nothing about the window ahead.
+  if reset < nowSeconds (
+    reset = nowSeconds
+  )
+  return {ok: true, remaining: headers["X-Ratelimit-Remaining"].toNum(), reset: reset}
+)
+
+// Retry-After is seconds from now; a 403 without one still means the window is
+// spent, so hold off until the reset GitHub last reported.
+def quotaAfterRateLimit(object headers, number nowSeconds, number fallbackSeconds) object (
+  number reset = nowSeconds + fallbackSeconds
+  if headers.contains("Retry-After") (
+    number retryAfter = headers["Retry-After"].toNum()
+    if retryAfter > 0 (
+      reset = nowSeconds + retryAfter
+    )
+  ) else if headers.contains("X-Ratelimit-Reset") (
+    number reported = headers["X-Ratelimit-Reset"].toNum()
+    if reported > nowSeconds (
+      reset = reported
+    )
+  )
+  return {ok: true, remaining: 0, reset: reset}
+)
+
+def searchAffordable(object quota, number nowSeconds, number calls, number reserve) boolean (
+  // Nothing observed yet, or the window has rolled over since we last looked.
+  if !quota.contains("remaining") or quota.remaining.toNum() < 0 (
+    return true
+  )
+  if nowSeconds >= quota.reset.toNum() (
+    return true
+  )
+  return quota.remaining.toNum() - reserve >= calls
+)

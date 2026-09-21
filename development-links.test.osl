@@ -98,3 +98,30 @@ testing.assert(once[1].assert(object).linkedBy.toStr() == "manual", "an explicit
 
 array otherEntry = resolveIdeaPulls({_id: "iZzZzZz9999999Z", pulls: []}, [pull])
 testing.assert(otherEntry.len == 0, "an unrelated entry picks up nothing")
+
+// Staying inside GitHub's search quota
+testing.assert(snapshotIsFresh(1000000, 1000000 + 60000, 300), "a snapshot a minute old is still fresh")
+testing.assert(snapshotIsFresh(1000000, 1000000 + 299999, 300), "a snapshot is fresh right up to the refresh interval")
+testing.assert(!snapshotIsFresh(1000000, 1000000 + 300000, 300), "a snapshot older than the interval is stale")
+testing.assert(!snapshotIsFresh(0, 1000000, 300), "no snapshot is never fresh")
+testing.assert(!snapshotIsFresh(1000000, 500000, 300), "a snapshot from the future is not trusted")
+
+object headers = {"X-Ratelimit-Remaining": "7", "X-Ratelimit-Reset": "2000"}
+object quota = quotaFromHeaders(headers, 1900)
+testing.assert(quota.ok == true and quota.remaining.toNum() == 7, "the remaining budget is read from the response")
+testing.assert(quota.reset.toNum() == 2000, "the reset time is read from the response")
+testing.assert(quotaFromHeaders({}, 1900).ok == false, "a response without quota headers tells us nothing")
+testing.assert(quotaFromHeaders({"X-Ratelimit-Remaining": "7", "X-Ratelimit-Reset": "100"}, 1900).reset.toNum() == 1900, "a reset already past is clamped to now")
+
+object limited = quotaAfterRateLimit({"Retry-After": "30"}, 1000, 60)
+testing.assert(limited.remaining.toNum() == 0 and limited.reset.toNum() == 1030, "Retry-After sets when the window reopens")
+testing.assert(quotaAfterRateLimit({"X-Ratelimit-Reset": "1500"}, 1000, 60).reset.toNum() == 1500, "without Retry-After the reported reset is used")
+testing.assert(quotaAfterRateLimit({}, 1000, 60).reset.toNum() == 1060, "a bare 403 still backs off")
+testing.assert(quotaAfterRateLimit({"Retry-After": "0"}, 1000, 60).reset.toNum() == 1060, "a useless Retry-After falls back to the backoff")
+
+testing.assert(searchAffordable({remaining: -1, reset: 0}, 1000, 2, 2), "a first refresh is allowed before anything is observed")
+testing.assert(searchAffordable({remaining: 0, reset: 2000}, 2000, 2, 2), "a rolled-over window restores the budget")
+testing.assert(!searchAffordable({remaining: 0, reset: 2000}, 1999, 2, 2), "a spent window is not retried early")
+testing.assert(searchAffordable({remaining: 4, reset: 2000}, 1000, 2, 2), "a refresh runs when the budget covers it and the reserve")
+testing.assert(!searchAffordable({remaining: 3, reset: 2000}, 1000, 2, 2), "the reserve is kept for anything else on this address")
+testing.assert(searchAffordable({}, 1000, 2, 2), "missing quota state does not block the first look")

@@ -11,6 +11,15 @@
 number developmentOpenLimit = 100
 number developmentMergedLimit = 40
 number developmentRefreshSeconds = 300
+// The loop ticks more often than the refresh window so a tick landing a
+// moment early cannot push the next refresh out to a second full interval.
+// Ticks that find fresh data cost nothing.
+number developmentTickSeconds = 60
+// One refresh spends two search requests. The quota is per IP, so leave room
+// for anything else on this host that talks to GitHub.
+number developmentSearchCalls = 2
+number developmentRateReserve = 2
+number developmentRateLimitBackoffSeconds = 60
 
 def githubHeaders() object (
   object headers = {
@@ -24,10 +33,37 @@ def githubHeaders() object (
   return headers
 )
 
+def nowSeconds() number (
+  return (timestamp / 1000).toInt()
+)
+
+def developmentQuota() object (
+  object stored = developmentDocs.findById("quota")
+  if stored.isEmpty() == true (
+    return {remaining: -1, reset: 0}
+  )
+  return stored
+)
+
+def storeDevelopmentQuota(object quota) (
+  if quota.ok == true (
+    putDocument(developmentDocs, "quota", {remaining: quota.remaining, reset: quota.reset})
+  )
+)
+
 def githubSearchPulls(string query, number limit) object (
   string endpoint = "https://api.github.com/search/issues?q=" ++ url.escape(query) ++ "&sort=updated&order=desc&per_page=" ++ limit.toStr()
   object response = requests.get(endpoint, {headers: githubHeaders(), timeout: 10, max_bytes: 8388608})
-  if !response.success or response.status.toInt() != 200 (
+  object headers = response.headers.assertElse(object, {})
+  number status = response.status.toInt()
+  // 403 and 429 are how a spent quota arrives. Record when it reopens so the
+  // next refresh waits instead of asking again.
+  if status == 403 or status == 429 (
+    storeDevelopmentQuota(quotaAfterRateLimit(headers, nowSeconds(), developmentRateLimitBackoffSeconds))
+    return {ok: false, items: []}
+  )
+  storeDevelopmentQuota(quotaFromHeaders(headers, nowSeconds()))
+  if !response.success or status != 200 (
     return {ok: false, items: []}
   )
   auto parsed = json.parse(response.body, {type: "object"})
@@ -72,10 +108,19 @@ def developmentPulls() array (
   return snapshot.pulls.assertElse(array, [])
 )
 
-def refreshDevelopmentPulls() object (
+def refreshDevelopmentPullsLocked() object (
+  object current = developmentSnapshot()
+  // A restart must not cost a request: the stored snapshot is still good, and
+  // a crash loop would otherwise burn the whole minute's budget.
+  if snapshotIsFresh((current.updated ?? 0).toNum(), timestamp, developmentRefreshSeconds) (
+    return current
+  )
+  if !searchAffordable(developmentQuota(), nowSeconds(), developmentSearchCalls, developmentRateReserve) (
+    return current
+  )
   object fetched = fetchDevelopmentPulls()
   if !fetched.ok (
-    return developmentSnapshot()
+    return current
   )
   object snapshot = {pulls: fetched.pulls.assertElse(array, []), updated: timestamp}
   putDocument(developmentDocs, "pulls", snapshot)
@@ -83,10 +128,17 @@ def refreshDevelopmentPulls() object (
   return snapshot
 )
 
+def refreshDevelopmentPulls() object (
+  sync.lock("development-refresh")
+  object snapshot = refreshDevelopmentPullsLocked()
+  sync.unlock("development-refresh")
+  return snapshot
+)
+
 def developmentFeedLoop() (
   while true (
     refreshDevelopmentPulls()
-    process.sleep(developmentRefreshSeconds)
+    process.sleep(developmentTickSeconds)
   )
 )
 
