@@ -229,6 +229,10 @@ def mostPlayedProjectActivity(string name,*serve.Context c, number limit) array 
 def handleGetUser(*serve.Context c) (
   string name = c.param("name")
   string key = normalizeUsername(name)
+  if isBannedUser(name) (
+    c.json(200, {ok: true, username: name, banned: true, projects: []})
+    return
+  )
   if isSafePathPart(key) and !fs.exists(usersDir ++ key ++ ".json") (
     discoverUserIdentity(name)
   )
@@ -273,6 +277,7 @@ def handleGetUser(*serve.Context c) (
   c.json(200, {
     ok: true,
     exists: exists or projectTotal > 0,
+    banned: false,
     username: profile.username,
     bio: profile.bio,
     featuredProject: profile.featuredProject,
