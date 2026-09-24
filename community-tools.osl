@@ -1964,6 +1964,30 @@ def handleEditSpaceComment(*serve.Context c) (
   c.json(200, edited)
 )
 
+def handlePinSpaceComment(*serve.Context c) (
+  object space = spaceDocs.findById(c.param("id"))
+  if space.isEmpty() == true or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  string moderator = space.owner.toStr()
+  if canManageSpace(space, c) (
+    moderator = c.getString("username")
+  )
+  object body = c.bodyJSON()
+  boolean pinned = true
+  if body.contains("pinned") and body.pinned != null (
+    pinned = body.pinned == true
+  )
+  object updated = setCommentPin(spaceCommentKey(space["_id"].toStr()), c.param("cid"), c.getString("username"), moderator, c.getBool("isAdmin"), pinned)
+  if !updated.ok (
+    c.json(updated.status.toInt(), {ok: false, error: updated.error})
+    return
+  )
+  updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
+  c.json(200, updated)
+)
+
 def handleReactSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
   if space.isEmpty() == true or !canViewSpace(space, c) (
