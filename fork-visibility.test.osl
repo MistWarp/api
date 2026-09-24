@@ -69,10 +69,7 @@ def projectViewKey(object project) string (
 )
 
 def projectSeeInside(object project) boolean (
-  if project.contains("seeInside") and project.seeInside == false (
-    return false
-  )
-  return true
+  return !project.contains("seeInside") or project.seeInside != false
 )
 
 object mockDb = {}
@@ -179,10 +176,7 @@ def canViewProjectJsonTest(object project, object ctx) boolean (
       return true
     )
     string pk = projectViewKey(project)
-    if pk != "" and (ctx.key ?? "").toStr() == pk (
-      return true
-    )
-    return false
+    return pk != "" and (ctx.key ?? "").toStr() == pk
   )
   if project.shared == true or projectVisibility(project) == "unlisted" (
     return true

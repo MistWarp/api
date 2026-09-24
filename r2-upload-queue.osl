@@ -57,7 +57,7 @@ def readR2UploadQueue() object (
     )
     return {ok: false}
   )
-  boolean missing = raw("func() bool { _, err := OSLos.Stat(r2UploadQueueFile); return OSLos.IsNotExist(err) }()")
+  boolean missing = storagefs.Missing(r2UploadQueueFile)
   return missing ? {ok: true, items: []} {ok: false}
 )
 
@@ -90,7 +90,7 @@ def queueR2UploadLocked(string key, string contentType, string contentEncoding) 
   return writeFile(r2UploadQueueFile, {items: items})
 )
 
-def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+def stageR2Blob(string key, BlobBody body, string contentType, string contentEncoding) boolean (
   if !isSafeBlobKey(key) (
     return false
   )

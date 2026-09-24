@@ -685,14 +685,14 @@ def challengeScoreSummary(object space, string projectId, string viewer) object 
           object criterion = criteria[k].assert(object)
           if criterion.id.toStr() == rating.criterionId.toStr() (
             number weight = criterion.weight.toNum()
-            weighted = weighted + (clampNumber(rating.value.toNum(), 1, 10) * weight)
-            weightTotal = weightTotal + weight
+            weighted += (clampNumber(rating.value.toNum(), 1, 10) * weight)
+            weightTotal += weight
           )
         )
       )
       if weightTotal > 0 (
-        total = total + (weighted / weightTotal)
-        scoreCount = scoreCount + 1
+        total += (weighted / weightTotal)
+        scoreCount += 1
       )
       if normalizeUsername(score.judge.toStr()) == normalizeUsername(viewer) (
         myScore = score
@@ -706,8 +706,8 @@ def challengeScoreSummary(object space, string projectId, string viewer) object 
   for i votes.len (
     object vote = votes[i].assert(object)
     if vote.projectId.toStr() == projectId (
-      audienceTotal = audienceTotal + vote.value.toNum()
-      audienceCount = audienceCount + 1
+      audienceTotal += vote.value.toNum()
+      audienceCount += 1
       if normalizeUsername(vote.username.toStr()) == normalizeUsername(viewer) (
         myVote = vote.value.toNum()
       )
@@ -760,7 +760,7 @@ def challengeProjects(object space,*serve.Context c) array (
 def spaceTotalPlaytime(array ids) number (
   number total = 0
   for i ids.len (
-    total = total + projectTotalPlaytime(ids[i].toStr())
+    total += projectTotalPlaytime(ids[i].toStr())
   )
   return total
 )
@@ -857,7 +857,7 @@ def spaceListResponse(object space,*serve.Context c) object (
   for i ids.len (
     object project = projectSearchDocs.findById(ids[i].toStr())
     if !project.isEmpty() and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
-      projectCount = projectCount + 1
+      projectCount += 1
       if thumbnailURL == "" and project.contains("thumbUrl") (
         thumbnailURL = project.thumbUrl.toStr()
       )
@@ -2019,7 +2019,7 @@ def handleCreatePreview(*serve.Context c) (
     if existing.expiresAt.toNum() <= timestamp (
       previewDocs.deleteOne({_id: existing["_id"]})
     ) else (
-      activePreviews = activePreviews + 1
+      activePreviews += 1
     )
   )
   if activePreviews >= 20 (
@@ -2379,8 +2379,8 @@ def handleGetDiagnostics(*serve.Context c) (
     string kind = item.type.toStr()
     counts[kind] = counts[kind].toNum() + 1
     if item.loadMs.toNum() > 0 (
-      totalLoadMs = totalLoadMs + item.loadMs.toNum()
-      loadSamples = loadSamples + 1
+      totalLoadMs += item.loadMs.toNum()
+      loadSamples += 1
     )
   )
   number averageLoadMs = 0
@@ -2462,7 +2462,7 @@ def handleListProjectReviews(*serve.Context c) (
   object myReview = {}
   for i reviews.len (
     object review = reviews[i].assert(object)
-    ratingTotal = ratingTotal + review.rating.toNum()
+    ratingTotal += review.rating.toNum()
     review.playtimeMs = projectPlaytime(c.param("id"), review.author.toStr())
     string authorId = ""
     if review.contains("authorId") and review.authorId != null (

@@ -2,7 +2,7 @@ def projectWorkspaceFingerprint(object project) string (
   array keys = projectWorkspaceKeys(project)
   string identity = ""
   for i keys.len (
-    identity = identity ++ keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
+    identity ++= keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
   )
   return identity.hashSHA256()
 )
@@ -16,12 +16,12 @@ def pruneGitInspectionCache(string cacheDir, string preserveName) (
   if gitInspectionPruneCache.has(cacheDir) (
     calls = gitInspectionPruneCache.get(cacheDir).toNum()
   )
-  calls = calls + 1
+  calls += 1
   gitInspectionPruneCache.set(cacheDir, calls)
   if !shouldPruneGitInspectionCache(calls) (
     return
   )
-  raw("func() { entries, err := OSLos.ReadDir(cacheDir); if err != nil { return }; type cachedFile struct { path string; name string; size int64; modified time.Time }; files := []cachedFile{}; var total int64; now := time.Now(); for _, entry := range entries { if entry.IsDir() || OSLstrings.Contains(entry.Name(), \".tmp.\") { continue }; info, infoErr := entry.Info(); if infoErr != nil { continue }; item := cachedFile{path: cacheDir+entry.Name(), name: entry.Name(), size: info.Size(), modified: info.ModTime()}; if entry.Name() != preserveName && now.Sub(info.ModTime()) > 24*time.Hour { OSLos.Remove(item.path); continue }; files = append(files, item); total += item.size }; OSLsort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) }); for (len(files) > 256 || total > 2147483648) && len(files) > 0 { removeAt := -1; for i, item := range files { if item.name != preserveName { removeAt = i; break } }; if removeAt < 0 { break }; item := files[removeAt]; OSLos.Remove(item.path); total -= item.size; files = append(files[:removeAt], files[removeAt+1:]...) } }()")
+  storagefs.PruneCacheDir(cacheDir, preserveName)
 )
 
 def cachedProjectWorkspacePath(object project) string (
@@ -102,9 +102,9 @@ def projectGitAllowedHeadsString(object project) string (
   string joined = ""
   for i heads.len (
     if joined != "" (
-      joined = joined ++ ","
+      joined ++= ","
     )
-    joined = joined ++ heads[i].toStr()
+    joined ++= heads[i].toStr()
   )
   return joined
 )
@@ -160,7 +160,7 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
   if fs.exists(cachePath) and fs.getSize(cachePath) <= 33554432 (
     return fs.readFile(cachePath)
   )
-  string resultJson = raw("gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)")
+  string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
   if resultJson.len <= 33554432 (
     auto parsed = json.parse(resultJson, {type: "object"})
     if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
