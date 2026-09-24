@@ -368,6 +368,7 @@ def setupApiRoutes(*serve.Router api) (
   api.DELETE("/spaces/:id/comments/:cid", requireAuth, handleDeleteSpaceComment)
   api.PUT("/spaces/:id/comments/:cid", requireAuth, handleEditSpaceComment)
   api.POST("/spaces/:id/comments/:cid/react", requireAuth, handleReactSpaceComment)
+  api.POST("/spaces/:id/comments/:cid/pin", requireAuth, handlePinSpaceComment)
   api.GET("/me/spaces", requireAuth, handleMySpaces)
 
   api.POST("/projects", requireAuth, serve.rateLimit(30, 3600), handleCreateProject)
