@@ -71,7 +71,7 @@ def notificationBody(string actor, string notifType, object extra) string (
       string pullIndex = extra.pull.toStr()
       string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
       if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
-        pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+        pullLink ++= "#comment-id-" ++ extra.commentId.toStr()
       )
       if projectTitle != "" (
         return actor ++ " commented on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
@@ -89,7 +89,7 @@ def notificationBody(string actor, string notifType, object extra) string (
   if notifType == "profile_comment" (
     string profileLink = editorOrigin ++ "/users/" ++ extra.profile.toStr()
     if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
-      profileLink = profileLink ++ "#comment-id-" ++ extra.commentId.toStr()
+      profileLink ++= "#comment-id-" ++ extra.commentId.toStr()
     )
     return actor ++ " commented on your profile" ++ quotedPreview(extra) ++ ": " ++ profileLink
   )
@@ -100,7 +100,7 @@ def notificationBody(string actor, string notifType, object extra) string (
     )
     string roadmapLink = editorOrigin ++ "/roadmap"
     if extra.contains("roadmapId") (
-      roadmapLink = roadmapLink ++ "#idea-" ++ extra.roadmapId.toStr()
+      roadmapLink ++= "#idea-" ++ extra.roadmapId.toStr()
     )
     return actor ++ " commented on " ++ roadmapTitle ++ quotedPreview(extra) ++ ": " ++ roadmapLink
   )
@@ -109,7 +109,7 @@ def notificationBody(string actor, string notifType, object extra) string (
       string pullIndex = extra.pull.toStr()
       string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
       if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
-        pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+        pullLink ++= "#comment-id-" ++ extra.commentId.toStr()
       )
       if projectTitle != "" (
         return actor ++ " replied to your comment on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
@@ -122,7 +122,7 @@ def notificationBody(string actor, string notifType, object extra) string (
     if extra.contains("profile") and extra.profile != null and extra.profile.toStr() != "" (
       string replyProfileLink = editorOrigin ++ "/users/" ++ extra.profile.toStr()
       if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
-        replyProfileLink = replyProfileLink ++ "#comment-id-" ++ extra.commentId.toStr()
+        replyProfileLink ++= "#comment-id-" ++ extra.commentId.toStr()
       )
       return actor ++ " replied to your comment" ++ quotedPreview(extra) ++ ": " ++ replyProfileLink
     )
@@ -133,7 +133,7 @@ def notificationBody(string actor, string notifType, object extra) string (
       string pullIndex = extra.pull.toStr()
       string pullLink = editorOrigin ++ "/project/" ++ extra.projectId.toStr() ++ "/pulls/" ++ pullIndex
       if extra.contains("commentId") and extra.commentId != null and extra.commentId.toStr() != "" (
-        pullLink = pullLink ++ "#comment-id-" ++ extra.commentId.toStr()
+        pullLink ++= "#comment-id-" ++ extra.commentId.toStr()
       )
       if projectTitle != "" (
         return actor ++ " mentioned you on " ++ projectTitle ++ " pr #" ++ pullIndex ++ quotedPreview(extra) ++ ": " ++ pullLink
@@ -367,7 +367,7 @@ def addNotification(string target, string actor, string notifType, object extra)
     )
     if kept < 50 (
       next.append(existing)
-      kept = kept + 1
+      kept += 1
     )
   )
   saveNotifications(targetKey, next)

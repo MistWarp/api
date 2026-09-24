@@ -24,7 +24,7 @@ def realtimeRoster(string roomKey) array (
 def realtimeBroadcast(string roomKey, object message,*ws.Connection? except) (
   string encoded = json.stringify(message)
   for conn in gameRealtimeSocket.GetConnections() (
-    if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey and (except == null or conn != except) (
+    if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey and (except == null or conn !== except) (
       conn.Send(encoded)
     )
   )

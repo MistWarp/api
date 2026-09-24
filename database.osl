@@ -189,7 +189,7 @@ def initCommunityDatabase() boolean (
       ) else (
         walking = false
       )
-      hops = hops + 1
+      hops += 1
     )
     string remixRoot = ""
     if root != id (
@@ -255,7 +255,7 @@ def projectTotalPlaytime(string projectId) number (
   array records = playtimeDocs.where("projectId", db.equal, projectId).all()
   for i records.len (
     object record = records[i].assert(object)
-    total = total + record.duration.toNum()
+    total += record.duration.toNum()
   )
   return total
 )

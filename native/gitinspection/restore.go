@@ -129,8 +129,8 @@ func RestoreArchive(workspacePath, currentHead, restoreHead, outputPath, project
 	return restoreResult{OK: true, Head: commit.OID, Manifest: manifest}
 }
 
-func RestoreArchiveJSON(workspacePath, currentHead, restoreHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) string {
-	result := RestoreArchive(workspacePath, currentHead, restoreHead, outputPath, projectID, remixParent, baseCommit, branch, author, message, timestamp)
+func RestoreArchiveJSON(workspacePath, currentHead, restoreHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestampSeconds float64) string {
+	result := RestoreArchive(workspacePath, currentHead, restoreHead, outputPath, projectID, remixParent, baseCommit, branch, author, message, int64(timestampSeconds))
 	encoded, _ := json.Marshal(result)
 	return string(encoded)
 }

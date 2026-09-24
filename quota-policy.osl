@@ -14,7 +14,7 @@ def quotaTotalBytes(array events, number nowMs, number windowMs) number (
   for i events.len (
     object event = events[i].assert(object)
     if nowMs - event.t.toNum() < windowMs (
-      total = total + event.bytes.toNum()
+      total += event.bytes.toNum()
     )
   )
   return total
@@ -35,7 +35,7 @@ def quotaApplyRefund(array events, number refundBytes, number nowMs, number wind
     number bytes = event.bytes.toNum()
     if remaining > 0 (
       if bytes <= remaining (
-        remaining = remaining - bytes
+        remaining -= bytes
       ) else (
         rev.append({t: event.t, bytes: bytes - remaining})
         remaining = 0
@@ -43,13 +43,13 @@ def quotaApplyRefund(array events, number refundBytes, number nowMs, number wind
     ) else (
       rev.append(event)
     )
-    i = i - 1
+    i -= 1
   )
   array out = []
   number j = rev.len
   while j >= 1 (
     out.append(rev[j.toInt()])
-    j = j - 1
+    j -= 1
   )
   return out
 )
@@ -68,7 +68,7 @@ def quotaUpcomingReleases(array events, number nowMs, number windowMs, number ma
       )
       kept[(j - 1).toInt()] = b
       kept[j.toInt()] = a
-      j = j - 1
+      j -= 1
     )
   )
   array out = []
@@ -98,7 +98,7 @@ def quotaSummarize(array events, number limit, number nowMs, number windowMs) ob
   boolean hasAny = false
   for i kept.len (
     object event = kept[i].assert(object)
-    total = total + event.bytes.toNum()
+    total += event.bytes.toNum()
     if !hasAny or event.t.toNum() < oldest (
       oldest = event.t.toNum()
       hasAny = true
@@ -114,7 +114,7 @@ def quotaSummarize(array events, number limit, number nowMs, number windowMs) ob
     for i kept.len (
       object event = kept[i].assert(object)
       if event.t.toNum() == oldest (
-        nextBytes = nextBytes + event.bytes.toNum()
+        nextBytes += event.bytes.toNum()
       )
     )
   )

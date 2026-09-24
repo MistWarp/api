@@ -1,6 +1,7 @@
 import "std:zip"
 import "std:fs"
 import "std:testing"
+import "go:mistwarp.local/storagefs"
 import "./archive-security.osl"
 
 string fixtureDir = "/tmp/mistwarp-zip-fixtures-" ++ timestamp.toStr()
@@ -11,7 +12,7 @@ def stageParent(string stage, string name) (
   if parts.len > 1 (
     string parent = stage
     for i in 1 to (parts.len - 1) (
-      parent = parent ++ "/" ++ parts[i]
+      parent ++= "/" ++ parts[i]
     )
     fs.mkdirAll(parent)
   )

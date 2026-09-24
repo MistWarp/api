@@ -169,7 +169,7 @@ def newsResponse(object item, string username, boolean includeReactionUsers) obj
       option.votes = voters.len
       option.voted = stringArrayContainsUser(voters, username)
       option.voters = []
-      total = total + voters.len
+      total += voters.len
       options[i] = option
     )
     poll.options = options

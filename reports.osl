@@ -51,9 +51,9 @@ def canAppendPendingReport(array reports, string sourceKey) boolean (
   for i reports.len (
     object report = reports[i].assert(object)
     if report.resolved != true (
-      totalPending = totalPending + 1
+      totalPending += 1
       if (report.sourceKey ?? "").toStr() == sourceKey (
-        sourcePending = sourcePending + 1
+        sourcePending += 1
       )
     )
   )

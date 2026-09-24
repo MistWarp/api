@@ -132,12 +132,12 @@ def handleAdminGetAgreement(*serve.Context c) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      totalUsers = totalUsers + 1
+      totalUsers += 1
       auto result = readFile(agreementAcceptDir ++ name)
       if result.ok (
         object acc = result.data.assert(object)
         if acc.version == version (
-          acceptedCount = acceptedCount + 1
+          acceptedCount += 1
         )
       )
     )
