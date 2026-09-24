@@ -4,6 +4,7 @@ import "std:serve"
 import "std:s3"
 import "std:requests"
 import "std:thread"
+import "go:mistwarp.local/storagefs"
 import "std:process"
 import "std:url"
 

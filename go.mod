@@ -10,6 +10,7 @@ require (
 	mistwarp.local/gitinspection v0.0.0-00010101000000-000000000000 // indirect
 	mistwarp.local/r2inventory v0.0.0-00010101000000-000000000000 // indirect
 	mistwarp.local/runtimeinfo v0.0.0-00010101000000-000000000000 // indirect
+	mistwarp.local/storagefs v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace mistwarp.local/gitinspection => ./native/gitinspection
@@ -17,3 +18,5 @@ replace mistwarp.local/gitinspection => ./native/gitinspection
 replace mistwarp.local/r2inventory => ./native/r2inventory
 
 replace mistwarp.local/runtimeinfo => ./native/runtimeinfo
+
+replace mistwarp.local/storagefs => ./native/storagefs

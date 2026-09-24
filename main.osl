@@ -19,6 +19,7 @@ import "go:time"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/runtimeinfo"
 import "go:mistwarp.local/r2inventory"
+import "go:mistwarp.local/storagefs"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
@@ -34,7 +35,7 @@ def dotenvValue(string name) string (
         string value = parts[2].toStr().strip()
         for p parts.len (
           if p > 2 (
-            value = value ++ "=" ++ parts[p].toStr()
+            value ++= "=" ++ parts[p].toStr()
           )
         )
         return value.replace("\"", "").replace("'", "")

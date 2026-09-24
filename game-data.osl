@@ -37,7 +37,7 @@ def calculateGameSaveStorageBytes(string userId) number (
       for n namespaces.len (
         string path = gameSavesDir ++ projectId ++ "/" ++ namespaces[n].toStr() ++ "/" ++ filename
         if fs.exists(path) (
-          total = total + fs.getSize(path)
+          total += fs.getSize(path)
         )
       )
     )

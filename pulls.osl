@@ -296,7 +296,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   object history = projectVersionHistory(project)
   history.head = projectGitHead(project)
   string historyJson = json.stringify(history)
-  string rewriteJson = raw("gitinspection.ManageBranchArchiveJSON(sourcePath, outputPath, action, branch, name, from, historyJson)")
+  string rewriteJson = gitinspection.ManageBranchArchiveJSON(sourcePath, outputPath, action, branch, name, from, historyJson)
   auto parsedRewrite = json.parse(rewriteJson, {type: "object"})
   fs.remove(sourcePath)
   if parsedRewrite.isErr() or parsedRewrite.unwrap().assert(object).ok != true or !fs.exists(outputPath) (
@@ -389,7 +389,7 @@ def handlePrepareBranchMerge(*serve.Context c) (
     c.internalError("could not assemble project history")
     return
   )
-  string mergeJson = raw("gitinspection.PrepareBranchMergeJSON(workspacePath, targetHead, sourceHead)")
+  string mergeJson = gitinspection.PrepareBranchMergeJSON(workspacePath, targetHead, sourceHead)
   auto parsedMerge = json.parse(mergeJson, {type: "object"})
   if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
     string message = parsedMerge.isErr() ? "could not prepare the branch merge" (parsedMerge.unwrap().assert(object).error ?? "could not prepare the branch merge").toStr()
@@ -682,7 +682,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   string baseCommit = pull.baseCommit.toStr()
   string headCommit = pull.headCommit.toStr()
-  string inspectionJson = c.query("inline") == "1" ? raw("gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)") raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
+  string inspectionJson = c.query("inline") == "1" ? gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
   auto parsedInspection = json.parse(inspectionJson, {type: "object"})
   if parsedInspection.isErr() (
     c.internalError("could not inspect pull request changes")
@@ -739,7 +739,7 @@ def handleMergePull(*serve.Context c) (
     )
     string baseCommit = pull.baseCommit.toStr()
     string headCommit = pull.headCommit.toStr()
-    string inspectionJson = raw("gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)")
+    string inspectionJson = gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
     auto parsedInspection = json.parse(inspectionJson, {type: "object"})
     if parsedInspection.isErr() or parsedInspection.unwrap().assert(object).ok != true (
       c.json(409, {ok: false, error: "the pull request history is unavailable", code: "pull_history_unavailable"})
@@ -777,7 +777,7 @@ def handleMergePull(*serve.Context c) (
     string mergeAuthor = normalizeUsername(c.getString("username"))
     string mergeMessage = "Merge pull request #" ++ pull.index.toStr()
     number mergeTimestamp = timestamp
-    string mergeArchiveJson = raw("gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, int64(mergeTimestamp / 1000))")
+    string mergeArchiveJson = gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, mergeTimestamp / 1000)
     auto parsedMergeArchive = json.parse(mergeArchiveJson, {type: "object"})
     if parsedMergeArchive.isErr() or parsedMergeArchive.unwrap().assert(object).ok != true or !fs.exists(mergeArchivePath) (
       fs.remove(mergeArchivePath)
@@ -873,7 +873,7 @@ def handleMergePull(*serve.Context c) (
   )
   string sourceHead = pull.headCommit.toStr()
   string baseHead = pull.baseCommit.toStr()
-  string mergeJson = raw("gitinspection.PrepareMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead, baseHead)")
+  string mergeJson = gitinspection.PrepareMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead, baseHead)
   auto parsedMerge = json.parse(mergeJson, {type: "object"})
   if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
     c.json(409, {ok: false, error: "the pull request could not be merged on the server", code: "pull_merge_unavailable"})

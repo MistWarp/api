@@ -3,7 +3,7 @@ def randomString(number length) string (
 )
 
 def generateId() string (
-  string ts = raw("fmt.Sprintf(\"%d\", time.Now().UnixNano())")
+  string ts = storagefs.UniqueTimestamp()
   return "p" ++ ts ++ randomString(6)
 )
 
@@ -60,7 +60,7 @@ def paginate(array items, number offset, number limit) array (
   for i items.len (
     if i > offset and count < limit (
       page.append(items[i])
-      count = count + 1
+      count += 1
     )
   )
   return page

@@ -14,7 +14,7 @@ def ids(array projects) string (
   string result = ""
   for i projects.len (
     object project = projects[i]
-    result = result ++ project.id.toStr()
+    result ++= project.id.toStr()
   )
   return result
 )
