@@ -234,8 +234,8 @@ func CreateMergeArchive(targetPath, targetHead, sourcePath, sourceHead, treePath
 	return writeMergeArchive(outputPath, targetHead, sourceHead, tree.OID, projectID, remixParent, baseCommit, branch, author, message, timestamp, objects)
 }
 
-func CreateMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) string {
-	result := CreateMergeArchive(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message, timestamp)
+func CreateMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestampSeconds float64) string {
+	result := CreateMergeArchive(targetPath, targetHead, sourcePath, sourceHead, treePath, outputPath, projectID, remixParent, baseCommit, branch, author, message, int64(timestampSeconds))
 	encoded, _ := json.Marshal(result)
 	return string(encoded)
 }
@@ -269,8 +269,8 @@ func CreateFastForwardMergeArchive(targetPath, targetHead, sourcePath, sourceHea
 	return writeMergeArchive(outputPath, targetHead, sourceHead, sourceCommit.Tree, projectID, remixParent, baseCommit, branch, author, message, timestamp, objects)
 }
 
-func CreateFastForwardMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestamp int64) string {
-	result := CreateFastForwardMergeArchive(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message, timestamp)
+func CreateFastForwardMergeArchiveJSON(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message string, timestampSeconds float64) string {
+	result := CreateFastForwardMergeArchive(targetPath, targetHead, sourcePath, sourceHead, outputPath, projectID, remixParent, baseCommit, branch, author, message, int64(timestampSeconds))
 	encoded, _ := json.Marshal(result)
 	return string(encoded)
 }

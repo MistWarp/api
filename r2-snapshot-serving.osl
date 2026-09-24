@@ -39,5 +39,5 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
   )
   // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
   string snapshotBody = fetched.body.toStr()
-  c.data(200, "application/json", raw("[]byte(snapshotBody)"))
+  c.data(200, "application/json", storagefs.Bytes(snapshotBody))
 )

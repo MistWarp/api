@@ -716,7 +716,7 @@ def handleGetActivity(*serve.Context c) (
         for j activityLimit (
           items.append(userItems[j])
         )
-        count = count + 1
+        count += 1
       )
     )
   )
@@ -730,7 +730,7 @@ def handleGetActivity(*serve.Context c) (
         object project = projectSearchDocs.findById(review.projectId.toStr())
         if !project.isEmpty() and projectIsViewable(project) (
           items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
-          reviewItems = reviewItems + 1
+          reviewItems += 1
         )
       )
     )

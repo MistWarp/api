@@ -200,13 +200,13 @@ def parentDirOf(string path) string (
     if i == 1 (
       dir = parts[1].toStr()
     ) else (
-      dir = dir ++ "/" ++ parts[i].toStr()
+      dir ++= "/" ++ parts[i].toStr()
     )
   )
   return dir
 )
 
-def r2PutEncoded(string key, any body, string contentType, string contentEncoding) boolean (
+def r2PutEncoded(string key, BlobBody body, string contentType, string contentEncoding) boolean (
   if r2Local (
     string path = localBlobPath(key)
     fs.mkdirAll(parentDirOf(path))
@@ -224,7 +224,7 @@ def r2PutEncoded(string key, any body, string contentType, string contentEncodin
   return stored
 )
 
-def r2Put(string key, any body, string contentType) boolean (
+def r2Put(string key, BlobBody body, string contentType) boolean (
   return r2PutEncoded(key, body, contentType, "")
 )
 
@@ -288,7 +288,7 @@ def syncR2StorageInventory(boolean force) object (
     return {ok: true, skipped: true, syncedAt: current.syncedAt}
   )
   number scanStartedAt = timestamp
-  string encoded = raw("r2inventory.ScanJSON(r2Endpoint, r2Bucket, r2AccessKeyId, r2SecretAccessKey, \"auto\")")
+  string encoded = r2inventory.ScanJSON(r2Endpoint, r2Bucket, r2AccessKeyId, r2SecretAccessKey, "auto")
   auto parsed = json.parse(encoded, {type: "object"})
   if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
     string errorMessage = parsed.isErr() ? "could not read the R2 inventory" parsed.unwrap().assert(object).error.toStr()
@@ -391,7 +391,7 @@ def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
 )
 
 def mergeWorkspaceArchives(string basePath, string deltaPath, string outputPath, number maxExpandedBytes) boolean (
-  return raw("func() bool { output, err := OSLos.Create(outputPath); if err != nil { return false }; writer := OSLgozip.NewWriter(output); paths := map[string]bool{}; requiredDirs := map[string]bool{}; fileCount := 0; var expandedBytes uint64; expandedLimit := uint64(maxExpandedBytes); fileLimit := int(maxWorkspaceFiles); copyArchive := func(sourcePath string) bool { reader, openErr := OSLgozip.OpenReader(sourcePath); if openErr != nil { return false }; defer reader.Close(); for _, item := range reader.File { name := item.Name; cleanName := OSLstrings.TrimSuffix(name, \"/\"); unsafe := cleanName == \"\" || len(name) > 1024 || OSLstrings.HasPrefix(cleanName, \"/\") || OSLstrings.Contains(cleanName, \"\\\\\") || OSLstrings.ContainsRune(cleanName, 0); parts := OSLstrings.Split(cleanName, \"/\"); for _, part := range parts { if part == \"\" || part == \".\" || part == \"..\" { unsafe = true } }; directory := item.FileInfo().IsDir(); if unsafe || item.Mode()&OSLos.ModeSymlink != 0 { return false }; if _, exists := paths[cleanName]; exists { continue }; if !directory && requiredDirs[cleanName] { return false }; parent := \"\"; for index := 0; index < len(parts)-1; index++ { if parent == \"\" { parent = parts[index] } else { parent += \"/\" + parts[index] }; if parentDirectory, exists := paths[parent]; exists && !parentDirectory { return false }; requiredDirs[parent] = true }; paths[cleanName] = directory; fileCount++; if fileCount > fileLimit || item.UncompressedSize64 > expandedLimit-expandedBytes { return false }; if directory { if item.UncompressedSize64 != 0 { return false }; header := item.FileHeader; if _, createErr := writer.CreateHeader(&header); createErr != nil { return false }; continue }; if !item.Mode().IsRegular() || item.Method != OSLgozip.Store && item.Method != OSLgozip.Deflate { return false }; source, readErr := item.Open(); if readErr != nil { return false }; header := item.FileHeader; target, createErr := writer.CreateHeader(&header); if createErr != nil { source.Close(); return false }; copied, copyErr := OSLio.Copy(target, OSLio.LimitReader(source, int64(expandedLimit-expandedBytes)+1)); closeErr := source.Close(); if copyErr != nil || closeErr != nil || copied < 0 || uint64(copied) != item.UncompressedSize64 || uint64(copied) > expandedLimit-expandedBytes { return false }; expandedBytes += uint64(copied) }; return true }; ok := copyArchive(deltaPath) && copyArchive(basePath); closeErr := writer.Close(); fileCloseErr := output.Close(); if !ok || closeErr != nil || fileCloseErr != nil { OSLos.Remove(outputPath); return false }; return true }()")
+  return storagefs.MergeZipArchives(basePath, deltaPath, outputPath, maxExpandedBytes, maxWorkspaceFiles)
 )
 
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
@@ -480,7 +480,7 @@ def serveBlobKey(*serve.Context c, string key) (
 
   string body = fetched.body.toStr()
   c.setHeader("Cache-Control", blobCacheHeader(key))
-  c.data(200, contentTypeForKey(key), raw("[]byte(body)"))
+  c.data(200, contentTypeForKey(key), storagefs.Bytes(body))
 )
 
 def serveProjectJson(*serve.Context c, object project) (

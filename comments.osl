@@ -100,10 +100,7 @@ def commentParentId(object comment) string (
 )
 
 def isCommentPinned(object comment) boolean (
-  if comment.contains("pinned") and comment.pinned == true (
-    return true
-  )
-  return false
+  return comment.contains("pinned") and comment.pinned == true
 )
 
 def commentPinnedAt(object comment) number (
@@ -670,10 +667,7 @@ def profileCommentKey(string name) string (
 
 def profileCommentsOff(string name) boolean (
   object profile = loadProfile(name)
-  if profile.contains("commentsOff") and profile.commentsOff == true (
-    return true
-  )
-  return false
+  return profile.contains("commentsOff") and profile.commentsOff == true
 )
 
 def handleGetProfileComments(*serve.Context c) (

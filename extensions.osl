@@ -157,7 +157,7 @@ def inspectProjectExtensionUrls(string jsonPath) object (
       )
       object entries = result.unwrap().assert(object)
       array ids = entries.getKeys()
-      found = found + ids.len
+      found += ids.len
       for i ids.len (
         string extensionUrl = entries[ids[i].toStr()].toStr()
         unique[extensionUrl] = true
@@ -220,7 +220,7 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     if source == "" or source.len > maxExtensionSourceBytes (
       return {ok: false, error: "custom extension source is empty or exceeds 2 MB: " ++ extensionUrl}
     )
-    totalBytes = totalBytes + source.len
+    totalBytes += source.len
     if totalBytes > maxProjectExtensionBytes (
       return {ok: false, error: "custom extensions exceed the 10 MB total limit"}
     )
@@ -468,7 +468,7 @@ def unshareProjectsUsingHash(string hash) object (
         if !unshareProjectForBlockedExtension(project) (
           return {ok: false, affected: affected}
         )
-        affected = affected + 1
+        affected += 1
       )
     )
   )
@@ -486,7 +486,7 @@ def unshareProjectsUsingUrl(string extensionUrl) object (
         if !unshareProjectForBlockedExtension(project) (
           return {ok: false, affected: affected}
         )
-        affected = affected + 1
+        affected += 1
       )
     )
   )

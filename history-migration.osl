@@ -1,5 +1,5 @@
 def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead, string parentId) string (
-  return raw("gitinspection.GenerateHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, float64(createdAt), parentArchivePath, parentHead, parentId)")
+  return gitinspection.GenerateHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, createdAt, parentArchivePath, parentHead, parentId)
 )
 
 def projectHasStoredContent(object project) boolean (
@@ -60,7 +60,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
     if !isValidMd5Ext(name) (
       assetsReady = false
     ) else if !copyHistoryAssetToPath(name, assetsPath ++ "/" ++ name) (
-      missingAssets = missingAssets + 1
+      missingAssets += 1
     )
   )
   if !assetsReady or (missingAssets > 0 and !allowMissingAssets) (

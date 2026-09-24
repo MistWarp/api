@@ -86,8 +86,7 @@ def handleLiveCollaboration(*serve.Context c) (
   string action = body.action.assertElse(string, "list")
   string lockName = "live-editor:" ++ project.id.toStr()
   sync.lock(lockName)
-  // Release the lease lock even if malformed state raises a runtime error.
-  raw("defer sync.unlock(lockName)")
+  defer sync.unlock(lockName)
   object session = liveSession(project, branch)
   object editors = projectEditorPresence.get(project.id.toStr()).assertElse(object, {})
   for key in editors.getKeys() (

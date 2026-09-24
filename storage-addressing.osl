@@ -6,7 +6,9 @@ def projectWorkspaceSnapshotKey(string hash) string (
   return "project-workspaces/" ++ hash ++ ".mwp"
 )
 
-def contentHash(any body) string (
+type BlobBody = byte[] | string
+
+def contentHash(BlobBody body) string (
   return body.toStr().hashSHA256()
 )
 

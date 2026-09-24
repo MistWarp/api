@@ -87,17 +87,11 @@ def canInteractProject(object project,*serve.Context c) boolean (
 )
 
 def projectRemixable(object project) boolean (
-  if project.contains("remixable") and project.remixable == false (
-    return false
-  )
-  return true
+  return !project.contains("remixable") or project.remixable != false
 )
 
 def projectSeeInside(object project) boolean (
-  if project.contains("seeInside") and project.seeInside == false (
-    return false
-  )
-  return true
+  return !project.contains("seeInside") or project.seeInside != false
 )
 
 def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
@@ -235,7 +229,7 @@ def projectCommerceSplits(object project) array (
       )
       if share > 0 and allocated + share <= 9000 (
         addCommerceSplit(totals, collaborator.username.toStr(), share)
-        allocated = allocated + share
+        allocated += share
       )
     )
   )
@@ -248,7 +242,7 @@ def projectCommerceSplits(object project) array (
     auto parentResult = loadProject(project.remixParent.toStr())
     if parentResult.ok and remixPoints > 0 and allocated + remixPoints <= 9000 (
       addCommerceSplit(totals, parentResult.project.owner.toStr(), remixPoints)
-      allocated = allocated + remixPoints
+      allocated += remixPoints
     )
   )
 
@@ -447,7 +441,7 @@ def retryPendingPayouts() object (
     object p = payouts[i]
     boolean ok = payoutTo(p.seller.toStr(), p.amount.toNum(), "MistWarp sale (retry)")
     if ok (
-      paid = paid + 1
+      paid += 1
     ) else (
       remaining.append(p)
     )
@@ -518,14 +512,14 @@ def handleGetMyStats(*serve.Context c) (
     auto res = loadProject(entry.id.toStr())
     if res.ok (
       object p = res.project.assert(object)
-      projectCount = projectCount + 1
+      projectCount += 1
       if projectVisibility(p) == "public" (
-        sharedCount = sharedCount + 1
+        sharedCount += 1
       )
-      totalViews = totalViews + p.views.toNum()
-      totalHearts = totalHearts + p.loves.assert(array).len
-      totalRevenue = totalRevenue + projectRevenue(p)
-      totalBuyers = totalBuyers + projectBuyers(p).len
+      totalViews += p.views.toNum()
+      totalHearts += p.loves.assert(array).len
+      totalRevenue += projectRevenue(p)
+      totalBuyers += projectBuyers(p).len
       if p.contains("viewHistory") and p.viewHistory != null (
         mergeDayHistory(viewHistory, p.viewHistory.assert(object))
       )
@@ -539,7 +533,7 @@ def handleGetMyStats(*serve.Context c) (
   array vk = viewHistory.getKeys()
   for i vk.len (
     if today - vk[i].toNum() < 30 (
-      viewsThisMonth = viewsThisMonth + viewHistory[vk[i].toStr()].toNum()
+      viewsThisMonth += viewHistory[vk[i].toStr()].toNum()
     )
   )
 
