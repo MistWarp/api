@@ -42,7 +42,7 @@ def roturTierForUser(string userId) string (
 def mistwarpBenefitsForTier(string rawTier) object (
   string tier = normalizeRoturTier(rawTier)
   object benefits = {
-    weeklyUploadBytes: 104857600,
+    storageBytes: 524288000,
     maxProjectAssetBytes: 10485760,
     maxProjectAssetsBytes: 52428800,
     maxProjects: 100,
@@ -62,7 +62,7 @@ def mistwarpBenefitsForTier(string rawTier) object (
     maxProjectPrice: 100
   }
   if tier == "Lite" (
-    benefits.weeklyUploadBytes = 262144000
+    benefits.storageBytes = 2147483648
     benefits.maxProjectAssetBytes = 26214400
     benefits.maxProjectAssetsBytes = 104857600
     benefits.maxProjects = 500
@@ -74,7 +74,7 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.analyticsDays = 30
     benefits.historyCheckpoints = true
   ) else if tier == "Plus" (
-    benefits.weeklyUploadBytes = 1073741824
+    benefits.storageBytes = 10737418240
     benefits.maxProjectAssetBytes = 52428800
     benefits.maxProjectAssetsBytes = 262144000
     benefits.maxProjects = 2000
@@ -92,7 +92,7 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.salesFeeBasisPoints = 700
     benefits.maxProjectPrice = 250
   ) else if tier == "Pro" (
-    benefits.weeklyUploadBytes = 5368709120
+    benefits.storageBytes = 53687091200
     benefits.maxProjectAssetBytes = 104857600
     benefits.maxProjectAssetsBytes = 1073741824
     benefits.maxProjects = 10000
