@@ -324,6 +324,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   array previousWorkspaceKeys = projectWorkspaceKeys(project)
   project.workspaceKey = workspaceKey
   project.workspaceLayers = [workspaceKey]
+  project.historyBytes = workspaceBody.len
   project.gitHead = manifest.head
   project.gitBranch = manifest.branch
   if manifest.contains("commits") and manifest.commits != null (
@@ -817,6 +818,7 @@ def handleMergePull(*serve.Context c) (
     target.pendingJson = false
     target.workspaceKey = mergeArchiveKey
     target.workspaceLayers = [mergeArchiveKey]
+    target.historyBytes = mergeArchiveBody.len
     target.gitHead = mergeArchiveGit.head
     target.gitBranch = mergeArchiveGit.branch
     target.gitCommits = mergeArchiveGit.commits

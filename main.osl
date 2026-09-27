@@ -169,6 +169,7 @@ import "./groups.osl"
 import "./related-projects.osl"
 import "./random-projects.osl"
 import "./projects.osl"
+import "./storage-usage.osl"
 import "./live-collaboration.osl"
 import "./history-delta.osl"
 import "./commit-management.osl"
@@ -251,6 +252,7 @@ cleanupExpiredCommunityRecords()
 thread.new(reconcileLoop)
 thread.new(stagedFlushLoop)
 thread.new(generateMissingProjectHistories)
+thread.new(backfillProjectHistoryBytes)
 thread.new(developmentFeedLoop)
 
 *serve.Router app = serve.new()
@@ -303,8 +305,6 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/notifications/read", requireAuth, handleReadNotifications)
 
   api.GET("/me/quota", requireAuth, handleGetMyQuota)
-  api.POST("/me/quota/reset", requireAuth, handleQuotaReset)
-  api.POST("/me/quota/reset/confirm", requireAuth, handleQuotaResetConfirm)
   api.GET("/me/stats", requireAuth, handleGetMyStats)
   api.GET("/me/library", requireAuth, handleGetMyLibrary)
   api.GET("/me/shared-projects", requireAuth, handleGetSharedProjects)

@@ -122,6 +122,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
 
   current.workspaceKey = workspaceKey
   current.workspaceLayers = [workspaceKey]
+  current.historyBytes = workspace.len
   current.gitHead = head
   current.gitBranch = "main"
   current.gitCommits = history.commits
