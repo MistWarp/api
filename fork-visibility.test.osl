@@ -189,6 +189,9 @@ def canViewProjectJsonTest(object project, object ctx) boolean (
 )
 
 def canSeeInsideProjectTest(object project, object ctx) boolean (
+  if ctx.authenticated == true and ctx.isAdmin == true (
+    return true
+  )
   if !projectSourcePolicyAllows(project, projectPrice(project), ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner", ctx.authenticated == true and canAccessPaidJson(project, ctx)) (
     return false
   )
@@ -288,3 +291,8 @@ testing.assert(canSeeInsideProjectTest(paidProject, buyerCtx), "buyers can see i
 testing.assert(!canSeeInsideProjectTest(paidProject, nonbuyerCtx), "nonbuyers cannot inspect paid source")
 paidProject.seeInside = false
 testing.assert(!canSeeInsideProjectTest(paidProject, buyerCtx), "a purchase does not bypass disabled See inside")
+
+object adminCtx = {authenticated: true, username: "site_admin", userId: "u_admin", isAdmin: true}
+testing.assert(canSeeInsideProjectTest(paidProject, adminCtx), "admins can see inside paid projects with See inside disabled")
+testing.assert(canSeeInsideProjectTest(projectB, adminCtx), "admins can see inside private forks with See inside disabled")
+testing.assert(!canSeeInsideProjectTest(projectB, {authenticated: false, username: "", userId: "", isAdmin: true}), "admin access needs an authenticated session")
