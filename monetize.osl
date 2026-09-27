@@ -101,6 +101,9 @@ def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
 )
 
 def canSeeInsideProject(object project,*serve.Context c) boolean (
+  if c.getBool("authenticated") and c.getBool("isAdmin") (
+    return true
+  )
   if !canEditProject(project, c) and canSaveLiveProject(project, c) (
     return true
   )
