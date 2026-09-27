@@ -1,0 +1,109 @@
+def storedKeyBytes(string key, object inventory) number (
+  string path = localBlobPath(key)
+  if fs.exists(path) (
+    return fs.getSize(path)
+  )
+  if inventory.contains(key) (
+    return inventory[key].assertElse(object, {}).size.toNum()
+  )
+  return -1
+)
+
+def measuredHistoryBytes(object project, object inventory) number (
+  array keys = projectWorkspaceKeys(project)
+  number total = 0
+  for i keys.len (
+    number bytes = storedKeyBytes(keys[i].toStr(), inventory)
+    if bytes < 0 (
+      return -1
+    )
+    total += bytes
+  )
+  return total
+)
+
+def backfillLiveProjectHistoryBytes(string id, object inventory) boolean (
+  string lockName = "project-history-" ++ id
+  sync.lock(lockName)
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    sync.unlock(lockName)
+    return true
+  )
+  object project = loaded.project.assert(object)
+  if project.contains("historyBytes") (
+    sync.unlock(lockName)
+    return true
+  )
+  number bytes = measuredHistoryBytes(project, inventory)
+  if bytes < 0 (
+    sync.unlock(lockName)
+    return false
+  )
+  project.historyBytes = bytes
+  boolean saved = saveProject(project)
+  if saved (
+    upsertIndexEntry(project)
+  )
+  sync.unlock(lockName)
+  return saved
+)
+
+def backfillTrashedProjectHistoryBytes(string file, object inventory) boolean (
+  auto loaded = readFile(trashDir ++ file)
+  if !loaded.ok (
+    return true
+  )
+  object project = loaded.data.assert(object)
+  if project.contains("historyBytes") (
+    return true
+  )
+  number bytes = measuredHistoryBytes(project, inventory)
+  if bytes < 0 (
+    return false
+  )
+  project.historyBytes = bytes
+  return writeFile(trashDir ++ file, project)
+)
+
+// Projects saved before storage limits have no recorded history size.
+// Measure them once from local copies or the R2 inventory.
+def backfillProjectHistoryBytes() (
+  string migrationId = "migration:project-history-bytes-v1"
+  if diagnosticDocs.findById(migrationId).isEmpty() == false (
+    return
+  )
+  object inventory = {}
+  if !r2Local (
+    object synced = syncR2StorageInventory(true)
+    if synced.ok != true (
+      log "Storage size backfill skipped: " ++ (synced.error ?? "R2 inventory unavailable").toStr()
+      return
+    )
+    auto loaded = readFile(r2StorageIndexFile)
+    if loaded.ok (
+      inventory = (loaded.data.assertElse(object, {}).objects ?? {}).assertElse(object, {})
+    )
+  )
+  number unresolved = 0
+  array files = fs.readDir(projectsDir)
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") and !backfillLiveProjectHistoryBytes(file.replace(".json", ""), inventory) (
+      unresolved += 1
+    )
+  )
+  array trashFiles = fs.readDir(trashDir)
+  for i trashFiles.len (
+    string file = trashFiles[i].toStr()
+    if file.endsWith(".json") and !backfillTrashedProjectHistoryBytes(file, inventory) (
+      unresolved += 1
+    )
+  )
+  if unresolved > 0 (
+    log "Storage size backfill left " ++ unresolved.toStr() ++ " projects without a history size; it will retry on the next start"
+    return
+  )
+  putDocument(diagnosticDocs, migrationId, {_id: migrationId, completedAt: timestamp})
+  log "Storage size backfill complete"
+)
