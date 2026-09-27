@@ -205,10 +205,7 @@ def handleGetUserAdmin(*serve.Context c) (
     banned: isBannedUser(name),
     admin: isAdminUser(name),
     projects: ownerIndexEntries(name, true),
-    quota: {
-      used: weeklyUploadedBytes(name),
-      limit: mistwarpBenefitsForUsername(name).weeklyUploadBytes
-    }
+    quota: storageDetails(name)
   })
 )
 

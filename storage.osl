@@ -30,6 +30,17 @@ def projectSizeBytes(object project) number (
   return 0
 )
 
+def projectHistoryBytes(object project) number (
+  if project.contains("historyBytes") and project.historyBytes != null (
+    return project.historyBytes.toNum()
+  )
+  return 0
+)
+
+def projectStorageBytes(object project) number (
+  return projectSizeBytes(project) + projectHistoryBytes(project)
+)
+
 def weekViewsOf(object project) number (
   if !project.contains("viewHistory") or project.viewHistory == null (
     return 0
@@ -171,6 +182,7 @@ def indexEntryFromProject(object project) object (
     edited: project.edited,
     sharedAt: project.sharedAt,
     sizeBytes: projectSizeBytes(project),
+    historyBytes: projectHistoryBytes(project),
     weekViews: weekViewsOf(project),
     teamSize: contributors.len + 1,
     contributors: contributors,

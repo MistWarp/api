@@ -101,7 +101,7 @@ The read-only commit endpoints inspect the stored `.mwp` on the server. Clients 
 
 These routes use the same see-inside policy as workspace downloads. The server caches materialized workspace layers and computed JSON by the ordered content-addressed layer keys. Public, free projects may be cached by the CDN for one hour; private, unlisted, and paid responses use `private, no-store`. Stable ETags let browsers revalidate without reparsing Git objects. The local inspection cache keeps at most 256 files or 2 GiB and removes entries older than 24 hours.
 
-Before extraction, the API rejects archives with unsafe paths, duplicate entries, symlinks, unsupported compression methods, or more entries and expanded bytes than the endpoint allows. MistWarp history archives are capped at 128 MiB compressed and 20,000 entries. Their expanded-byte ceiling matches the account's maximum project size, including its tier-specific asset allowance. The API reads each history entry through that ceiling before storing it, so forged ZIP metadata cannot bypass the limit. Only uploads that pass validation and are actually stored count toward the weekly byte budget; rejected uploads and saves with no changes are free, so iterating on a project does not burn budget.
+Before extraction, the API rejects archives with unsafe paths, duplicate entries, symlinks, unsupported compression methods, or more entries and expanded bytes than the endpoint allows. MistWarp history archives are capped at 128 MiB compressed and 20,000 entries. Their expanded-byte ceiling matches the account's maximum project size, including its tier-specific asset allowance. The API reads each history entry through that ceiling before storing it, so forged ZIP metadata cannot bypass the limit.
 
 - `assets/<md5ext>`: content addressed, shared across all projects and remixes, uploaded once ever
 - `projects/<id>/project.json`: the gzip-encoded playable snapshot
@@ -112,6 +112,10 @@ Project JSON, history archives, and assets are staged on local disk before the u
 The first editor save uploads a compact MWP archive containing the Git repository without a duplicate worktree. Later saves compare the local HEAD with the server HEAD and send only new Git objects plus updated refs. The API stores those archives as content-addressed layers, so remixes share their parent's history instead of copying it. It compacts a chain after eight layers. If the user saves without making a commit, the editor sends a full archive with the worktree so uncommitted changes are not lost.
 
 For a delta whose `baseHead` still matches the stored head, the API removes loose Git objects already present in the materialized base before storing the new layer. It retains the delta manifest and refs, verifies the combined archive, and stitches only the new commits and graph nodes ahead of `baseHead` onto the inherited metadata. A final locked head comparison rejects concurrent history changes before project metadata is saved.
+
+## Storage limits
+
+Each plan has a total storage limit: 500 MB on Free, 2 GB on Lite, 10 GB on Plus and 50 GB on Pro. A user's usage is the sum of every project they own, trashed projects included. Each project counts its assets, its compressed project JSON and its history archive, even when an asset is shared with other projects. Saving is checked against the owner's limit before anything is stored. A save may make a project bigger only while it fits in the free space, so a user over the limit can still save a project at its current size or smaller. Assets uploaded ahead of a save count as pending until a saved project references them, or for 7 days. Deleting a project frees its space once it is removed from the trash. `GET /v1/me/quota` returns `used`, `pending`, `limit`, `remaining` and the five largest projects. On first start after this change, the server measures the history size of existing projects from local copies and the R2 inventory.
 
 ## Auth flow
 
