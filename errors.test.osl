@@ -20,6 +20,7 @@ import "./errors.osl"
 
 testing.assert(shouldIgnoreSiteError("unsandboxed is not defined"), "ignores extension ReferenceError")
 testing.assert(shouldIgnoreSiteError("ReferenceError: unsandboxed is not defined"), "ignores prefixed extension ReferenceError")
+testing.assert(shouldIgnoreSiteError("Can't find variable: unsandboxed"), "ignores Safari extension ReferenceError")
 testing.assert(shouldIgnoreSiteError(" UNSANDBOXED IS NOT DEFINED "), "normalizes case and whitespace")
 testing.assert(!shouldIgnoreSiteError("Hyper Sense must run unsandboxed"), "retains other extension errors")
 

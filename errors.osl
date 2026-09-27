@@ -10,7 +10,7 @@ def pruneSiteErrors() (
 
 def shouldIgnoreSiteError(string message) boolean (
   string normalized = message.toLower().strip()
-  return normalized == "unsandboxed is not defined" or normalized == "referenceerror: unsandboxed is not defined"
+  return normalized == "unsandboxed is not defined" or normalized == "referenceerror: unsandboxed is not defined" or normalized == "can't find variable: unsandboxed"
 )
 
 def handleRecordSiteError(*serve.Context c) (
