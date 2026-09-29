@@ -13,7 +13,7 @@ def normalizeRoturTier(string rawTier) string (
 )
 
 def roturTierForUser(string userId) string (
-  if userId == "" (
+  if userId == "" or isStudentUserId(userId) (
     return "Free"
   )
   if paidPerksCache.has(userId) (
@@ -115,6 +115,9 @@ def mistwarpBenefitsForTier(string rawTier) object (
 )
 
 def mistwarpBenefitsForUserId(string userId) object (
+  if isStudentUserId(userId) (
+    return classroomStudentBenefits(userId)
+  )
   return mistwarpBenefitsForTier(roturTierForUser(userId))
 )
 

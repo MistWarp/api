@@ -329,6 +329,9 @@ def handleSearchUsers(*serve.Context c) (
   array ranked = []
   for i found.len (
     object profile = found[i].assert(object)
+    if isStudentUsername(profile.username.toStr()) (
+      continue
+    )
     number score = searchMatchScore(profile.username.toStr(), q)
     ranked.append({rank: searchRank(score, profile.followers.toNum()), profile: profile})
   )
