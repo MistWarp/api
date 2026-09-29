@@ -1,0 +1,294 @@
+def backpackUserKey(string userId) string (
+  return ("backpack:" ++ userId).hashSHA256()
+)
+
+def backpackIndexPath(string userId) string (
+  return backpackDir ++ backpackUserKey(userId) ++ ".json"
+)
+
+def backpackLockName(string userId) string (
+  return "backpack-" ++ backpackUserKey(userId)
+)
+
+def loadBackpackItems(string userId) array (
+  if userId == "" (
+    return []
+  )
+  auto loaded = readFile(backpackIndexPath(userId))
+  if !loaded.ok (
+    return []
+  )
+  object data = loaded.data.assertElse(object, {})
+  return (data.items ?? []).assertElse(array, [])
+)
+
+def saveBackpackItems(string userId, array items) boolean (
+  return writeFile(backpackIndexPath(userId), {items: items})
+)
+
+def backpackStoredBytes(string userId) number (
+  return backpackTotalBytes(loadBackpackItems(userId))
+)
+
+def backpackItemView(object item) object (
+  string thumbnailKey = (item.thumbnailKey ?? "").toStr()
+  return {
+    id: item.id,
+    type: item.type,
+    mime: item.mime,
+    name: item.name,
+    bytes: backpackItemBytes(item),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    bodyUrl: publicUrl(item.bodyKey.toStr()),
+    thumbnailUrl: if thumbnailKey == "" then "" else publicUrl(thumbnailKey)
+  }
+)
+
+def removeBackpackBlobs(object item) (
+  r2Remove(item.bodyKey.toStr())
+  string thumbnailKey = (item.thumbnailKey ?? "").toStr()
+  if thumbnailKey != "" (
+    r2Remove(thumbnailKey)
+  )
+)
+
+def handleGetMyBackpack(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  string itemType = c.query("type")
+  if itemType != "" and !backpackItemTypes.contains(itemType) (
+    c.badRequest("unknown backpack item type")
+    return
+  )
+  array items = loadBackpackItems(c.getString("userId"))
+  array filtered = backpackFilterType(items, itemType)
+  number offset = c.query("offset").toNum().toInt()
+  if offset < 0 (
+    offset = 0
+  )
+  array page = paginate(filtered, offset, backpackPageSize(c.query("limit")))
+  array views = []
+  for i page.len (
+    views.append(backpackItemView(page[i].assert(object)))
+  )
+  c.json(200, {ok: true, items: views, total: filtered.len, count: items.len, bytes: backpackTotalBytes(items)})
+)
+
+def handleCreateBackpackItem(*serve.Context c) (
+  string username = c.getString("username")
+  string userId = c.getString("userId")
+  string itemType = c.formValue("type").strip()
+  string mime = c.formValue("mime").strip()
+  string bodyExt = backpackBodyExt(itemType, mime)
+  if bodyExt == "" (
+    c.badRequest("unsupported backpack item type")
+    return
+  )
+  auto bodyResult = c.formFile("body")
+  if bodyResult.isErr() (
+    c.badRequest("missing body file")
+    return
+  )
+  object body = bodyResult.unwrap().assert(object)
+  number bodyBytes = body.size.toNum()
+  if bodyBytes <= 0 or bodyBytes > maxBackpackBodyBytes (
+    c.json(413, {ok: false, code: "item_too_large", error: "This item is too large for the backpack."})
+    return
+  )
+  object thumbnail = {}
+  string thumbnailExt = ""
+  number thumbnailBytes = 0
+  auto thumbnailResult = c.formFile("thumbnail")
+  if !thumbnailResult.isErr() (
+    thumbnail = thumbnailResult.unwrap().assert(object)
+    thumbnailExt = backpackThumbnailExt(c.formValue("thumbnailMime"))
+    thumbnailBytes = thumbnail.size.toNum()
+    if thumbnailExt == "" (
+      c.badRequest("thumbnails must be png or jpeg")
+      return
+    )
+    if thumbnailBytes > maxBackpackThumbnailBytes (
+      c.badRequest("thumbnail too large")
+      return
+    )
+  )
+  number itemBytes = bodyBytes + thumbnailBytes
+
+  string quotaLock = "upload-quota-" ++ normalizeUsername(username)
+  sync.lock(quotaLock)
+  sync.lock(backpackLockName(userId))
+  array items = loadBackpackItems(userId)
+  if items.len >= maxBackpackItems (
+    sync.unlock(backpackLockName(userId))
+    sync.unlock(quotaLock)
+    c.json(413, {ok: false, code: "backpack_full", error: "Your backpack is full. Delete items you no longer need to make room."})
+    return
+  )
+  object details = storageDetails(username)
+  if !c.getBool("isAdmin") and details.used.toNum() + details.pending.toNum() + itemBytes > details.limit.toNum() (
+    sync.unlock(backpackLockName(userId))
+    sync.unlock(quotaLock)
+    storageFullResponse(c, details, itemBytes)
+    return
+  )
+  string folder = "backpack/" ++ randomString(32)
+  string bodyKey = folder ++ "/body." ++ bodyExt
+  if !r2Put(bodyKey, body.data, contentTypeForExt(bodyExt)) (
+    sync.unlock(backpackLockName(userId))
+    sync.unlock(quotaLock)
+    c.internalError("failed to store backpack item")
+    return
+  )
+  string thumbnailKey = ""
+  if thumbnailExt != "" (
+    thumbnailKey = folder ++ "/thumbnail." ++ thumbnailExt
+    if !r2Put(thumbnailKey, thumbnail.data, contentTypeForExt(thumbnailExt)) (
+      r2Remove(bodyKey)
+      sync.unlock(backpackLockName(userId))
+      sync.unlock(quotaLock)
+      c.internalError("failed to store backpack thumbnail")
+      return
+    )
+  )
+  object item = {
+    id: "b" ++ randomString(16),
+    type: itemType,
+    mime: mime.toLower(),
+    name: backpackItemName(c.formValue("name"), itemType),
+    bodyKey: bodyKey,
+    bodyBytes: bodyBytes,
+    thumbnailKey: thumbnailKey,
+    thumbnailBytes: thumbnailBytes,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  }
+  array next = [item]
+  next ++= items
+  if !saveBackpackItems(userId, next) (
+    removeBackpackBlobs(item)
+    sync.unlock(backpackLockName(userId))
+    sync.unlock(quotaLock)
+    c.internalError("failed to save backpack")
+    return
+  )
+  sync.unlock(backpackLockName(userId))
+  sync.unlock(quotaLock)
+  c.json(200, {ok: true, item: backpackItemView(item)})
+)
+
+def handleUpdateBackpackItem(*serve.Context c) (
+  object body = c.bodyJSON()
+  string id = c.param("id")
+  string userId = c.getString("userId")
+  if !body.contains("name") (
+    c.badRequest("nothing to update")
+    return
+  )
+  sync.lock(backpackLockName(userId))
+  array items = loadBackpackItems(userId)
+  object updated = {}
+  boolean found = false
+  for i items.len (
+    object item = items[i].assert(object)
+    if item.id.toStr() == id (
+      item.name = backpackItemName(body.name.toStr(), item.type.toStr())
+      item.updatedAt = timestamp
+      items[i] = item
+      updated = item
+      found = true
+    )
+  )
+  if !found (
+    sync.unlock(backpackLockName(userId))
+    c.notFound("backpack item not found")
+    return
+  )
+  boolean saved = saveBackpackItems(userId, items)
+  sync.unlock(backpackLockName(userId))
+  if !saved (
+    c.internalError("failed to save backpack")
+    return
+  )
+  c.json(200, {ok: true, item: backpackItemView(updated)})
+)
+
+def deleteBackpackItems(string userId, array ids) object (
+  sync.lock(backpackLockName(userId))
+  object split = backpackWithout(loadBackpackItems(userId), ids)
+  array removed = split.removed.assert(array)
+  if removed.len == 0 (
+    sync.unlock(backpackLockName(userId))
+    return {ok: true, deleted: 0, freedBytes: 0}
+  )
+  if !saveBackpackItems(userId, split.kept.assert(array)) (
+    sync.unlock(backpackLockName(userId))
+    return {ok: false}
+  )
+  sync.unlock(backpackLockName(userId))
+  for i removed.len (
+    removeBackpackBlobs(removed[i].assert(object))
+  )
+  return {ok: true, deleted: removed.len, freedBytes: backpackTotalBytes(removed)}
+)
+
+def handleDeleteBackpackItem(*serve.Context c) (
+  object result = deleteBackpackItems(c.getString("userId"), [c.param("id")])
+  if result.ok != true (
+    c.internalError("failed to save backpack")
+    return
+  )
+  if result.deleted.toNum() == 0 (
+    c.notFound("backpack item not found")
+    return
+  )
+  c.json(200, result)
+)
+
+def handleDeleteBackpackItems(*serve.Context c) (
+  object body = c.bodyJSON()
+  array raw = (body.ids ?? []).assertElse(array, [])
+  if raw.len == 0 or raw.len > maxBackpackItems (
+    c.badRequest("ids must list between 1 and " ++ maxBackpackItems.toStr() ++ " items")
+    return
+  )
+  array ids = []
+  for i raw.len (
+    ids.append(raw[i].toStr())
+  )
+  object result = deleteBackpackItems(c.getString("userId"), ids)
+  if result.ok != true (
+    c.internalError("failed to save backpack")
+    return
+  )
+  c.json(200, result)
+)
+
+def handleGetBackpackBlob(*serve.Context c) (
+  string key = "backpack/" ++ c.param("folder") ++ "/" ++ c.param("file")
+  if !isValidBackpackKey(key) (
+    c.notFound("blob not found")
+    return
+  )
+  c.setHeader("X-Content-Type-Options", "nosniff")
+  c.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+  serveBlobKey(c, key)
+)
+
+def collectBackpackForUser(string userId) array (
+  array items = loadBackpackItems(userId)
+  array views = []
+  for i items.len (
+    views.append(backpackItemView(items[i].assert(object)))
+  )
+  return views
+)
+
+def purgeBackpackForUser(string userId) (
+  sync.lock(backpackLockName(userId))
+  array items = loadBackpackItems(userId)
+  for i items.len (
+    removeBackpackBlobs(items[i].assert(object))
+  )
+  fs.remove(backpackIndexPath(userId))
+  sync.unlock(backpackLockName(userId))
+)

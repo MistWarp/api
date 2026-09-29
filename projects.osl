@@ -436,6 +436,7 @@ def handleGetMyQuota(*serve.Context c) (
     pending: details.pending,
     limit: details.limit,
     remaining: details.remaining,
+    backpack: backpackStoredBytes(c.getString("userId")),
     largest: paginate(projects, 0, 5)
   })
 )
@@ -603,6 +604,7 @@ def ownerStorageBytes(string username) number (
   for i trashed.len (
     total += projectStorageBytes(trashed[i].assert(object))
   )
+  total += backpackStoredBytes(userIdForUsername(username))
   return total
 )
 
@@ -621,7 +623,7 @@ def storageFullResponse(*serve.Context c, object details, number neededBytes) (
   number usedMb = ((details.used.toNum() + details.pending.toNum()) / 1048576).toInt()
   number limitMb = (details.limit.toNum() / 1048576).toInt()
   number neededMb = (neededBytes / 1048576).toInt() + 1
-  c.json(413, {ok: false, code: "storage_full", error: "Your projects use " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB of storage, and this needs about " ++ neededMb.toStr() ++ " MB more. Delete projects you no longer need and empty them from the trash, or upgrade your plan.", used: details.used, pending: details.pending, limit: details.limit, remaining: details.remaining})
+  c.json(413, {ok: false, code: "storage_full", error: "Your projects and backpack use " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB of storage, and this needs about " ++ neededMb.toStr() ++ " MB more. Delete projects or backpack items you no longer need and empty the trash, or upgrade your plan.", used: details.used, pending: details.pending, limit: details.limit, remaining: details.remaining})
 )
 
 // Assets uploaded ahead of a save count against storage until a saved
