@@ -924,7 +924,8 @@ def handleGetAssignment(*serve.Context c) (
     object submission = submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr())
     rows.append({
       student: {id: student["_id"], displayName: student.displayName},
-      submission: if submission.len == 0 then null else submission
+      submission: if submission.len == 0 then null else submission,
+      group: if submission.len == 0 then null else groupForSubmission(submission)
     })
   )
   c.json(200, {ok: true, assignment: assignmentSummary(assignment, students.len), rows: rows})
@@ -963,13 +964,14 @@ def handleReviewSubmission(*serve.Context c) (
     return
   )
   object body = c.bodyJSON()
+  object review = {}
   if body.contains("feedback") (
     string feedback = body.feedback.toStr().strip()
     if feedback.len > 5000 (
       c.badRequest("feedback is too long")
       return
     )
-    submission.feedback = feedback
+    review.feedback = feedback
   )
   if body.contains("grade") (
     string grade = (body.grade ?? "").toStr().strip()
@@ -977,15 +979,20 @@ def handleReviewSubmission(*serve.Context c) (
       c.badRequest("grades can be up to 20 characters")
       return
     )
-    submission.grade = grade
+    review.grade = grade
   )
   if body["return"] == true (
-    submission.state = "returned"
-    submission.returnedAt = timestamp
-    submission.returnedBy = c.getString("userId")
-    addNotification(usernameForId(submission.studentId.toStr()), c.getString("username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+    review.state = "returned"
+    review.returnedAt = timestamp
+    review.returnedBy = c.getString("userId")
   )
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  array members = groupSubmissions(submission)
+  submission = updateGroupSubmissions(submission, review)
+  if body["return"] == true (
+    for i members.len (
+      addNotification(usernameForId(members[i].studentId.toStr()), c.getString("username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+    )
+  )
   recordClassroomAudit(classDoc["_id"].toStr(), c, "submission_reviewed", {assignmentId: assignment["_id"], studentId: submission.studentId, returned: body["return"] == true})
   c.json(200, {ok: true, submission: submission})
 )
@@ -1003,7 +1010,8 @@ def studentAssignmentRows(object student) array (
       instructions: assignment.instructions,
       dueAt: assignment.dueAt,
       createdAt: assignment.createdAt,
-      submission: if submission.len == 0 then null else submission
+      submission: if submission.len == 0 then null else submission,
+      group: if submission.len == 0 then null else groupForSubmission(submission)
     })
   )
   return rows
@@ -1166,11 +1174,13 @@ def handleTurnInAssignment(*serve.Context c) (
     return
   )
   object project = loaded.project.assert(object)
-  submission.state = "turned_in"
-  submission.turnedInAt = timestamp
-  submission.turnedInHead = (project.gitHead ?? "").toStr()
-  submission.late = submissionIsLate((assignment.dueAt ?? 0).toNum(), timestamp)
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  object turnedIn = {
+    state: "turned_in",
+    turnedInAt: timestamp,
+    turnedInHead: (project.gitHead ?? "").toStr(),
+    late: submissionIsLate((assignment.dueAt ?? 0).toNum(), timestamp)
+  }
+  submission = updateGroupSubmissions(submission, turnedIn)
   object classDoc = loadClass(student.classId.toStr())
   array teachers = classTeacherIds(classDoc)
   for i teachers.len (
@@ -1189,11 +1199,7 @@ def handleUnsubmitAssignment(*serve.Context c) (
     c.badRequest("this work is not waiting for your teacher")
     return
   )
-  submission.state = "started"
-  submission.turnedInAt = 0
-  submission.turnedInHead = ""
-  submission.late = false
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  submission = updateGroupSubmissions(submission, {state: "started", turnedInAt: 0, turnedInHead: "", late: false})
   c.json(200, {ok: true, submission: submission})
 )
 
@@ -1241,6 +1247,11 @@ def classroomAccessGuard(*serve.Context c) (
     return
   )
   string path = apiRoutePath(c.path())
+  if c.getBool("isStudent") and regex.match("^/projects/[^/]+/live$", path) and !studentLiveCollaborationAllowed(c.getString("userId")) (
+    c.json(403, {ok: false, code: "plan_required", error: "Live collaboration needs your teacher to have a Classroom plan."})
+    c.abort()
+    return
+  )
   if path.startsWith("/users/") (
     array parts = path.split("/")
     string name = url.unescape(parts[3].toStr())
