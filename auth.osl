@@ -178,6 +178,20 @@ def handleGetMe(*serve.Context c) (
     return
   )
   string username = c.getString("username")
+  if c.getBool("isStudent") (
+    object student = loadStudent(c.getString("userId"))
+    c.json(200, {
+      ok: true,
+      username: username,
+      displayName: student.displayName,
+      created: student.createdAt,
+      isAdmin: false,
+      isStudent: true,
+      classId: student.classId,
+      standing: "good"
+    })
+    return
+  )
   object profile = loadProfile(username)
   number created = 0
   if profile.contains("created") and profile.created != null (
