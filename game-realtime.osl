@@ -75,7 +75,7 @@ def realtimeSafeState(object values) boolean (
 )
 
 def realtimeAcceptIdentity(*ws.Connection conn, object identity) (
-  if identity.isEmpty() or identity.expiresAt.toNum() <= timestamp (
+  if identity.len == 0 or identity.expiresAt.toNum() <= timestamp (
     realtimeError(conn, "multiplayer ticket is invalid or expired")
     conn.Close()
     return
@@ -237,7 +237,7 @@ def realtimeUpgradeGuard(*serve.Context c) (
   )
   object identity = multiplayerTicketCache.get(ticket).assertElse(object, {})
   multiplayerTicketCache.delete(ticket)
-  if identity.isEmpty() or identity.expiresAt.toNum() <= timestamp (
+  if identity.len == 0 or identity.expiresAt.toNum() <= timestamp (
     c.json(401, {ok: false, error: "multiplayer ticket is invalid or expired"})
     c.abort()
     return

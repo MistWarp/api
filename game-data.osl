@@ -204,7 +204,7 @@ def requireGameDataCapability(*serve.Context c, object project) object (
     return {ok: false, status: 403, error: "game data capability required"}
   )
   object capability = gameDataCapabilityCache.get(token).assertElse(object, {})
-  if capability.isEmpty() or capability.expiresAt.toNum() <= timestamp (
+  if capability.len == 0 or capability.expiresAt.toNum() <= timestamp (
     gameDataCapabilityCache.delete(token)
     return {ok: false, status: 403, error: "game data capability expired"}
   )

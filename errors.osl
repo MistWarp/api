@@ -126,7 +126,7 @@ def handleAdminResolveSiteError(*serve.Context c) (
     resolved = body.resolved == true
   )
   object entry = errorDocs.findById(id)
-  if entry.isEmpty() == true (
+  if entry.len == 0 (
     c.notFound("error not found")
     return
   )
@@ -163,7 +163,7 @@ def handleAdminDeleteSiteError(*serve.Context c) (
     c.badRequest("error id is required")
     return
   )
-  if errorDocs.findById(id).isEmpty() == true (
+  if errorDocs.findById(id).len == 0 (
     c.notFound("error not found")
     return
   )

@@ -69,7 +69,7 @@ def removeEvidenceDir(string id) (
   if jsonKey != "" (
     removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
   )
-  if !meta.isEmpty() (
+  if meta.len > 0 (
     deleteOrphanedAssets(meta)
   )
 )
@@ -132,7 +132,7 @@ def handleGetEvidenceAsset(*serve.Context c) (
     return
   )
   object meta = loadEvidenceMeta(id)
-  if meta.isEmpty() or !meta.assets.assertElse(array, []).contains(name) (
+  if meta.len == 0 or !meta.assets.assertElse(array, []).contains(name) (
     c.notFound("not found")
     return
   )

@@ -187,7 +187,7 @@ def syncSpaceMemberships(object space) boolean (
   string signature = json.stringify(keys)
   string stateId = "space:" ++ spaceId
   object state = spaceMemberDocs.findById(stateId)
-  if state.isEmpty() == false and state.signature.toStr() == signature (
+  if state.len > 0 and state.signature.toStr() == signature (
     return true
   )
   array previous = spaceMemberDocs.where("spaceId", db.equal, spaceId).all()
@@ -222,7 +222,7 @@ def deleteSpaceMemberships(string spaceId) boolean (
 
 def migrateSpaceMemberships() boolean (
   string migrationId = "migration:space-members-v1"
-  if spaceMemberDocs.findById(migrationId).isEmpty() == false (
+  if spaceMemberDocs.findById(migrationId).len > 0 (
     return true
   )
   array previous = spaceMemberDocs.all()
@@ -520,7 +520,7 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
       string oldId = playtime["_id"].toStr()
       string newId = playtime.projectId.toStr() ++ ":" ++ newKey
       object existing = playtimeDocs.findById(newId)
-      if existing.isEmpty() == false and newId != oldId (
+      if existing.len > 0 and newId != oldId (
         playtime.duration = playtime.duration.toNum() + existing.duration.toNum()
       )
       playtime.username = newName
@@ -529,7 +529,7 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
     )
   )
   object session = playtimeSessionDocs.findById(oldKey)
-  if session.isEmpty() == false (
+  if session.len > 0 (
     session.username = newName
     playtimeSessionDocs.deleteOne({_id: oldKey})
     putDocument(playtimeSessionDocs, newKey, session)
@@ -856,7 +856,7 @@ def spaceListResponse(object space,*serve.Context c) object (
   boolean canManage = canManageSpace(space, c)
   for i ids.len (
     object project = projectSearchDocs.findById(ids[i].toStr())
-    if !project.isEmpty() and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
+    if project.len > 0 and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
       projectCount += 1
       if thumbnailURL == "" and project.contains("thumbUrl") (
         thumbnailURL = project.thumbUrl.toStr()
@@ -982,7 +982,7 @@ def handleListSpaces(*serve.Context c) (
 
 def handleGetSpace(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1087,7 +1087,7 @@ def handleCreateSpace(*serve.Context c) (
 
 def handleUpdateSpace(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1223,7 +1223,7 @@ def handleUpdateSpace(*serve.Context c) (
 
 def handleDeleteSpace(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1243,7 +1243,7 @@ def handleDeleteSpace(*serve.Context c) (
 
 def handleSetSpaceThumbnail(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1273,7 +1273,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
 def handleAddSpaceProject(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
   object project = projectSearchDocs.findById(c.param("project"))
-  if space.isEmpty() == true or project.isEmpty() == true (
+  if space.len == 0 or project.len == 0 (
     c.notFound("space or project not found")
     return
   )
@@ -1316,13 +1316,13 @@ def handleAddSpaceProject(*serve.Context c) (
 
 def handleRemoveSpaceProject(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
   object project = projectSearchDocs.findById(c.param("project"))
   boolean allowed = canManageSpace(space, c)
-  if project.isEmpty() != true (
+  if project.len > 0 (
     allowed = allowed or searchEntryOwnedByContext(project, c)
   )
   if !allowed (
@@ -1348,7 +1348,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
 
 def handleInviteChallengeJudge(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" (
+  if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
   )
@@ -1359,7 +1359,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
   string requested = c.bodyJSON().username.toStr().strip()
   string usernameKey = normalizeUsername(requested)
   object profile = profileSearchDocs.findById(usernameKey)
-  if usernameKey == "" or profile.isEmpty() == true (
+  if usernameKey == "" or profile.len == 0 (
     c.notFound("user not found")
     return
   )
@@ -1379,7 +1379,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
 
 def handleJoinChallenge(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" or !canViewSpace(space, c) (
+  if space.len == 0 or space.kind.toStr() != "challenge" or !canViewSpace(space, c) (
     c.notFound("challenge not found")
     return
   )
@@ -1403,7 +1403,7 @@ def handleJoinChallenge(*serve.Context c) (
 
 def handleLeaveChallenge(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" (
+  if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
   )
@@ -1420,7 +1420,7 @@ def handleLeaveChallenge(*serve.Context c) (
   array ids = spaceProjectIds(space)
   for i ids.len (
     object project = projectSearchDocs.findById(ids[i].toStr())
-    if project.isEmpty() == false and searchEntryOwnedByContext(project, c) (
+    if project.len > 0 and searchEntryOwnedByContext(project, c) (
       c.badRequest("remove your submission before leaving the challenge")
       return
     )
@@ -1433,7 +1433,7 @@ def handleLeaveChallenge(*serve.Context c) (
 
 def handleRespondChallengeJudgeInvite(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !isChallengeJudgeInvitee(space, c.getString("username")) (
+  if space.len == 0 or !isChallengeJudgeInvitee(space, c.getString("username")) (
     c.notFound("judge invitation not found")
     return
   )
@@ -1461,7 +1461,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
 
 def handleRemoveChallengeJudge(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canManageSpace(space, c) (
+  if space.len == 0 or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return
   )
@@ -1502,7 +1502,7 @@ def validChallengeCriterion(object space, string criterionId) boolean (
 def handleScoreChallengeEntry(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
   string projectId = c.param("project")
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
+  if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
     return
   )
@@ -1556,7 +1556,7 @@ def handleScoreChallengeEntry(*serve.Context c) (
 def handleVoteChallengeEntry(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
   string projectId = c.param("project")
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
+  if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
     return
   )
@@ -1566,7 +1566,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
     return
   )
   object project = projectSearchDocs.findById(projectId)
-  if project.isEmpty() == false and searchEntryOwnedByContext(project, c) (
+  if project.len > 0 and searchEntryOwnedByContext(project, c) (
     c.forbidden("you cannot vote for your own entry")
     return
   )
@@ -1592,7 +1592,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
 
 def handlePublishChallengeResults(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or space.kind.toStr() != "challenge" or !canManageSpace(space, c) (
+  if space.len == 0 or space.kind.toStr() != "challenge" or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return
   )
@@ -1612,7 +1612,7 @@ def handlePublishChallengeResults(*serve.Context c) (
 
 def handleFollowSpace(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1627,7 +1627,7 @@ def handleFollowSpace(*serve.Context c) (
 
 def handleUnfollowSpace(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1648,7 +1648,7 @@ def handleMySpaces(*serve.Context c) (
   for i memberships.len (
     object membership = memberships[i].assert(object)
     object space = spaceDocs.findById(membership.spaceId.toStr())
-    if space.isEmpty() == false (
+    if space.len > 0 (
       seen[space["_id"].toStr()] = true
       stored.append(space)
     )
@@ -1679,7 +1679,7 @@ def handleMySpaces(*serve.Context c) (
 
 def handleGetSpaceManagement(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1692,7 +1692,7 @@ def handleGetSpaceManagement(*serve.Context c) (
 
 def handleInviteSpaceCurator(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1707,7 +1707,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
     return
   )
   object profile = profileSearchDocs.findById(usernameKey)
-  if profile.isEmpty() == true (
+  if profile.len == 0 (
     c.notFound("user not found")
     return
   )
@@ -1734,7 +1734,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
 
 def handleRespondSpaceCuratorInvite(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1775,7 +1775,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
 
 def handleRemoveSpaceCurator(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1796,7 +1796,7 @@ def handleRemoveSpaceCurator(*serve.Context c) (
 
 def handleCancelSpaceCuratorInvite(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1833,7 +1833,7 @@ def handleReactSpace(*serve.Context c) (
 
 def handleReactSpaceLocked(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1872,7 +1872,7 @@ def handleReactSpaceLocked(*serve.Context c) (
 
 def handleGetSpaceComments(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1883,7 +1883,7 @@ def handleGetSpaceComments(*serve.Context c) (
 
 def handleCreateSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1923,7 +1923,7 @@ def handleCreateSpaceComment(*serve.Context c) (
 
 def handleDeleteSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true (
+  if space.len == 0 (
     c.notFound("space not found")
     return
   )
@@ -1947,7 +1947,7 @@ def handleDeleteSpaceComment(*serve.Context c) (
 
 def handleEditSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1966,7 +1966,7 @@ def handleEditSpaceComment(*serve.Context c) (
 
 def handlePinSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -1990,7 +1990,7 @@ def handlePinSpaceComment(*serve.Context c) (
 
 def handleReactSpaceComment(*serve.Context c) (
   object space = spaceDocs.findById(c.param("id"))
-  if space.isEmpty() == true or !canViewSpace(space, c) (
+  if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
@@ -2122,7 +2122,7 @@ def handleCreateRelease(*serve.Context c) (
 
 def handleGetReleaseProjectJson(*serve.Context c) (
   object release = releaseDocs.findById(c.param("release"))
-  if release.isEmpty() == true or release.projectId.toStr() != c.param("id") (
+  if release.len == 0 or release.projectId.toStr() != c.param("id") (
     c.notFound("release not found")
     return
   )
@@ -2163,7 +2163,7 @@ def handleDeleteRelease(*serve.Context c) (
     return
   )
   object release = releaseDocs.findById(c.param("release"))
-  if release.isEmpty() or release.projectId.toStr() != project.id.toStr() (
+  if release.len == 0 or release.projectId.toStr() != project.id.toStr() (
     c.notFound("release not found")
     return
   )
@@ -2219,7 +2219,7 @@ def beginPlaytimeSession(string projectId, string username, string sessionId) bo
   string userId = userIdForUsername(username)
   string identityKey = playtimeIdentity(username)
   object session = playtimeSessionDocs.findById(sessionId)
-  if session.isEmpty() == true or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
+  if session.len == 0 or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
     putDocument(playtimeSessionDocs, sessionId, {
       _id: sessionId,
       projectId: projectId,
@@ -2243,7 +2243,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   string playtimeLock = "playtime:" ++ playtimeId
   sync.lock(playtimeLock)
   object playtime = playtimeDocs.findById(playtimeId)
-  if playtime.isEmpty() == true (
+  if playtime.len == 0 (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
   ) else (
     playtime.username = username
@@ -2259,7 +2259,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
 def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
   string userId = userIdForUsername(username)
   object session = playtimeSessionDocs.findById(sessionId)
-  if session.isEmpty() == true or session.projectId.toStr() != projectId (
+  if session.len == 0 or session.projectId.toStr() != projectId (
     return 0
   )
   number credited = clampNumber(timestamp - session.lastCredit.toNum(), 0, 60000)
@@ -2269,7 +2269,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     string playtimeLock = "playtime:" ++ playtimeId
     sync.lock(playtimeLock)
     object playtime = playtimeDocs.findById(playtimeId)
-    if playtime.isEmpty() == true (
+    if playtime.len == 0 (
       playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
     )
     playtime.duration = playtime.duration.toNum() + credited
@@ -2436,7 +2436,7 @@ def handleUpdateProjectFeedback(*serve.Context c) (
     return
   )
   object feedback = feedbackDocs.findById(c.param("feedback"))
-  if feedback.isEmpty() == true or feedback.projectId.toStr() != c.param("id") (
+  if feedback.len == 0 or feedback.projectId.toStr() != c.param("id") (
     c.notFound("feedback not found")
     return
   )
@@ -2538,12 +2538,12 @@ def handleSaveProjectReview(*serve.Context c) (
   string reviewId = project.id.toStr() ++ ":" ++ reviewerId
   object existing = reviewDocs.findById(reviewId)
   number created = timestamp
-  if existing.isEmpty() == false (
+  if existing.len > 0 (
     created = existing.created.toNum()
   )
   object review = {_id: reviewId, projectId: project.id, author: c.getString("username"), authorId: c.getString("userId"), authorKey: normalizeUsername(c.getString("username")), rating: rating, message: message, created: created, edited: timestamp}
   putDocument(reviewDocs, reviewId, review)
-  if existing.isEmpty() == true (
+  if existing.len == 0 (
     addNotification(project.owner.toStr(), c.getString("username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
   )
   review.playtimeMs = projectPlaytime(project.id.toStr(), review.author.toStr())
@@ -2670,7 +2670,7 @@ def handleVoteIdea(*serve.Context c) (
 
 def handleVoteIdeaLocked(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2722,7 +2722,7 @@ def handleVoteIdeaLocked(*serve.Context c) (
 
 def handleGetIdeaComments(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2733,7 +2733,7 @@ def handleGetIdeaComments(*serve.Context c) (
 
 def handleCreateIdeaComment(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2772,7 +2772,7 @@ def handleCreateIdeaComment(*serve.Context c) (
 
 def handleDeleteIdeaComment(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2796,7 +2796,7 @@ def handleDeleteIdeaComment(*serve.Context c) (
 
 def handleEditIdeaComment(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2815,7 +2815,7 @@ def handleEditIdeaComment(*serve.Context c) (
 
 def handleReactIdeaComment(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
@@ -2824,7 +2824,7 @@ def handleReactIdeaComment(*serve.Context c) (
 
 def handleUpdateIdea(*serve.Context c) (
   object idea = ideaDocs.findById(c.param("id"))
-  if idea.isEmpty() == true (
+  if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
