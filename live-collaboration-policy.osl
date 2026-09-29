@@ -7,7 +7,7 @@ def liveSessionKey(object project, string branch) string (
 )
 
 def liveAccessForRole(string role) string (
-  if role == "tester" return "watch"
+  if role == "tester" or role == "viewer" return "watch"
   return "edit"
 )
 

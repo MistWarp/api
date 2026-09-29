@@ -46,6 +46,7 @@ def openCollection(*db.DB database, string name) *db.Collection (
 *db.Collection classroomGroupDocs = openCollection(communityDb, "classroom_groups")
 *db.Collection classroomClaimDocs = openCollection(communityDb, "classroom_claims")
 *db.Collection schoolDocs = openCollection(communityDb, "classroom_schools")
+*db.Collection classroomPresentationDocs = openCollection(communityDb, "classroom_presentations")
 *db.Collection commentIndexDocs = openCollection(communityDb, "comment_index")
 
 def putDocument(*db.Collection collection, string id, object value) boolean (
