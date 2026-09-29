@@ -29,6 +29,9 @@ def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
   if projectOwnerBanned(project) (
     return false
   )
+  if isStudentUserId((conn.Get("userId") ?? "").toStr()) (
+    return projectRole(project, conn.Get("username").toStr()) != ""
+  )
   if projectIsViewable(project) (
     return true
   )
