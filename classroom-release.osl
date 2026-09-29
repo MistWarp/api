@@ -181,6 +181,10 @@ def handleRedeemClaim(*serve.Context c) (
   )
   object student = found.student.assert(object)
   object classDoc = found.class.assert(object)
+  if isClassTeacher(classDoc, c.getString("userId")) (
+    c.json(403, {ok: false, code: "teacher_cannot_claim", error: "This link is for the student or their family. Give it to them to use with their own Rotur account."})
+    return
+  )
   string studentId = student["_id"].toStr()
   string studentName = student.username.toStr()
   string claimantId = c.getString("userId")
