@@ -27,8 +27,10 @@ def stripeRequest(string path, array fields) object (
 
 def classroomBillingInfo(string userId) object (
   object stored = classroomPlanDocs.findById(userId)
+  boolean schoolManaged = schoolForTeacher(userId).len > 0
   return {
-    available: stripeBillingConfigured(),
+    available: stripeBillingConfigured() and !schoolManaged,
+    schoolManaged: schoolManaged,
     seatPackSize: classroomSeatPackSize,
     seatPacksAvailable: stripeSeatPackPrice != "",
     managedByStripe: (stored.source ?? "").toStr() == "stripe",
@@ -38,6 +40,10 @@ def classroomBillingInfo(string userId) object (
 )
 
 def handleClassroomCheckout(*serve.Context c) (
+  if schoolForTeacher(c.getString("userId")).len > 0 (
+    c.json(409, {ok: false, code: "school_managed", error: "Your school manages your Classroom plan."})
+    return
+  )
   if !stripeBillingConfigured() (
     c.json(503, {ok: false, code: "billing_unavailable", error: "Online payment is not set up yet. Contact MistWarp support to buy a plan."})
     return
@@ -111,7 +117,7 @@ def storeStripePlan(string userId, object update, number eventCreated) (
     )
     merged.updatedAt = timestamp
     putDocument(classroomPlanDocs, userId, merged)
-    classroomPoolCache.delete(userId)
+    invalidateClassroomPool(userId)
   )
   sync.unlock(lockName)
 )
