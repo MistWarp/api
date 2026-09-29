@@ -6,10 +6,15 @@ def liveSessionKey(object project, string branch) string (
   return project.id.toStr() ++ ":" ++ branch
 )
 
+def liveAccessForRole(string role) string (
+  if role == "tester" return "watch"
+  return "edit"
+)
+
 def liveMemberCanSave(object member, number now) boolean (
-  return member.approved == true and member.expires.toNum() > now
+  return member.approved == true and member.expires.toNum() > now and member.access.assertElse(string, "edit") == "edit"
 )
 
 def canJoinLiveSession(object session, string role) boolean (
-  return session.public.assertElse(boolean, false) and role != "" and role != "tester"
+  return session.public.assertElse(boolean, false) and role != ""
 )
