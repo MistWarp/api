@@ -4,4 +4,5 @@ number maxProjectUploadRequestBytes = 50331648
 number maxUploadChunkRequestBytes = 9437184
 number maxWorkspaceBootstrapRequestBytes = 50331648
 number maxThumbnailRequestBytes = 2097152
+number maxBackpackRequestBytes = 23068672
 number maxExtensionIndexRequestBytes = 12582912

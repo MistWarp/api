@@ -20,6 +20,7 @@ def ensureDirectories() boolean (
   result = result and fs.mkdirAll(gameSaveUsageDir)
   result = result and fs.mkdirAll(gameEntitlementsDir)
   result = result and fs.mkdirAll(gameInventoryDir)
+  result = result and fs.mkdirAll(backpackDir)
   return result
 )
 

@@ -1,0 +1,45 @@
+import "std:testing"
+import "std:regex"
+import "./backpack-policy.osl"
+
+testing.assert(backpackBodyExt("script", "application/json") == "json", "scripts are stored as json")
+testing.assert(backpackBodyExt("sprite", "application/zip") == "zip", "sprites are stored as zip")
+testing.assert(backpackBodyExt("costume", "image/svg+xml") == "svg", "vector costumes keep svg")
+testing.assert(backpackBodyExt("costume", "IMAGE/PNG") == "png", "mime matching ignores case")
+testing.assert(backpackBodyExt("sound", "audio/x-wav") == "wav", "wav aliases are accepted")
+testing.assert(backpackBodyExt("sound", "audio/mp3") == "mp3", "mp3 aliases are accepted")
+testing.assert(backpackBodyExt("costume", "application/json") == "", "a costume cannot be json")
+testing.assert(backpackBodyExt("script", "text/html") == "", "html is never accepted")
+testing.assert(backpackBodyExt("folder", "application/json") == "", "unknown types are rejected")
+
+testing.assert(backpackThumbnailExt("image/jpeg") == "jpg", "jpeg thumbnails are accepted")
+testing.assert(backpackThumbnailExt("image/svg+xml") == "", "svg thumbnails are rejected")
+
+testing.assert(backpackItemName("  Player  ", "sprite") == "Player", "names are trimmed")
+testing.assert(backpackItemName("   ", "sound") == "sound", "blank names fall back to the type")
+testing.assert(backpackItemName("a" * 150, "script").len == maxBackpackNameLength, "long names are cut")
+
+testing.assert(isValidBackpackKey("backpack/StEqMLHtI8PG8T7uzJbFZsMMQHhNUx6c/body.json"), "body keys are valid")
+testing.assert(isValidBackpackKey("backpack/StEqMLHtI8PG8T7uzJbFZsMMQHhNUx6c/thumbnail.jpg"), "thumbnail keys are valid")
+testing.assert(!isValidBackpackKey("backpack/StEqMLHtI8PG8T7uzJbFZsMMQHhNUx6c/body.html"), "html bodies are invalid")
+testing.assert(!isValidBackpackKey("backpack/short/body.json"), "short keys are invalid")
+testing.assert(!isValidBackpackKey("backpack/../assets/body.json"), "traversal is invalid")
+
+array items = [
+  {id: "a", type: "script", bodyBytes: 100, thumbnailBytes: 10},
+  {id: "b", type: "sound", bodyBytes: 500, thumbnailBytes: 0},
+  {id: "c", type: "script", bodyBytes: 40}
+]
+testing.assert(backpackTotalBytes(items) == 650, "totals bodies and thumbnails")
+testing.assert(backpackFilterType(items, "script").len == 2, "filters by type")
+testing.assert(backpackFilterType(items, "").len == 3, "an empty filter keeps everything")
+
+object split = backpackWithout(items, ["a", "missing"])
+testing.assert(split.kept.len == 2, "unmatched ids leave items alone")
+testing.assert(split.removed.len == 1, "matched ids are removed")
+testing.assert(backpackTotalBytes(split.removed.assert(array)) == 110, "removed bytes can be freed")
+
+testing.assert(backpackPageSize("20") == 20, "page size is honoured")
+testing.assert(backpackPageSize("0") == maxBackpackPageSize, "zero falls back to the maximum")
+testing.assert(backpackPageSize("5000") == maxBackpackPageSize, "large sizes are capped")
+testing.assert(backpackPageSize("") == maxBackpackPageSize, "missing sizes use the maximum")
