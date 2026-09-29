@@ -461,6 +461,9 @@ def refreshUsernameForId(string userId) string (
   if userId == "" (
     return ""
   )
+  if isStudentUserId(userId) (
+    return usernameForId(userId)
+  )
   if identityRefreshCache.has(userId) (
     return identityRefreshCache.get(userId).toStr()
   )
@@ -495,7 +498,7 @@ def refreshUsernameForId(string userId) string (
 
 def discoverUserIdentity(string username) string (
   string key = normalizeUsername(username)
-  if key == "" (
+  if key == "" or isStudentUsername(key) (
     return ""
   )
   object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0")
@@ -824,6 +827,7 @@ def reconcileDeletedUsers() (
       )
     )
   )
+  ids = ids.filter((any id) boolean -> !isStudentUserId(id.toStr()))
   if ids.len == 0 (
     return
   )

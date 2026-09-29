@@ -3,6 +3,7 @@ def authMiddleware(*serve.Context c) (
   string username = ""
   string userId = ""
   boolean isAdmin = false
+  boolean isStudent = false
 
   string token = requestToken(c)
   if token != "" (
@@ -11,7 +12,17 @@ def authMiddleware(*serve.Context c) (
       authenticated = true
       username = session.username.toStr()
       userId = session.userId.toStr()
-      isAdmin = isAdminUser(username)
+      if isStudentUserId(userId) (
+        object student = loadStudent(userId)
+        isStudent = true
+        if student.len == 0 or student.disabled == true (
+          authenticated = false
+          username = ""
+          userId = ""
+        )
+      ) else (
+        isAdmin = isAdminUser(username)
+      )
     )
   )
 
@@ -19,6 +30,7 @@ def authMiddleware(*serve.Context c) (
   c.set("username", username)
   c.set("userId", userId)
   c.set("isAdmin", isAdmin)
+  c.set("isStudent", isStudent and authenticated)
 
   c.next()
 )

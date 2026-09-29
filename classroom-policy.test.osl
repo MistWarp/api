@@ -1,0 +1,88 @@
+import "std:testing"
+import "std:regex"
+import "./classroom-policy.osl"
+
+testing.assert(isStudentUserId("mwc_abc"), "student ids carry the classroom prefix")
+testing.assert(!isStudentUserId("12345"), "rotur ids are not student ids")
+testing.assert(isStudentUsername("sam~k7p2q"), "student usernames carry a separator rotur never allows")
+testing.assert(!isStudentUsername("sam.k7p2q"), "rotur usernames are never student usernames")
+
+testing.assert(studentHandleFromName("Sam O'Neil") == "samoneil", "handles keep letters and digits")
+testing.assert(studentHandleFromName("  Zoë 2 ") == "zo2", "handles drop characters outside a to z and digits")
+testing.assert(studentHandleFromName("Maximilian Alexander") == "maximilianalexan", "handles are capped at 16 characters")
+testing.assert(studentUsername("sam", "k7p2q") == "sam~k7p2q", "usernames join the handle and class slug")
+testing.assert(!validStudentDisplayName("  "), "blank names are rejected")
+testing.assert(!validStudentDisplayName("!!!"), "names need at least one letter or digit")
+testing.assert(validStudentDisplayName("Ada L."), "ordinary names are accepted")
+
+testing.assert(validPictureSequence(["cat", "moon", "car"]), "three known pictures form a picture password")
+testing.assert(!validPictureSequence(["cat", "moon"]), "picture passwords need three pictures")
+testing.assert(!validPictureSequence(["cat", "moon", "unicorn"]), "unknown pictures are rejected")
+testing.assert(pictureSecret(["cat", "moon", "car"]) == "cat-moon-car", "picture order is part of the secret")
+testing.assert(normalizeClassCode(" abcd-2345 ") == "ABCD2345", "class codes ignore case, spaces and dashes")
+
+object fresh = {failedLogins: 0, lockedUntil: 0}
+object once = studentLoginAfterFailure(fresh, 1000)
+testing.assert(once.failedLogins == 1 and once.lockedUntil == 0, "one failure does not lock the account")
+object nearly = {failedLogins: 4, lockedUntil: 0}
+object locked = studentLoginAfterFailure(nearly, 1000)
+testing.assert(locked.lockedUntil == 1000 + studentLoginLockMs, "the fifth failure locks the account")
+testing.assert(locked.failedLogins == 0, "the failure count restarts after a lock")
+testing.assert(studentLoginLocked(locked, 2000), "a locked account refuses logins")
+testing.assert(!studentLoginLocked(locked, 1001 + studentLoginLockMs), "the lock expires")
+
+object free = effectiveClassroomPlan({}, 100)
+testing.assert(free.tier == "free" and free.seats == 5 and free.maxClasses == 1, "teachers start on the free plan")
+testing.assert(free.liveCollaboration == false, "live collaboration is a paid feature")
+object paid = effectiveClassroomPlan({tier: "classroom", expiresAt: 500}, 100)
+testing.assert(paid.tier == "classroom" and paid.seats == 35, "a current paid plan applies its defaults")
+object expired = effectiveClassroomPlan({tier: "classroom", seats: 60, expiresAt: 50}, 100)
+testing.assert(expired.tier == "free" and expired.seats == 5, "an expired plan falls back to free")
+object extra = effectiveClassroomPlan({tier: "classroom", seats: 60, storageBytes: 5}, 100)
+testing.assert(extra.seats == 60 and extra.storageBytes == 5, "purchased seat packs override the defaults")
+object bogus = effectiveClassroomPlan({tier: "enterprise", seats: 900}, 100)
+testing.assert(bogus.tier == "free" and bogus.seats == 5, "unknown tiers never grant seats")
+
+testing.assert(pooledStudentStorageLimit(100, 40, 10) == 70, "a student may use their share plus the unused pool")
+testing.assert(pooledStudentStorageLimit(100, 120, 30) == 30, "a full pool stops new uploads without deleting work")
+
+object classDoc = {ownerId: "t1", coTeachers: [{userId: "t2", username: "b"}]}
+testing.assert(isClassTeacher(classDoc, "t1"), "the owner teaches the class")
+testing.assert(isClassTeacher(classDoc, "t2"), "co-teachers teach the class")
+testing.assert(!isClassTeacher(classDoc, "t3"), "other people do not")
+testing.assert(!isClassTeacher(classDoc, ""), "signed-out visitors do not")
+testing.assert(isClassOwner(classDoc, "t1") and !isClassOwner(classDoc, "t2"), "only the owner owns the class")
+
+testing.assert(apiRoutePath("/v1/projects/p1") == "/projects/p1", "the v1 prefix is removed")
+testing.assert(apiRoutePath("/api/projects/p1") == "/projects/p1", "the legacy prefix is removed")
+testing.assert(studentRouteAllowed("GET", "/v1/explore"), "students can read")
+testing.assert(studentRouteAllowed("POST", "/v1/projects"), "students can create projects")
+testing.assert(studentRouteAllowed("POST", "/v1/projects/p1/upload"), "students can save work")
+testing.assert(studentRouteAllowed("POST", "/v1/projects/p1/upload-parts/tok/chunk"), "students can save large work")
+testing.assert(studentRouteAllowed("POST", "/v1/projects/p1/live"), "students can join live sessions")
+testing.assert(studentRouteAllowed("POST", "/v1/classroom/assignments/a1/turn-in"), "students can turn work in")
+testing.assert(studentRouteAllowed("POST", "/v1/reports"), "students can report problems")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/comments"), "students cannot comment")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/publish"), "students cannot publish")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/visibility"), "students cannot change visibility")
+testing.assert(!studentRouteAllowed("POST", "/v1/users/a/follow"), "students cannot follow people")
+testing.assert(!studentRouteAllowed("PUT", "/v1/me/profile"), "students cannot write a public profile")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/purchase/intent"), "students cannot buy")
+testing.assert(!studentRouteAllowed("POST", "/v1/spaces"), "students cannot create spaces")
+testing.assert(!studentRouteAllowed("POST", "/v1/classroom/classes"), "students cannot create classes")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/multiplayer-ticket"), "students cannot join public multiplayer rooms")
+testing.assert(!studentRouteAllowed("POST", "/v1/projects/p1/upload/extra"), "rules match whole paths")
+
+testing.assert(studentProjectUpdateAllowed(["title", "instructions"]), "students can describe their work")
+testing.assert(!studentProjectUpdateAllowed(["title", "collaborators"]), "students cannot add teammates")
+testing.assert(!studentProjectUpdateAllowed(["owner"]), "students cannot give work away")
+testing.assert(!studentProjectUpdateAllowed(["price"]), "students cannot sell work")
+
+testing.assert(submissionCanTurnIn({state: "started"}), "started work can be turned in")
+testing.assert(submissionCanTurnIn({state: "returned"}), "returned work can be turned in again")
+testing.assert(!submissionCanTurnIn({state: "turned_in"}), "work cannot be turned in twice")
+testing.assert(submissionCanUnsubmit({state: "turned_in"}), "turned in work can be taken back")
+testing.assert(!submissionCanUnsubmit({state: "returned"}), "returned work cannot be taken back")
+testing.assert(submissionIsLate(100, 101), "work after the due date is late")
+testing.assert(!submissionIsLate(100, 100), "work on the due date is on time")
+testing.assert(!submissionIsLate(0, 999), "assignments without a due date are never late")

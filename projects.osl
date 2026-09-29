@@ -30,7 +30,7 @@ def projectRole(object project, string username) string (
       )
     )
   )
-  return ""
+  return classTeacherRoleForProject(project, userId)
 )
 
 def canEditProject(object project,*serve.Context c) boolean (
@@ -124,7 +124,7 @@ def ensureViewKey(object project) (
 )
 
 def projectMustStayPrivate(object project) boolean (
-  if projectContributionOnlyFlag(project) (
+  if projectContributionOnlyFlag(project) or isStudentUserId((project.ownerId ?? "").toStr()) (
     return true
   )
   if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
@@ -2116,6 +2116,10 @@ def handleUpdateProjectLocked(*serve.Context c) (
   )
 
   object body = c.bodyJSON()
+  if isStudentUserId((project.ownerId ?? "").toStr()) and !c.getBool("isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
+    c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
+    return
+  )
   if body.contains("owner") (
     boolean canTransfer = c.getBool("isAdmin") or projectRole(project, c.getString("username")) == "owner" or canManageGroupContent(project, c)
     if !canTransfer (
@@ -3347,49 +3351,70 @@ def handleRemixProjectLocked(*serve.Context c) (
     c.forbidden("this project cannot be remixed")
     return
   )
-
-  number projectLimit = mistwarpBenefitsForUserId(c.getString("userId")).maxProjects.toNum()
-  if !c.getBool("isAdmin") and ownedProjectSlotCount(c.getString("userId"), c.getString("username")) >= projectLimit (
-    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
-    return
-  )
-
-  string username = c.getString("username")
-  string id = generateId()
   object body = c.bodyJSON()
   string forkTitle = parent.title.toStr() ++ " fork"
   if body.contains("title") and body.title != null and body.title.toStr().strip() != "" (
     forkTitle = body.title.toStr().strip().trim(1, 100)
   )
+  string forkBranch = ""
+  if body.contains("branch") and body.branch != null (
+    forkBranch = body.branch.toStr().strip()
+  )
+  object forked = forkProjectFor(parent, c.getString("username"), c.getString("userId"), forkTitle, forkBranch, !c.getBool("isAdmin"))
+  if forked.ok != true (
+    forkFailureResponse(c, forked)
+    return
+  )
+  object project = forked.project.assert(object)
+  c.json(201, {
+    ok: true,
+    id: project.id,
+    projectJsonUrl: projectJsonUrlFor(project),
+    assetsBase: assetsBaseUrl()
+  })
+)
+
+def forkFailureResponse(*serve.Context c, object forked) (
+  if forked.code == "storage_full" (
+    object details = storageDetails(forked.username.toStr())
+    storageFullResponse(c, details, forked.bytes.toNum() - details.remaining.toNum())
+    return
+  )
+  c.json(forked.status.toNum().toInt(), {ok: false, code: forked.code, error: forked.error})
+)
+
+def forkProjectFor(object source, string username, string userId, string forkTitle, string requestedBranch, boolean enforceLimits) object (
+  object parent = source
+  number projectLimit = mistwarpBenefitsForUserId(userId).maxProjects.toNum()
+  if enforceLimits and ownedProjectSlotCount(userId, username) >= projectLimit (
+    return {ok: false, status: 413, code: "project_limit", error: "project limit reached; delete a trashed project permanently or upgrade your plan"}
+  )
   string forkBranch = "main"
   if parent.contains("gitBranch") and parent.gitBranch != null and parent.gitBranch.toStr() != "" (
     forkBranch = parent.gitBranch.toStr()
   )
-  if body.contains("branch") and body.branch != null and body.branch.toStr().strip() != "" (
-    forkBranch = body.branch.toStr().strip()
+  if requestedBranch != "" (
+    forkBranch = requestedBranch
   )
   if forkBranch.len > 100 or forkBranch.contains(" ") or forkBranch.contains("\\") or forkBranch.contains("..") or forkBranch.startsWith("/") (
-    c.badRequest("invalid branch name")
-    return
+    return {ok: false, status: 400, code: "invalid_branch", error: "invalid branch name"}
   )
 
   object jsonSnapshot = ensureProjectJsonSnapshot(parent)
   if !jsonSnapshot.ok (
-    c.internalError("could not copy the original project, try again")
-    return
+    return {ok: false, status: 500, code: "copy_failed", error: "could not copy the original project, try again"}
   )
   parent = jsonSnapshot.project.assert(object)
   object workspaceSnapshots = ensureProjectWorkspaceSnapshots(parent)
   if !workspaceSnapshots.ok (
-    c.internalError("could not prepare the original project history, try again")
-    return
+    return {ok: false, status: 500, code: "history_failed", error: "could not prepare the original project history, try again"}
   )
   parent = workspaceSnapshots.project.assert(object)
 
   if !projectHasWorkspace(parent) (
-    c.json(409, {ok: false, code: "history_unavailable", error: "prepare the original project's history before remixing"})
-    return
+    return {ok: false, status: 409, code: "history_unavailable", error: "prepare the original project's history before remixing"}
   )
+  string id = generateId()
   string sourcePath = cachedProjectWorkspacePath(parent)
   string forkPath = tmpDir ++ id ++ ".fork.mwp"
   string parentId = parent.id.toStr()
@@ -3397,34 +3422,30 @@ def handleRemixProjectLocked(*serve.Context c) (
   auto parsedFork = json.parse(forkJson, {type: "object"})
   if parsedFork.isErr() or parsedFork.unwrap().assert(object).ok != true (
     fs.remove(forkPath)
-    c.json(409, {ok: false, code: "history_unavailable", error: "requested branch history is unavailable"})
-    return
+    return {ok: false, status: 409, code: "history_unavailable", error: "requested branch history is unavailable"}
   )
   object forkHistory = parsedFork.unwrap().assert(object).manifest.assert(object)
   byte[] forkBody = fs.readFileBytes(forkPath)
   fs.remove(forkPath)
   number forkBytes = projectSizeBytes(parent) + forkBody.len
-  if !c.getBool("isAdmin") and storageAllowance(mistwarpBenefitsForUserId(c.getString("userId")).storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
-    object forkStorage = storageDetails(username)
-    storageFullResponse(c, forkStorage, forkBytes - forkStorage.remaining.toNum())
-    return
+  if enforceLimits and storageAllowance(mistwarpBenefitsForUserId(userId).storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
+    return {ok: false, status: 413, code: "storage_full", error: "storage full", username: username, bytes: forkBytes}
   )
   string forkKey = projectWorkspaceSnapshotKey(contentHash(forkBody))
   if !stageR2Blob(forkKey, forkBody, "application/x-mistwarp-project", "") (
-    c.internalError("could not store fork history")
-    return
+    return {ok: false, status: 500, code: "store_failed", error: "could not store fork history"}
   )
 
   object project = {
     id: id,
     owner: username,
-    ownerId: c.getString("userId"),
+    ownerId: userId,
     title: forkTitle,
     description: "",
     instructions: "",
     repo: null,
-    workspaceKey: parent.contains("workspaceKey") ? parent.workspaceKey "",
-    workspaceLayers: projectWorkspaceKeys(parent),
+    workspaceKey: forkKey,
+    workspaceLayers: [forkKey],
     jsonKey: parent.jsonKey,
     viewKey: randomString(16),
     created: timestamp,
@@ -3434,7 +3455,7 @@ def handleRemixProjectLocked(*serve.Context c) (
     lastUploadAt: timestamp,
     jsonGzip: true,
     inheritedJson: true,
-    storedJsonBytes: parent.contains("storedJsonBytes") ? parent.storedJsonBytes 0,
+    storedJsonBytes: parent.storedJsonBytes ?? 0,
     remixParent: parent.id,
     contributionOnly: remixIsContributionOnly(parent, projectPrice(parent)),
     remixRoot: parent.id,
@@ -3446,49 +3467,34 @@ def handleRemixProjectLocked(*serve.Context c) (
     brokenhearts: [],
     assets: parent.assets,
     sizeBytes: projectSizeBytes(parent),
+    historyBytes: forkBody.len,
+    gitHead: forkHistory.head,
+    remixBaseCommit: forkHistory.head,
+    gitBranch: forkHistory.branch,
+    gitCommits: forkHistory.commits,
+    gitGraph: forkHistory.graph,
     collaborators: []
   }
-  object parentEntry = projectSearchDocs.findById(parent.id.toStr())
+  object parentEntry = projectSearchDocs.findById(parentId)
   if parentEntry.len > 0 and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
     project.remixRoot = parentEntry.remixRoot
   )
-  project.workspaceKey = forkKey
-  project.workspaceLayers = [forkKey]
-  project.historyBytes = forkBody.len
-  project.gitHead = forkHistory.head
-  project.remixBaseCommit = forkHistory.head
-  project.gitBranch = forkHistory.branch
-  project.gitCommits = forkHistory.commits
-  project.gitGraph = forkHistory.graph
-  if parent.contains("jsonBytes") (
-    project.jsonBytes = parent.jsonBytes
-  )
-  if parent.contains("assetBytes") (
-    project.assetBytes = parent.assetBytes
-  )
-  if parent.contains("extensions") (
-    project.extensions = parent.extensions
-  )
-  if parent.contains("extensionsIndexed") (
-    project.extensionsIndexed = parent.extensionsIndexed
+  array inheritedFields = ["jsonBytes", "assetBytes", "extensions", "extensionsIndexed"]
+  for i inheritedFields.len (
+    string field = inheritedFields[i].toStr()
+    if parent.contains(field) (
+      project[field] = parent[field]
+    )
   )
 
   if !storeProjectExtensions(id, [], storedProjectExtensions(project), {}) (
-    c.internalError("could not index project extensions")
-    return
+    return {ok: false, status: 500, code: "extensions_failed", error: "could not index project extensions"}
   )
   if !saveProject(project) (
-    c.internalError("could not save fork")
-    return
+    return {ok: false, status: 500, code: "save_failed", error: "could not save fork"}
   )
   upsertIndexEntry(project)
-
-  c.json(201, {
-    ok: true,
-    id: id,
-    projectJsonUrl: projectJsonUrlFor(project),
-    assetsBase: assetsBaseUrl()
-  })
+  return {ok: true, project: project}
 )
 
 def validateUploadedHistory(object project, byte[] body, string metadata, string currentHead) object (
