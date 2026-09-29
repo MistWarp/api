@@ -8,6 +8,11 @@ def pruneSiteErrors() (
   )
 )
 
+def shouldIgnoreSiteError(string message) boolean (
+  string normalized = message.toLower().strip()
+  return normalized == "unsandboxed is not defined" or normalized == "referenceerror: unsandboxed is not defined" or normalized == "can't find variable: unsandboxed"
+)
+
 def handleRecordSiteError(*serve.Context c) (
   object body = c.bodyJSON()
   string message = body.message.toStr().strip()
@@ -17,6 +22,10 @@ def handleRecordSiteError(*serve.Context c) (
   )
   if message.len > 2000 (
     message = message.trim(1, 2000)
+  )
+  if shouldIgnoreSiteError(message) (
+    c.json(200, {ok: true, ignored: true})
+    return
   )
   string stack = ""
   if body.contains("stack") and body.stack != null (
