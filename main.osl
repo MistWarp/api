@@ -211,6 +211,7 @@ import "./classroom-billing-policy.osl"
 import "./classroom-billing.osl"
 import "./classroom-groups.osl"
 import "./classroom-release.osl"
+import "./classroom-schools.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
@@ -387,6 +388,12 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/classroom/join/:code", serve.rateLimit(30, 60), handleClassroomJoinInfo)
   api.POST("/classroom/login", serve.rateLimit(20, 60), handleClassroomLogin)
   api.GET("/classroom", requireAuth, handleGetClassroom)
+  api.GET("/classroom/school", requireClassroomTeacher, handleGetSchool)
+  api.GET("/classroom/school/audit", requireClassroomTeacher, handleGetSchoolAudit)
+  api.GET("/classroom/school/export", requireClassroomTeacher, serve.rateLimit(10, 3600), handleExportSchool)
+  api.POST("/classroom/school/teachers", requireClassroomTeacher, handleAddSchoolTeacher)
+  api.DELETE("/classroom/school/teachers/:teacher", requireClassroomTeacher, handleRemoveSchoolTeacher)
+  api.PUT("/classroom/school/teachers/:teacher/admin", requireClassroomTeacher, handleSetSchoolAdmin)
   api.POST("/classroom/billing/checkout", requireClassroomTeacher, serve.rateLimit(20, 3600), handleClassroomCheckout)
   api.POST("/classroom/billing/portal", requireClassroomTeacher, serve.rateLimit(30, 3600), handleClassroomBillingPortal)
   api.POST("/classroom/billing/webhook", handleStripeWebhook)
@@ -585,6 +592,8 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
   api.GET("/admin/classroom/plans", requireAdmin, handleAdminGetClassroomPlan)
   api.POST("/admin/classroom/plans", requireAdmin, handleAdminSetClassroomPlan)
+  api.GET("/admin/classroom/schools", requireAdmin, handleAdminListSchools)
+  api.POST("/admin/classroom/schools", requireAdmin, handleAdminCreateSchool)
 )
 
 *serve.Router uploadsV1 = app.group("/v1")
