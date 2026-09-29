@@ -1,0 +1,228 @@
+number classroomClaimLifetimeMs = 1209600000
+
+def claimIsUsable(object claim, number now) boolean (
+  return claim.len > 0 and (claim.expiresAt ?? 0).toNum() > now
+)
+
+def claimUrl(string code) string (
+  return editorOrigin ++ "/classroom/claim/" ++ code
+)
+
+def pendingClaimForStudent(string studentId) object (
+  array claims = classroomClaimDocs.where("studentId", db.equal, studentId).all()
+  for i claims.len (
+    object claim = claims[i].assert(object)
+    if claimIsUsable(claim, timestamp) (
+      return claim
+    )
+  )
+  return {}
+)
+
+def claimResponse(object claim) object (
+  return {code: claim["_id"], url: claimUrl(claim["_id"].toStr()), expiresAt: claim.expiresAt}
+)
+
+def handleReleaseStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 (
+    return
+  )
+  string studentId = student["_id"].toStr()
+  deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
+  string code = ""
+  for _ 20 (
+    string candidate = randomFromAlphabet(classCodeAlphabet, 10)
+    if code == "" and classroomClaimDocs.findById(candidate).len == 0 (
+      code = candidate
+    )
+  )
+  if code == "" (
+    c.internalError("could not create a claim code, try again")
+    return
+  )
+  object claim = {
+    _id: code,
+    studentId: studentId,
+    classId: classDoc["_id"],
+    issuedBy: c.getString("userId"),
+    createdAt: timestamp,
+    expiresAt: timestamp + classroomClaimLifetimeMs
+  }
+  classroomClaimDocs.insertOne(claim)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_release_started", {studentId: studentId})
+  c.json(201, {ok: true, claim: claimResponse(claim)})
+)
+
+def handleCancelStudentRelease(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 (
+    return
+  )
+  deleteDocumentsByField(classroomClaimDocs, "studentId", student["_id"].toStr())
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_release_cancelled", {studentId: student["_id"]})
+  c.json(200, {ok: true})
+)
+
+def usableClaimOrFail(*serve.Context c) object (
+  object claim = classroomClaimDocs.findById(normalizeClassCode(c.param("code")))
+  object student = {}
+  if claimIsUsable(claim, timestamp) (
+    student = loadStudent(claim.studentId.toStr())
+  )
+  if student.len == 0 (
+    c.notFound("This link has expired or was already used. Ask your teacher for a new one.")
+    return {}
+  )
+  return {claim: claim, student: student, class: loadClass(student.classId.toStr())}
+)
+
+def handleGetClaim(*serve.Context c) (
+  object found = usableClaimOrFail(c)
+  if found.len == 0 (
+    return
+  )
+  object student = found.student.assert(object)
+  object classDoc = found.class.assert(object)
+  c.json(200, {
+    ok: true,
+    displayName: student.displayName,
+    className: classDoc.name,
+    teacher: classDoc.owner,
+    projectCount: ownerIndexEntries(student.username.toStr(), true).len,
+    expiresAt: found.claim.expiresAt
+  })
+)
+
+def moveProjectOwner(object project, string username, string userId) (
+  project.owner = username
+  project.ownerId = userId
+  project.groupTag = ""
+  project.edited = timestamp
+  saveProject(project)
+  upsertIndexEntry(project)
+)
+
+def archiveSubmittedWork(object student, object classDoc) (
+  string teacherId = classDoc.ownerId.toStr()
+  string teacherName = usernameForId(teacherId)
+  if teacherName == "" (
+    teacherName = classDoc.owner.toStr()
+  )
+  array submissions = submissionDocs.where("studentId", db.equal, student["_id"].toStr()).all()
+  for i submissions.len (
+    object submission = submissions[i].assert(object)
+    string state = submission.state.toStr()
+    if (submission.groupId ?? "").toStr() == "" and (state == "turned_in" or state == "returned") (
+      auto loaded = loadProject(submission.projectId.toStr())
+      if loaded.ok and projectHasWorkspace(loaded.project.assert(object)) (
+        object project = loaded.project.assert(object)
+        object copy = forkProjectFor(project, teacherName, teacherId, (project.title.toStr() ++ " (" ++ student.displayName.toStr() ++ ")").trim(1, 100), "", false)
+        if copy.ok == true (
+          submission.projectId = copy.project.id
+        )
+      )
+      submission.archived = true
+      submission.studentName = student.displayName
+      putDocument(submissionDocs, submission["_id"].toStr(), submission)
+    )
+  )
+)
+
+def handOverGroupProject(object project, object student, string claimantName, string claimantId) boolean (
+  array team = project.collaborators.assertElse(array, [])
+  if team.len == 0 (
+    return false
+  )
+  object next = team[1].assert(object)
+  array rest = []
+  for i team.len (
+    if i > 1 (
+      rest.append(team[i])
+    )
+  )
+  if projectHasWorkspace(project) (
+    forkProjectFor(project, claimantName, claimantId, project.title.toStr(), "", false)
+  )
+  project.collaborators = rest
+  moveProjectOwner(project, next.username.toStr(), next.userId.toStr())
+  return true
+)
+
+def leaveClassGroups(object student) (
+  string studentId = student["_id"].toStr()
+  array groups = classroomGroupDocs.where("classId", db.equal, student.classId.toStr()).all()
+  for i groups.len (
+    object group = groups[i].assert(object)
+    array ids = group.studentIds.assertElse(array, [])
+    if ids.contains(studentId) (
+      group.studentIds = ids.filter((any id) boolean -> id.toStr() != studentId)
+      putDocument(classroomGroupDocs, group["_id"].toStr(), group)
+    )
+  )
+)
+
+def handleRedeemClaim(*serve.Context c) (
+  if c.getBool("isStudent") (
+    c.json(403, {ok: false, code: "student_restricted", error: "Sign in with your own Rotur account to keep your projects."})
+    return
+  )
+  object found = usableClaimOrFail(c)
+  if found.len == 0 (
+    return
+  )
+  object student = found.student.assert(object)
+  object classDoc = found.class.assert(object)
+  string studentId = student["_id"].toStr()
+  string studentName = student.username.toStr()
+  string claimantId = c.getString("userId")
+  string claimantName = c.getString("username")
+  string lockName = "classroom-release-" ++ studentId
+  sync.lock(lockName)
+  if loadStudent(studentId).len == 0 (
+    sync.unlock(lockName)
+    c.notFound("This link has expired or was already used. Ask your teacher for a new one.")
+    return
+  )
+  archiveSubmittedWork(student, classDoc)
+  array moved = []
+  array entries = ownerIndexEntries(studentName, true)
+  for i entries.len (
+    auto loaded = loadProject(entries[i].assert(object).id.toStr())
+    if loaded.ok (
+      object project = loaded.project.assert(object)
+      if !handOverGroupProject(project, student, claimantName, claimantId) (
+        moveProjectOwner(project, claimantName, claimantId)
+        moved.append(project.id)
+      )
+    )
+  )
+  array trashed = trashedProjectsOwnedBy(studentId, studentName)
+  for i trashed.len (
+    object project = trashed[i].assert(object)
+    project.owner = claimantName
+    project.ownerId = claimantId
+    project.collaborators = []
+    writeFile(trashDir ++ project.id.toStr() ++ ".json", project)
+  )
+  leaveClassGroups(student)
+  purgeUser(studentId, studentName)
+  deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
+  studentDocs.deleteOne({_id: studentId})
+  sync.unlock(lockName)
+  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_released", {studentId: studentId, displayName: student.displayName, to: claimantName, projects: moved.len})
+  array teachers = classTeacherIds(classDoc)
+  for i teachers.len (
+    addNotification(usernameForId(teachers[i].toStr()), claimantName, "classroom_released", {classId: classDoc["_id"], className: classDoc.name, studentName: student.displayName})
+  )
+  c.json(200, {ok: true, projects: moved, trashed: trashed.len})
+)
