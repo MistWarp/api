@@ -41,7 +41,7 @@ def compressFixture(string kind) byte[] (
 // Little-endian reads over 1-based byte arrays. Positions are 1-based, so
 // 0-based offset N of a header starting at H becomes H + N.
 def read16le(byte[] data, number pos) number (
-  return data[pos] + (data[(pos + 1)] * 256)
+  return data[pos].toNum() + (data[(pos + 1)].toNum() * 256)
 )
 
 def read32le(byte[] data, number pos) number (
