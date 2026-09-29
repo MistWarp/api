@@ -88,6 +88,7 @@ string gameSaveUsageDir = "data/game-save-usage/"
 string legacyAccountGameDataDir = "data/account-game-data/"
 string gameEntitlementsDir = "data/game-entitlements/"
 string gameInventoryDir = "data/game-inventory/"
+string backpackDir = "data/backpack/"
 
 number maxWorkspaceBytes = 536870912
 number maxWorkspaceFiles = 1000000
@@ -179,6 +180,8 @@ import "./game-realtime.osl"
 import "./extensions.osl"
 import "./monetize.osl"
 import "./game-inventory.osl"
+import "./backpack-policy.osl"
+import "./backpack.osl"
 import "./game-marketplace.osl"
 import "./report-evidence.osl"
 import "./comments.osl"
@@ -269,6 +272,7 @@ app.use(serve.logger())
 
 app.static("/thumbnails", "./data/thumbnails")
 app.GET("/blobs/assets/:name", handleGetAssetBlob)
+app.GET("/blobs/backpack/:folder/:file", handleGetBackpackBlob)
 app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
 app.GET("/blobs/evidence/:id/project.json", handleGetEvidenceJson)
 app.GET("/blobs/evidence/:id/assets/:name", handleGetEvidenceAsset)
@@ -286,6 +290,7 @@ def setupUploadRoutes(*serve.Router uploads) (
   uploads.POST("/projects/:id/upload-parts/:token/chunk", serve.maxBodySize(maxUploadChunkRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProjectPartChunk)
   uploads.POST("/projects/:id/history/bootstrap", serve.maxBodySize(maxWorkspaceBootstrapRequestBytes), requireAuth, requireCurrentAgreement, handleBootstrapProjectHistory)
   uploads.POST("/projects/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetThumbnail)
+  uploads.POST("/me/backpack", serve.maxBodySize(maxBackpackRequestBytes), requireAuth, requireCurrentAgreement, handleCreateBackpackItem)
   uploads.POST("/spaces/:id/thumbnail", serve.maxBodySize(maxThumbnailRequestBytes), requireAuth, handleSetSpaceThumbnail)
   uploads.POST("/admin/projects/:id/extensions/index", serve.maxBodySize(maxExtensionIndexRequestBytes), requireAdmin, handleAdminIndexProjectExtensions)
 )
@@ -319,6 +324,10 @@ def setupApiRoutes(*serve.Router api) (
   api.PUT("/me/settings", requireAuth, handlePutMySettings)
   api.GET("/me/game-saves", requireAuth, handleListMyGameSaves)
   api.GET("/me/game-inventory", requireAuth, handleGetMyGameInventory)
+  api.GET("/me/backpack", requireAuth, handleGetMyBackpack)
+  api.PATCH("/me/backpack/:id", requireAuth, handleUpdateBackpackItem)
+  api.DELETE("/me/backpack/:id", requireAuth, handleDeleteBackpackItem)
+  api.POST("/me/backpack/delete", requireAuth, handleDeleteBackpackItems)
   api.DELETE("/me/game-saves/:project", requireAuth, handleDeleteMyGameSave)
   api.GET("/me/export", requireAuth, handleExportMyData)
   api.DELETE("/me/data", requireAuth, handleDeleteMyData)

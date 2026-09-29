@@ -753,6 +753,7 @@ def purgeUser(string userId, string username) (
   purgeUserFromComments(key)
   purgeUserFromNotifications(key)
   purgeGameDataForUser(userId)
+  purgeBackpackForUser(userId)
   purgeUserFromSpaces(username)
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)

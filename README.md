@@ -115,7 +115,21 @@ For a delta whose `baseHead` still matches the stored head, the API removes loos
 
 ## Storage limits
 
-Each plan has a total storage limit: 500 MB on Free, 2 GB on Lite, 10 GB on Plus and 50 GB on Pro. A user's usage is the sum of every project they own, trashed projects included. Each project counts its assets, its compressed project JSON and its history archive, even when an asset is shared with other projects. Saving is checked against the owner's limit before anything is stored. A save may make a project bigger only while it fits in the free space, so a user over the limit can still save a project at its current size or smaller. Assets uploaded ahead of a save count as pending until a saved project references them, or for 7 days. Deleting a project frees its space once it is removed from the trash. `GET /v1/me/quota` returns `used`, `pending`, `limit`, `remaining` and the five largest projects. On first start after this change, the server measures the history size of existing projects from local copies and the R2 inventory.
+Each plan has a total storage limit: 500 MB on Free, 2 GB on Lite, 10 GB on Plus and 50 GB on Pro. A user's usage is the sum of every project they own, trashed projects included. Each project counts its assets, its compressed project JSON and its history archive, even when an asset is shared with other projects. Saving is checked against the owner's limit before anything is stored. A save may make a project bigger only while it fits in the free space, so a user over the limit can still save a project at its current size or smaller. Assets uploaded ahead of a save count as pending until a saved project references them, or for 7 days. Deleting a project frees its space once it is removed from the trash. Backpack items count toward the same limit, and deleting one frees its space straight away. `GET /v1/me/quota` returns `used`, `pending`, `limit`, `remaining`, `backpack` (the bytes held in the backpack) and the five largest projects. On first start after this change, the server measures the history size of existing projects from local copies and the R2 inventory.
+
+## Backpack
+
+The editor backpack syncs to the signed-in account. Items are scripts, sprites, costumes and sounds, stored as a body file plus an optional PNG or JPEG thumbnail under `backpack/<random id>/` in R2 (or `data/blobs/` locally), with the per-user list in `data/backpack/`. Blob URLs are unguessable and served sandboxed with `nosniff`; only the owner can list items.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /v1/me/backpack?type=&offset=&limit=` | Newest first, up to 100 per page, with `total`, `count` and `bytes` |
+| `POST /v1/me/backpack` | Multipart `type`, `mime`, `name`, `body`, and optional `thumbnail` with `thumbnailMime`; checked against the storage limit |
+| `PATCH /v1/me/backpack/:id` | Rename with `{name}` |
+| `DELETE /v1/me/backpack/:id` | Delete one item |
+| `POST /v1/me/backpack/delete` | Delete several with `{ids}`; returns `deleted` and `freedBytes` |
+
+A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletion, deleted Rotur accounts and data export all include the backpack.
 
 ## Auth flow
 
