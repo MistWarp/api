@@ -30,7 +30,11 @@ def projectRole(object project, string username) string (
       )
     )
   )
-  return classTeacherRoleForProject(project, userId)
+  string teacherRole = classTeacherRoleForProject(project, userId)
+  if teacherRole != "" (
+    return teacherRole
+  )
+  return presentationViewerRole(project, userId)
 )
 
 def canEditProject(object project,*serve.Context c) boolean (
@@ -91,6 +95,9 @@ def canViewProject(object project,*serve.Context c) boolean (
 def canViewProjectJson(object project,*serve.Context c) boolean (
   if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
     return false
+  )
+  if c.getBool("authenticated") and projectRole(project, c.getString("username")) == "viewer" (
+    return true
   )
   if canSaveLiveProject(project, c) return true
   if validPreviewKey(project.id.toStr(), c.query("k")) (

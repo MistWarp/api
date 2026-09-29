@@ -1,0 +1,124 @@
+number classroomPresentationLifetimeMs = 14400000
+
+def activePresentationForProject(string projectId) object (
+  object presentation = classroomPresentationDocs.findById(projectId)
+  if presentation.len == 0 or (presentation.expiresAt ?? 0).toNum() <= timestamp (
+    return {}
+  )
+  return presentation
+)
+
+def activePresentationForClass(string classId) object (
+  array presentations = classroomPresentationDocs.where("classId", db.equal, classId).all()
+  for i presentations.len (
+    object presentation = presentations[i].assert(object)
+    if (presentation.expiresAt ?? 0).toNum() > timestamp (
+      return presentation
+    )
+  )
+  return {}
+)
+
+def presentationViewerRole(object project, string userId) string (
+  if userId == "" (
+    return ""
+  )
+  object presentation = activePresentationForProject(project.id.toStr())
+  if presentation.len == 0 (
+    return ""
+  )
+  string classId = presentation.classId.toStr()
+  if isStudentUserId(userId) (
+    object student = loadStudent(userId)
+    if student.len > 0 and student.classId.toStr() == classId and student.disabled != true (
+      return "viewer"
+    )
+    return ""
+  )
+  if isClassTeacher(loadClass(classId), userId) (
+    return "viewer"
+  )
+  return ""
+)
+
+def presentationResponse(object presentation) object (
+  return {
+    projectId: presentation["_id"],
+    title: presentation.title,
+    presenter: presentation.presenter,
+    presenterName: presentation.presenterName,
+    startedAt: presentation.startedAt,
+    expiresAt: presentation.expiresAt
+  }
+)
+
+def presentationOrNull(string classId) any (
+  object presentation = activePresentationForClass(classId)
+  if presentation.len == 0 (
+    return null
+  )
+  return presentationResponse(presentation)
+)
+
+def endClassPresentations(string classId) (
+  deleteDocumentsByField(classroomPresentationDocs, "classId", classId)
+)
+
+def handleStartPresentation(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  if classroomPlanFor(classDoc.ownerId.toStr()).liveCollaboration != true (
+    c.json(403, {ok: false, code: "plan_required", error: "Presenting to your class needs a Classroom plan."})
+    return
+  )
+  object body = c.bodyJSON()
+  auto loaded = loadProject((body.projectId ?? "").toStr())
+  if !loaded.ok (
+    c.badRequest("choose a project to present")
+    return
+  )
+  object project = loaded.project.assert(object)
+  if !canEditProject(project, c) (
+    c.badRequest("choose a project that you or one of your students can edit")
+    return
+  )
+  string presenter = c.getString("username")
+  string presenterName = presenter
+  string ownerId = (project.ownerId ?? "").toStr()
+  if isStudentUserId(ownerId) (
+    object student = loadStudent(ownerId)
+    if student.len == 0 or student.classId.toStr() != classDoc["_id"].toStr() (
+      c.badRequest("students can only present to their own class")
+      return
+    )
+    presenter = student.username.toStr()
+    presenterName = student.displayName.toStr()
+  )
+  string classId = classDoc["_id"].toStr()
+  endClassPresentations(classId)
+  object presentation = {
+    _id: project.id,
+    classId: classId,
+    title: project.title,
+    presenter: presenter,
+    presenterName: presenterName,
+    startedBy: c.getString("userId"),
+    startedAt: timestamp,
+    expiresAt: timestamp + classroomPresentationLifetimeMs
+  }
+  putDocument(classroomPresentationDocs, project.id.toStr(), presentation)
+  recordClassroomAudit(classId, c, "presentation_started", {projectId: project.id, title: project.title, presenter: presenterName})
+  c.json(201, {ok: true, presentation: presentationResponse(presentation)})
+)
+
+def handleStopPresentation(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  endClassPresentations(classDoc["_id"].toStr())
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "presentation_ended", {})
+  c.json(200, {ok: true})
+)

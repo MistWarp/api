@@ -212,6 +212,7 @@ import "./classroom-billing.osl"
 import "./classroom-groups.osl"
 import "./classroom-release.osl"
 import "./classroom-schools.osl"
+import "./classroom-present.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
@@ -407,6 +408,8 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/classroom/classes/:id/transfer", requireClassroomTeacher, handleTransferClass)
   api.GET("/classroom/classes/:id/audit", requireClassroomTeacher, handleGetClassAudit)
   api.GET("/classroom/classes/:id/groups", requireClassroomTeacher, handleListClassGroups)
+  api.POST("/classroom/classes/:id/present", requireClassroomTeacher, handleStartPresentation)
+  api.DELETE("/classroom/classes/:id/present", requireClassroomTeacher, handleStopPresentation)
   api.POST("/classroom/classes/:id/groups", requireClassroomTeacher, handleCreateClassGroup)
   api.DELETE("/classroom/classes/:id/groups/:gid", requireClassroomTeacher, handleDeleteClassGroup)
   api.POST("/classroom/classes/:id/students", requireClassroomTeacher, serve.rateLimit(30, 3600), handleCreateStudents)
