@@ -347,6 +347,7 @@ def handleGetClass(*serve.Context c) (
   c.json(200, {
     ok: true,
     class: classResponse(classDoc, c),
+    presentation: presentationOrNull(classId),
     students: studentRows,
     assignments: assignmentRows,
     plan: classroomPlanFor(ownerId),
@@ -1057,6 +1058,7 @@ def handleGetStudentClassroom(*serve.Context c) (
     role: "student",
     student: {id: student["_id"], displayName: student.displayName, username: student.username},
     class: {id: classDoc["_id"], name: classDoc.name, teacher: classDoc.owner},
+    presentation: presentationOrNull(classDoc["_id"].toStr()),
     assignments: studentAssignmentRows(student),
     projects: projects,
     storage: storage

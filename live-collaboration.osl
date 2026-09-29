@@ -22,7 +22,7 @@ def handleGetSharedProjects(*serve.Context c) (
       if result.ok (
         object project = result.project.assert(object)
         string role = projectRole(project, username)
-        if role != "" and role != "owner" and canViewProject(project, c) (
+        if role != "" and role != "owner" and role != "viewer" and canViewProject(project, c) (
           projects.append(projectResponse(project, c))
         )
       )
@@ -50,7 +50,7 @@ def canSaveLiveProject(object project,*serve.Context c) boolean (
   string username = normalizeUsername(c.getString("username"))
   string role = projectRole(project, username)
   if role == "editor" return true
-  if role == "" or role == "tester" return false
+  if role == "" or role == "tester" or role == "viewer" return false
   string branch = c.formValue("collaborationBranch")
   if branch == "" (
     branch = project.gitBranch.assertElse(string, "main")
@@ -159,7 +159,7 @@ def handleLiveCollaboration(*serve.Context c) (
         ) else (
           if !members.contains(username) or members[username].peerId.toStr() != peerId (
             boolean approved = role != "" and role != "tester"
-            members[username] = {username: username, peerId: peerId, approved: approved, expires: timestamp + 90000}
+            members[username] = {username: username, peerId: peerId, approved: approved, viewer: role == "viewer", expires: timestamp + 90000}
           )
         )
       )
