@@ -733,6 +733,7 @@ def purgeUserSessions(string userId) (
         object session = res.data.assert(object)
         if session.userId.toStr() == userId (
           fs.remove(sessionsDir ++ name)
+          sessionCache.delete(name.replace(".json", ""))
         )
       )
     )

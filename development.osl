@@ -39,7 +39,7 @@ def nowSeconds() number (
 
 def developmentQuota() object (
   object stored = developmentDocs.findById("quota")
-  if stored.isEmpty() == true (
+  if stored.len == 0 (
     return {remaining: -1, reset: 0}
   )
   return stored
@@ -96,7 +96,7 @@ def developmentSnapshot() object (
     return developmentCache.get("pulls").assertElse(object, {pulls: [], updated: 0})
   )
   object stored = developmentDocs.findById("pulls")
-  if stored.isEmpty() == true (
+  if stored.len == 0 (
     return {pulls: [], updated: 0}
   )
   developmentCache.set("pulls", stored)

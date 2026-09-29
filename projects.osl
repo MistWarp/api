@@ -1664,7 +1664,7 @@ def handleUploadProjectLocked(*serve.Context c) (
       historyBaseHead = mergeTargetHead
     ) else (
       mergePull = pullDocument(project.id.toStr(), pullId)
-      if pullId == "" or mergePull.isEmpty() == true or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
+      if pullId == "" or mergePull.len == 0 or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
         fs.remove(zipPath)
         fs.remove(extractDir)
         c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
@@ -2037,7 +2037,7 @@ def handleGetProject(*serve.Context c) (
   object response = projectResponse(project, c)
   if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" (
     object release = releaseDocs.findById(project.publicRelease.toStr())
-    if release.isEmpty() == false and release.contains("jsonUrl") (
+    if release.len > 0 and release.contains("jsonUrl") (
       response.projectJsonUrl = release.jsonUrl
       response.releaseVersion = release.version
       response.releaseChannel = release.channel
@@ -3282,7 +3282,7 @@ def handleGetRemixTree(*serve.Context c) (
   array nodes = []
   object seen = {}
   object root = projectSearchDocs.findById(rootId)
-  if root.isEmpty() == false (
+  if root.len > 0 (
     nodes.append(root)
     seen[rootId] = true
   )
@@ -3449,7 +3449,7 @@ def handleRemixProjectLocked(*serve.Context c) (
     collaborators: []
   }
   object parentEntry = projectSearchDocs.findById(parent.id.toStr())
-  if parentEntry.isEmpty() == false and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
+  if parentEntry.len > 0 and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
     project.remixRoot = parentEntry.remixRoot
   )
   project.workspaceKey = forkKey

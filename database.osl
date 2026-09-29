@@ -77,7 +77,7 @@ def syncSearchProject(object project) boolean (
   object entry = indexEntryFromProject(project)
   if entry.remixRoot.toStr() == "" and entry.remixParent.toStr() != "" (
     object parent = projectSearchDocs.findById(entry.remixParent.toStr())
-    if parent.isEmpty() == false (
+    if parent.len > 0 (
       entry.remixRoot = parent.id
       if parent.contains("remixRoot") and parent.remixRoot.toStr() != "" (
         entry.remixRoot = parent.remixRoot
@@ -111,7 +111,7 @@ def removeSearchProject(string id) boolean (
 
 def migratePullCommentCounts() boolean (
   string migrationId = "migration:pull-comment-count-v1"
-  if diagnosticDocs.findById(migrationId).isEmpty() == false (
+  if diagnosticDocs.findById(migrationId).len > 0 (
     return true
   )
   array pulls = pullDocs.all()
@@ -219,7 +219,7 @@ def validPreviewKey(string projectId, string key) boolean (
     return false
   )
   object preview = previewDocs.findOne({projectId: projectId, key: key})
-  if preview.isEmpty() == true (
+  if preview.len == 0 (
     return false
   )
   return preview.expiresAt.toNum() > timestamp
@@ -234,7 +234,7 @@ def projectPlaytimeRecord(string projectId, string username) object (
     identityKey = normalizeUsername(username)
   )
   object entry = playtimeDocs.findById(projectId ++ ":" ++ identityKey)
-  if entry.isEmpty() == true and identityKey != normalizeUsername(username) (
+  if entry.len == 0 and identityKey != normalizeUsername(username) (
     entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
   )
   return entry
@@ -242,12 +242,12 @@ def projectPlaytimeRecord(string projectId, string username) object (
 
 def projectPlaytime(string projectId, string username) number (
   object entry = projectPlaytimeRecord(projectId, username)
-  return entry.isEmpty() == true ? 0 (entry.duration ?? 0).toNum()
+  return entry.len == 0 ? 0 (entry.duration ?? 0).toNum()
 )
 
 def projectLastPlayed(string projectId, string username) number (
   object entry = projectPlaytimeRecord(projectId, username)
-  return entry.isEmpty() == true ? 0 (entry.updated ?? 0).toNum()
+  return entry.len == 0 ? 0 (entry.updated ?? 0).toNum()
 )
 
 def projectTotalPlaytime(string projectId) number (

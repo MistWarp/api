@@ -271,7 +271,7 @@ def handleCreateNews(*serve.Context c) (
     viewHistory: {},
     reactions: {}
   }
-  if link.isEmpty() == false (
+  if link.len > 0 (
     item.link = link
   )
   if category == "poll" (
@@ -330,7 +330,7 @@ def handleUpdateNews(*serve.Context c) (
       item.format = "markdown"
       item.category = category
       item.updated = timestamp
-      if link.isEmpty() == true (
+      if link.len == 0 (
         if item.contains("link") (
           item.delete("link")
         )
@@ -413,7 +413,7 @@ def handleViewNews(*serve.Context c) (
 
 def migratePolicyNewsPosts() boolean (
   string migrationId = "migration:news-policy-posts-v2"
-  if diagnosticDocs.findById(migrationId).isEmpty() == false (
+  if diagnosticDocs.findById(migrationId).len > 0 (
     return true
   )
   array titles = [
@@ -508,7 +508,7 @@ def handleVoteNewsPoll(*serve.Context c) (
   boolean validOption = false
   for i items.len (
     object item = items[i].assert(object)
-    if item.id.toStr() == id and item.contains("poll") and item.poll != null and item.poll.assert(object).isEmpty() == false (
+    if item.id.toStr() == id and item.contains("poll") and item.poll != null and item.poll.assert(object).len > 0 (
       found = true
       object poll = item.poll.assert(object)
       array options = poll.options.assert(array)
