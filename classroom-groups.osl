@@ -1,0 +1,222 @@
+number classroomGroupMinSize = 2
+number classroomGroupMaxSize = 6
+
+def groupSubmissions(object submission) array (
+  string groupId = (submission.groupId ?? "").toStr()
+  if groupId == "" (
+    return [submission]
+  )
+  return submissionDocs.where("groupId", db.equal, groupId).and("assignmentId", db.equal, submission.assignmentId.toStr()).all()
+)
+
+def updateGroupSubmissions(object submission, object changes) object (
+  object updated = submission ++ changes
+  array members = groupSubmissions(submission)
+  for i members.len (
+    object member = members[i].assert(object) ++ changes
+    putDocument(submissionDocs, member["_id"].toStr(), member)
+    if member["_id"].toStr() == submission["_id"].toStr() (
+      updated = member
+    )
+  )
+  return updated
+)
+
+def groupResponse(object group) object (
+  array members = []
+  array ids = group.studentIds.assertElse(array, [])
+  for i ids.len (
+    object student = loadStudent(ids[i].toStr())
+    if student.len > 0 (
+      members.append({id: student["_id"], displayName: student.displayName})
+    )
+  )
+  return {
+    id: group["_id"],
+    name: group.name,
+    projectId: group.projectId,
+    assignmentId: group.assignmentId,
+    createdAt: group.createdAt,
+    members: members
+  }
+)
+
+def groupForSubmission(object submission) object (
+  string groupId = (submission.groupId ?? "").toStr()
+  if groupId == "" (
+    return {}
+  )
+  object group = classroomGroupDocs.findById(groupId)
+  if group.len == 0 (
+    return {}
+  )
+  return groupResponse(group)
+)
+
+def handleListClassGroups(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  array groups = classroomGroupDocs.where("classId", db.equal, classDoc["_id"].toStr()).all()
+  groups.sortBy("createdAt", "descending")
+  array rows = []
+  for i groups.len (
+    rows.append(groupResponse(groups[i].assert(object)))
+  )
+  c.json(200, {ok: true, groups: rows, liveCollaboration: classroomPlanFor(classDoc.ownerId.toStr()).liveCollaboration})
+)
+
+def handleCreateClassGroup(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  string classId = classDoc["_id"].toStr()
+  object body = c.bodyJSON()
+  string name = (body.name ?? "").toStr().strip()
+  if name == "" or name.len > 80 (
+    c.badRequest("group names must be between 1 and 80 characters")
+    return
+  )
+  array requested = (body.studentIds ?? []).assertElse(array, [])
+  array students = []
+  array seen = []
+  for i requested.len (
+    string studentId = requested[i].toStr()
+    object student = loadStudent(studentId)
+    if student.len == 0 or student.classId.toStr() != classId or student.disabled == true (
+      c.badRequest("every group member must be an active student in this class")
+      return
+    )
+    if !seen.contains(studentId) (
+      seen.append(studentId)
+      students.append(student)
+    )
+  )
+  if students.len < classroomGroupMinSize or students.len > classroomGroupMaxSize (
+    c.badRequest("groups need between 2 and 6 students")
+    return
+  )
+  object assignment = {}
+  string assignmentId = (body.assignmentId ?? "").toStr()
+  if assignmentId != "" (
+    assignment = assignmentDocs.findById(assignmentId)
+    if assignment.len == 0 or assignment.classId.toStr() != classId (
+      c.badRequest("choose an assignment from this class")
+      return
+    )
+    for i students.len (
+      object student = students[i].assert(object)
+      if submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()).len > 0 (
+        c.json(409, {ok: false, code: "already_started", error: student.displayName.toStr() ++ " has already started this assignment on their own."})
+        return
+      )
+    )
+  )
+  object owner = students[1].assert(object)
+  string title = name.trim(1, 100)
+  object created = {}
+  string starterId = (assignment.starterProjectId ?? "").toStr()
+  auto starter = loadProject(starterId)
+  if starterId != "" and starter.ok and projectHasWorkspace(starter.project.assert(object)) (
+    created = forkProjectFor(starter.project.assert(object), owner.username.toStr(), owner["_id"].toStr(), title, "", true)
+  ) else (
+    created = createBlankStudentProject(owner, title)
+  )
+  if created.ok != true (
+    forkFailureResponse(c, created)
+    return
+  )
+  object project = created.project.assert(object)
+  array team = []
+  for i students.len (
+    object student = students[i].assert(object)
+    if i > 1 (
+      team.append({username: student.username, userId: student["_id"], role: "editor", share: 0})
+    )
+  )
+  project.collaborators = team
+  saveProject(project)
+  upsertIndexEntry(project)
+  string groupId = "grp" ++ randomString(10)
+  object group = {
+    _id: groupId,
+    classId: classId,
+    name: name,
+    studentIds: seen,
+    projectId: project.id,
+    assignmentId: assignmentId,
+    createdAt: timestamp,
+    createdBy: c.getString("userId")
+  }
+  classroomGroupDocs.insertOne(group)
+  if assignmentId != "" (
+    for i students.len (
+      object student = students[i].assert(object)
+      string submissionId = assignmentId ++ ":" ++ student["_id"].toStr()
+      putDocument(submissionDocs, submissionId, {
+        _id: submissionId,
+        assignmentId: assignmentId,
+        classId: classId,
+        studentId: student["_id"],
+        groupId: groupId,
+        projectId: project.id,
+        state: "started",
+        startedAt: timestamp,
+        turnedInAt: 0,
+        turnedInHead: "",
+        late: false,
+        feedback: "",
+        grade: ""
+      })
+    )
+  )
+  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  recordClassroomAudit(classId, c, "group_created", {groupId: groupId, name: name, count: students.len})
+  c.json(201, {ok: true, group: groupResponse(group)})
+)
+
+def handleDeleteClassGroup(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return
+  )
+  object group = classroomGroupDocs.findById(c.param("gid"))
+  if group.len == 0 or group.classId.toStr() != classDoc["_id"].toStr() (
+    c.notFound("group not found")
+    return
+  )
+  auto loaded = loadProject(group.projectId.toStr())
+  if loaded.ok (
+    object project = loaded.project.assert(object)
+    project.collaborators = []
+    saveProject(project)
+    upsertIndexEntry(project)
+  )
+  array submissions = submissionDocs.where("groupId", db.equal, group["_id"].toStr()).all()
+  string ownerId = ""
+  if loaded.ok (
+    ownerId = (loaded.project.assert(object).ownerId ?? "").toStr()
+  )
+  for i submissions.len (
+    object submission = submissions[i].assert(object)
+    if submission.studentId.toStr() == ownerId (
+      submission.groupId = ""
+      putDocument(submissionDocs, submission["_id"].toStr(), submission)
+    ) else (
+      submissionDocs.deleteOne({_id: submission["_id"]})
+    )
+  )
+  classroomGroupDocs.deleteOne({_id: group["_id"]})
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "group_deleted", {groupId: group["_id"], name: group.name})
+  c.json(200, {ok: true})
+)
+
+def studentLiveCollaborationAllowed(string studentId) boolean (
+  object classDoc = classForStudentId(studentId)
+  if classDoc.len == 0 (
+    return false
+  )
+  return classroomPlanFor(classDoc.ownerId.toStr()).liveCollaboration == true
+)
