@@ -70,7 +70,7 @@ def backfillTrashedProjectHistoryBytes(string file, object inventory) boolean (
 // Measure them once from local copies or the R2 inventory.
 def backfillProjectHistoryBytes() (
   string migrationId = "migration:project-history-bytes-v1"
-  if diagnosticDocs.findById(migrationId).isEmpty() == false (
+  if diagnosticDocs.findById(migrationId).len > 0 (
     return
   )
   object inventory = {}

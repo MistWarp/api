@@ -450,7 +450,7 @@ def handleCreatePull(*serve.Context c) (
 
 def handleGetPull(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -471,7 +471,7 @@ def handleGetPullTimeline(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -501,7 +501,7 @@ def handleGetPullTimeline(*serve.Context c) (
 
 def handleCreatePullComment(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -527,7 +527,7 @@ def handleCreatePullComment(*serve.Context c) (
   )
   sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
   object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
-  if latestPull.isEmpty() == false (
+  if latestPull.len > 0 (
     number storedCount = storedPullCommentCount(latestPull)
     number actualCount = 0
     if storedCount < 0 (
@@ -552,7 +552,7 @@ def handleCreatePullComment(*serve.Context c) (
 
 def handleDeletePullComment(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -569,7 +569,7 @@ def handleDeletePullComment(*serve.Context c) (
   )
   sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
   object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
-  if latestPull.isEmpty() == false (
+  if latestPull.len > 0 (
     number storedCount = storedPullCommentCount(latestPull)
     number actualCount = 0
     if storedCount < 0 (
@@ -584,7 +584,7 @@ def handleDeletePullComment(*serve.Context c) (
 
 def handleEditPullComment(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -608,13 +608,13 @@ def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) bo
   )
   array matches = []
   object targetPull = pullDocument(project.id.toStr(), pullIndex)
-  if targetPull.isEmpty() == false (
+  if targetPull.len > 0 (
     matches.append(targetPull)
   )
   array sourcePulls = pullDocs.where("sourceProjectId", db.equal, project.id.toStr()).and("index", db.equal, pullIndex.toNum()).limit(20).all()
   for i sourcePulls.len (
     object sourcePull = sourcePulls[i].assert(object)
-    if targetPull.isEmpty() == true or sourcePull["_id"].toStr() != targetPull["_id"].toStr() (
+    if targetPull.len == 0 or sourcePull["_id"].toStr() != targetPull["_id"].toStr() (
       matches.append(sourcePull)
     )
   )
@@ -639,7 +639,7 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
     return false
   )
   object pull = pullDocument(targetId, pullIndex)
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     return false
   )
   boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha or projectRecordsCommit(project, sha))
@@ -659,7 +659,7 @@ def handleGetPullDiff(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true (
+  if pull.len == 0 (
     c.notFound("pull request not found")
     return
   )
@@ -709,7 +709,7 @@ def handleGetPullDiff(*serve.Context c) (
 
 def handleMergePull(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true or pull.state.toStr() != "open" (
+  if pull.len == 0 or pull.state.toStr() != "open" (
     c.notFound("open pull request not found")
     return
   )
@@ -894,7 +894,7 @@ def handleMergePull(*serve.Context c) (
 
 def handleClosePull(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
-  if pull.isEmpty() == true or pull.state.toStr() != "open" (
+  if pull.len == 0 or pull.state.toStr() != "open" (
     c.notFound("open pull request not found")
     return
   )
@@ -922,7 +922,7 @@ def handleClosePull(*serve.Context c) (
 
 def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
   object pull = pullDocument(project.id.toStr(), pullIndex)
-  if pull.isEmpty() == true or pull.state.toStr() != "open" (
+  if pull.len == 0 or pull.state.toStr() != "open" (
     return false
   )
   string role = projectRole(project, username)
