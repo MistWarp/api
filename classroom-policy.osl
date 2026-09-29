@@ -181,6 +181,9 @@ array studentWriteRoutes = [
   "POST ^/reports?$",
   "POST ^/errors$",
   "PUT ^/me/settings$",
+  "POST ^/me/backpack(/delete)?$",
+  "PATCH ^/me/backpack/[^/]+$",
+  "DELETE ^/me/backpack/[^/]+$",
   "POST ^/notifications/read$",
   "POST ^/perks/seen$",
   "POST ^/classroom/(login|assignments/[^/]+/(start|turn-in|unsubmit))$"

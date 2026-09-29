@@ -146,6 +146,7 @@ def assetsBaseUrl() string (
 def contentTypeForExt(string ext) string (
   object types = {
     "json": "application/json",
+    "zip": "application/zip",
     "png": "image/png",
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
@@ -178,6 +179,9 @@ def isSafeBlobKey(string key) boolean (
   if key.startsWith("assets/") (
     string name = key.replace("assets/", "")
     return isValidMd5Ext(name)
+  )
+  if key.startsWith("backpack/") (
+    return isValidBackpackKey(key)
   )
   if regex.match("^project-json/[a-f0-9]{64}\\.json\\.gz$", key) (
     return true
@@ -237,6 +241,9 @@ def r2ObjectType(string key) string (
   )
   if key.startsWith("project-workspaces/") (
     return "history"
+  )
+  if key.startsWith("backpack/") (
+    return "backpack"
   )
   if key.contains("project.json") or key.startsWith("project-json/") (
     return "projectData"
@@ -432,7 +439,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
 )
 
 def blobCacheHeader(string key) string (
-  if key.startsWith("assets/") (
+  if key.startsWith("assets/") or key.startsWith("backpack/") (
     return "public, max-age=31536000, immutable"
   )
   return "no-cache"

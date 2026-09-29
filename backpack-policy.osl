@@ -1,0 +1,119 @@
+number maxBackpackBodyBytes = 20971520
+number maxBackpackThumbnailBytes = 1048576
+number maxBackpackItems = 2000
+number maxBackpackNameLength = 100
+number maxBackpackPageSize = 100
+array backpackItemTypes = ["script", "sprite", "costume", "sound"]
+
+def backpackBodyExt(string itemType, string mime) string (
+  string lower = mime.toLower().strip()
+  if itemType == "script" and lower == "application/json" (
+    return "json"
+  )
+  if itemType == "sprite" and lower == "application/zip" (
+    return "zip"
+  )
+  if itemType == "costume" (
+    if lower == "image/svg+xml" (
+      return "svg"
+    )
+    if lower == "image/png" (
+      return "png"
+    )
+    if lower == "image/jpeg" (
+      return "jpg"
+    )
+  )
+  if itemType == "sound" (
+    if lower == "audio/wav" or lower == "audio/wave" or lower == "audio/x-wav" (
+      return "wav"
+    )
+    if lower == "audio/mpeg" or lower == "audio/mp3" (
+      return "mp3"
+    )
+    if lower == "audio/ogg" or lower == "application/ogg" (
+      return "ogg"
+    )
+  )
+  return ""
+)
+
+def backpackThumbnailExt(string mime) string (
+  string lower = mime.toLower().strip()
+  if lower == "image/jpeg" (
+    return "jpg"
+  )
+  if lower == "image/png" (
+    return "png"
+  )
+  return ""
+)
+
+def backpackItemName(string raw, string itemType) string (
+  string name = raw.strip()
+  if name.len > maxBackpackNameLength (
+    name = name.trim(1, maxBackpackNameLength).strip()
+  )
+  if name == "" (
+    return itemType
+  )
+  return name
+)
+
+def isValidBackpackKey(string key) boolean (
+  if regex.match("^backpack/[A-Za-z0-9]{32}/body[.](json|zip|svg|png|jpg|wav|mp3|ogg)$", key) (
+    return true
+  )
+  if regex.match("^backpack/[A-Za-z0-9]{32}/thumbnail[.](jpg|png)$", key) (
+    return true
+  )
+  return false
+)
+
+def backpackItemBytes(object item) number (
+  return (item.bodyBytes ?? 0).toNum() + (item.thumbnailBytes ?? 0).toNum()
+)
+
+def backpackTotalBytes(array items) number (
+  number total = 0
+  for i items.len (
+    total += backpackItemBytes(items[i].assert(object))
+  )
+  return total
+)
+
+def backpackFilterType(array items, string itemType) array (
+  if itemType == "" (
+    return items
+  )
+  array kept = []
+  for i items.len (
+    object item = items[i].assert(object)
+    if item.type.toStr() == itemType (
+      kept.append(item)
+    )
+  )
+  return kept
+)
+
+def backpackPageSize(string raw) number (
+  number size = raw.toNum().toInt()
+  if size < 1 or size > maxBackpackPageSize (
+    return maxBackpackPageSize
+  )
+  return size
+)
+
+def backpackWithout(array items, array ids) object (
+  array kept = []
+  array removed = []
+  for i items.len (
+    object item = items[i].assert(object)
+    if ids.contains(item.id.toStr()) (
+      removed.append(item)
+    ) else (
+      kept.append(item)
+    )
+  )
+  return {kept: kept, removed: removed}
+)
