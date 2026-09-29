@@ -1,0 +1,1290 @@
+def randomFromAlphabet(string alphabet, number length) string (
+  string out = ""
+  for _ length (
+    out ++= alphabet[crypto.randomInt(1, alphabet.len + 1)]
+  )
+  return out
+)
+
+def generateClassCode() string (
+  for _ 20 (
+    string code = randomFromAlphabet(classCodeAlphabet, 8)
+    if classDocs.where("code", db.equal, code).count() == 0 (
+      return code
+    )
+  )
+  return ""
+)
+
+def generateClassSlug() string (
+  for _ 20 (
+    string slug = randomFromAlphabet("abcdefghjkmnpqrstuvwxyz23456789", 5)
+    if classDocs.where("slug", db.equal, slug).count() == 0 (
+      return slug
+    )
+  )
+  return ""
+)
+
+def generateStudentPassword() string (
+  string first = classroomPasswordWords[crypto.randomInt(1, classroomPasswordWords.len + 1)].toStr()
+  string second = classroomPasswordWords[crypto.randomInt(1, classroomPasswordWords.len + 1)].toStr()
+  return first ++ "-" ++ second ++ "-" ++ crypto.randomInt(10, 100).toStr()
+)
+
+def generatePictureSequence() array (
+  array pictures = []
+  for _ classroomPictureLength (
+    pictures.append(classroomPictureNames[crypto.randomInt(1, classroomPictureNames.len + 1)])
+  )
+  return pictures
+)
+
+def loadClass(string id) object (
+  if id == "" (
+    return {}
+  )
+  return classDocs.findById(id)
+)
+
+def loadStudent(string id) object (
+  if !isStudentUserId(id) (
+    return {}
+  )
+  return studentDocs.findById(id)
+)
+
+def studentForUsername(string username) object (
+  if !isStudentUsername(username) (
+    return {}
+  )
+  string userId = userIdForUsername(username)
+  if userId == "" (
+    return {}
+  )
+  return loadStudent(userId)
+)
+
+def classForStudentId(string studentId) object (
+  object student = loadStudent(studentId)
+  if student.len == 0 (
+    return {}
+  )
+  return loadClass(student.classId.toStr())
+)
+
+def classesOwnedBy(string userId) array (
+  return classDocs.where("ownerId", db.equal, userId).all()
+)
+
+def classesTaughtBy(string userId) array (
+  array taught = []
+  array all = classDocs.all()
+  for i all.len (
+    object classDoc = all[i].assert(object)
+    if isClassTeacher(classDoc, userId) (
+      taught.append(classDoc)
+    )
+  )
+  taught.sortBy("createdAt", "descending")
+  return taught
+)
+
+def studentsInClass(string classId) array (
+  array students = studentDocs.where("classId", db.equal, classId).all()
+  students.sortBy("displayKey", "ascending")
+  return students
+)
+
+def studentsForPlanOwner(string ownerId) array (
+  array students = []
+  array classes = classesOwnedBy(ownerId)
+  for i classes.len (
+    object classDoc = classes[i].assert(object)
+    students ++= studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).all()
+  )
+  return students
+)
+
+def classroomPlanFor(string ownerId) object (
+  return effectiveClassroomPlan(classroomPlanDocs.findById(ownerId), timestamp)
+)
+
+def planOwnerStorageBytes(string ownerId) number (
+  if classroomPoolCache.has(ownerId) (
+    return classroomPoolCache.get(ownerId).toNum()
+  )
+  number total = 0
+  array students = studentsForPlanOwner(ownerId)
+  for i students.len (
+    total += ownerStorageBytes(students[i].username.toStr())
+  )
+  classroomPoolCache.set(ownerId, total)
+  return total
+)
+
+def classroomUsage(string ownerId) object (
+  return {
+    seats: studentsForPlanOwner(ownerId).len,
+    classes: classesOwnedBy(ownerId).len,
+    storageBytes: planOwnerStorageBytes(ownerId)
+  }
+)
+
+def classroomStudentBenefits(string studentId) object (
+  object benefits = mistwarpBenefitsForTier("Free")
+  benefits.maxSpaces = 0
+  benefits.maxProjectPrice = 0
+  benefits.gameSaveStorageBytes = 1000000
+  object student = loadStudent(studentId)
+  if student.len == 0 (
+    benefits.storageBytes = 0
+    benefits.maxProjects = 0
+    return benefits
+  )
+  object classDoc = loadClass(student.classId.toStr())
+  string ownerId = (classDoc.ownerId ?? "").toStr()
+  object plan = classroomPlanFor(ownerId)
+  number own = ownerStorageBytes(student.username.toStr())
+  benefits.storageBytes = pooledStudentStorageLimit(plan.storageBytes.toNum(), planOwnerStorageBytes(ownerId), own)
+  benefits.maxProjects = 200
+  return benefits
+)
+
+def recordClassroomAudit(string classId,*serve.Context c, string action, object detail) (
+  string id = "ca" ++ storagefs.UniqueTimestamp() ++ randomString(4)
+  classroomAuditDocs.insertOne({
+    _id: id,
+    classId: classId,
+    actorId: c.getString("userId"),
+    actor: c.getString("username"),
+    action: action,
+    detail: detail,
+    at: timestamp
+  })
+)
+
+def classResponse(object classDoc,*serve.Context c) object (
+  string classId = classDoc["_id"].toStr()
+  return {
+    id: classId,
+    name: classDoc.name,
+    code: classDoc.code,
+    loginMode: classDoc.loginMode,
+    archived: classDoc.archived == true,
+    owner: classDoc.owner,
+    coTeachers: classDoc.coTeachers ?? [],
+    createdAt: classDoc.createdAt,
+    studentCount: studentDocs.where("classId", db.equal, classId).count(),
+    assignmentCount: assignmentDocs.where("classId", db.equal, classId).count(),
+    isOwner: isClassOwner(classDoc, c.getString("userId"))
+  }
+)
+
+def studentResponse(object student) object (
+  string username = student.username.toStr()
+  return {
+    id: student["_id"],
+    displayName: student.displayName,
+    username: username,
+    disabled: student.disabled == true,
+    locked: studentLoginLocked(student, timestamp),
+    createdAt: student.createdAt,
+    lastLoginAt: student.lastLoginAt ?? 0,
+    storageBytes: ownerStorageBytes(username),
+    projectCount: ownerIndexEntries(username, true).len
+  }
+)
+
+def requireClassroomTeacher(*serve.Context c) (
+  if !c.getBool("authenticated") (
+    c.json(401, {ok: false, error: "not authenticated"})
+    c.abort()
+    return
+  )
+  if c.getBool("isStudent") (
+    c.json(403, {ok: false, code: "student_restricted", error: "Student accounts cannot manage classes."})
+    c.abort()
+    return
+  )
+  c.next()
+)
+
+def taughtClassOrFail(*serve.Context c) object (
+  object classDoc = loadClass(c.param("id"))
+  if classDoc.len == 0 or !isClassTeacher(classDoc, c.getString("userId")) (
+    c.notFound("class not found")
+    return {}
+  )
+  return classDoc
+)
+
+def ownedClassOrFail(*serve.Context c) object (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 (
+    return {}
+  )
+  if !isClassOwner(classDoc, c.getString("userId")) (
+    c.forbidden("only the class owner can do this")
+    return {}
+  )
+  return classDoc
+)
+
+def classStudentOrFail(*serve.Context c, object classDoc) object (
+  object student = loadStudent(c.param("sid"))
+  if student.len == 0 or student.classId.toStr() != classDoc["_id"].toStr() (
+    c.notFound("student not found")
+    return {}
+  )
+  return student
+)
+
+def handleGetClassroom(*serve.Context c) (
+  if c.getBool("isStudent") (
+    handleGetStudentClassroom(c)
+    return
+  )
+  string userId = c.getString("userId")
+  array classes = classesTaughtBy(userId)
+  array rows = []
+  for i classes.len (
+    rows.append(classResponse(classes[i].assert(object), c))
+  )
+  c.json(200, {
+    ok: true,
+    role: "teacher",
+    plan: classroomPlanFor(userId),
+    usage: classroomUsage(userId),
+    classes: rows
+  })
+)
+
+def handleCreateClass(*serve.Context c) (
+  object body = c.bodyJSON()
+  string name = (body.name ?? "").toStr().strip()
+  if !validClassName(name) (
+    c.badRequest("class names must be between 1 and 80 characters")
+    return
+  )
+  string loginMode = (body.loginMode ?? "password").toStr()
+  if !validClassLoginMode(loginMode) (
+    c.badRequest("invalid login mode")
+    return
+  )
+  string userId = c.getString("userId")
+  string lockName = "classroom-owner-" ++ userId
+  sync.lock(lockName)
+  object plan = classroomPlanFor(userId)
+  if classesOwnedBy(userId).len >= plan.maxClasses.toNum() (
+    sync.unlock(lockName)
+    c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ " classes. Archive and delete a class or upgrade your plan."})
+    return
+  )
+  string code = generateClassCode()
+  string slug = generateClassSlug()
+  if code == "" or slug == "" (
+    sync.unlock(lockName)
+    c.internalError("could not create a class code, try again")
+    return
+  )
+  string id = "cls" ++ randomString(10)
+  object classDoc = {
+    _id: id,
+    name: name,
+    code: code,
+    slug: slug,
+    loginMode: loginMode,
+    archived: false,
+    ownerId: userId,
+    owner: c.getString("username"),
+    coTeachers: [],
+    createdAt: timestamp
+  }
+  classDocs.insertOne(classDoc)
+  sync.unlock(lockName)
+  recordClassroomAudit(id, c, "class_created", {name: name})
+  c.json(201, {ok: true, class: classResponse(classDoc, c)})
+)
+
+def handleGetClass(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  string classId = classDoc["_id"].toStr()
+  array students = studentsInClass(classId)
+  array studentRows = []
+  for i students.len (
+    studentRows.append(studentResponse(students[i].assert(object)))
+  )
+  array assignments = assignmentDocs.where("classId", db.equal, classId).all()
+  assignments.sortBy("createdAt", "descending")
+  array assignmentRows = []
+  for i assignments.len (
+    assignmentRows.append(assignmentSummary(assignments[i].assert(object), students.len))
+  )
+  string ownerId = classDoc.ownerId.toStr()
+  c.json(200, {
+    ok: true,
+    class: classResponse(classDoc, c),
+    students: studentRows,
+    assignments: assignmentRows,
+    plan: classroomPlanFor(ownerId),
+    usage: classroomUsage(ownerId),
+    pictures: classroomPictureNames
+  })
+)
+
+def handleUpdateClass(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object body = c.bodyJSON()
+  if body.contains("name") (
+    string name = body.name.toStr().strip()
+    if !validClassName(name) (
+      c.badRequest("class names must be between 1 and 80 characters")
+      return
+    )
+    classDoc.name = name
+  )
+  if body.contains("loginMode") (
+    string loginMode = body.loginMode.toStr()
+    if !validClassLoginMode(loginMode) (
+      c.badRequest("invalid login mode")
+      return
+    )
+    if loginMode != classDoc.loginMode.toStr() (
+      c.badRequest("create new login details for each student to change how the class signs in")
+      return
+    )
+  )
+  if body.contains("archived") (
+    classDoc.archived = body.archived == true
+  )
+  putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "class_updated", {name: classDoc.name, archived: classDoc.archived})
+  c.json(200, {ok: true, class: classResponse(classDoc, c)})
+)
+
+def handleDeleteClass(*serve.Context c) (
+  object classDoc = ownedClassOrFail(c)
+  if classDoc.len == 0 return
+  string classId = classDoc["_id"].toStr()
+  if studentDocs.where("classId", db.equal, classId).count() > 0 (
+    c.json(409, {ok: false, code: "class_not_empty", error: "Move or delete every student before deleting the class."})
+    return
+  )
+  deleteDocumentsByField(assignmentDocs, "classId", classId)
+  deleteDocumentsByField(submissionDocs, "classId", classId)
+  deleteDocumentsByField(classroomAuditDocs, "classId", classId)
+  classDocs.deleteOne({_id: classId})
+  c.json(200, {ok: true})
+)
+
+def handleResetClassCode(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  string code = generateClassCode()
+  if code == "" (
+    c.internalError("could not create a class code, try again")
+    return
+  )
+  classDoc.code = code
+  putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "class_code_reset", {})
+  c.json(200, {ok: true, code: code})
+)
+
+def handleAddCoTeacher(*serve.Context c) (
+  object classDoc = ownedClassOrFail(c)
+  if classDoc.len == 0 return
+  object body = c.bodyJSON()
+  string username = normalizeUsername((body.username ?? "").toStr())
+  if username == "" or isStudentUsername(username) (
+    c.badRequest("enter the Rotur username of a teacher")
+    return
+  )
+  string teacherId = teacherIdForUsername(username)
+  if teacherId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  if isClassTeacher(classDoc, teacherId) (
+    c.badRequest("this person already teaches the class")
+    return
+  )
+  array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
+  if coTeachers.len >= 10 (
+    c.badRequest("a class can have up to 10 co-teachers")
+    return
+  )
+  coTeachers.append({userId: teacherId, username: usernameForId(teacherId)})
+  classDoc.coTeachers = coTeachers
+  putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "co_teacher_added", {userId: teacherId, username: username})
+  addNotification(usernameForId(teacherId), c.getString("username"), "classroom_co_teacher", {classId: classDoc["_id"], className: classDoc.name})
+  c.json(200, {ok: true, class: classResponse(classDoc, c)})
+)
+
+def handleRemoveCoTeacher(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  string target = c.param("teacher")
+  string userId = c.getString("userId")
+  if !isClassOwner(classDoc, userId) and target != userId (
+    c.forbidden("only the class owner can remove other teachers")
+    return
+  )
+  array kept = []
+  array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
+  for i coTeachers.len (
+    object teacher = coTeachers[i].assert(object)
+    if teacher.userId.toStr() != target (
+      kept.append(teacher)
+    )
+  )
+  classDoc.coTeachers = kept
+  putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "co_teacher_removed", {userId: target})
+  c.json(200, {ok: true})
+)
+
+def handleTransferClass(*serve.Context c) (
+  object classDoc = ownedClassOrFail(c)
+  if classDoc.len == 0 return
+  object body = c.bodyJSON()
+  string username = normalizeUsername((body.username ?? "").toStr())
+  if username == "" or isStudentUsername(username) (
+    c.badRequest("enter the Rotur username of a teacher")
+    return
+  )
+  string nextOwnerId = teacherIdForUsername(username)
+  if nextOwnerId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  string previousOwnerId = classDoc.ownerId.toStr()
+  if nextOwnerId == previousOwnerId (
+    c.badRequest("you already own this class")
+    return
+  )
+  string classId = classDoc["_id"].toStr()
+  string lockName = "classroom-owner-" ++ nextOwnerId
+  sync.lock(lockName)
+  object plan = classroomPlanFor(nextOwnerId)
+  object usage = classroomUsage(nextOwnerId)
+  number incoming = studentDocs.where("classId", db.equal, classId).count()
+  if usage.classes.toNum() >= plan.maxClasses.toNum() or usage.seats.toNum() + incoming > plan.seats.toNum() (
+    sync.unlock(lockName)
+    c.json(413, {ok: false, code: "seat_limit", error: "The new owner's plan does not have room for this class and its students."})
+    return
+  )
+  array kept = []
+  array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
+  for i coTeachers.len (
+    object teacher = coTeachers[i].assert(object)
+    if teacher.userId.toStr() != nextOwnerId (
+      kept.append(teacher)
+    )
+  )
+  if body.keepAsCoTeacher == true (
+    kept.append({userId: previousOwnerId, username: c.getString("username")})
+  )
+  classDoc.coTeachers = kept
+  classDoc.ownerId = nextOwnerId
+  classDoc.owner = usernameForId(nextOwnerId)
+  putDocument(classDocs, classId, classDoc)
+  sync.unlock(lockName)
+  classroomPoolCache.delete(previousOwnerId)
+  classroomPoolCache.delete(nextOwnerId)
+  recordClassroomAudit(classId, c, "class_transferred", {from: previousOwnerId, to: nextOwnerId})
+  addNotification(classDoc.owner.toStr(), c.getString("username"), "classroom_transferred", {classId: classId, className: classDoc.name})
+  c.json(200, {ok: true})
+)
+
+def teacherIdForUsername(string username) string (
+  string key = normalizeUsername(username)
+  if key == "" or isStudentUsername(key) (
+    return ""
+  )
+  string known = userIdForUsername(key)
+  if known != "" (
+    return known
+  )
+  return discoverUserIdentity(key)
+)
+
+def registerStudentIdentity(string userId, string username) (
+  sync.lock("user-ids")
+  object data = loadUserIds()
+  object users = data.users
+  users[userId] = username
+  saveUserIds(data)
+  sync.unlock("user-ids")
+  userIdsCache.set(userId, username)
+  userIdsCache.set("username:" ++ normalizeUsername(username), userId)
+)
+
+def uniqueStudentUsername(string handle, string slug) string (
+  string candidate = studentUsername(handle, slug)
+  number suffix = 2
+  while userIdForUsername(candidate) != "" and suffix < 1000 (
+    candidate = studentUsername(handle ++ suffix.toStr(), slug)
+    suffix += 1
+  )
+  return candidate
+)
+
+def issueStudentCredentials(object student, string loginMode) object (
+  if loginMode == "picture" (
+    array pictures = generatePictureSequence()
+    student.pictureHash = crypto.bcryptHash(pictureSecret(pictures), 10)
+    student.passwordHash = ""
+    return {pictures: pictures}
+  )
+  string password = generateStudentPassword()
+  student.passwordHash = crypto.bcryptHash(password, 10)
+  student.pictureHash = ""
+  return {password: password}
+)
+
+def handleCreateStudents(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object body = c.bodyJSON()
+  array names = (body.names ?? []).assertElse(array, [])
+  array cleaned = []
+  for i names.len (
+    string name = names[i].toStr().strip()
+    if name != "" (
+      if !validStudentDisplayName(name) (
+        c.badRequest("student names need a letter or number and at most 40 characters: " ++ name.trim(1, 40))
+        return
+      )
+      cleaned.append(name)
+    )
+  )
+  if cleaned.len == 0 (
+    c.badRequest("add at least one student name")
+    return
+  )
+  if cleaned.len > 100 (
+    c.badRequest("add up to 100 students at a time")
+    return
+  )
+  string ownerId = classDoc.ownerId.toStr()
+  string lockName = "classroom-owner-" ++ ownerId
+  sync.lock(lockName)
+  object plan = classroomPlanFor(ownerId)
+  number seatsUsed = studentsForPlanOwner(ownerId).len
+  if seatsUsed + cleaned.len > plan.seats.toNum() (
+    sync.unlock(lockName)
+    number free = plan.seats.toNum() - seatsUsed
+    if free < 0 (
+      free = 0
+    )
+    c.json(413, {ok: false, code: "seat_limit", error: "This plan has " ++ free.toStr() ++ " free student seats. Remove students or add seats to your plan.", seats: plan.seats, used: seatsUsed})
+    return
+  )
+  string classId = classDoc["_id"].toStr()
+  string loginMode = classDoc.loginMode.toStr()
+  array created = []
+  for i cleaned.len (
+    string displayName = cleaned[i].toStr()
+    string username = uniqueStudentUsername(studentHandleFromName(displayName), classDoc.slug.toStr())
+    string studentId = studentIdPrefix ++ randomString(20)
+    object student = {
+      _id: studentId,
+      classId: classId,
+      displayName: displayName,
+      displayKey: displayName.toLower(),
+      username: username,
+      disabled: false,
+      failedLogins: 0,
+      lockedUntil: 0,
+      createdAt: timestamp,
+      createdBy: c.getString("userId"),
+      lastLoginAt: 0
+    }
+    object credentials = issueStudentCredentials(student, loginMode)
+    registerStudentIdentity(studentId, username)
+    studentDocs.insertOne(student)
+    created.append({id: studentId, displayName: displayName, username: username, credentials: credentials})
+  )
+  sync.unlock(lockName)
+  recordClassroomAudit(classId, c, "students_created", {count: created.len})
+  c.json(201, {ok: true, class: classResponse(classDoc, c), loginMode: loginMode, students: created})
+)
+
+def handleGetClassStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  array entries = ownerIndexEntries(student.username.toStr(), true)
+  array projects = []
+  for i entries.len (
+    object entry = entries[i].assert(object)
+    projects.append({id: entry.id, title: entry.title, edited: entry.edited, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum()})
+  )
+  array submissions = submissionDocs.where("studentId", db.equal, student["_id"].toStr()).all()
+  c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions})
+)
+
+def handleUpdateClassStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  object body = c.bodyJSON()
+  if body.contains("displayName") (
+    string displayName = body.displayName.toStr().strip()
+    if !validStudentDisplayName(displayName) (
+      c.badRequest("student names need a letter or number and at most 40 characters")
+      return
+    )
+    student.displayName = displayName
+    student.displayKey = displayName.toLower()
+  )
+  if body.contains("disabled") (
+    student.disabled = body.disabled == true
+    if student.disabled == true (
+      purgeUserSessions(student["_id"].toStr())
+    )
+  )
+  if body.unlock == true (
+    student.failedLogins = 0
+    student.lockedUntil = 0
+  )
+  putDocument(studentDocs, student["_id"].toStr(), student)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_updated", {studentId: student["_id"], disabled: student.disabled})
+  c.json(200, {ok: true, student: studentResponse(student)})
+)
+
+def handleResetStudentLogin(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  object credentials = issueStudentCredentials(student, classDoc.loginMode.toStr())
+  student.failedLogins = 0
+  student.lockedUntil = 0
+  putDocument(studentDocs, student["_id"].toStr(), student)
+  purgeUserSessions(student["_id"].toStr())
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_login_reset", {studentId: student["_id"]})
+  c.json(200, {ok: true, student: studentResponse(student), loginMode: classDoc.loginMode, credentials: credentials})
+)
+
+def handleMoveClassStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  object body = c.bodyJSON()
+  object target = loadClass((body.classId ?? "").toStr())
+  if target.len == 0 or !isClassTeacher(target, c.getString("userId")) (
+    c.badRequest("choose one of your classes")
+    return
+  )
+  if target["_id"].toStr() == classDoc["_id"].toStr() (
+    c.badRequest("the student is already in this class")
+    return
+  )
+  if target.loginMode.toStr() != classDoc.loginMode.toStr() (
+    c.badRequest("both classes need the same sign-in method")
+    return
+  )
+  string targetOwner = target.ownerId.toStr()
+  if targetOwner != classDoc.ownerId.toStr() (
+    object plan = classroomPlanFor(targetOwner)
+    if studentsForPlanOwner(targetOwner).len + 1 > plan.seats.toNum() (
+      c.json(413, {ok: false, code: "seat_limit", error: "The other class's plan has no free student seats."})
+      return
+    )
+  )
+  student.classId = target["_id"]
+  putDocument(studentDocs, student["_id"].toStr(), student)
+  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  classroomPoolCache.delete(targetOwner)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_moved", {studentId: student["_id"], to: target["_id"]})
+  recordClassroomAudit(target["_id"].toStr(), c, "student_moved", {studentId: student["_id"], from: classDoc["_id"]})
+  c.json(200, {ok: true})
+)
+
+def deleteStudentAccount(object student) (
+  string studentId = student["_id"].toStr()
+  purgeUser(studentId, student.username.toStr())
+  deleteDocumentsByField(submissionDocs, "studentId", studentId)
+  studentDocs.deleteOne({_id: studentId})
+)
+
+def handleDeleteClassStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  deleteStudentAccount(student)
+  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_deleted", {studentId: student["_id"], displayName: student.displayName})
+  c.json(200, {ok: true})
+)
+
+def handleGetClassAudit(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  array events = classroomAuditDocs.where("classId", db.equal, classDoc["_id"].toStr()).sort("at", db.desc).limit(200).all()
+  c.json(200, {ok: true, events: events})
+)
+
+def handleClassroomJoinInfo(*serve.Context c) (
+  string code = normalizeClassCode(c.param("code"))
+  array matches = classDocs.where("code", db.equal, code).all()
+  if code == "" or matches.len == 0 (
+    c.notFound("class not found")
+    return
+  )
+  object classDoc = matches[1].assert(object)
+  if classDoc.archived == true (
+    c.notFound("class not found")
+    return
+  )
+  array students = studentsInClass(classDoc["_id"].toStr())
+  array roster = []
+  for i students.len (
+    object student = students[i].assert(object)
+    if student.disabled != true (
+      roster.append({id: student["_id"], displayName: student.displayName})
+    )
+  )
+  c.json(200, {
+    ok: true,
+    class: {name: classDoc.name, loginMode: classDoc.loginMode},
+    students: roster,
+    pictures: classroomPictureNames
+  })
+)
+
+def studentCredentialsMatch(object student, object body) boolean (
+  string pictureHash = (student.pictureHash ?? "").toStr()
+  if pictureHash != "" (
+    array pictures = (body.pictures ?? []).assertElse(array, [])
+    return validPictureSequence(pictures) and crypto.bcryptVerify(pictureSecret(pictures), pictureHash)
+  )
+  string passwordHash = (student.passwordHash ?? "").toStr()
+  string password = (body.password ?? "").toStr().toLower().strip()
+  return passwordHash != "" and password != "" and crypto.bcryptVerify(password, passwordHash)
+)
+
+def handleClassroomLogin(*serve.Context c) (
+  object body = c.bodyJSON()
+  string code = normalizeClassCode((body.code ?? "").toStr())
+  object student = loadStudent((body.studentId ?? "").toStr())
+  string failure = "That sign-in did not match. Check with your teacher and try again."
+  if code == "" or student.len == 0 (
+    c.json(401, {ok: false, error: failure})
+    return
+  )
+  object classDoc = loadClass(student.classId.toStr())
+  if classDoc.len == 0 or classDoc.code.toStr() != code or classDoc.archived == true or student.disabled == true (
+    c.json(401, {ok: false, error: failure})
+    return
+  )
+  string studentId = student["_id"].toStr()
+  string lockName = "classroom-login-" ++ studentId
+  sync.lock(lockName)
+  student = loadStudent(studentId)
+  if studentLoginLocked(student, timestamp) (
+    sync.unlock(lockName)
+    c.json(429, {ok: false, code: "login_locked", error: "Too many tries. Ask your teacher to unlock your account, or wait 15 minutes."})
+    return
+  )
+  if !studentCredentialsMatch(student, body) (
+    object next = studentLoginAfterFailure(student, timestamp)
+    student.failedLogins = next.failedLogins
+    student.lockedUntil = next.lockedUntil
+    putDocument(studentDocs, studentId, student)
+    sync.unlock(lockName)
+    c.json(401, {ok: false, error: failure})
+    return
+  )
+  student.failedLogins = 0
+  student.lockedUntil = 0
+  student.lastLoginAt = timestamp
+  putDocument(studentDocs, studentId, student)
+  sync.unlock(lockName)
+  string sessionId = createSession(student.username.toStr(), studentId)
+  setAuthCookie(c, sessionId)
+  c.json(200, {
+    ok: true,
+    token: sessionId,
+    username: student.username,
+    displayName: student.displayName,
+    isStudent: true
+  })
+)
+
+def assignmentSummary(object assignment, number studentCount) object (
+  string assignmentId = assignment["_id"].toStr()
+  number turnedIn = submissionDocs.where("assignmentId", db.equal, assignmentId).and("state", db.equal, "turned_in").count()
+  number returned = submissionDocs.where("assignmentId", db.equal, assignmentId).and("state", db.equal, "returned").count()
+  number started = submissionDocs.where("assignmentId", db.equal, assignmentId).count()
+  return {
+    id: assignmentId,
+    title: assignment.title,
+    instructions: assignment.instructions,
+    starterProjectId: assignment.starterProjectId,
+    dueAt: assignment.dueAt,
+    createdAt: assignment.createdAt,
+    counts: {students: studentCount, started: started, turnedIn: turnedIn, returned: returned}
+  }
+)
+
+def readAssignmentFields(*serve.Context c, object assignment, object body) boolean (
+  if body.contains("title") (
+    string title = body.title.toStr().strip()
+    if title == "" or title.len > 120 (
+      c.badRequest("assignment titles must be between 1 and 120 characters")
+      return false
+    )
+    assignment.title = title
+  )
+  if body.contains("instructions") (
+    string instructions = body.instructions.toStr().strip()
+    if instructions.len > 5000 (
+      c.badRequest("instructions are too long")
+      return false
+    )
+    assignment.instructions = instructions
+  )
+  if body.contains("dueAt") (
+    number dueAt = (body.dueAt ?? 0).toNum()
+    if dueAt < 0 (
+      c.badRequest("invalid due date")
+      return false
+    )
+    assignment.dueAt = dueAt
+  )
+  if body.contains("starterProjectId") (
+    string starterId = (body.starterProjectId ?? "").toStr().strip()
+    if starterId != "" (
+      auto loaded = loadProject(starterId)
+      if !loaded.ok or !canEditProject(loaded.project.assert(object), c) (
+        c.badRequest("choose a starter project that you can edit")
+        return false
+      )
+    )
+    assignment.starterProjectId = starterId
+  )
+  return true
+)
+
+def handleCreateAssignment(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object body = c.bodyJSON()
+  if !body.contains("title") (
+    c.badRequest("assignment titles must be between 1 and 120 characters")
+    return
+  )
+  object assignment = {
+    _id: "asg" ++ randomString(10),
+    classId: classDoc["_id"],
+    title: "",
+    instructions: "",
+    starterProjectId: "",
+    dueAt: 0,
+    createdAt: timestamp,
+    createdBy: c.getString("userId")
+  }
+  if !readAssignmentFields(c, assignment, body) return
+  assignmentDocs.insertOne(assignment)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_created", {assignmentId: assignment["_id"], title: assignment.title})
+  c.json(201, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
+)
+
+def classAssignmentOrFail(*serve.Context c, object classDoc) object (
+  object assignment = assignmentDocs.findById(c.param("aid"))
+  if assignment.len == 0 or assignment.classId.toStr() != classDoc["_id"].toStr() (
+    c.notFound("assignment not found")
+    return {}
+  )
+  return assignment
+)
+
+def handleGetAssignment(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object assignment = classAssignmentOrFail(c, classDoc)
+  if assignment.len == 0 return
+  string assignmentId = assignment["_id"].toStr()
+  array students = studentsInClass(classDoc["_id"].toStr())
+  array rows = []
+  for i students.len (
+    object student = students[i].assert(object)
+    object submission = submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr())
+    rows.append({
+      student: {id: student["_id"], displayName: student.displayName},
+      submission: if submission.len == 0 then null else submission
+    })
+  )
+  c.json(200, {ok: true, assignment: assignmentSummary(assignment, students.len), rows: rows})
+)
+
+def handleUpdateAssignment(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object assignment = classAssignmentOrFail(c, classDoc)
+  if assignment.len == 0 return
+  if !readAssignmentFields(c, assignment, c.bodyJSON()) return
+  putDocument(assignmentDocs, assignment["_id"].toStr(), assignment)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_updated", {assignmentId: assignment["_id"]})
+  c.json(200, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
+)
+
+def handleDeleteAssignment(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object assignment = classAssignmentOrFail(c, classDoc)
+  if assignment.len == 0 return
+  deleteDocumentsByField(submissionDocs, "assignmentId", assignment["_id"].toStr())
+  assignmentDocs.deleteOne({_id: assignment["_id"]})
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_deleted", {assignmentId: assignment["_id"], title: assignment.title})
+  c.json(200, {ok: true})
+)
+
+def handleReviewSubmission(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object assignment = classAssignmentOrFail(c, classDoc)
+  if assignment.len == 0 return
+  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ c.param("sid"))
+  if submission.len == 0 (
+    c.notFound("this student has not started the assignment")
+    return
+  )
+  object body = c.bodyJSON()
+  if body.contains("feedback") (
+    string feedback = body.feedback.toStr().strip()
+    if feedback.len > 5000 (
+      c.badRequest("feedback is too long")
+      return
+    )
+    submission.feedback = feedback
+  )
+  if body.contains("grade") (
+    string grade = (body.grade ?? "").toStr().strip()
+    if grade.len > 20 (
+      c.badRequest("grades can be up to 20 characters")
+      return
+    )
+    submission.grade = grade
+  )
+  if body["return"] == true (
+    submission.state = "returned"
+    submission.returnedAt = timestamp
+    submission.returnedBy = c.getString("userId")
+    addNotification(usernameForId(submission.studentId.toStr()), c.getString("username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+  )
+  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "submission_reviewed", {assignmentId: assignment["_id"], studentId: submission.studentId, returned: body["return"] == true})
+  c.json(200, {ok: true, submission: submission})
+)
+
+def studentAssignmentRows(object student) array (
+  array assignments = assignmentDocs.where("classId", db.equal, student.classId.toStr()).all()
+  assignments.sortBy("createdAt", "descending")
+  array rows = []
+  for i assignments.len (
+    object assignment = assignments[i].assert(object)
+    object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+    rows.append({
+      id: assignment["_id"],
+      title: assignment.title,
+      instructions: assignment.instructions,
+      dueAt: assignment.dueAt,
+      createdAt: assignment.createdAt,
+      submission: if submission.len == 0 then null else submission
+    })
+  )
+  return rows
+)
+
+def handleGetStudentClassroom(*serve.Context c) (
+  object student = loadStudent(c.getString("userId"))
+  object classDoc = loadClass((student.classId ?? "").toStr())
+  if student.len == 0 or classDoc.len == 0 (
+    c.notFound("class not found")
+    return
+  )
+  array entries = ownerIndexEntries(student.username.toStr(), true)
+  array projects = []
+  for i entries.len (
+    object entry = entries[i].assert(object)
+    projects.append({id: entry.id, title: entry.title, edited: entry.edited})
+  )
+  object storage = storageDetails(student.username.toStr())
+  c.json(200, {
+    ok: true,
+    role: "student",
+    student: {id: student["_id"], displayName: student.displayName, username: student.username},
+    class: {id: classDoc["_id"], name: classDoc.name, teacher: classDoc.owner},
+    assignments: studentAssignmentRows(student),
+    projects: projects,
+    storage: storage
+  })
+)
+
+def studentAssignmentOrFail(*serve.Context c) object (
+  object student = loadStudent(c.getString("userId"))
+  object assignment = assignmentDocs.findById(c.param("aid"))
+  if student.len == 0 or assignment.len == 0 or assignment.classId.toStr() != student.classId.toStr() (
+    c.notFound("assignment not found")
+    return {}
+  )
+  return {student: student, assignment: assignment}
+)
+
+def createBlankStudentProject(object student, string title) object (
+  string id = generateId()
+  object project = {
+    id: id,
+    owner: student.username,
+    ownerId: student["_id"],
+    groupTag: "",
+    branding: {},
+    vanitySlug: "",
+    title: title,
+    description: "",
+    instructions: "",
+    repo: null,
+    jsonKey: projectJsonKey(id),
+    workspaceKey: "",
+    gitHead: "",
+    gitBranch: "main",
+    gitCommits: [],
+    gitGraph: {branches: [], branchLogs: [], nodes: []},
+    viewKey: randomString(16),
+    created: timestamp,
+    edited: timestamp,
+    sharedAt: 0,
+    shared: false,
+    lastUploadAt: 0,
+    remixParent: "",
+    contributionOnly: false,
+    remixShare: 0,
+    remixNotified: false,
+    scratchOrigin: "",
+    views: 0,
+    loves: [],
+    brokenhearts: [],
+    assets: [],
+    tags: [],
+    collaborators: []
+  }
+  if !saveProject(project) (
+    return {ok: false, status: 500, code: "save_failed", error: "failed to save project"}
+  )
+  upsertIndexEntry(project)
+  return {ok: true, project: project}
+)
+
+def handleStartAssignment(*serve.Context c) (
+  object found = studentAssignmentOrFail(c)
+  if found.len == 0 return
+  object student = found.student.assert(object)
+  object assignment = found.assignment.assert(object)
+  string submissionId = assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()
+  string lockName = "classroom-submission-" ++ submissionId
+  sync.lock(lockName)
+  object existing = submissionDocs.findById(submissionId)
+  if existing.len > 0 (
+    auto loaded = loadProject(existing.projectId.toStr())
+    if loaded.ok (
+      sync.unlock(lockName)
+      c.json(200, {ok: true, submission: existing, projectId: existing.projectId})
+      return
+    )
+  )
+  string title = assignment.title.toStr().trim(1, 100)
+  object created = {}
+  string starterId = (assignment.starterProjectId ?? "").toStr()
+  if starterId != "" (
+    auto starter = loadProject(starterId)
+    if !starter.ok (
+      sync.unlock(lockName)
+      c.json(409, {ok: false, code: "starter_missing", error: "The starter project for this assignment is missing. Ask your teacher."})
+      return
+    )
+    object starterProject = starter.project.assert(object)
+    if projectHasWorkspace(starterProject) (
+      created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), title, "", true)
+    ) else (
+      created = createBlankStudentProject(student, title)
+    )
+  ) else (
+    created = createBlankStudentProject(student, title)
+  )
+  if created.ok != true (
+    sync.unlock(lockName)
+    forkFailureResponse(c, created)
+    return
+  )
+  object project = created.project.assert(object)
+  object submission = {
+    _id: submissionId,
+    assignmentId: assignment["_id"],
+    classId: student.classId,
+    studentId: student["_id"],
+    projectId: project.id,
+    state: "started",
+    startedAt: timestamp,
+    turnedInAt: 0,
+    turnedInHead: "",
+    late: false,
+    feedback: "",
+    grade: ""
+  }
+  putDocument(submissionDocs, submissionId, submission)
+  sync.unlock(lockName)
+  classroomPoolCache.delete(classForStudentId(student["_id"].toStr()).ownerId.toStr())
+  c.json(201, {ok: true, submission: submission, projectId: project.id})
+)
+
+def handleTurnInAssignment(*serve.Context c) (
+  object found = studentAssignmentOrFail(c)
+  if found.len == 0 return
+  object student = found.student.assert(object)
+  object assignment = found.assignment.assert(object)
+  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+  if submission.len == 0 or !submissionCanTurnIn(submission) (
+    c.badRequest("start the assignment before turning it in")
+    return
+  )
+  auto loaded = loadProject(submission.projectId.toStr())
+  if !loaded.ok (
+    c.json(409, {ok: false, code: "project_missing", error: "Your project for this assignment was deleted. Restore it from the trash first."})
+    return
+  )
+  object project = loaded.project.assert(object)
+  submission.state = "turned_in"
+  submission.turnedInAt = timestamp
+  submission.turnedInHead = (project.gitHead ?? "").toStr()
+  submission.late = submissionIsLate((assignment.dueAt ?? 0).toNum(), timestamp)
+  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  object classDoc = loadClass(student.classId.toStr())
+  array teachers = classTeacherIds(classDoc)
+  for i teachers.len (
+    addNotification(usernameForId(teachers[i].toStr()), student.username.toStr(), "classroom_turned_in", {assignmentId: assignment["_id"], assignmentTitle: assignment.title, classId: classDoc["_id"], studentName: student.displayName})
+  )
+  c.json(200, {ok: true, submission: submission})
+)
+
+def handleUnsubmitAssignment(*serve.Context c) (
+  object found = studentAssignmentOrFail(c)
+  if found.len == 0 return
+  object student = found.student.assert(object)
+  object assignment = found.assignment.assert(object)
+  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+  if submission.len == 0 or !submissionCanUnsubmit(submission) (
+    c.badRequest("this work is not waiting for your teacher")
+    return
+  )
+  submission.state = "started"
+  submission.turnedInAt = 0
+  submission.turnedInHead = ""
+  submission.late = false
+  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  c.json(200, {ok: true, submission: submission})
+)
+
+def studentProjectClass(object project) object (
+  string ownerId = (project.ownerId ?? "").toStr()
+  if !isStudentUserId(ownerId) (
+    return {}
+  )
+  return classForStudentId(ownerId)
+)
+
+def classTeacherRoleForProject(object project, string userId) string (
+  if userId == "" or isStudentUserId(userId) (
+    return ""
+  )
+  object classDoc = studentProjectClass(project)
+  if classDoc.len == 0 or !isClassTeacher(classDoc, userId) (
+    return ""
+  )
+  return "maintainer"
+)
+
+def canSeeStudentProfile(string username,*serve.Context c) boolean (
+  if c.getBool("isAdmin") (
+    return true
+  )
+  string viewerId = c.getString("userId")
+  if viewerId == "" (
+    return false
+  )
+  object student = studentForUsername(username)
+  if student.len == 0 (
+    return false
+  )
+  if student["_id"].toStr() == viewerId (
+    return true
+  )
+  return isClassTeacher(loadClass(student.classId.toStr()), viewerId)
+)
+
+def classroomAccessGuard(*serve.Context c) (
+  if c.getBool("isStudent") and !studentRouteAllowed(c.method(), c.path()) (
+    c.json(403, {ok: false, code: "student_restricted", error: "Student accounts cannot do this. Ask your teacher if you need it."})
+    c.abort()
+    return
+  )
+  string path = apiRoutePath(c.path())
+  if path.startsWith("/users/") (
+    array parts = path.split("/")
+    string name = url.unescape(parts[3].toStr())
+    if isStudentUsername(name) and !canSeeStudentProfile(name, c) (
+      c.notFound("user not found")
+      return
+    )
+  )
+  c.next()
+)
+
+def handleAdminGetClassroomPlan(*serve.Context c) (
+  string username = c.query("username")
+  string userId = teacherIdForUsername(username)
+  if userId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  c.json(200, {ok: true, username: usernameForId(userId), stored: classroomPlanDocs.findById(userId), plan: classroomPlanFor(userId), usage: classroomUsage(userId)})
+)
+
+def handleAdminSetClassroomPlan(*serve.Context c) (
+  object body = c.bodyJSON()
+  string userId = teacherIdForUsername((body.username ?? "").toStr())
+  if userId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  string tier = (body.tier ?? "").toStr()
+  if !validClassroomTier(tier) (
+    c.badRequest("tier must be free, classroom or school")
+    return
+  )
+  object stored = {
+    _id: userId,
+    tier: tier,
+    seats: (body.seats ?? 0).toNum(),
+    storageBytes: (body.storageGb ?? 0).toNum() * classroomGiB,
+    maxClasses: (body.maxClasses ?? 0).toNum(),
+    expiresAt: (body.expiresAt ?? 0).toNum(),
+    source: "admin",
+    updatedBy: c.getString("username"),
+    updatedAt: timestamp
+  }
+  putDocument(classroomPlanDocs, userId, stored)
+  classroomPoolCache.delete(userId)
+  c.json(200, {ok: true, plan: classroomPlanFor(userId)})
+)

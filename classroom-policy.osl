@@ -1,0 +1,227 @@
+string studentIdPrefix = "mwc_"
+string studentUsernameSeparator = "~"
+number studentLoginMaxFailures = 5
+number studentLoginLockMs = 900000
+number classroomGiB = 1073741824
+
+array classroomPictureNames = ["cat", "dog", "fish", "bird", "rabbit", "turtle", "squirrel", "snail", "star", "moon", "sun", "tree", "apple", "rocket", "boat", "car"]
+number classroomPictureLength = 3
+
+array classroomPasswordWords = ["apple", "bread", "cloud", "daisy", "eagle", "flame", "grape", "honey", "igloo", "jelly", "koala", "lemon", "mango", "night", "ocean", "panda", "queen", "river", "sugar", "tiger", "umbra", "violet", "whale", "yacht", "zebra", "amber", "berry", "candy", "delta", "ember", "frost", "globe", "hazel", "ivory", "jolly", "kitty", "lucky", "maple", "noble", "olive", "pearl", "quick", "robin", "sunny", "tulip", "unity", "vivid", "windy"]
+
+string classCodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+def isStudentUserId(string userId) boolean (
+  return userId.startsWith(studentIdPrefix)
+)
+
+def isStudentUsername(string username) boolean (
+  return username.contains(studentUsernameSeparator)
+)
+
+def studentHandleFromName(string displayName) string (
+  string lowered = displayName.toLower().strip()
+  string handle = ""
+  for i lowered.len (
+    string ch = lowered[i]
+    if regex.match("^[a-z0-9]$", ch) and handle.len < 16 (
+      handle ++= ch
+    )
+  )
+  return handle
+)
+
+def studentUsername(string handle, string classSlug) string (
+  return handle ++ studentUsernameSeparator ++ classSlug
+)
+
+def validStudentDisplayName(string displayName) boolean (
+  string trimmed = displayName.strip()
+  return trimmed.len >= 1 and trimmed.len <= 40 and studentHandleFromName(trimmed) != ""
+)
+
+def validClassName(string name) boolean (
+  string trimmed = name.strip()
+  return trimmed.len >= 1 and trimmed.len <= 80
+)
+
+def validClassLoginMode(string mode) boolean (
+  return mode == "password" or mode == "picture"
+)
+
+def validPictureSequence(array pictures) boolean (
+  if pictures.len != classroomPictureLength (
+    return false
+  )
+  for i pictures.len (
+    if !classroomPictureNames.contains(pictures[i].toStr()) (
+      return false
+    )
+  )
+  return true
+)
+
+def pictureSecret(array pictures) string (
+  array names = []
+  for i pictures.len (
+    names.append(pictures[i].toStr())
+  )
+  return names.join("-")
+)
+
+def normalizeClassCode(string code) string (
+  return code.toUpper().strip().replace(" ", "").replace("-", "")
+)
+
+def studentLoginLocked(object student, number now) boolean (
+  return (student.lockedUntil ?? 0).toNum() > now
+)
+
+def studentLoginAfterFailure(object student, number now) object (
+  number failures = (student.failedLogins ?? 0).toNum() + 1
+  number lockedUntil = (student.lockedUntil ?? 0).toNum()
+  if failures >= studentLoginMaxFailures (
+    lockedUntil = now + studentLoginLockMs
+    failures = 0
+  )
+  return {failedLogins: failures, lockedUntil: lockedUntil}
+)
+
+def classroomPlanDefaults(string tier) object (
+  if tier == "school" (
+    return {tier: "school", seats: 500, maxClasses: 200, storageBytes: 250 * classroomGiB, liveCollaboration: true}
+  )
+  if tier == "classroom" (
+    return {tier: "classroom", seats: 35, maxClasses: 12, storageBytes: 25 * classroomGiB, liveCollaboration: true}
+  )
+  return {tier: "free", seats: 5, maxClasses: 1, storageBytes: classroomGiB, liveCollaboration: false}
+)
+
+def validClassroomTier(string tier) boolean (
+  return tier == "free" or tier == "classroom" or tier == "school"
+)
+
+def effectiveClassroomPlan(object stored, number now) object (
+  string tier = (stored.tier ?? "free").toStr()
+  if !validClassroomTier(tier) (
+    tier = "free"
+  )
+  number expiresAt = (stored.expiresAt ?? 0).toNum()
+  if tier != "free" and expiresAt > 0 and expiresAt <= now (
+    tier = "free"
+  )
+  object plan = classroomPlanDefaults(tier)
+  if tier != "free" (
+    if (stored.seats ?? 0).toNum() > 0 (
+      plan.seats = stored.seats.toNum()
+    )
+    if (stored.storageBytes ?? 0).toNum() > 0 (
+      plan.storageBytes = stored.storageBytes.toNum()
+    )
+    if (stored.maxClasses ?? 0).toNum() > 0 (
+      plan.maxClasses = stored.maxClasses.toNum()
+    )
+  )
+  plan.expiresAt = if tier == "free" then 0 else expiresAt
+  return plan
+)
+
+def pooledStudentStorageLimit(number poolBytes, number poolUsed, number ownUsed) number (
+  number spare = poolBytes - poolUsed
+  if spare < 0 (
+    spare = 0
+  )
+  return ownUsed + spare
+)
+
+def classTeacherIds(object classDoc) array (
+  array ids = [(classDoc.ownerId ?? "").toStr()]
+  array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
+  for i coTeachers.len (
+    object teacher = coTeachers[i].assertElse(object, {})
+    string id = (teacher.userId ?? "").toStr()
+    if id != "" and !ids.contains(id) (
+      ids.append(id)
+    )
+  )
+  return ids
+)
+
+def isClassTeacher(object classDoc, string userId) boolean (
+  return userId != "" and classTeacherIds(classDoc).contains(userId)
+)
+
+def isClassOwner(object classDoc, string userId) boolean (
+  return userId != "" and (classDoc.ownerId ?? "").toStr() == userId
+)
+
+def apiRoutePath(string path) string (
+  if path.startsWith("/v1/") (
+    return path.trim(4, path.len)
+  )
+  if path.startsWith("/api/") (
+    return path.trim(5, path.len)
+  )
+  return path
+)
+
+array studentWriteRoutes = [
+  "POST ^/logout$",
+  "POST ^/projects$",
+  "POST ^/projects/[^/]+/(live|assets/check|upload|upload-parts|thumbnail|view|remix|restore|diagnostics|history/bootstrap|branches|branches/merge)$",
+  "POST ^/projects/[^/]+/upload-parts/[^/]+/(chunk|complete)$",
+  "PUT ^/projects/[^/]+$",
+  "DELETE ^/projects/[^/]+$",
+  "PATCH ^/projects/[^/]+/branches$",
+  "DELETE ^/projects/[^/]+/branches$",
+  "PATCH ^/projects/[^/]+/commits/[^/]+$",
+  "PUT ^/projects/[^/]+/me/save$",
+  "DELETE ^/projects/[^/]+/me/save$",
+  "DELETE ^/trash/[^/]+$",
+  "POST ^/reports?$",
+  "POST ^/errors$",
+  "PUT ^/me/settings$",
+  "POST ^/notifications/read$",
+  "POST ^/perks/seen$",
+  "POST ^/classroom/(login|assignments/[^/]+/(start|turn-in|unsubmit))$"
+]
+
+def studentRouteAllowed(string method, string rawPath) boolean (
+  string verb = method.toUpper()
+  if verb == "GET" or verb == "HEAD" or verb == "OPTIONS" (
+    return true
+  )
+  string path = apiRoutePath(rawPath)
+  for i studentWriteRoutes.len (
+    string rule = studentWriteRoutes[i].toStr()
+    array parts = rule.split(" ")
+    if parts[1].toStr() == verb and regex.match(parts[2].toStr(), path) (
+      return true
+    )
+  )
+  return false
+)
+
+array studentProjectFields = ["title", "description", "instructions", "notes", "credits", "compatibility"]
+
+def studentProjectUpdateAllowed(array keys) boolean (
+  for i keys.len (
+    if !studentProjectFields.contains(keys[i].toStr()) (
+      return false
+    )
+  )
+  return true
+)
+
+def submissionCanTurnIn(object submission) boolean (
+  string state = (submission.state ?? "").toStr()
+  return state == "started" or state == "returned"
+)
+
+def submissionCanUnsubmit(object submission) boolean (
+  return (submission.state ?? "").toStr() == "turned_in"
+)
+
+def submissionIsLate(number dueAt, number turnedInAt) boolean (
+  return dueAt > 0 and turnedInAt > dueAt
+)

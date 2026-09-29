@@ -340,7 +340,7 @@ def addNotification(string target, string actor, string notifType, object extra)
     read: false
   }
 
-  if postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
+  if !isStudentUserId(targetId) and postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
     return
   )
 

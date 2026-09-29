@@ -201,6 +201,8 @@ import "./settings.osl"
 import "./agreement.osl"
 import "./account-controls.osl"
 import "./community-tools.osl"
+import "./classroom-policy.osl"
+import "./classrooms.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
@@ -220,6 +222,7 @@ auto gameDataCapabilityCache = cache.create(100000, 300)
 auto multiplayerTicketCache = cache.create(100000, 120)
 auto realtimeHandshakeCache = cache.create(100000, 30)
 auto developmentCache = cache.create(4, 300)
+auto classroomPoolCache = cache.create(10000, 60)
 
 ensureDirectories()
 initCommunityDatabase()
@@ -274,6 +277,7 @@ if r2Local (
 )
 
 app.use(authMiddleware)
+app.use(classroomAccessGuard)
 setupGameRealtime()
 setupSiteRealtime()
 
@@ -371,6 +375,33 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/spaces/:id/comments/:cid/react", requireAuth, handleReactSpaceComment)
   api.POST("/spaces/:id/comments/:cid/pin", requireAuth, handlePinSpaceComment)
   api.GET("/me/spaces", requireAuth, handleMySpaces)
+
+  api.GET("/classroom/join/:code", serve.rateLimit(30, 60), handleClassroomJoinInfo)
+  api.POST("/classroom/login", serve.rateLimit(20, 60), handleClassroomLogin)
+  api.GET("/classroom", requireAuth, handleGetClassroom)
+  api.POST("/classroom/classes", requireClassroomTeacher, serve.rateLimit(20, 3600), handleCreateClass)
+  api.GET("/classroom/classes/:id", requireClassroomTeacher, handleGetClass)
+  api.PUT("/classroom/classes/:id", requireClassroomTeacher, handleUpdateClass)
+  api.DELETE("/classroom/classes/:id", requireClassroomTeacher, handleDeleteClass)
+  api.POST("/classroom/classes/:id/code", requireClassroomTeacher, handleResetClassCode)
+  api.POST("/classroom/classes/:id/teachers", requireClassroomTeacher, handleAddCoTeacher)
+  api.DELETE("/classroom/classes/:id/teachers/:teacher", requireClassroomTeacher, handleRemoveCoTeacher)
+  api.POST("/classroom/classes/:id/transfer", requireClassroomTeacher, handleTransferClass)
+  api.GET("/classroom/classes/:id/audit", requireClassroomTeacher, handleGetClassAudit)
+  api.POST("/classroom/classes/:id/students", requireClassroomTeacher, serve.rateLimit(30, 3600), handleCreateStudents)
+  api.GET("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleGetClassStudent)
+  api.PUT("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleUpdateClassStudent)
+  api.DELETE("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleDeleteClassStudent)
+  api.POST("/classroom/classes/:id/students/:sid/reset", requireClassroomTeacher, handleResetStudentLogin)
+  api.POST("/classroom/classes/:id/students/:sid/move", requireClassroomTeacher, handleMoveClassStudent)
+  api.POST("/classroom/classes/:id/assignments", requireClassroomTeacher, handleCreateAssignment)
+  api.GET("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleGetAssignment)
+  api.PUT("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleUpdateAssignment)
+  api.DELETE("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleDeleteAssignment)
+  api.PUT("/classroom/classes/:id/assignments/:aid/submissions/:sid", requireClassroomTeacher, handleReviewSubmission)
+  api.POST("/classroom/assignments/:aid/start", requireAuth, handleStartAssignment)
+  api.POST("/classroom/assignments/:aid/turn-in", requireAuth, handleTurnInAssignment)
+  api.POST("/classroom/assignments/:aid/unsubmit", requireAuth, handleUnsubmitAssignment)
 
   api.POST("/projects", requireAuth, serve.rateLimit(30, 3600), handleCreateProject)
   api.POST("/projects/:id/live", requireAuth, serve.rateLimit(120, 60), handleLiveCollaboration)
@@ -534,6 +565,8 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/admin/extensions/:hash/source", requireAdmin, handleAdminGetExtensionSource)
   api.POST("/admin/extensions/policy", requireAdmin, handleAdminSetExtensionPolicy)
   api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
+  api.GET("/admin/classroom/plans", requireAdmin, handleAdminGetClassroomPlan)
+  api.POST("/admin/classroom/plans", requireAdmin, handleAdminSetClassroomPlan)
 )
 
 *serve.Router uploadsV1 = app.group("/v1")
