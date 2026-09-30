@@ -1,6 +1,6 @@
 # Data protection impact assessment: MistWarp Classroom
 
-Version 2026-10-01. Owner: Sophie (MistWarp). Next review: 2027-10-01.
+Version 2026-10-01. Owner: Sophie, who runs Rotur and MistWarp. Next review: 2027-10-01.
 
 ## 1. Why a DPIA is needed
 

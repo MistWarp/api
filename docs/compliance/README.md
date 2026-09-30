@@ -10,13 +10,13 @@ These are MistWarp's own records for MistWarp Classroom. They are the documents 
 | [Retention schedule](retention-schedule.md) | UK GDPR Article 5(1)(e), and COPPA 16 CFR 312.10 |
 | [Breach response procedure](breach-response.md) | UK GDPR Articles 33 and 34, and the 48 hour promise in the Data Processing Agreement |
 
-Owner: Sophie, sole trader trading as MistWarp. Contact: privacy@mistwarp.org.
+Owner: Sophie, sole trader trading as Rotur and MistWarp. MistWarp is part of Rotur, so both are the same controller. Contact: privacy@mistwarp.org.
 
 Review all five at least once a year, after any significant change to Classroom, and after any breach. Record each review in the table at the end of each file.
 
 ## Open actions
 
-- Register with the ICO and pay the data protection fee, then add the registration number to `LEGAL.icoRegistration` in scratch-gui `src/community/legal/config.js`.
+- Register with the ICO and pay the data protection fee once, as a sole trader, listing both trading names (Rotur and MistWarp). Then add the registration number to `LEGAL.icoRegistration` in scratch-gui `src/community/legal/config.js`.
 - Add a postal address for notices to `LEGAL.postalAddress`. COPPA requires the operator's address in the notice. A service address or PO box is fine.
 - Make sure privacy@mistwarp.org receives mail and is checked at least every two working days.
 - Accept Cloudflare's Data Processing Addendum in the Cloudflare dashboard if it has not been accepted already, and keep a copy.
