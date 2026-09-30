@@ -226,7 +226,7 @@ def loadProject(string id) object (
   if !result.ok (
     string projectPath = projectsDir ++ id ++ ".json"
     boolean missing = storagefs.Missing(projectPath)
-    return {ok: false, error: missing ? "project not found" "project read failed", missing: missing, retryable:!missing}
+    return {ok: false, error: if missing then "project not found" else "project read failed", missing: missing, retryable:!missing}
   )
   object project = result.data.assert(object)
   if (!project.contains("ownerId") or project.ownerId == null or project.ownerId.toStr() == "") and project.contains("owner") and project.owner != null (

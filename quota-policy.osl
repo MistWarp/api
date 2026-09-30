@@ -13,7 +13,7 @@ def quotaTotalBytes(array events, number nowMs, number windowMs) number (
   number total = 0
   array kept = quotaPruneEvents(events, nowMs, windowMs)
   for i kept.len (
-    total = total + kept[i].assert(object).bytes.toNum()
+    total += kept[i].assert(object).bytes.toNum()
   )
   return total
 )

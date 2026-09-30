@@ -196,8 +196,8 @@ def handleListBans(*serve.Context c) (
 def handleListUsers(*serve.Context c) (
   string q = normalizeUsername(c.query("q"))
   string sort = c.query("sort").toLower().strip()
-  number offset = c.query("offset") == "" ? 0 c.query("offset").toNum().toInt()
-  number limit = c.query("limit") == "" ? 30 c.query("limit").toNum().toInt()
+  number offset = if c.query("offset") == "" then 0 else c.query("offset").toNum().toInt()
+  number limit = if c.query("limit") == "" then 30 else c.query("limit").toNum().toInt()
   if offset < 0 (
     offset = 0
   )
@@ -281,8 +281,8 @@ def adminStorageStats() object (
   object local = localRuntimeStorageStats()
   object inventorySync = syncR2StorageInventory(false)
   auto r2Loaded = readFile(r2StorageIndexFile)
-  object r2Data = r2Loaded.ok ? r2Loaded.data.assertElse(object, {}) {}
-  object r2Objects = r2Data.contains("objects") ? r2Data.objects.assertElse(object, {}) {}
+  object r2Data = if r2Loaded.ok then r2Loaded.data.assertElse(object, {}) else {}
+  object r2Objects = if r2Data.contains("objects") then r2Data.objects.assertElse(object, {}) else {}
   object r2 = aggregateStorageObjects(r2Objects)
   array queuedItems = loadR2UploadQueue()
   object queuedObjects = {}
@@ -291,7 +291,7 @@ def adminStorageStats() object (
     queuedObjects[item.key.toStr()] = item
   )
   object queued = aggregateStorageObjects(queuedObjects)
-  number r2SyncedAt = r2Data.contains("syncedAt") ? r2Data.syncedAt.toNum() 0
+  number r2SyncedAt = if r2Data.contains("syncedAt") then r2Data.syncedAt.toNum() else 0
   return {local: local, r2: r2, queued: queued, r2Configured:!r2Local, r2SyncedAt: r2SyncedAt, inventorySync: inventorySync}
 )
 
@@ -510,9 +510,9 @@ def handleAdminStats(*serve.Context c) (
     pendingPayouts: pendingPayouts.len,
     pendingPayoutAmount: pendingPayoutAmount,
     days: days,
-    averageProjectBytes: totalProjects > 0 ? totalBytes / totalProjects 0,
-    averageViews: totalProjects > 0 ? totalViews / totalProjects 0,
-    averageLoves: totalProjects > 0 ? totalLoves / totalProjects 0,
+    averageProjectBytes: if totalProjects > 0 then totalBytes / totalProjects else 0,
+    averageViews: if totalProjects > 0 then totalViews / totalProjects else 0,
+    averageLoves: if totalProjects > 0 then totalLoves / totalProjects else 0,
     totalRemixes: totalRemixes,
     totalPlaytimeMs: totalPlaytimeMs,
     totalLoads: totalLoads,

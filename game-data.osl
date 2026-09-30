@@ -317,7 +317,7 @@ def handlePutMyProjectSave(*serve.Context c) (
   current.updatedAt = timestamp
   current.lastRequestId = requestId
   string path = gameSavePath(projectId, userId, context)
-  number previousBytes = fs.exists(path) ? fs.getSize(path) 0
+  number previousBytes = if fs.exists(path) then fs.getSize(path) else 0
   number nextBytes = json.stringify(current).len
   number usedBytes = storedGameSaveBytes(userId)
   number projectedBytes = (usedBytes - previousBytes) + nextBytes
@@ -392,7 +392,7 @@ def handleDeleteMyGameSave(*serve.Context c) (
   )
   if removedBytes > 0 (
     number usedBytes = storedGameSaveBytes(userId)
-    number nextBytes = usedBytes > removedBytes ? usedBytes - removedBytes 0
+    number nextBytes = if usedBytes > removedBytes then usedBytes - removedBytes else 0
     saveGameSaveUsage(userId, nextBytes)
   )
   sync.unlock(lockName)
