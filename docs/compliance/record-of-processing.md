@@ -2,7 +2,7 @@
 
 Kept under UK GDPR Article 30(2). Version 2026-10-01.
 
-**Processor:** Sophie, sole trader trading as MistWarp, United Kingdom. Contact: privacy@mistwarp.org. MistWarp has no representative or data protection officer; it is not required to appoint one.
+**Processor:** Sophie, sole trader trading as Rotur and MistWarp, United Kingdom. MistWarp is part of Rotur. Contact: privacy@mistwarp.org. MistWarp has no representative or data protection officer; it is not required to appoint one.
 
 **Controllers:** every school, trust, district or organisation whose teacher has accepted the Classroom Terms. The organisation's name, the accepting teacher, the terms version and the time are stored in the `classroom_terms` collection, with the history of every acceptance.
 
