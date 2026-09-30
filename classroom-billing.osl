@@ -1,5 +1,5 @@
 def stripeBillingConfigured() boolean (
-  return stripeSecretKey != "" and stripeWebhookSecret != "" and stripeClassroomPrice != ""
+  return stripeSecretKey != "" and stripeWebhookSecret != "" and classroomBillingIntervals(stripeClassroomPrice, stripeClassroomPriceYearly).len > 0
 )
 
 def stripeRequest(string path, array fields) object (
@@ -32,7 +32,9 @@ def classroomBillingInfo(string userId) object (
     available: stripeBillingConfigured() and !schoolManaged,
     schoolManaged: schoolManaged,
     seatPackSize: classroomSeatPackSize,
-    seatPacksAvailable: stripeSeatPackPrice != "",
+    seatPacksAvailable: stripeSeatPackPrice != "" or stripeSeatPackPriceYearly != "",
+    intervals: classroomBillingIntervals(stripeClassroomPrice, stripeClassroomPriceYearly),
+    seatPackIntervals: classroomBillingIntervals(stripeSeatPackPrice, stripeSeatPackPriceYearly),
     managedByStripe: (stored.source ?? "").toStr() == "stripe",
     canManage: (stored.stripeCustomerId ?? "").toStr() != "",
     status: (stored.stripeStatus ?? "").toStr(),
@@ -82,6 +84,9 @@ def handleClassroomCheckout(*serve.Context c) (
   )
   object body = c.bodyJSON()
   number seatPacks = clampNumber((body.seatPacks ?? 0).toNum().toInt(), 0, 50)
+  string interval = classroomCheckoutInterval((body.interval ?? "").toStr(), classroomBillingIntervals(stripeClassroomPrice, stripeClassroomPriceYearly))
+  string classroomPrice = classroomPriceForInterval(interval, stripeClassroomPrice, stripeClassroomPriceYearly)
+  string seatPackPrice = classroomPriceForInterval(interval, stripeSeatPackPrice, stripeSeatPackPriceYearly)
   string returnBase = editorOrigin ++ "/classroom"
   array fields = [
     ["mode", "subscription"],
@@ -91,11 +96,11 @@ def handleClassroomCheckout(*serve.Context c) (
     ["allow_promotion_codes", "true"],
     ["metadata[userId]", userId],
     ["subscription_data[metadata][userId]", userId],
-    ["line_items[0][price]", stripeClassroomPrice],
+    ["line_items[0][price]", classroomPrice],
     ["line_items[0][quantity]", "1"]
   ]
-  if seatPacks > 0 and stripeSeatPackPrice != "" (
-    fields.append(["line_items[1][price]", stripeSeatPackPrice])
+  if seatPacks > 0 and seatPackPrice != "" (
+    fields.append(["line_items[1][price]", seatPackPrice])
     fields.append(["line_items[1][quantity]", seatPacks.toStr()])
   )
   string customerId = (stored.stripeCustomerId ?? "").toStr()
@@ -158,7 +163,7 @@ def applyStripeSubscription(object subscription, number eventCreated, boolean de
   if !stripeEventMayChangePlan(classroomPlanDocs.findById(userId), subscriptionId) (
     return
   )
-  object plan = classroomPlanFromSubscription(subscription, stripeSeatPackPrice)
+  object plan = classroomPlanFromSubscription(subscription, [stripeSeatPackPrice, stripeSeatPackPriceYearly])
   if deleted (
     plan = {tier: "free", seats: 0, expiresAt: 0, stripeStatus: "canceled"}
   )

@@ -31,19 +31,19 @@ object active = {
     {price: {id: "price_seats"}, quantity: 2, current_period_end: 1800000000}
   ]}
 }
-object plan = classroomPlanFromSubscription(active, "price_seats")
+object plan = classroomPlanFromSubscription(active, ["price_seats"])
 testing.assert(plan.tier == "classroom", "an active subscription grants the classroom plan")
 testing.assert(plan.seats == 55, "each seat pack adds ten seats")
 testing.assert(plan.expiresAt == (1800000000 * 1000) + classroomBillingGraceMs, "the plan lasts the paid period plus a grace period")
 
 object legacy = {status: "trialing", current_period_end: 1700000000, items: {data: []}}
-testing.assert(classroomPlanFromSubscription(legacy, "price_seats").seats == 35, "trials get the default seats")
-testing.assert(classroomPlanFromSubscription(legacy, "price_seats").expiresAt == (1700000000 * 1000) + classroomBillingGraceMs, "older api versions put the period on the subscription")
+testing.assert(classroomPlanFromSubscription(legacy, ["price_seats"]).seats == 35, "trials get the default seats")
+testing.assert(classroomPlanFromSubscription(legacy, ["price_seats"]).expiresAt == (1700000000 * 1000) + classroomBillingGraceMs, "older api versions put the period on the subscription")
 
 object cancelled = {status: "canceled", items: {data: []}}
-testing.assert(classroomPlanFromSubscription(cancelled, "price_seats").tier == "free", "a cancelled subscription returns to free")
-testing.assert(classroomPlanFromSubscription({status: "unpaid"}, "").tier == "free", "unpaid subscriptions return to free")
-testing.assert(classroomPlanFromSubscription({status: "past_due", items: {data: []}}, "").tier == "classroom", "a failed payment keeps the plan while Stripe retries")
+testing.assert(classroomPlanFromSubscription(cancelled, ["price_seats"]).tier == "free", "a cancelled subscription returns to free")
+testing.assert(classroomPlanFromSubscription({status: "unpaid"}, []).tier == "free", "unpaid subscriptions return to free")
+testing.assert(classroomPlanFromSubscription({status: "past_due", items: {data: []}}, []).tier == "classroom", "a failed payment keeps the plan while Stripe retries")
 
 testing.assert(stripeEventIsNewer({stripeEventAt: 10}, 10), "an event from the same second still applies")
 testing.assert(!stripeEventIsNewer({stripeEventAt: 11}, 10), "an older event cannot undo a newer one")
@@ -66,3 +66,19 @@ testing.assert(!classroomTrialAvailable(trial, false, 1001 + classroomTrialMs), 
 testing.assert(classroomTrialEndsAt(trial, 2000) == 1000 + classroomTrialMs, "a running trial reports when it ends")
 testing.assert(classroomTrialEndsAt(trial, 1001 + classroomTrialMs) == 0, "an ended trial reports no end date")
 testing.assert(stripeEventMayChangePlan(trial, "sub_9"), "a subscription replaces a trial")
+
+object mixed = {status: "active", items: {data: [
+  {price: {id: "price_class_year"}, quantity: 1, current_period_end: 1800000000},
+  {price: {id: "price_seats_year"}, quantity: 3, current_period_end: 1800000000}
+]}}
+testing.assert(classroomPlanFromSubscription(mixed, ["price_seats_month", "price_seats_year"]).seats == 65, "yearly seat packs count as well as monthly ones")
+testing.assert(classroomPlanFromSubscription(mixed, ["", "price_seats_month"]).seats == 35, "unknown or empty seat pack prices add nothing")
+testing.assert(classroomBillingIntervals("price_m", "price_y") == ["year", "month"], "yearly billing is offered first")
+testing.assert(classroomBillingIntervals("price_m", "") == ["month"], "only configured intervals are offered")
+testing.assert(classroomBillingIntervals("", "").len == 0, "nothing is offered without prices")
+testing.assert(classroomCheckoutInterval("month", ["year", "month"]) == "month", "a teacher can choose monthly billing")
+testing.assert(classroomCheckoutInterval("", ["year", "month"]) == "year", "checkout defaults to yearly billing")
+testing.assert(classroomCheckoutInterval("year", ["month"]) == "month", "an unavailable interval falls back to one that exists")
+testing.assert(classroomCheckoutInterval("year", []) == "", "no interval without prices")
+testing.assert(classroomPriceForInterval("year", "price_m", "price_y") == "price_y", "yearly checkout uses the yearly price")
+testing.assert(classroomPriceForInterval("month", "price_m", "price_y") == "price_m", "monthly checkout uses the monthly price")

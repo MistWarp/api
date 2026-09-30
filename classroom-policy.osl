@@ -94,7 +94,7 @@ def classroomPlanDefaults(string tier) object (
   if tier == "classroom" (
     return {tier: "classroom", seats: 35, maxClasses: 12, storageBytes: 25 * classroomGiB, liveCollaboration: true}
   )
-  return {tier: "free", seats: 5, maxClasses: 1, storageBytes: classroomGiB, liveCollaboration: false}
+  return {tier: "free", seats: 35, maxClasses: 1, storageBytes: classroomGiB, liveCollaboration: false}
 )
 
 def validClassroomTier(string tier) boolean (
