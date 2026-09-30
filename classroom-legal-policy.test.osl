@@ -1,0 +1,37 @@
+import "std:testing"
+import "./classroom-legal-policy.osl"
+
+testing.assert(!classroomTermsAccepted({}), "teachers start without accepting the terms")
+testing.assert(classroomTermsAccepted({version: classroomTermsVersion}), "the current version counts as accepted")
+testing.assert(!classroomTermsAccepted({version: "2020-01-01"}), "an older version must be accepted again")
+
+testing.assert(classroomTermsBodyValid({version: classroomTermsVersion, authorised: true, organisation: "Riverside Primary"}), "a complete acceptance is valid")
+testing.assert(!classroomTermsBodyValid({version: classroomTermsVersion, authorised: false, organisation: "Riverside Primary"}), "the authority statement is required")
+testing.assert(!classroomTermsBodyValid({version: classroomTermsVersion, organisation: "Riverside Primary"}), "a missing authority statement is refused")
+testing.assert(!classroomTermsBodyValid({version: "old", authorised: true, organisation: "Riverside Primary"}), "a stale version is refused")
+testing.assert(!classroomTermsBodyValid({version: classroomTermsVersion, authorised: true, organisation: " x "}), "the organisation needs a real name")
+
+object first = classroomTermsAcceptance({}, {organisation: "  Riverside Primary "}, "mist", 100)
+testing.assert(first.version == classroomTermsVersion and first.acceptedAt == 100 and first.organisation == "Riverside Primary", "an acceptance records the version, time and organisation")
+testing.assert(first.history.len == 1, "the first acceptance starts the history")
+object second = classroomTermsAcceptance(first, {organisation: "Hilltop Academy"}, "mist", 200)
+testing.assert(second.history.len == 2 and second.organisation == "Hilltop Academy", "later acceptances keep earlier ones")
+
+number day = 86400000
+testing.assert(classroomRetentionAction({}, 10 * day) == "start", "classes without activity start their clock")
+testing.assert(classroomRetentionAction({teacherActiveAt: day}, 30 * day) == "", "recent classes are left alone")
+testing.assert(classroomRetentionAction({teacherActiveAt: day}, day + classroomRetentionWarnMs) == "warn", "teachers are warned after eleven months")
+object warned = {teacherActiveAt: day, retentionWarnedAt: day + classroomRetentionWarnMs}
+testing.assert(classroomRetentionAction(warned, day + classroomRetentionWarnMs + day) == "", "a warning is sent once")
+testing.assert(classroomRetentionAction(warned, day + classroomRetentionDeleteMs) == "delete", "classes are deleted after twelve months")
+object lateWarning = {teacherActiveAt: day, retentionWarnedAt: day + classroomRetentionDeleteMs + day}
+testing.assert(classroomRetentionAction(lateWarning, day + classroomRetentionDeleteMs + (2 * day)) == "", "deletion always waits for the notice period")
+testing.assert(classroomRetentionAction(lateWarning, day + classroomRetentionDeleteMs + day + classroomRetentionNoticeMs) == "delete", "deletion follows the notice period")
+testing.assert(classroomRetentionAction({teacherActiveAt: day, retentionWarnedAt: 0}, day + classroomRetentionDeleteMs + day) == "warn", "a class is never deleted without a warning")
+object returned = {teacherActiveAt: day + classroomRetentionWarnMs + day, retentionWarnedAt: day + classroomRetentionWarnMs}
+testing.assert(classroomRetentionAction(returned, day + classroomRetentionDeleteMs + day) == "", "a teacher coming back cancels the deletion")
+testing.assert(classroomRetentionDeleteAt({teacherActiveAt: day}, day + classroomRetentionWarnMs) == day + classroomRetentionDeleteMs, "the deletion date is twelve months after the last visit")
+testing.assert(classroomRetentionDeleteAt({teacherActiveAt: day}, day + classroomRetentionDeleteMs) == day + classroomRetentionDeleteMs + classroomRetentionNoticeMs, "a late warning still gives the full notice period")
+
+testing.assert(classroomActivityNeedsTouch({}, day), "classes without activity are touched")
+testing.assert(!classroomActivityNeedsTouch({teacherActiveAt: day}, day + 1000), "activity is written at most once a day")

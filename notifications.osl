@@ -340,7 +340,8 @@ def addNotification(string target, string actor, string notifType, object extra)
     read: false
   }
 
-  if !isStudentUserId(targetId) and postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
+  boolean keepLocal = isStudentUserId(targetId) or isStudentUserId(actorId) or isStudentUsername(actor) or notifType.startsWith("classroom_")
+  if !keepLocal and postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
     return
   )
 
