@@ -3216,7 +3216,16 @@ def handleLeaderboard(*serve.Context c) (
   )
   rows.sortBy(by, "descending")
   number limit = clampNumber(c.queryInt("limit", 15), 1, 50)
-  c.json(200, {ok: true, by: by, users: paginate(rows, 0, limit)})
+  array visible = []
+  for i rows.len (
+    if visible.len < limit (
+      object row = rows[i].assert(object)
+      if !usernameIsMinor(row.username.toStr()) (
+        visible.append(row)
+      )
+    )
+  )
+  c.json(200, {ok: true, by: by, users: visible})
 )
 
 def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
