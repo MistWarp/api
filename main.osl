@@ -125,6 +125,8 @@ string stripeSecretKey = configValue("STRIPE_SECRET_KEY", "")
 string stripeWebhookSecret = configValue("STRIPE_WEBHOOK_SECRET", "")
 string stripeClassroomPrice = configValue("STRIPE_CLASSROOM_PRICE", "")
 string stripeSeatPackPrice = configValue("STRIPE_SEAT_PACK_PRICE", "")
+string stripeClassroomPriceYearly = configValue("STRIPE_CLASSROOM_PRICE_YEARLY", "")
+string stripeSeatPackPriceYearly = configValue("STRIPE_SEAT_PACK_PRICE_YEARLY", "")
 string realtimeURL = configValue("REALTIME_URL", "wss://api.mistwarp.org/v1/connect")
 number historyMigrationWorkers = configValue("HISTORY_MIGRATION_WORKERS", "4").toNum().toInt()
 if historyMigrationWorkers < 1 (
