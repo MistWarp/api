@@ -398,6 +398,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/classroom/billing/checkout", requireClassroomTeacher, serve.rateLimit(20, 3600), handleClassroomCheckout)
   api.POST("/classroom/billing/portal", requireClassroomTeacher, serve.rateLimit(30, 3600), handleClassroomBillingPortal)
   api.POST("/classroom/billing/webhook", handleStripeWebhook)
+  api.POST("/classroom/trial", requireClassroomTeacher, serve.rateLimit(10, 3600), handleStartClassroomTrial)
   api.POST("/classroom/classes", requireClassroomTeacher, serve.rateLimit(20, 3600), handleCreateClass)
   api.GET("/classroom/classes/:id", requireClassroomTeacher, handleGetClass)
   api.PUT("/classroom/classes/:id", requireClassroomTeacher, handleUpdateClass)

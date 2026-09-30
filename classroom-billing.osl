@@ -35,8 +35,34 @@ def classroomBillingInfo(string userId) object (
     seatPacksAvailable: stripeSeatPackPrice != "",
     managedByStripe: (stored.source ?? "").toStr() == "stripe",
     canManage: (stored.stripeCustomerId ?? "").toStr() != "",
-    status: (stored.stripeStatus ?? "").toStr()
+    status: (stored.stripeStatus ?? "").toStr(),
+    trialAvailable: classroomTrialAvailable(stored, schoolManaged, timestamp),
+    trialDays: classroomTrialDays,
+    trialEndsAt: classroomTrialEndsAt(stored, timestamp)
   }
+)
+
+def handleStartClassroomTrial(*serve.Context c) (
+  string userId = c.getString("userId")
+  if schoolForTeacher(userId).len > 0 (
+    c.json(409, {ok: false, code: "school_managed", error: "Your school manages your Classroom plan."})
+    return
+  )
+  string lockName = "classroom-plan-" ++ userId
+  sync.lock(lockName)
+  object stored = classroomPlanDocs.findById(userId)
+  if !classroomTrialAvailable(stored, false, timestamp) (
+    sync.unlock(lockName)
+    c.json(409, {ok: false, code: "trial_unavailable", error: "The free trial is for teachers who have not had a Classroom plan before."})
+    return
+  )
+  object next = classroomTrialPlan(stored, timestamp)
+  next._id = userId
+  next.updatedAt = timestamp
+  putDocument(classroomPlanDocs, userId, next)
+  invalidateClassroomPool(userId)
+  sync.unlock(lockName)
+  c.json(200, {ok: true, plan: classroomPlanFor(userId), billing: classroomBillingInfo(userId)})
 )
 
 def handleClassroomCheckout(*serve.Context c) (
