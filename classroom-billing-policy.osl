@@ -54,13 +54,13 @@ def subscriptionItems(object subscription) array (
   return (items.data ?? []).assertElse(array, [])
 )
 
-def subscriptionSeatPacks(object subscription, string seatPackPrice) number (
+def subscriptionSeatPacks(object subscription, array seatPackPrices) number (
   number packs = 0
   array items = subscriptionItems(subscription)
   for i items.len (
     object item = items[i].assertElse(object, {})
-    object price = (item.price ?? {}).assertElse(object, {})
-    if seatPackPrice != "" and (price.id ?? "").toStr() == seatPackPrice (
+    string priceId = ((item.price ?? {}).assertElse(object, {}).id ?? "").toStr()
+    if priceId != "" and seatPackPrices.contains(priceId) (
       packs += (item.quantity ?? 0).toNum()
     )
   )
@@ -79,7 +79,7 @@ def subscriptionPeriodEnd(object subscription) number (
   return periodEnd
 )
 
-def classroomPlanFromSubscription(object subscription, string seatPackPrice) object (
+def classroomPlanFromSubscription(object subscription, array seatPackPrices) object (
   string status = (subscription.status ?? "").toStr()
   if !classroomSubscriptionActive(status) (
     return {tier: "free", seats: 0, expiresAt: 0, stripeStatus: status}
@@ -89,7 +89,7 @@ def classroomPlanFromSubscription(object subscription, string seatPackPrice) obj
   if periodEnd > 0 (
     expiresAt = (periodEnd * 1000) + classroomBillingGraceMs
   )
-  number seats = classroomPlanDefaults("classroom").seats.toNum() + (subscriptionSeatPacks(subscription, seatPackPrice) * classroomSeatPackSize)
+  number seats = classroomPlanDefaults("classroom").seats.toNum() + (subscriptionSeatPacks(subscription, seatPackPrices) * classroomSeatPackSize)
   return {tier: "classroom", seats: seats, expiresAt: expiresAt, stripeStatus: status}
 )
 
@@ -135,4 +135,35 @@ def classroomTrialEndsAt(object stored, number now) number (
     return expiresAt
   )
   return 0
+)
+
+def classroomBillingIntervals(string monthlyPrice, string yearlyPrice) array (
+  array intervals = []
+  if yearlyPrice != "" (
+    intervals.append("year")
+  )
+  if monthlyPrice != "" (
+    intervals.append("month")
+  )
+  return intervals
+)
+
+def classroomCheckoutInterval(string requested, array intervals) string (
+  if intervals.contains(requested) (
+    return requested
+  )
+  if intervals.len == 0 (
+    return ""
+  )
+  return intervals[1].toStr()
+)
+
+def classroomPriceForInterval(string interval, string monthlyPrice, string yearlyPrice) string (
+  if interval == "year" (
+    return yearlyPrice
+  )
+  if interval == "month" (
+    return monthlyPrice
+  )
+  return ""
 )
