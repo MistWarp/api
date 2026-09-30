@@ -190,7 +190,7 @@ def handleGetUserAdmin(*serve.Context c) (
     return
   )
   object profile = loadProfile(name)
-  boolean commentsOff = profile.contains("commentsOff") and profile.commentsOff == true
+  boolean commentsOff = effectiveProfileCommentsOff(profile)
   array followers = profile.followers.assert(array)
   array following = profile.following.assert(array)
   c.json(200, {

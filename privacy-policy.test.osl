@@ -1,0 +1,73 @@
+import "std:testing"
+import "std:regex"
+import "./classroom-policy.osl"
+import "./privacy-policy.osl"
+
+testing.assert(roturReportsMinor({valid: true, minor: true}), "rotur can report a minor")
+testing.assert(!roturReportsMinor({valid: true, minor: false}), "adults are not minors")
+testing.assert(!roturReportsMinor({valid: true}), "a missing minor flag means an adult")
+testing.assert(!roturReportsMinor({valid: true, minor: null}), "a null minor flag means an adult")
+
+object adult = {username: "maya", minor: false}
+object minor = {username: "sam", minor: true}
+object legacy = {username: "old"}
+object student = {username: "sam~k7p2q"}
+
+testing.assert(!profileIsMinor(adult), "adult profiles are not minors")
+testing.assert(profileIsMinor(minor), "minor profiles are minors")
+testing.assert(!profileIsMinor(legacy), "profiles without the flag are treated as adults")
+testing.assert(profileIsMinor(student), "classroom students are treated as minors")
+
+testing.assert(effectiveShowRecentActivity(adult), "adults show recent activity by default")
+testing.assert(!effectiveShowRecentActivity(minor), "minors hide recent activity by default")
+testing.assert(effectiveShowRecentActivity(legacy), "legacy profiles keep recent activity visible")
+testing.assert(!effectiveShowRecentActivity(student), "students hide recent activity by default")
+testing.assert(effectiveShowRecentActivity({username: "sam", minor: true, showRecentActivity: true}), "a minor can choose to show recent activity")
+testing.assert(!effectiveShowRecentActivity({username: "maya", minor: false, showRecentActivity: false}), "an adult choice to hide activity is kept")
+testing.assert(!effectiveShowRecentActivity({username: "sam", minor: true, showRecentActivity: null}), "a null choice falls back to the minor default")
+
+testing.assert(!effectiveProfileCommentsOff(adult), "adult profiles accept comments by default")
+testing.assert(effectiveProfileCommentsOff(minor), "minor profiles turn comments off by default")
+testing.assert(!effectiveProfileCommentsOff({username: "sam", minor: true, commentsOff: false}), "a minor can turn profile comments back on")
+testing.assert(effectiveProfileCommentsOff({username: "maya", commentsOff: true}), "an adult choice to turn comments off is kept")
+
+testing.assert(profileSearchable({username: "maya", minor: false}), "adults appear in user search")
+testing.assert(profileSearchable({username: "old"}), "legacy search entries appear in user search")
+testing.assert(!profileSearchable({username: "sam", minor: true}), "minors never appear in user search")
+testing.assert(!profileSearchable({username: "sam~k7p2q"}), "students never appear in user search")
+
+testing.assert(publicPlaytime(5000, false) == 5000, "adult playtime is shown")
+testing.assert(publicPlaytime(5000, true) == 0, "minor playtime is hidden")
+
+object privacyAdult = activityPrivacy({username: "maya", hiddenLibraryProjects: ["p9"]})
+testing.assert(privacyAdult.showActivity == true, "adult activity privacy shows activity")
+testing.assert(privacyAdult.minor == false, "adult activity privacy is not a minor")
+testing.assert(privacyAdult.hiddenLibrary.assert(array).contains("p9"), "hidden library items are carried over")
+object privacyMinor = activityPrivacy({username: "sam", minor: true})
+testing.assert(privacyMinor.showActivity == false, "minor activity privacy hides activity by default")
+testing.assert(privacyMinor.hiddenLibrary.assert(array).len == 0, "a missing hidden list is empty")
+
+object visibilities = {p1: "public", p2: "unlisted", p3: "private", p9: "public"}
+object openPrivacy = {showActivity: true, minor: false, hiddenLibrary: ["p9"]}
+object quietPrivacy = {showActivity: false, minor: false, hiddenLibrary: []}
+object minorPrivacy = {showActivity: true, minor: true, hiddenLibrary: []}
+
+testing.assert(activityItemVisible({type: "love", projectId: "p1"}, openPrivacy, visibilities), "hearts on public projects are shown")
+testing.assert(activityItemVisible({type: "favorite", projectId: "p1"}, openPrivacy, visibilities), "saves of public projects are shown")
+testing.assert(!activityItemVisible({type: "favorite", projectId: "p9"}, openPrivacy, visibilities), "saves hidden from the library stay hidden")
+testing.assert(activityItemVisible({type: "love", projectId: "p9"}, openPrivacy, visibilities), "hiding a library item does not hide a heart")
+testing.assert(!activityItemVisible({type: "love", projectId: "p2"}, openPrivacy, visibilities), "hearts on unlisted projects are never shown")
+testing.assert(!activityItemVisible({type: "share", projectId: "p3"}, openPrivacy, visibilities), "events about private projects are never shown")
+testing.assert(!activityItemVisible({type: "share", projectId: "p2"}, openPrivacy, visibilities), "events about unlisted projects are never shown")
+testing.assert(!activityItemVisible({type: "share", projectId: "gone"}, openPrivacy, visibilities), "events about unknown projects are never shown")
+testing.assert(!activityItemVisible({type: "share"}, openPrivacy, visibilities), "events without a project are never shown")
+testing.assert(activityItemVisible({type: "remix", projectId: "p1", parentId: "p9"}, openPrivacy, visibilities), "remixes of public projects are shown")
+testing.assert(!activityItemVisible({type: "remix", projectId: "p1", parentId: "p3"}, openPrivacy, visibilities), "remixes do not reveal a private parent")
+
+testing.assert(!activityItemVisible({type: "love", projectId: "p1"}, quietPrivacy, visibilities), "hearts are hidden when recent activity is off")
+testing.assert(!activityItemVisible({type: "favorite", projectId: "p1"}, quietPrivacy, visibilities), "saves are hidden when recent activity is off")
+testing.assert(activityItemVisible({type: "share", projectId: "p1"}, quietPrivacy, visibilities), "shared projects still appear when recent activity is off")
+
+testing.assert(!activityItemVisible({type: "love", projectId: "p1"}, minorPrivacy, visibilities), "a minor's hearts are never shown")
+testing.assert(!activityItemVisible({type: "favorite", projectId: "p1"}, minorPrivacy, visibilities), "a minor's saves are never shown")
+testing.assert(activityItemVisible({type: "release", projectId: "p1"}, minorPrivacy, visibilities), "a minor's public releases can appear")

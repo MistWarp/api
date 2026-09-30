@@ -2463,7 +2463,7 @@ def handleListProjectReviews(*serve.Context c) (
   for i reviews.len (
     object review = reviews[i].assert(object)
     ratingTotal += review.rating.toNum()
-    review.playtimeMs = projectPlaytime(c.param("id"), review.author.toStr())
+    review.playtimeMs = authorPublicPlaytime(c.param("id"), review.author.toStr())
     string authorId = ""
     if review.contains("authorId") and review.authorId != null (
       authorId = review.authorId.toStr()
@@ -2498,7 +2498,7 @@ def handleListUserReviews(*serve.Context c) (
         object project = result.project.assert(object)
         review.projectTitle = project.title
         review.projectOwner = project.owner
-        review.playtimeMs = projectPlaytime(review.projectId.toStr(), review.author.toStr())
+        review.playtimeMs = authorPublicPlaytime(review.projectId.toStr(), review.author.toStr())
         reviews.append(review)
       )
     )
@@ -2546,7 +2546,7 @@ def handleSaveProjectReview(*serve.Context c) (
   if existing.len == 0 (
     addNotification(project.owner.toStr(), c.getString("username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
   )
-  review.playtimeMs = projectPlaytime(project.id.toStr(), review.author.toStr())
+  review.playtimeMs = authorPublicPlaytime(project.id.toStr(), review.author.toStr())
   c.json(200, {ok: true, review: review})
 )
 

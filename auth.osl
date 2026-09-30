@@ -6,11 +6,12 @@ def clearAuthCookie(*serve.Context c) (
   c.clearCookie("auth_token")
 )
 
-def createSession(string username, string userId) string (
+def createSession(string username, string userId, boolean minor) string (
   string sessionId = randomString(32)
   object session = {
     username: username,
     userId: userId,
+    minor: minor,
     createdAt: timestamp
   }
   writeFile(sessionsDir ++ sessionId ++ ".json", session)
@@ -45,7 +46,7 @@ def getSession(string token) object (
   if mapped != "" (
     username = mapped
   )
-  return {ok: true, username: username, userId: userId}
+  return {ok: true, username: username, userId: userId, minor: session.minor == true}
 )
 
 def deleteSession(string token) boolean (
@@ -93,7 +94,7 @@ def handleRoturAuth(*serve.Context c) (
     return
   )
 
-  object resp = requests.get("https://api.rotur.dev/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
+  object resp = requests.get(roturBase ++ "/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
   if !resp.success (
     c.json(401, {ok: false, error: "failed to validate token"})
     return
@@ -134,6 +135,7 @@ def handleRoturAuth(*serve.Context c) (
 
   string userId = data.id.toStr()
   string username = data.username.toStr()
+  boolean minor = roturReportsMinor(data)
 
   ensureUserIdentity(userId, username)
 
@@ -150,16 +152,18 @@ def handleRoturAuth(*serve.Context c) (
   object profile = loadProfile(username)
   profile.userId = userId
   profile.username = username
+  profile.minor = minor
   saveProfile(profile)
 
-  string sessionId = createSession(username, userId)
+  string sessionId = createSession(username, userId, minor)
   setAuthCookie(c, sessionId)
 
   c.json(200, {
     ok: true,
     token: sessionId,
     username: username,
-    isAdmin: isAdminUser(username)
+    isAdmin: isAdminUser(username),
+    minor: minor
   })
 )
 
@@ -187,6 +191,7 @@ def handleGetMe(*serve.Context c) (
       created: student.createdAt,
       isAdmin: false,
       isStudent: true,
+      minor: true,
       classId: student.classId,
       standing: "good"
     })
@@ -204,6 +209,7 @@ def handleGetMe(*serve.Context c) (
     bio: profile.bio,
     featuredProject: profile.featuredProject,
     isAdmin: c.getBool("isAdmin"),
+    minor: c.getBool("isMinor") or profileIsMinor(profile),
     standing: standingLevel(username)
   })
 )
