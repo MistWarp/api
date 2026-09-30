@@ -380,7 +380,7 @@ def handleGetProjectComments(*serve.Context c) (
     )
     string authorKey = normalizeUsername(comment.author.toStr())
     if !playtimeByAuthor.contains(authorKey) (
-      playtimeByAuthor[authorKey] = projectPlaytime(project.id.toStr(), comment.author.toStr())
+      playtimeByAuthor[authorKey] = authorPublicPlaytime(project.id.toStr(), comment.author.toStr())
     )
     comment.playtimeMs = playtimeByAuthor[authorKey]
     comments[i] = comment
@@ -573,7 +573,7 @@ def handleCreateProjectComment(*serve.Context c) (
   )
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
   created.comment = commentResponse(created.comment.assert(object), commenter)
-  created.comment.playtimeMs = projectPlaytime(project.id.toStr(), commenter)
+  created.comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), commenter)
   siteBroadcastProject(project.id.toStr(), {
     type: "comment_created",
     projectId: project.id,
@@ -623,7 +623,7 @@ def handleEditProjectComment(*serve.Context c) (
     return
   )
   edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
-  edited.comment.playtimeMs = projectPlaytime(c.param("id"), edited.comment.author.toStr())
+  edited.comment.playtimeMs = authorPublicPlaytime(c.param("id"), edited.comment.author.toStr())
   siteBroadcastProject(c.param("id"), {
     type: "comment_edited",
     projectId: c.param("id"),
@@ -651,7 +651,7 @@ def handlePinProjectComment(*serve.Context c) (
     return
   )
   updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
-  updated.comment.playtimeMs = projectPlaytime(project.id.toStr(), updated.comment.author.toStr())
+  updated.comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), updated.comment.author.toStr())
   siteBroadcastProject(project.id.toStr(), {
     type: "comment_edited",
     projectId: project.id,
@@ -666,8 +666,7 @@ def profileCommentKey(string name) string (
 )
 
 def profileCommentsOff(string name) boolean (
-  object profile = loadProfile(name)
-  return profile.contains("commentsOff") and profile.commentsOff == true
+  return effectiveProfileCommentsOff(loadProfile(name))
 )
 
 def handleGetProfileComments(*serve.Context c) (

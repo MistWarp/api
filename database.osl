@@ -105,7 +105,7 @@ def syncSearchProfile(object profile) boolean (
     userId = profile.userId.toStr()
   )
   number created = if profile.contains("created") then profile.created.toNum() else 0
-  object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, edited: timestamp}
+  object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, minor: profileIsMinor(profile), edited: timestamp}
   return putDocument(profileSearchDocs, key, entry)
 )
 
