@@ -305,8 +305,8 @@ def projectResponse(object project,*serve.Context c) object (
     id: project.id,
     owner: project.owner,
     groupTag: groupTagOf(project),
-    branding: project.contains("branding") ? project.branding {},
-    vanitySlug: project.contains("vanitySlug") ? project.vanitySlug "",
+    branding: if project.contains("branding") then project.branding else {},
+    vanitySlug: if project.contains("vanitySlug") then project.vanitySlug else "",
     title: project.title,
     tags: tags,
     compatibility: compatibility,
@@ -325,7 +325,7 @@ def projectResponse(object project,*serve.Context c) object (
     shared: project.shared,
     visibility: projectVisibility(project),
     price: price,
-    remixShare: project.contains("remixShare") ? project.remixShare 0,
+    remixShare: if project.contains("remixShare") then project.remixShare else 0,
     locked: locked,
     bought: bought,
     saved: isInLibrary(viewer, project.id.toStr()),
@@ -520,7 +520,7 @@ def handleCreateProject(*serve.Context c) (
     lastUploadAt: 0,
     remixParent: remixParent,
     contributionOnly: contributionOnly,
-    remixShare: remixParent == "" ? 0 10,
+    remixShare: if remixParent == "" then 0 else 10,
     remixNotified: false,
     scratchOrigin: scratchOrigin,
     views: 0,
@@ -716,7 +716,7 @@ def cleanupExpiredStagedUploadParts() (
       string token = filename.replace("upload-part-", "").replace(".json", "")
       auto loaded = readFile(tmpDir ++ filename)
       if !loaded.ok or loaded.data.expires.toNum() < timestamp (
-        object metadata = loaded.ok ? loaded.data.assert(object) {}
+        object metadata = if loaded.ok then loaded.data.assert(object) else {}
         if metadata.contains("chunks") (
           removeUploadPartChunks(token, metadata.chunks.toNum())
         )
@@ -1535,7 +1535,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     mergeTreeFile = stagedMergeTree.file.assert(object)
     hasMergeTree = true
   )
-  number storageAllowanceBytes = c.getBool("isAdmin") ? -1 projectStorageAllowance(project)
+  number storageAllowanceBytes = if c.getBool("isAdmin") then -1 else projectStorageAllowance(project)
 
   string id = project.id.toStr()
   string workId = id ++ "." ++ randomString(8)
@@ -1696,11 +1696,11 @@ def handleUploadProjectLocked(*serve.Context c) (
     boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
     mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
     mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, mergeTree.data)
-    string mergeBranch = branchMerge ? mergeTargetBranch (project.gitBranch ?? "main").toStr()
-    string mergeRemixParent = project.contains("remixParent") and project.remixParent != null ? project.remixParent.toStr() ""
-    string mergeBaseCommit = project.contains("remixBaseCommit") and project.remixBaseCommit != null ? project.remixBaseCommit.toStr() ""
+    string mergeBranch = if branchMerge then mergeTargetBranch else (project.gitBranch ?? "main").toStr()
+    string mergeRemixParent = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
+    string mergeBaseCommit = if project.contains("remixBaseCommit") and project.remixBaseCommit != null then project.remixBaseCommit.toStr() else ""
     string mergeProjectId = project.id.toStr()
-    string mergeMessage = branchMerge ? "Merge branch '" ++ mergeSourceBranch ++ "' into '" ++ mergeTargetBranch ++ "'" "Merge pull request #" ++ pullId
+    string mergeMessage = if branchMerge then "Merge branch '" ++ mergeSourceBranch ++ "' into '" ++ mergeTargetBranch ++ "'" else "Merge pull request #" ++ pullId
     number mergeTimestamp = timestamp
     string mergeJson = ""
     if mergeReady (
@@ -1730,9 +1730,9 @@ def handleUploadProjectLocked(*serve.Context c) (
   if restoreCommit != "" and !hasWorkspace (
     string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
     string restoreDeltaPath = tmpDir ++ workId ++ ".restore-delta.mwp"
-    string restoreBranch = project.contains("gitBranch") and project.gitBranch != null ? project.gitBranch.toStr() "main"
-    string restoreRemixParent = project.contains("remixParent") and project.remixParent != null ? project.remixParent.toStr() ""
-    string restoreBaseCommit = project.contains("remixBaseCommit") and project.remixBaseCommit != null ? project.remixBaseCommit.toStr() ""
+    string restoreBranch = if project.contains("gitBranch") and project.gitBranch != null then project.gitBranch.toStr() else "main"
+    string restoreRemixParent = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
+    string restoreBaseCommit = if project.contains("remixBaseCommit") and project.remixBaseCommit != null then project.remixBaseCommit.toStr() else ""
     number restoreTimestamp = timestamp
     boolean restoreReady = copyProjectWorkspaceToPath(project, restoreBasePath)
     string restoreJson = ""
@@ -2177,8 +2177,8 @@ def handleUpdateProjectLocked(*serve.Context c) (
       c.badRequest("branding tagline is too long")
       return
     )
-    object nextBranding = clearingBranding ? {} {accentColor: accentColor, tagline: tagline}
-    object currentBranding = project.contains("branding") ? project.branding.assertElse(object, {}) {}
+    object nextBranding = if clearingBranding then {} else {accentColor: accentColor, tagline: tagline}
+    object currentBranding = if project.contains("branding") then project.branding.assertElse(object, {}) else {}
     if creatorBenefits.customProjectBranding != true and json.stringify(nextBranding) != json.stringify(currentBranding) (
       c.forbidden("custom project branding requires Rotur Plus or Pro")
       return
@@ -2187,7 +2187,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
   )
   if body.contains("vanitySlug") (
     string slug = body.vanitySlug.toStr().toLower().strip()
-    string currentSlug = project.contains("vanitySlug") ? project.vanitySlug.toStr() ""
+    string currentSlug = if project.contains("vanitySlug") then project.vanitySlug.toStr() else ""
     if slug != "" and slug != currentSlug and creatorBenefits.vanityProjectUrls != true (
       c.forbidden("vanity project URLs require Rotur Pro")
       return

@@ -9,7 +9,7 @@ def projectHasStoredContent(object project) boolean (
 )
 
 def projectHistorySourceVersion(object project) string (
-  array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
+  array assets = if project.contains("assets") then project.assets.assertElse(array, []) else []
   return project.jsonKey.toStr() ++ "\n" ++ project.lastUploadAt.toStr() ++ "\n" ++ project.pendingJson.toStr() ++ "\n" ++ project.remixParent.toStr() ++ "\n" ++ project.remixBaseCommit.toStr() ++ "\n" ++ project.edited.toStr() ++ "\n" ++ json.stringify(assets)
 )
 
@@ -52,7 +52,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
     fs.remove(assetsPath)
     return {ok: false, error: "could not read project JSON"}
   )
-  array assets = project.contains("assets") ? project.assets.assertElse(array, []) []
+  array assets = if project.contains("assets") then project.assets.assertElse(array, []) else []
   boolean assetsReady = true
   number missingAssets = 0
   for i assets.len (

@@ -735,13 +735,13 @@ def challengeProjects(object space,*serve.Context c) array (
       if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
         object entry = indexEntryFromProject(project)
         object summary = challengeScoreSummary(space, project.id.toStr(), c.getString("username"))
-        entry.judgeScore = showResults ? summary.judgeScore 0
+        entry.judgeScore = if showResults then summary.judgeScore else 0
         entry.judgeScoreCount = summary.judgeScoreCount
-        entry.audienceScore = showResults ? summary.audienceScore 0
+        entry.audienceScore = if showResults then summary.audienceScore else 0
         entry.audienceVoteCount = summary.audienceVoteCount
         entry.myVote = summary.myVote
-        entry.myScore = isChallengeJudge(space, c.getString("username")) ? summary.myScore {}
-        entry.scoreBreakdown = canManageSpace(space, c) ? summary.scores []
+        entry.myScore = if isChallengeJudge(space, c.getString("username")) then summary.myScore else {}
+        entry.scoreBreakdown = if canManageSpace(space, c) then summary.scores else []
         projects.append(entry)
       )
     )
@@ -792,7 +792,7 @@ def spaceResponse(object space,*serve.Context c) object (
     object visibleProject = projects[i].assert(object)
     visibleIds.append(visibleProject.id)
   )
-  response.projectIds = canManageSpace(space, c) ? ids visibleIds
+  response.projectIds = if canManageSpace(space, c) then ids else visibleIds
   response.canManage = canManageSpace(space, c)
   response.isOwner = isSpaceOwner(space, c)
   response.following = stringArrayContainsUser(spaceFollowers(space), c.getString("username"))
@@ -1867,7 +1867,7 @@ def handleReactSpaceLocked(*serve.Context c) (
     return
   )
   notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
-  c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: hadReaction ? "" reactionType})
+  c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: if hadReaction then "" else reactionType})
 )
 
 def handleGetSpaceComments(*serve.Context c) (
