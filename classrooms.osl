@@ -235,6 +235,7 @@ def taughtClassOrFail(*serve.Context c) object (
     c.notFound("class not found")
     return {}
   )
+  touchClassroomActivity(classDoc)
   return classDoc
 )
 
@@ -268,11 +269,13 @@ def handleGetClassroom(*serve.Context c) (
   array classes = classesTaughtBy(userId)
   array rows = []
   for i classes.len (
+    touchClassroomActivity(classes[i].assert(object))
     rows.append(classResponse(classes[i].assert(object), c))
   )
   c.json(200, {
     ok: true,
     role: "teacher",
+    terms: classroomTermsStatus(userId),
     plan: classroomPlanFor(userId),
     usage: classroomUsage(userId),
     billing: classroomBillingInfo(userId),
@@ -347,7 +350,7 @@ def handleGetClass(*serve.Context c) (
   c.json(200, {
     ok: true,
     class: classResponse(classDoc, c),
-    presentation: presentationOrNull(classId),
+    presentation: if classPresentation(classId).len == 0 then null else classPresentation(classId),
     students: studentRows,
     assignments: assignmentRows,
     plan: classroomPlanFor(ownerId),
@@ -395,6 +398,9 @@ def handleDeleteClass(*serve.Context c) (
     c.json(409, {ok: false, code: "class_not_empty", error: "Move or delete every student before deleting the class."})
     return
   )
+  deleteDocumentsByField(classroomGroupDocs, "classId", classId)
+  deleteDocumentsByField(classroomPresentationDocs, "classId", classId)
+  deleteDocumentsByField(classroomClaimDocs, "classId", classId)
   deleteDocumentsByField(assignmentDocs, "classId", classId)
   deleteDocumentsByField(submissionDocs, "classId", classId)
   deleteDocumentsByField(classroomAuditDocs, "classId", classId)
@@ -737,6 +743,7 @@ def deleteStudentAccount(object student) (
   string studentId = student["_id"].toStr()
   purgeUser(studentId, student.username.toStr())
   deleteDocumentsByField(submissionDocs, "studentId", studentId)
+  deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
   studentDocs.deleteOne({_id: studentId})
 )
 
@@ -1058,7 +1065,7 @@ def handleGetStudentClassroom(*serve.Context c) (
     role: "student",
     student: {id: student["_id"], displayName: student.displayName, username: student.username},
     class: {id: classDoc["_id"], name: classDoc.name, teacher: classDoc.owner},
-    presentation: presentationOrNull(classDoc["_id"].toStr()),
+    presentation: if classPresentation(classDoc["_id"].toStr()).len == 0 then null else classPresentation(classDoc["_id"].toStr()),
     assignments: studentAssignmentRows(student),
     projects: projects,
     storage: storage

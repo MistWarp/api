@@ -1,0 +1,256 @@
+def classroomTermsRecord(string userId) object (
+  return classroomTermsDocs.findById(userId)
+)
+
+def classroomTermsStatus(string userId) object (
+  object record = classroomTermsRecord(userId)
+  boolean accepted = classroomTermsAccepted(record)
+  return {
+    version: classroomTermsVersion,
+    accepted: accepted,
+    acceptedAt: if accepted then record.acceptedAt else 0,
+    organisation: if accepted then record.organisation else ""
+  }
+)
+
+def requireClassroomTerms(*serve.Context c) (
+  if c.getBool("isStudent") (
+    c.next()
+    return
+  )
+  if !classroomTermsAccepted(classroomTermsRecord(c.getString("userId"))) (
+    c.json(428, {
+      ok: false,
+      code: "classroom_terms_required",
+      error: "Accept the Classroom terms on the Classroom page before adding classes or students.",
+      version: classroomTermsVersion
+    })
+    c.abort()
+    return
+  )
+  c.next()
+)
+
+def handleAcceptClassroomTerms(*serve.Context c) (
+  object body = c.bodyJSON()
+  if (body.version ?? "").toStr() != classroomTermsVersion (
+    c.json(409, {ok: false, code: "terms_changed", error: "The Classroom terms have changed. Reload the page and read the new version.", version: classroomTermsVersion})
+    return
+  )
+  if !classroomTermsBodyValid(body) (
+    c.badRequest("confirm you are authorised and name your school or organisation")
+    return
+  )
+  string userId = c.getString("userId")
+  object record = classroomTermsAcceptance(classroomTermsRecord(userId), body, c.getString("username"), timestamp)
+  putDocument(classroomTermsDocs, userId, record)
+  c.json(200, {ok: true, terms: classroomTermsStatus(userId)})
+)
+
+def touchClassroomActivity(object classDoc) (
+  if classDoc.len == 0 or !classroomActivityNeedsTouch(classDoc, timestamp) (
+    return
+  )
+  string classId = classDoc["_id"].toStr()
+  object fresh = loadClass(classId)
+  if fresh.len == 0 (
+    return
+  )
+  fresh.teacherActiveAt = timestamp
+  fresh.retentionWarnedAt = 0
+  putDocument(classDocs, classId, fresh)
+)
+
+def recordClassroomSystemAudit(string classId, string action, object detail) (
+  classroomAuditDocs.insertOne({
+    _id: "ca" ++ storagefs.UniqueTimestamp() ++ randomString(4),
+    classId: classId,
+    actorId: "",
+    actor: "MistWarp",
+    action: action,
+    detail: detail,
+    at: timestamp
+  })
+)
+
+def studentExportRow(object student) object (
+  return {
+    id: student["_id"],
+    displayName: student.displayName,
+    username: student.username,
+    disabled: student.disabled == true,
+    createdAt: student.createdAt,
+    lastLoginAt: student.lastLoginAt ?? 0,
+    failedLogins: student.failedLogins ?? 0,
+    lockedUntil: student.lockedUntil ?? 0,
+    projects: ownerIndexEntries(student.username.toStr(), true).map((any entry) any -> {id: entry.id, title: entry.title, created: entry.created ?? 0, edited: entry.edited})
+  }
+)
+
+def classExportData(object classDoc) object (
+  string classId = classDoc["_id"].toStr()
+  array students = []
+  array studentRows = studentsInClass(classId)
+  for j studentRows.len (
+    students.append(studentExportRow(studentRows[j].assert(object)))
+  )
+  return {
+    id: classId,
+    name: classDoc.name,
+    owner: classDoc.owner,
+    coTeachers: classDoc.coTeachers ?? [],
+    archived: classDoc.archived == true,
+    loginMode: classDoc.loginMode,
+    createdAt: classDoc.createdAt,
+    teacherActiveAt: classDoc.teacherActiveAt ?? 0,
+    students: students,
+    assignments: assignmentDocs.where("classId", db.equal, classId).all(),
+    submissions: submissionDocs.where("classId", db.equal, classId).all(),
+    groups: classroomGroupDocs.where("classId", db.equal, classId).all(),
+    activity: classroomAuditDocs.where("classId", db.equal, classId).sort("at", db.desc).all()
+  }
+)
+
+def handleExportClass(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  string classId = classDoc["_id"].toStr()
+  recordClassroomAudit(classId, c, "class_exported", {})
+  c.setHeader("Content-Disposition", "attachment; filename=\"mistwarp-class-" ++ classId ++ ".json\"")
+  c.json(200, {ok: true, exportedAt: timestamp, termsVersion: classroomTermsVersion, class: classExportData(classDoc)})
+)
+
+def handleExportClassStudent(*serve.Context c) (
+  object classDoc = taughtClassOrFail(c)
+  if classDoc.len == 0 return
+  object student = classStudentOrFail(c, classDoc)
+  if student.len == 0 return
+  string classId = classDoc["_id"].toStr()
+  string studentId = student["_id"].toStr()
+  array activity = []
+  array events = classroomAuditDocs.where("classId", db.equal, classId).sort("at", db.desc).all()
+  for i events.len (
+    object event = events[i].assert(object)
+    object detail = (event.detail ?? {}).assertElse(object, {})
+    if (detail.studentId ?? "").toStr() == studentId or (event.actorId ?? "").toStr() == studentId (
+      activity.append(event)
+    )
+  )
+  array groups = []
+  array classGroups = classroomGroupDocs.where("classId", db.equal, classId).all()
+  for i classGroups.len (
+    object group = classGroups[i].assert(object)
+    if (group.studentIds ?? []).assertElse(array, []).contains(studentId) (
+      groups.append(group)
+    )
+  )
+  recordClassroomAudit(classId, c, "student_exported", {studentId: studentId, displayName: student.displayName})
+  c.setHeader("Content-Disposition", "attachment; filename=\"mistwarp-student-" ++ studentId ++ ".json\"")
+  c.json(200, {
+    ok: true,
+    exportedAt: timestamp,
+    class: {id: classId, name: classDoc.name, owner: classDoc.owner},
+    student: studentExportRow(student),
+    submissions: submissionDocs.where("studentId", db.equal, studentId).all(),
+    groups: groups,
+    activity: activity,
+    pendingRelease: classroomClaimDocs.where("studentId", db.equal, studentId).all().map((any claim) any -> {createdAt: claim.createdAt, expiresAt: claim.expiresAt})
+  })
+)
+
+def purgeClassroomClass(object classDoc) number (
+  string classId = classDoc["_id"].toStr()
+  array students = studentsInClass(classId)
+  for i students.len (
+    deleteStudentAccount(students[i].assert(object))
+  )
+  deleteDocumentsByField(classroomGroupDocs, "classId", classId)
+  deleteDocumentsByField(classroomPresentationDocs, "classId", classId)
+  deleteDocumentsByField(classroomClaimDocs, "classId", classId)
+  deleteDocumentsByField(assignmentDocs, "classId", classId)
+  deleteDocumentsByField(submissionDocs, "classId", classId)
+  deleteDocumentsByField(classroomAuditDocs, "classId", classId)
+  classDocs.deleteOne({_id: classId})
+  invalidateClassroomPool((classDoc.ownerId ?? "").toStr())
+  return students.len
+)
+
+def warnClassroomRetention(object classDoc) (
+  string classId = classDoc["_id"].toStr()
+  number deleteAt = classroomRetentionDeleteAt(classDoc, timestamp)
+  array teachers = classTeacherIds(classDoc)
+  for i teachers.len (
+    string teacherName = usernameForId(teachers[i].toStr())
+    if teacherName != "" (
+      addNotification(teacherName, "", "classroom_retention_warning", {classId: classId, className: classDoc.name, deleteAt: deleteAt})
+    )
+  )
+  classDoc.retentionWarnedAt = timestamp
+  putDocument(classDocs, classId, classDoc)
+  recordClassroomSystemAudit(classId, "retention_warning", {deleteAt: deleteAt})
+)
+
+def sweepClassroomRetention() (
+  array classes = classDocs.all()
+  for i classes.len (
+    object classDoc = classes[i].assert(object)
+    string action = classroomRetentionAction(classDoc, timestamp)
+    if action == "start" (
+      classDoc.teacherActiveAt = timestamp
+      putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
+    ) else if action == "warn" (
+      warnClassroomRetention(classDoc)
+    ) else if action == "delete" (
+      number removed = purgeClassroomClass(classDoc)
+      log "classroom retention: deleted class " ++ classDoc["_id"].toStr() ++ " with " ++ removed.toStr() ++ " students after 12 months without a teacher"
+    )
+  )
+)
+
+def classroomRetentionLoop() (
+  process.sleep(600)
+  while true (
+    sweepClassroomRetention()
+    process.sleep(21600)
+  )
+)
+
+def handleAdminPurgeClassroom(*serve.Context c) (
+  object body = c.bodyJSON()
+  if body.confirm != "delete" (
+    c.badRequest("send confirm: \"delete\" to erase this classroom data")
+    return
+  )
+  array classes = []
+  string target = ""
+  string schoolId = (body.schoolId ?? "").toStr()
+  if schoolId != "" (
+    object school = schoolDocs.findById(schoolId)
+    if school.len == 0 (
+      c.badRequest("school not found")
+      return
+    )
+    array classIds = schoolClassIds(school)
+    for i classIds.len (
+      object classDoc = loadClass(classIds[i].toStr())
+      if classDoc.len > 0 (
+        classes.append(classDoc)
+      )
+    )
+    target = "school " ++ schoolId
+  ) else (
+    string userId = teacherIdForUsername((body.username ?? "").toStr())
+    if userId == "" (
+      c.badRequest("Rotur user not found")
+      return
+    )
+    classes = classesOwnedBy(userId)
+    target = "teacher " ++ userId
+  )
+  number students = 0
+  for i classes.len (
+    students += purgeClassroomClass(classes[i].assert(object))
+  )
+  log "classroom purge by " ++ c.getString("username") ++ ": " ++ target ++ ", " ++ classes.len.toStr() ++ " classes, " ++ students.toStr() ++ " students"
+  c.json(200, {ok: true, classes: classes.len, students: students})
+)
