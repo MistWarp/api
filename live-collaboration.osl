@@ -107,7 +107,7 @@ def handleLiveCollaboration(*serve.Context c) (
     object activeMembers = session.members.assert(object)
     for key in activeMembers.getKeys() (
       string memberRole = projectRole(project, key)
-      if activeMembers[key].expires.toNum() <= timestamp or memberRole == "" or memberRole == "tester" (
+      if activeMembers[key].expires.toNum() <= timestamp or memberRole == "" (
         activeMembers.delete(key)
       )
     )
@@ -154,12 +154,11 @@ def handleLiveCollaboration(*serve.Context c) (
         string peerId = body.peerId.assertElse(string, "")
         if !canJoinLiveSession(session, role) (
           errorMessage = "this session is not open to your account"
-        ) else if peerId == "" or peerId.len > 200 or role == "tester" (
-          errorMessage = "a contributor account and connected room are required"
+        ) else if peerId == "" or peerId.len > 200 (
+          errorMessage = "a connected room is required"
         ) else (
           if !members.contains(username) or members[username].peerId.toStr() != peerId (
-            boolean approved = role != "" and role != "tester"
-            members[username] = {username: username, peerId: peerId, approved: approved, expires: timestamp + 90000}
+            members[username] = {username: username, peerId: peerId, approved: true, access: liveAccessForRole(role), expires: timestamp + 90000}
           )
         )
       )
