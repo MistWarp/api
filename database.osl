@@ -104,7 +104,7 @@ def syncSearchProfile(object profile) boolean (
   if profile.contains("userId") and profile.userId != null (
     userId = profile.userId.toStr()
   )
-  number created = profile.contains("created") ? profile.created.toNum() 0
+  number created = if profile.contains("created") then profile.created.toNum() else 0
   object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, edited: timestamp}
   return putDocument(profileSearchDocs, key, entry)
 )
@@ -163,7 +163,7 @@ def initCommunityDatabase() boolean (
     object entry = profileEntries[i].assert(object)
     if !entry.contains("created") (
       object profile = loadProfile(entry.usernameKey.toStr())
-      entry.created = profile.contains("created") ? profile.created.toNum() 0
+      entry.created = if profile.contains("created") then profile.created.toNum() else 0
       putDocument(profileSearchDocs, entry["_id"].toStr(), entry)
     )
   )
@@ -248,12 +248,12 @@ def projectPlaytimeRecord(string projectId, string username) object (
 
 def projectPlaytime(string projectId, string username) number (
   object entry = projectPlaytimeRecord(projectId, username)
-  return entry.len == 0 ? 0 (entry.duration ?? 0).toNum()
+  return if entry.len == 0 then 0 else (entry.duration ?? 0).toNum()
 )
 
 def projectLastPlayed(string projectId, string username) number (
   object entry = projectPlaytimeRecord(projectId, username)
-  return entry.len == 0 ? 0 (entry.updated ?? 0).toNum()
+  return if entry.len == 0 then 0 else (entry.updated ?? 0).toNum()
 )
 
 def projectTotalPlaytime(string projectId) number (

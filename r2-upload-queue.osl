@@ -1,7 +1,7 @@
 def projectStorageActivityAt(object project) number (
   number edited = (project.edited ?? 0).toNum()
   number created = (project.created ?? 0).toNum()
-  return edited > 0 ? edited created
+  return if edited > 0 then edited else created
 )
 
 // Shared blobs must wait for every project that references them, including trash.
@@ -58,12 +58,12 @@ def readR2UploadQueue() object (
     return {ok: false}
   )
   boolean missing = storagefs.Missing(r2UploadQueueFile)
-  return missing ? {ok: true, items: []} {ok: false}
+  return if missing then {ok: true, items: []} else {ok: false}
 )
 
 def loadR2UploadQueue() array (
   object loaded = readR2UploadQueue()
-  return loaded.ok ? loaded.items.assert(array) []
+  return if loaded.ok then loaded.items.assert(array) else []
 )
 
 def queueR2UploadLocked(string key, string contentType, string contentEncoding) boolean (
@@ -73,7 +73,7 @@ def queueR2UploadLocked(string key, string contentType, string contentEncoding) 
   )
   array items = queueResult.items.assert(array)
   string path = localBlobPath(key)
-  number size = fs.exists(path) ? fs.getSize(path) 0
+  number size = if fs.exists(path) then fs.getSize(path) else 0
   object item = {key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp, firstQueuedAt: timestamp}
   boolean found = false
   for i items.len (
@@ -126,7 +126,10 @@ def flushR2UploadQueue() (
   )
   array items = queueResult.items.assert(array)
   auto storedResult = readFile(r2StorageIndexFile)
-  object stored = storedResult.ok ? (storedResult.data.assert(object).objects ?? {}).assertElse(object, {}) {}
+  object stored = {}
+  if storedResult.ok (
+    stored = (storedResult.data.assert(object).objects ?? {}).assertElse(object, {})
+  )
   object queued = {}
   for i items.len (
     queued[items[i].assert(object).key.toStr()] = true

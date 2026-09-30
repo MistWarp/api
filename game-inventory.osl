@@ -149,7 +149,7 @@ def grantInventoryItem(string userId, object project, object item, number amount
   sync.lock(lockName)
   object inventory = loadGameInventory(userId)
   object items = inventory.items.assertElse(object, {})
-  object owned = items.contains(globalId) ? items[globalId].assertElse(object, {}) {}
+  object owned = if items.contains(globalId) then items[globalId].assertElse(object, {}) else {}
   array grantIds = owned.grantIds.assertElse(array, [])
   if owned.lastGrantId.toStr() == sourceId or grantIds.contains(sourceId) (
     sync.unlock(lockName)

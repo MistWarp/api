@@ -254,13 +254,13 @@ def r2ObjectType(string key) string (
 def recordR2Stored(object item) (
   sync.lock("r2-storage-index")
   auto loaded = readFile(r2StorageIndexFile)
-  object data = loaded.ok ? loaded.data.assertElse(object, {}) {}
+  object data = if loaded.ok then loaded.data.assertElse(object, {}) else {}
   if !data.contains("objects") (
     data.objects = {}
   )
   object objects = data.objects
   objects[item.key.toStr()] = {
-    type: item.type.toStr() == "" ? r2ObjectType(item.key.toStr()) item.type,
+    type: if item.type.toStr() == "" then r2ObjectType(item.key.toStr()) else item.type,
     size: item.size.toNum(),
     storedAt: timestamp
   }
@@ -289,7 +289,7 @@ def syncR2StorageInventory(boolean force) object (
   )
   sync.lock("r2-storage-inventory-sync")
   auto loaded = readFile(r2StorageIndexFile)
-  object current = loaded.ok ? loaded.data.assertElse(object, {}) {}
+  object current = if loaded.ok then loaded.data.assertElse(object, {}) else {}
   if !force and current.contains("syncedAt") and current.syncedAt.toNum() > 0 (
     sync.unlock("r2-storage-inventory-sync")
     return {ok: true, skipped: true, syncedAt: current.syncedAt}
@@ -298,16 +298,16 @@ def syncR2StorageInventory(boolean force) object (
   string encoded = r2inventory.ScanJSON(r2Endpoint, r2Bucket, r2AccessKeyId, r2SecretAccessKey, "auto")
   auto parsed = json.parse(encoded, {type: "object"})
   if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
-    string errorMessage = parsed.isErr() ? "could not read the R2 inventory" parsed.unwrap().assert(object).error.toStr()
+    string errorMessage = if parsed.isErr() then "could not read the R2 inventory" else parsed.unwrap().assert(object).error.toStr()
     sync.unlock("r2-storage-inventory-sync")
     return {ok: false, error: errorMessage}
   )
   object inventory = parsed.unwrap().assert(object)
   sync.lock("r2-storage-index")
   auto latestLoaded = readFile(r2StorageIndexFile)
-  object latest = latestLoaded.ok ? latestLoaded.data.assertElse(object, {}) {}
+  object latest = if latestLoaded.ok then latestLoaded.data.assertElse(object, {}) else {}
   object inventoryObjects = inventory.objects.assertElse(object, {})
-  object latestObjects = latest.contains("objects") ? latest.objects.assertElse(object, {}) {}
+  object latestObjects = if latest.contains("objects") then latest.objects.assertElse(object, {}) else {}
   array latestKeys = latestObjects.getKeys()
   for i latestKeys.len (
     string key = latestKeys[i].toStr()
@@ -517,7 +517,7 @@ def handleGetAssetBlob(*serve.Context c) (
   )
 
   string localUrl = publicUrl(key)
-  string remoteBase = r2Local ? "" r2PublicBase
+  string remoteBase = if r2Local then "" else r2PublicBase
   string assetUrl = assetUrlForLocation(name, fs.exists(localBlobPath(key)), blobBase() ++ "/assets", remoteBase)
   if assetUrl != localUrl (
     c.setHeader("Location", assetUrl)
