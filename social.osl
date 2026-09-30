@@ -83,6 +83,17 @@ def ownerIndexPage(string owner, boolean includeUnshared, number offset, number 
   return paginate(entries, offset, limit)
 )
 
+def usernameIsMinor(string username) boolean (
+  return profileIsMinor(loadProfile(username))
+)
+
+def authorPublicPlaytime(string projectId, string author) number (
+  if usernameIsMinor(author) (
+    return 0
+  )
+  return projectPlaytime(projectId, author)
+)
+
 def isViewerOwner(*serve.Context c, string name) boolean (
   if !c.getBool("authenticated") (
     return false
@@ -264,11 +275,8 @@ def handleGetUser(*serve.Context c) (
     )
   )
 
-  boolean commentsOff = false
-  if profile.contains("commentsOff") and profile.commentsOff == true (
-    commentsOff = true
-  )
-  boolean recentActivityVisible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+  boolean commentsOff = effectiveProfileCommentsOff(profile)
+  boolean recentActivityVisible = effectiveShowRecentActivity(profile)
   boolean ownsProfile = isViewerOwner(c, name)
   array recentActivity = []
   if recentActivityVisible or ownsProfile (
@@ -298,7 +306,7 @@ def handleGetUser(*serve.Context c) (
 def handleGetUserPlaytimeLibrary(*serve.Context c) (
   string name = c.param("name")
   object profile = loadProfile(name)
-  boolean visible = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
+  boolean visible = effectiveShowRecentActivity(profile)
   boolean ownsProfile = isViewerOwner(c, name)
   if !visible and !ownsProfile (
     c.json(200, {ok: true, visible: false, projects: [], total: 0, nextOffset: 0})
@@ -329,7 +337,8 @@ def handleSearchUsers(*serve.Context c) (
   array ranked = []
   for i found.len (
     object profile = found[i].assert(object)
-    if isStudentUsername(profile.username.toStr()) (
+    if !profileSearchable(profile) (
+      total -= 1
       continue
     )
     number score = searchMatchScore(profile.username.toStr(), q)
@@ -391,8 +400,7 @@ def handleUpdateProfile(*serve.Context c) (
 
   if body.contains("commentsOff") (
     boolean commentsOff = body.commentsOff == true
-    boolean currentCommentsOff = profile.contains("commentsOff") and profile.commentsOff == true
-    if currentCommentsOff != commentsOff (
+    if !profileHasChoice(profile, "commentsOff") or effectiveProfileCommentsOff(profile) != commentsOff (
       profile.commentsOff = commentsOff
       changed = true
     )
@@ -400,8 +408,7 @@ def handleUpdateProfile(*serve.Context c) (
 
   if body.contains("showRecentActivity") (
     boolean showRecentActivity = body.showRecentActivity == true
-    boolean currentShowRecentActivity = !profile.contains("showRecentActivity") or profile.showRecentActivity == true
-    if currentShowRecentActivity != showRecentActivity (
+    if !profileHasChoice(profile, "showRecentActivity") or effectiveShowRecentActivity(profile) != showRecentActivity (
       profile.showRecentActivity = showRecentActivity
       changed = true
     )
@@ -704,6 +711,35 @@ def handleSetLibraryProjectVisibility(*serve.Context c) (
   c.json(200, {ok: true, projectId: projectId, public: libraryPublic})
 )
 
+def activityProjectVisibility(string projectId) string (
+  object project = projectSearchDocs.findById(projectId)
+  if project.len > 0 and projectIsViewable(project) (
+    return projectVisibility(project)
+  )
+  return "private"
+)
+
+def publicActivityItems(array items, object privacy, number limit) array (
+  object visibilities = {}
+  array visible = []
+  for i items.len (
+    if visible.len < limit (
+      object item = items[i].assert(object)
+      array ids = activityProjectIds(item)
+      for j ids.len (
+        string id = ids[j].toStr()
+        if !visibilities.contains(id) (
+          visibilities[id] = activityProjectVisibility(id)
+        )
+      )
+      if activityItemVisible(item, privacy, visibilities) (
+        visible.append(item)
+      )
+    )
+  )
+  return visible
+)
+
 def handleGetActivity(*serve.Context c) (
   array users = c.query("users").split(",")
   array items = []
@@ -714,9 +750,9 @@ def handleGetActivity(*serve.Context c) (
       string username = normalizeUsername(users[i].toStr())
       if username != "" and !selectedUsers.contains(username) (
         selectedUsers[username] = true
-        array userItems = loadActivity(username)
-        number activityLimit = clampNumber(userItems.len, 0, 40)
-        for j activityLimit (
+        object privacy = activityPrivacy(loadProfile(username))
+        array userItems = publicActivityItems(loadActivity(username), privacy, 40)
+        for j userItems.len (
           items.append(userItems[j])
         )
         count += 1
@@ -729,12 +765,11 @@ def handleGetActivity(*serve.Context c) (
     if reviewItems < 40 (
       object review = recentReviews[i].assert(object)
       string author = normalizeUsername(review.author.toStr())
-      if selectedUsers.contains(author) (
-        object project = projectSearchDocs.findById(review.projectId.toStr())
-        if project.len > 0 and projectIsViewable(project) (
-          items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
-          reviewItems += 1
-        )
+      string projectId = review.projectId.toStr()
+      if selectedUsers.contains(author) and activityProjectVisibility(projectId) == "public" (
+        object project = projectSearchDocs.findById(projectId)
+        items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
+        reviewItems += 1
       )
     )
   )

@@ -457,6 +457,13 @@ def ensureUserIdentity(string userId, string username) (
   userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
+def roturServiceOptions() object (
+  if mistwarpRoturToken == "" (
+    return {}
+  )
+  return {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}}
+)
+
 def refreshUsernameForId(string userId) string (
   if userId == "" (
     return ""
@@ -467,7 +474,7 @@ def refreshUsernameForId(string userId) string (
   if identityRefreshCache.has(userId) (
     return identityRefreshCache.get(userId).toStr()
   )
-  object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
+  object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
   if resp.success and resp.status.toInt() == 200 (
     auto parsed = json.parse(resp.body, {type: "object"})
     if !parsed.isErr() (
@@ -501,7 +508,7 @@ def discoverUserIdentity(string username) string (
   if key == "" or isStudentUsername(key) (
     return ""
   )
-  object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0")
+  object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions())
   if !resp.success (
     if resp.status.toInt() == 404 (
       string uid = userIdForUsername(username)

@@ -811,7 +811,7 @@ def handleClassroomLogin(*serve.Context c) (
   student.lastLoginAt = timestamp
   putDocument(studentDocs, studentId, student)
   sync.unlock(lockName)
-  string sessionId = createSession(student.username.toStr(), studentId)
+  string sessionId = createSession(student.username.toStr(), studentId, true)
   setAuthCookie(c, sessionId)
   c.json(200, {
     ok: true,

@@ -90,11 +90,31 @@ def siteBroadcastStats(string projectId, string actor, object viewerState) (
   if message.len == 0 (
     return
   )
+  string publicMessage = json.stringify(message)
   message.actor = actor
   for key in viewerState.getKeys() (
     message[key] = viewerState[key]
   )
-  siteBroadcastProject(projectId, message)
+  if !usernameIsMinor(actor) (
+    siteBroadcastProject(projectId, message)
+    return
+  )
+  auto result = loadProject(projectId)
+  if !result.ok (
+    return
+  )
+  object project = result.project.assert(object)
+  string actorMessage = json.stringify(message)
+  string actorKey = normalizeUsername(actor)
+  for conn in siteRealtimeSocket.GetConnections() (
+    if !siteSubscribed(conn, projectId) continue
+    if !siteCanView(project, conn, siteProjectKey(conn, projectId)) continue
+    if conn.Get("authenticated") == true and normalizeUsername(conn.Get("username").toStr()) == actorKey (
+      conn.Send(actorMessage)
+    ) else (
+      conn.Send(publicMessage)
+    )
+  )
 )
 
 def siteFinishPlaytime(*ws.Connection conn) (

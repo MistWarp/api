@@ -22,7 +22,7 @@ def roturTierForUser(string userId) string (
       return cached.tier.toStr()
     )
   )
-  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0")
+  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
   if !response.success or response.status.toInt() != 200 (
     return "Free"
   )

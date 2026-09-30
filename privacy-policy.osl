@@ -1,0 +1,98 @@
+def roturReportsMinor(object data) boolean (
+  return data.contains("minor") and data.minor == true
+)
+
+def profileHasChoice(object profile, string key) boolean (
+  return profile.contains(key) and profile[key] != null
+)
+
+def profileIsMinor(object profile) boolean (
+  if profile.contains("minor") and profile.minor == true (
+    return true
+  )
+  return isStudentUsername((profile.username ?? "").toStr())
+)
+
+def effectiveShowRecentActivity(object profile) boolean (
+  if profileHasChoice(profile, "showRecentActivity") (
+    return profile.showRecentActivity == true
+  )
+  return !profileIsMinor(profile)
+)
+
+def effectiveProfileCommentsOff(object profile) boolean (
+  if profileHasChoice(profile, "commentsOff") (
+    return profile.commentsOff == true
+  )
+  return profileIsMinor(profile)
+)
+
+def profileSearchable(object searchDoc) boolean (
+  if searchDoc.contains("minor") and searchDoc.minor == true (
+    return false
+  )
+  return !isStudentUsername((searchDoc.username ?? "").toStr())
+)
+
+def publicPlaytime(number playtime, boolean authorIsMinor) number (
+  if authorIsMinor (
+    return 0
+  )
+  return playtime
+)
+
+def activityPrivacy(object profile) object (
+  array hidden = []
+  if profile.contains("hiddenLibraryProjects") and profile.hiddenLibraryProjects != null (
+    hidden = profile.hiddenLibraryProjects.assert(array)
+  )
+  return {
+    showActivity: effectiveShowRecentActivity(profile),
+    minor: profileIsMinor(profile),
+    hiddenLibrary: hidden
+  }
+)
+
+def activityIsEngagement(string activityType) boolean (
+  return activityType == "love" or activityType == "favorite"
+)
+
+def activityProjectIds(object item) array (
+  array ids = []
+  string projectId = (item.projectId ?? "").toStr()
+  if projectId != "" (
+    ids.append(projectId)
+  )
+  string parentId = (item.parentId ?? "").toStr()
+  if parentId != "" (
+    ids.append(parentId)
+  )
+  return ids
+)
+
+def activityProjectPublic(object visibilities, string projectId) boolean (
+  return visibilities.contains(projectId) and visibilities[projectId] == "public"
+)
+
+def activityItemVisible(object item, object privacy, object visibilities) boolean (
+  string activityType = (item.type ?? "").toStr()
+  if activityIsEngagement(activityType) (
+    if privacy.minor == true or privacy.showActivity != true (
+      return false
+    )
+  )
+  string projectId = (item.projectId ?? "").toStr()
+  if projectId == "" (
+    return false
+  )
+  if activityType == "favorite" and privacy.hiddenLibrary.assertElse(array, []).contains(projectId) (
+    return false
+  )
+  array ids = activityProjectIds(item)
+  for i ids.len (
+    if !activityProjectPublic(visibilities, ids[i].toStr()) (
+      return false
+    )
+  )
+  return true
+)
