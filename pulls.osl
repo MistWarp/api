@@ -228,7 +228,7 @@ def projectBranchHead(object project, string branch) string (
 def projectBranchResponse(object project) array (
   object history = projectVersionHistory(project)
   object graph = history.graph.assertElse(object, {})
-  array names = graph.contains("branches") ? graph.branches.assertElse(array, []) []
+  array names = if graph.contains("branches") then graph.branches.assertElse(array, []) else []
   array branches = []
   string active = history.branch.toStr()
   for i names.len (
@@ -236,13 +236,13 @@ def projectBranchResponse(object project) array (
     string head = projectBranchHead(project, name)
     if name != "" and head != "" (
       object branch = {name: name, head: head, current: name == active}
-      array nodes = graph.contains("nodes") ? graph.nodes.assertElse(array, []) []
+      array nodes = if graph.contains("nodes") then graph.nodes.assertElse(array, []) else []
       for j nodes.len (
         object node = nodes[j].assertElse(object, {})
         if node.sha.toStr() == head (
           branch.message = (node.message ?? "").toStr()
           branch.author = (node.author ?? "").toStr()
-          branch.date = node.contains("date") ? node.date 0
+          branch.date = if node.contains("date") then node.date else 0
         )
       )
       branches.append(branch)
@@ -300,7 +300,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   auto parsedRewrite = json.parse(rewriteJson, {type: "object"})
   fs.remove(sourcePath)
   if parsedRewrite.isErr() or parsedRewrite.unwrap().assert(object).ok != true or !fs.exists(outputPath) (
-    string message = parsedRewrite.isErr() ? "could not update the branch" (parsedRewrite.unwrap().assert(object).error ?? "could not update the branch").toStr()
+    string message = if parsedRewrite.isErr() then "could not update the branch" else (parsedRewrite.unwrap().assert(object).error ?? "could not update the branch").toStr()
     fs.remove(outputPath)
     sync.unlock(lockName)
     c.json(409, {ok: false, error: message, code: "branch_update_unavailable"})
@@ -393,7 +393,7 @@ def handlePrepareBranchMerge(*serve.Context c) (
   string mergeJson = gitinspection.PrepareBranchMergeJSON(workspacePath, targetHead, sourceHead)
   auto parsedMerge = json.parse(mergeJson, {type: "object"})
   if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
-    string message = parsedMerge.isErr() ? "could not prepare the branch merge" (parsedMerge.unwrap().assert(object).error ?? "could not prepare the branch merge").toStr()
+    string message = if parsedMerge.isErr() then "could not prepare the branch merge" else (parsedMerge.unwrap().assert(object).error ?? "could not prepare the branch merge").toStr()
     c.json(409, {ok: false, error: message, code: "branch_merge_unavailable"})
     return
   )
@@ -683,7 +683,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   string baseCommit = pull.baseCommit.toStr()
   string headCommit = pull.headCommit.toStr()
-  string inspectionJson = c.query("inline") == "1" ? gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+  string inspectionJson = if c.query("inline") == "1" then gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) else gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
   auto parsedInspection = json.parse(inspectionJson, {type: "object"})
   if parsedInspection.isErr() (
     c.internalError("could not inspect pull request changes")
@@ -771,9 +771,9 @@ def handleMergePull(*serve.Context c) (
     )
     source = sourceWorkspaceSnapshots.project.assert(object)
     string mergeArchivePath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".pull-merge.mwp"
-    string targetBranch = target.contains("gitBranch") and target.gitBranch != null ? target.gitBranch.toStr() "main"
-    string targetRemixParent = target.contains("remixParent") and target.remixParent != null ? target.remixParent.toStr() ""
-    string targetBaseCommit = target.contains("remixBaseCommit") and target.remixBaseCommit != null ? target.remixBaseCommit.toStr() ""
+    string targetBranch = if target.contains("gitBranch") and target.gitBranch != null then target.gitBranch.toStr() else "main"
+    string targetRemixParent = if target.contains("remixParent") and target.remixParent != null then target.remixParent.toStr() else ""
+    string targetBaseCommit = if target.contains("remixBaseCommit") and target.remixBaseCommit != null then target.remixBaseCommit.toStr() else ""
     string targetId = target.id.toStr()
     string mergeAuthor = normalizeUsername(c.getString("username"))
     string mergeMessage = "Merge pull request #" ++ pull.index.toStr()

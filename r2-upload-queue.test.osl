@@ -22,7 +22,7 @@ def readFile(string path) object (
     return {ok: false}
   )
   auto parsed = json.parse(fs.readFile(path), {type: "object"})
-  return parsed.isErr() ? {ok: false} {ok: true, data: parsed.unwrap()}
+  return if parsed.isErr() then {ok: false} else {ok: true, data: parsed.unwrap()}
 )
 
 def writeFile(string path, object data) boolean (

@@ -59,7 +59,7 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
   if !body.contains("coAuthors") and !body.contains("collaborators") (
     return {status: 400, error: "provide coAuthors"}
   )
-  array incoming = body.contains("coAuthors") ? body.coAuthors.assertElse(array, []) body.collaborators.assertElse(array, [])
+  array incoming = if body.contains("coAuthors") then body.coAuthors.assertElse(array, []) else body.collaborators.assertElse(array, [])
   object coAuthorResult = normalizedCommitCoAuthors(incoming)
   if !coAuthorResult.ok (
     return {status: 400, error: coAuthorResult.error}
