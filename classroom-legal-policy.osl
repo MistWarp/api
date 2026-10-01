@@ -1,0 +1,74 @@
+string classroomTermsVersion = "2026-10-01"
+number classroomRetentionWarnMs = 335 * 86400000
+number classroomRetentionDeleteMs = 365 * 86400000
+number classroomRetentionNoticeMs = 14 * 86400000
+number classroomActivityTouchMs = 86400000
+
+def classroomTermsAccepted(object record) boolean (
+  return (record.version ?? "").toStr() == classroomTermsVersion
+)
+
+def classroomTermsOrganisationValid(string organisation) boolean (
+  string trimmed = organisation.strip()
+  return trimmed.len >= 2 and trimmed.len <= 120
+)
+
+def classroomTermsAcceptance(object previous, object body, string username, number now) object (
+  object entry = {
+    version: classroomTermsVersion,
+    acceptedAt: now,
+    organisation: (body.organisation ?? "").toStr().strip(),
+    username: username
+  }
+  array history = (previous.history ?? []).assertElse(array, [])
+  history.append(entry)
+  return entry ++ {history: history}
+)
+
+def classroomTermsBodyValid(object body) boolean (
+  if (body.version ?? "").toStr() != classroomTermsVersion (
+    return false
+  )
+  if body.authorised != true (
+    return false
+  )
+  return classroomTermsOrganisationValid((body.organisation ?? "").toStr())
+)
+
+def classroomTeacherActiveAt(object classDoc) number (
+  number active = (classDoc.teacherActiveAt ?? 0).toNum()
+  if active > 0 (
+    return active
+  )
+  return 0
+)
+
+def classroomActivityNeedsTouch(object classDoc, number now) boolean (
+  return now - classroomTeacherActiveAt(classDoc) >= classroomActivityTouchMs
+)
+
+def classroomRetentionAction(object classDoc, number now) string (
+  number active = classroomTeacherActiveAt(classDoc)
+  if active <= 0 (
+    return "start"
+  )
+  number idle = now - active
+  number warnedAt = (classDoc.retentionWarnedAt ?? 0).toNum()
+  boolean warnedForThisIdle = warnedAt > active
+  if idle >= classroomRetentionDeleteMs and warnedForThisIdle and now - warnedAt >= classroomRetentionNoticeMs (
+    return "delete"
+  )
+  if idle >= classroomRetentionWarnMs and !warnedForThisIdle (
+    return "warn"
+  )
+  return ""
+)
+
+def classroomRetentionDeleteAt(object classDoc, number now) number (
+  number byIdle = classroomTeacherActiveAt(classDoc) + classroomRetentionDeleteMs
+  number byNotice = now + classroomRetentionNoticeMs
+  if byNotice > byIdle (
+    return byNotice
+  )
+  return byIdle
+)

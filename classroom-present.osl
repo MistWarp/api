@@ -52,10 +52,10 @@ def presentationResponse(object presentation) object (
   }
 )
 
-def presentationOrNull(string classId) any (
+def classPresentation(string classId) object (
   object presentation = activePresentationForClass(classId)
   if presentation.len == 0 (
-    return null
+    return {}
   )
   return presentationResponse(presentation)
 )
