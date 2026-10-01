@@ -1270,6 +1270,15 @@ def classroomAccessGuard(*serve.Context c) (
     return
   )
   string path = apiRoutePath(c.path())
+  string projectId = studentProjectRouteId(c.path())
+  if c.getBool("isStudent") and projectId != "" (
+    auto loaded = loadProject(projectId)
+    if !loaded.ok or projectRole(loaded.project.assert(object), c.getString("username")) == "" (
+      c.json(404, {ok: false, error: "project not found"})
+      c.abort()
+      return
+    )
+  )
   if c.getBool("isStudent") and regex.match("^/projects/[^/]+/live$", path) and !studentLiveCollaborationAllowed(c.getString("userId")) (
     c.json(403, {ok: false, code: "plan_required", error: "Live collaboration needs your teacher to have a Classroom plan."})
     c.abort()

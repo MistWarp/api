@@ -103,3 +103,36 @@ def stripeEventMayChangePlan(object stored, string subscriptionId) boolean (
   )
   return (stored.stripeSubscriptionId ?? "").toStr() == subscriptionId
 )
+
+number classroomTrialDays = 30
+number classroomTrialMs = classroomTrialDays * 86400000
+
+def classroomTrialAvailable(object stored, boolean schoolManaged, number now) boolean (
+  if schoolManaged (
+    return false
+  )
+  if (stored.source ?? "").toStr() != "" or (stored.trialStartedAt ?? 0).toNum() > 0 (
+    return false
+  )
+  return effectiveClassroomPlan(stored, now).tier == "free"
+)
+
+def classroomTrialPlan(object stored, number now) object (
+  return stored ++ {
+    tier: "classroom",
+    seats: 0,
+    storageBytes: 0,
+    maxClasses: 0,
+    expiresAt: now + classroomTrialMs,
+    source: "trial",
+    trialStartedAt: now
+  }
+)
+
+def classroomTrialEndsAt(object stored, number now) number (
+  number expiresAt = (stored.expiresAt ?? 0).toNum()
+  if (stored.source ?? "").toStr() == "trial" and expiresAt > now (
+    return expiresAt
+  )
+  return 0
+)
