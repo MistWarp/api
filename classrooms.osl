@@ -302,7 +302,8 @@ def handleCreateClass(*serve.Context c) (
   object plan = classroomPlanFor(userId)
   if classesForPlanOwner(userId).len >= plan.maxClasses.toNum() (
     sync.unlock(lockName)
-    c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ " classes. Archive and delete a class or upgrade your plan."})
+    string classWord = if plan.maxClasses.toNum() == 1 then " class" else " classes"
+    c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ classWord ++ ". Archive and delete a class or upgrade your plan."})
     return
   )
   string code = generateClassCode()

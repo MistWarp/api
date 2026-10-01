@@ -37,6 +37,8 @@ The server loads `.env` automatically. Real environment variables override `.env
 | STRIPE_WEBHOOK_SECRET | | Signing secret of the Stripe webhook pointed at `/v1/classroom/billing/webhook` |
 | STRIPE_CLASSROOM_PRICE | | Recurring Stripe price for one Classroom plan |
 | STRIPE_SEAT_PACK_PRICE | | Optional recurring Stripe price for each pack of 10 extra student seats |
+| STRIPE_CLASSROOM_PRICE_YEARLY | | Yearly Stripe price for one Classroom plan; when set, checkout offers yearly billing and uses it by default. Online payment needs at least one of the monthly and yearly Classroom prices |
+| STRIPE_SEAT_PACK_PRICE_YEARLY | | Optional yearly Stripe price for each pack of 10 extra student seats, used with the yearly Classroom price |
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.
