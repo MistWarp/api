@@ -71,6 +71,36 @@ def banReasonFor(string username) string (
   return ""
 )
 
+// MistWarp's bans are also bans from MistWarp's Rotur App, so Rotur enforces
+// them: the person's MistWarp tokens stop working, and they can't sign in to
+// MistWarp again until the ban is lifted. They see the reason, never who banned
+// them. The local list stays the source MistWarp checks on every request.
+
+def roturBanPath(string username) string (
+  string userId = userIdForUsername(username)
+  if userId == "" (
+    userId = username
+  )
+  return "/bans/" ++ url.escape(userId)
+)
+
+// "yes" once Rotur has the ban, "refused" if Rotur won't ban them (they are on
+// the app's team), "" to try again later.
+def pushRoturBan(string username, string reason) string (
+  string shown = reason.strip()
+  if shown == "" (
+    shown = "You broke MistWarp's community guidelines."
+  )
+  object result = roturApp("PUT", roturBanPath(username), {reason: shown.trim(1, 300), note: "Banned in MistWarp"})
+  if result.ok (
+    return "yes"
+  )
+  if result.status == 400 (
+    return "refused"
+  )
+  return ""
+)
+
 def banUser(string username, string reason, string actor) boolean (
   string key = normalizeUsername(username)
   if !isSafePathPart(key) (
@@ -78,7 +108,7 @@ def banUser(string username, string reason, string actor) boolean (
   )
   object data = loadBans()
   object bans = data.bans
-  bans[key] = {reason: reason, by: actor, created: timestamp}
+  bans[key] = {reason: reason, by: actor, created: timestamp, rotur: pushRoturBan(username, reason)}
   return saveBans(data)
 )
 
@@ -90,7 +120,70 @@ def unbanUser(string username) boolean (
     return false
   )
   bans.delete(key)
+  roturApp("DELETE", roturBanPath(username), {})
   return saveBans(data)
+)
+
+// Keeps MistWarp's bans and the Rotur App's in step, every few minutes: bans
+// made or lifted on rotur.dev/me/developer reach MistWarp, and bans Rotur
+// couldn't be told about yet are sent again.
+def syncRoturBans() (
+  object data = loadBans()
+  object bans = data.bans
+  boolean changed = false
+  array keys = bans.getKeys()
+  // Rotur enforces its own account bans now; these copies were never lifted.
+  for i keys.len (
+    if bans[keys[i].toStr()].by.toStr() == "rotur_sync" (
+      bans.delete(keys[i].toStr())
+      changed = true
+    )
+  )
+  object result = roturApp("GET", "/bans", {})
+  if result.ok (
+    // Rotur lists accounts it has banned itself with no username, so match
+    // on the ID too.
+    object remote = {}
+    object remoteIds = {}
+    array listed = (result.data.bans ?? []).assertElse(array, [])
+    for i listed.len (
+      object ban = listed[i].assert(object)
+      string userId = (ban.id ?? "").toStr()
+      string name = (ban.username ?? "").toStr()
+      if name == "" (
+        name = usernameForId(userId)
+      )
+      remoteIds[userId] = true
+      if name != "" (
+        remote[normalizeUsername(name)] = ban
+      )
+    )
+    array remoteKeys = remote.getKeys()
+    for i remoteKeys.len (
+      string key = remoteKeys[i].toStr()
+      if !bans.contains(key) and isSafePathPart(key) (
+        bans[key] = {reason: (remote[key].reason ?? "").toStr(), by: "rotur.dev", created: timestamp, rotur: "yes"}
+        changed = true
+      )
+    )
+    keys = bans.getKeys()
+    for i keys.len (
+      string key = keys[i].toStr()
+      object ban = bans[key].assert(object)
+      string state = (ban.rotur ?? "").toStr()
+      if state == "yes" and !remote.contains(key) and !remoteIds.contains(userIdForUsername(key)) (
+        bans.delete(key)
+        changed = true
+      ) else if state == "" (
+        ban.rotur = pushRoturBan(key, (ban.reason ?? "").toStr())
+        bans[key] = ban
+        changed = changed or ban.rotur != ""
+      )
+    )
+  )
+  if changed (
+    saveBans(data)
+  )
 )
 
 def isSuperAdmin(string username) boolean (
@@ -181,6 +274,7 @@ def handleUnbanUser(*serve.Context c) (
 )
 
 def handleListBans(*serve.Context c) (
+  syncRoturBans()
   object data = loadBans()
   object bans = data.bans
   array keys = bans.getKeys()
@@ -696,7 +790,11 @@ def handleReportAction(*serve.Context c) (
       c.badRequest("cannot ban an admin")
       return
     )
-    banUser(name, "report " ++ id, c.getString("username"))
+    string banReason = ""
+    if body.contains("reason") and body.reason != null (
+      banReason = body.reason.toStr().strip()
+    )
+    banUser(name, banReason, c.getString("username"))
   )
   if action == "warn_user" (
     string name = reportTargetUser(found)

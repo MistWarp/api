@@ -21,6 +21,8 @@ The server loads `.env` automatically. Real environment variables override `.env
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
+| ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
+| ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
 | R2_ACCESS_KEY_ID | | R2 access key |
@@ -36,6 +38,12 @@ The server loads `.env` automatically. Real environment variables override `.env
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.
+
+## Bans
+
+A MistWarp ban is also a ban from the MistWarp Rotur App (`PUT /v2/apps/<app>/bans/<user>`), so Rotur enforces it too: the person's MistWarp tokens stop working and Rotur won't let them sign in to MistWarp. Rotur shows them the ban's reason, and never who made it. Lifting a ban lifts both.
+
+Every five minutes, and whenever an admin opens the bans list, MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban Rotur couldn't be told about yet is sent again. Rotur won't ban the app's owner or managers, so their bans stay MistWarp-only.
 
 ## Development feed
 
