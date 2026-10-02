@@ -19,8 +19,10 @@ The server loads `.env` automatically. Real environment variables override `.env
 | PORT | 5627 | Listen port |
 | HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
-| ROTUR_APP_KEY | mistwarp | Rotur validator app key |
+| ROTUR_APP_KEY | mistwarp | The old validator key, for editors that predate validators keyed to the Rotur App |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
+| ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
+| ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
 | ROTUR_WEBHOOK_SECRET | | Signing secret (`whsec_…`) of the MistWarp Rotur App's webhook. Without it `POST /v1/rotur/webhook` answers 503 |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
@@ -37,6 +39,18 @@ The server loads `.env` automatically. Real environment variables override `.env
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.
+
+## Bans
+
+A MistWarp ban is also a ban from the MistWarp Rotur App (`PUT /v2/apps/<app>/bans/<user>`), so Rotur enforces it too: the person's MistWarp tokens stop working and Rotur won't let them sign in to MistWarp. Rotur shows them the ban's reason, and never who made it. Lifting a ban lifts both.
+
+Every five minutes MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban or unban Rotur couldn't be told about yet is sent again. A ban lifted in MistWarp is never brought back from Rotur while that's pending. Rotur won't ban the app's owner or managers, classroom students, or accounts it doesn't know, so those bans stay MistWarp-only. Bans whose reason only names a report are sent with a general reason instead.
+
+## Safety signals
+
+The MistWarp Rotur App declares that people can talk and can spend credits. Before a comment reaches someone (the owner of the project or profile, and the author of the comment it replies to), mistwarp-api asks Rotur's message signal. Before a purchase or donation starts, it asks the purchase signal. A "no" is shown to the person in Rotur's own words.
+
+Rotur only answers about people who have used MistWarp through Sign in with Rotur, or made their account on MistWarp. For anyone else, or if Rotur can't be reached, MistWarp carries on as it did before. Rotur counts credits towards a parent's monthly limit when it moves them, so the purchase signal only asks.
 
 ## Rotur webhooks
 
@@ -145,9 +159,13 @@ A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletio
 
 ## Auth flow
 
-1. Client holds a rotur token (rotur-sdk login).
-2. Client fetches `https://api.rotur.dev/generate_validator?key=<ROTUR_APP_KEY>&auth=<token>` (must be the same rotur instance the server validates against).
-3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
+1. Client holds a Rotur token from Sign in with Rotur, with the `validators:generate` scope.
+2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_CLIENT_ID>"}` and the token in the `Authorization` header, never the URL. MistWarp's own token can always make validators for its app, without `validators:generate`. Older editors send `ROTUR_APP_KEY` instead. It must be the same Rotur instance the server validates against.
+3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate`, with the app ID first and then the old key, and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted. For the app ID, Rotur also refuses anyone the app has banned, or who otherwise can't use MistWarp, with a message for them.
+
+Only MistWarp's own sign-in token can make app-ID validators (rotur/api#85), so the desktop app, which still uses the old sign-in, and older tokens send the old key. Rotur doesn't check the old key against MistWarp's Rotur App, so for those sign-ins Rotur's suspension, adults-only, parental approval and age settings aren't enforced, and a rotur.dev ban only applies once the five-minute ban sync has brought it in. Old-key validators made by another Rotur App's sign-in are refused. The gap closes once the desktop app uses Sign in with Rotur through a loopback redirect, which needs Rotur to accept any port on `http://127.0.0.1`.
+
+A refusal from Rotur is answered with 403 and its `code`, `error`, and for an app ban its `reason` and `until`.
 
 
 ## Milestone notifications
