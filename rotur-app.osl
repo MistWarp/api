@@ -11,6 +11,16 @@ def roturAppReady() boolean (
   return roturClientId != "" and roturClientSecret != ""
 )
 
+// How the apps API names someone: their Rotur ID when MistWarp knows it,
+// which never changes, else their username.
+def roturUserRef(string username) string (
+  string userId = userIdForUsername(username)
+  if userId != "" (
+    return userId
+  )
+  return username
+)
+
 // Calls https://api.rotur.dev/v2/apps/<client id><path>. Returns {ok, status,
 // data}: ok is false when the app isn't set up or Rotur didn't say yes.
 def roturApp(string method, string path, object body) object (
