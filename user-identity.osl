@@ -137,6 +137,13 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
           project.loves = replaceUserInArray(loves, oldKey, newName)
           changed = true
         )
+        if project.contains("everLoved") and project.everLoved != null (
+          array everLoved = project.everLoved.assertElse(array, [])
+          if arrayContainsUserKey(everLoved, oldKey) (
+            project.everLoved = replaceUserInArray(everLoved, oldKey, newName)
+            changed = true
+          )
+        )
         if project.contains("brokenhearts") and project.brokenhearts != null (
           array broken = project.brokenhearts.assert(array)
           if arrayContainsUserKey(broken, oldKey) (
@@ -612,6 +619,13 @@ def purgeUserFromProjects(string key, string userId) (
         if stringArrayContainsUser(loves, key) (
           project.loves = removeUserFromArray(loves, key)
           changed = true
+        )
+        if project.contains("everLoved") and project.everLoved != null (
+          array everLoved = project.everLoved.assertElse(array, [])
+          if stringArrayContainsUser(everLoved, key) (
+            project.everLoved = removeUserFromArray(everLoved, key)
+            changed = true
+          )
         )
         if project.contains("brokenhearts") and project.brokenhearts != null (
           array broken = project.brokenhearts.assert(array)
