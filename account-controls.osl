@@ -183,14 +183,25 @@ def handleExportMyData(*serve.Context c) (
   })
 )
 
-def handleDeleteMyData(*serve.Context c) (
-  object body = c.bodyJSON()
-  string username = c.getString("username")
-  if !body.contains("username") or normalizeUsername(body.username.toStr()) != normalizeUsername(username) (
-    c.badRequest("type your username to confirm")
+// Delete everything MistWarp holds about someone: their projects and what
+// hangs off them, their community records, game data and backpack, then the
+// account itself. Used when they ask, and when Rotur says they deleted their
+// Rotur account, left MistWarp or were banned from Rotur (rotur-webhooks.osl).
+def eraseUser(string userId, string username) (
+  purgeGameDataForUser(userId)
+  purgeBackpackForUser(userId)
+  deleteDocumentsByField(bountyWorkerDocs, "userId", userId)
+  array milestones = likeMilestoneDocs.all()
+  for i milestones.len (
+    string milestoneId = milestones[i].assert(object)["_id"].toStr()
+    if userId != "" and milestoneId.endsWith(":" ++ userId) (
+      likeMilestoneDocs.deleteOne({_id: milestoneId})
+    )
+  )
+  if username == "" (
+    purgeUserSessions(userId)
     return
   )
-  string userId = c.getString("userId")
   array ownedProjects = ownerIndexEntries(username, true)
   array ownedProjectIds = []
   array projectsToPurge = []
@@ -224,11 +235,21 @@ def handleDeleteMyData(*serve.Context c) (
   removeProjectsFromSpaces(ownedProjectIds)
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)
-  purgeGameDataForUser(userId)
-  purgeBackpackForUser(userId)
+  deleteDocumentsByField(errorDocs, "username", username)
+  anonymiseReportsBy(username, userId)
   purgeUser(userId, username)
   removeUserFromSafetyLists(username)
   fs.remove(safetyPath(username))
+)
+
+def handleDeleteMyData(*serve.Context c) (
+  object body = c.bodyJSON()
+  string username = c.getString("username")
+  if !body.contains("username") or normalizeUsername(body.username.toStr()) != normalizeUsername(username) (
+    c.badRequest("type your username to confirm")
+    return
+  )
+  eraseUser(c.getString("userId"), username)
   clearAuthCookie(c)
   c.json(200, {ok: true})
 )

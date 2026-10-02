@@ -23,6 +23,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
 | ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
 | ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
+| ROTUR_WEBHOOK_SECRET | | Signing secret (`whsec_…`) of the MistWarp Rotur App's webhook. Without it `POST /v1/rotur/webhook` answers 503 |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
 | R2_ACCESS_KEY_ID | | R2 access key |
@@ -50,6 +51,17 @@ Every five minutes, and whenever an admin opens the bans list, MistWarp reads th
 The MistWarp Rotur App declares that people can talk and can spend credits. Before a comment reaches someone (the owner of the project or profile, and the author of the comment it replies to), mistwarp-api asks Rotur's message signal. Before a purchase or donation starts, it asks the purchase signal. A "no" is shown to the person in Rotur's own words.
 
 Rotur only answers about people who have used MistWarp through Sign in with Rotur, or made their account on MistWarp. For anyone else, or if Rotur can't be reached, MistWarp carries on as it did before. Rotur counts credits towards a parent's monthly limit when it moves them, so the purchase signal only asks.
+
+## Rotur webhooks
+
+Set the MistWarp Rotur App's webhook to `https://api.mistwarp.org/v1/rotur/webhook` on rotur.dev/me/developer, with privacy requests on, and put its signing secret in `ROTUR_WEBHOOK_SECRET`.
+
+- `user.deleted`, `user.left` and `user.banned` erase everything MistWarp holds about that person, the same as deleting their data from Settings.
+- A `privacy.request` for `erasure` does the same. One for `access` sends them a MistWarp notification pointing to the download in Settings.
+
+Deliveries are checked against `Rotur-Signature` and refused if their timestamp is more than five minutes out. Each is saved to `data/rotur-webhooks.json`, answered, then handled in the background, and a retried delivery is only handled once. Anything not yet handled when the server stops is handled when it starts.
+
+Rotur only sends these for people who have used MistWarp through Sign in with Rotur, or whose account was made on MistWarp. The five-minute check of `/accounts/deleted_check` stays for everyone else.
 
 ## Development feed
 
@@ -147,8 +159,8 @@ A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletio
 
 ## Auth flow
 
-1. Client holds a rotur token (rotur-sdk login).
-2. Client fetches `https://api.rotur.dev/generate_validator?key=<ROTUR_APP_KEY>&auth=<token>` (must be the same rotur instance the server validates against).
+1. Client holds a Rotur token from Sign in with Rotur, with the `validators:generate` scope.
+2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_APP_KEY>"}` and the token in the `Authorization` header, never the URL. It must be the same Rotur instance the server validates against.
 3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
 
 

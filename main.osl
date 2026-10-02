@@ -205,6 +205,7 @@ import "./standing.osl"
 import "./settings.osl"
 import "./agreement.osl"
 import "./account-controls.osl"
+import "./rotur-webhooks.osl"
 import "./community-tools.osl"
 import "./classroom-policy.osl"
 import "./privacy-policy.osl"
@@ -259,6 +260,7 @@ cleanupExpiredStagedUploadParts()
 cleanupExpiredSessions()
 cleanupExpiredCommunityRecords()
 thread.new(reconcileLoop)
+thread.new(processRoturWebhooks)
 thread.new(stagedFlushLoop)
 thread.new(generateMissingProjectHistories)
 thread.new(backfillProjectHistoryBytes)
@@ -334,6 +336,7 @@ def setupApiRoutes(*serve.Router api) (
   api.DELETE("/me/game-saves/:project", requireAuth, handleDeleteMyGameSave)
   api.GET("/me/export", requireAuth, handleExportMyData)
   api.DELETE("/me/data", requireAuth, handleDeleteMyData)
+  api.POST("/rotur/webhook", handleRoturWebhook)
   api.GET("/me/safety", requireAuth, handleGetMySafety)
   api.POST("/me/blocks/:name", requireAuth, handleBlockUser)
   api.DELETE("/me/blocks/:name", requireAuth, handleUnblockUser)

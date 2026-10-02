@@ -1,0 +1,155 @@
+// Webhooks from MistWarp's Rotur App: https://docs.rotur.dev/build-an-app/webhooks
+//
+// Rotur tells MistWarp when someone deletes their Rotur account (user.deleted),
+// leaves MistWarp from rotur.dev/me/apps (user.left) or is banned from Rotur
+// (user.banned). MistWarp must then delete what it holds about them within 30
+// days, so it does it straight away. With privacy requests turned on, people
+// can also ask for a copy of their data or for it to be deleted.
+//
+// Rotur waits 10 seconds for an answer, and erasing someone can take longer,
+// so each delivery is saved to disk, answered, then handled by a worker. Saved
+// events also stop a retried delivery from being handled twice.
+
+string roturWebhookSecret = configValue("ROTUR_WEBHOOK_SECRET", "")
+string roturWebhooksFile = "data/rotur-webhooks.json"
+// Handled events are kept this long, longer than Rotur retries (36 minutes).
+number roturWebhookRetention = 604800000
+
+// Rotur-Signature is v1= and the hex HMAC-SHA256 of "<id>.<timestamp>.<raw
+// body>", keyed with the whole signing secret.
+def roturWebhookSignature(string secret, string id, string sentAt, string body) string (
+  return "v1=" ++ crypto.hmacSha256(secret, id ++ "." ++ sentAt ++ "." ++ body)
+)
+
+// A delivery is genuine if it is signed with the secret and was sent within
+// five minutes of now (in Unix seconds), so an old one can't be replayed.
+def roturWebhookValid(string secret, string id, string sentAt, string body, string signature, number now) boolean (
+  if secret == "" or id == "" or signature == "" or !regex.match("^[0-9]{1,12}$", sentAt) (
+    return false
+  )
+  number sent = sentAt.toNum()
+  if sent < now - 300 or sent > now + 300 (
+    return false
+  )
+  return crypto.constantTimeCompare(signature, roturWebhookSignature(secret, id, sentAt, body))
+)
+
+def loadRoturWebhooks() object (
+  auto result = readFile(roturWebhooksFile)
+  if !result.ok (
+    return {events: {}}
+  )
+  return result.data.assert(object)
+)
+
+// Saves a verified delivery. Returns false if it was already saved.
+def queueRoturWebhook(object event) boolean (
+  string id = event.id.toStr()
+  object data = {}
+  if event.contains("data") and typeof(event.data) == "object" (
+    data = event.data.assert(object)
+  )
+  sync.lock("rotur-webhooks")
+  object store = loadRoturWebhooks()
+  object events = store.events.assert(object)
+  if events.contains(id) (
+    sync.unlock("rotur-webhooks")
+    return false
+  )
+  object kept = {}
+  array ids = events.getKeys()
+  for i ids.len (
+    string existingId = ids[i].toStr()
+    object existing = events[existingId].assert(object)
+    if existing.done != true or timestamp - existing.received.toNum() < roturWebhookRetention (
+      kept[existingId] = existing
+    )
+  )
+  kept[id] = {
+    type: event.type.toStr(),
+    userId: (data.user_id ?? "").toStr(),
+    kind: (data.kind ?? "").toStr(),
+    received: timestamp,
+    done: false
+  }
+  store.events = kept
+  writeFile(roturWebhooksFile, store)
+  sync.unlock("rotur-webhooks")
+  return true
+)
+
+def markRoturWebhookDone(string id) (
+  sync.lock("rotur-webhooks")
+  object store = loadRoturWebhooks()
+  object events = store.events.assert(object)
+  if events.contains(id) (
+    object event = events[id].assert(object)
+    event.done = true
+    events[id] = event
+    store.events = events
+    writeFile(roturWebhooksFile, store)
+  )
+  sync.unlock("rotur-webhooks")
+)
+
+def handleRoturEvent(object event) (
+  string type = event.type.toStr()
+  string userId = event.userId.toStr()
+  if userId == "" or isStudentUserId(userId) (
+    return
+  )
+  string username = usernameForId(userId)
+  if type == "user.deleted" or type == "user.left" or type == "user.banned" (
+    log "Erasing MistWarp data for " ++ userId ++ " after " ++ type
+    eraseUser(userId, username)
+  ) else if type == "privacy.request" and event.kind.toStr() == "erasure" (
+    log "Erasing MistWarp data for " ++ userId ++ " on request"
+    eraseUser(userId, username)
+  ) else if type == "privacy.request" and event.kind.toStr() == "access" and username != "" (
+    addNotification(username, "", "moderation", {message: "You asked Rotur for a copy of your MistWarp data. Download it any time from Settings, under Privacy."})
+  )
+)
+
+// Handles every saved event that hasn't been handled yet, one at a time.
+def processRoturWebhooks() (
+  sync.lock("rotur-webhooks-worker")
+  object store = loadRoturWebhooks()
+  object events = store.events.assert(object)
+  array ids = events.getKeys()
+  for i ids.len (
+    string id = ids[i].toStr()
+    object event = events[id].assert(object)
+    if event.done != true (
+      handleRoturEvent(event)
+      markRoturWebhookDone(id)
+    )
+  )
+  sync.unlock("rotur-webhooks-worker")
+)
+
+def handleRoturWebhook(*serve.Context c) (
+  if roturWebhookSecret == "" (
+    c.json(503, {ok: false, error: "Rotur webhooks are not configured"})
+    return
+  )
+  string body = c.body()
+  string id = c.header("Rotur-Webhook-Id")
+  if !roturWebhookValid(roturWebhookSecret, id, c.header("Rotur-Webhook-Timestamp"), body, c.header("Rotur-Signature"), (timestamp / 1000).toInt()) (
+    c.json(401, {ok: false, error: "invalid signature"})
+    return
+  )
+  auto parsed = json.parse(body, {type: "object"})
+  if parsed.isErr() (
+    c.badRequest("invalid body")
+    return
+  )
+  object event = parsed.unwrap().assert(object)
+  if event.id.toStr() != id (
+    c.badRequest("event id does not match")
+    return
+  )
+  if queueRoturWebhook(event) (
+    thread.new(processRoturWebhooks)
+  )
+  c.json(200, {ok: true})
+)
