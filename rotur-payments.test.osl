@@ -121,7 +121,12 @@ testing.assert(tip.ok and !calls[calls.len].body.assert(object).contains("splits
 number postsBefore = calls.len
 object again = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 10}, "sam", "kit", [{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], 10, "A game", "")
 testing.assert(again.ok and again.key == sale.key and again.requestId == sale.requestId and again.approveUrl == sale.approveUrl, "reuses the open request: " ++ json.stringify(again))
-testing.assert(calls.len == postsBefore, "asks Rotur for nothing new")
+testing.assert(calls.len == postsBefore + 1 and calls[calls.len].method == "GET", "only checks the open request is still pending")
+// A declined request isn't reused, so the person can try again straight away.
+requests[sale.requestId].status = "declined"
+object afterDecline = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 10}, "sam", "kit", [{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], 10, "A game", "")
+testing.assert(afterDecline.ok and afterDecline.key != sale.key and afterDecline.requestId != sale.requestId, "a declined request gets a new one")
+requests[sale.requestId].status = "pending"
 object otherPrice = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 12}, "sam", "kit", [], 12, "A game", "")
 testing.assert(otherPrice.ok and otherPrice.key != sale.key, "a different price is a different purchase")
 object store = loadPurchaseKeys()

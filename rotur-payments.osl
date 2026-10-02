@@ -106,6 +106,16 @@ def samePurchase(object stored, object entry, string prefix, string key) boolean
   return true
 )
 
+// Rotur's status for a payment request: "pending", "paid", "declined",
+// "cancelled" or "expired", or "" if it couldn't be read.
+def roturPaymentStatus(string requestId) string (
+  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  if !result.ok (
+    return ""
+  )
+  return (result.data.status ?? "").toStr()
+)
+
 def roturPaymentPaid(string requestId, string reference) boolean (
   if requestId == "" (
     return false
@@ -121,18 +131,26 @@ def roturPaymentPaid(string requestId, string reference) boolean (
 def startPurchase(string prefix, object entry, string payer, string payee, array splits, number amount, string note, string returnUrl) object (
   array shares = splitsWithoutPayer(splits, payer)
   entry.splits = shares
+  // One start at a time for the same purchase, so two clicks can't both miss
+  // the open request and make two.
+  string lock = "purchase-start:" ++ prefix ++ json.stringify(entry)
+  sync.lock(lock)
   object open = loadPurchaseKeys().keys.assertElse(object, {})
   array openKeys = open.getKeys()
   for i openKeys.len (
     string openKey = openKeys[i].toStr()
     object stored = open[openKey].assertElse(object, {})
-    if samePurchase(stored, entry, prefix, openKey) (
+    // Only a request still waiting for an answer is reused. A declined one
+    // would leave the person unable to try again until it expired.
+    if samePurchase(stored, entry, prefix, openKey) and roturPaymentStatus(stored.requestId.toStr()) == "pending" (
+      sync.unlock(lock)
       return {ok: true, key: openKey, requestId: stored.requestId.toStr(), approveUrl: stored.approveUrl.toStr(), splits: shares}
     )
   )
   string key = prefix ++ randomString(16)
   object request = requestRoturPayment(payer, payee, shares, amount, note, key, returnUrl)
   if !request.ok (
+    sync.unlock(lock)
     return request
   )
   entry.requestId = request.id
@@ -146,6 +164,7 @@ def startPurchase(string prefix, object entry, string payer, string payee, array
   store.keys = keys
   savePurchaseKeys(store)
   sync.unlock("purchase-keys")
+  sync.unlock(lock)
   return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl, splits: shares}
 )
 

@@ -124,6 +124,9 @@ def handleOwnsGameProduct(*serve.Context c) (
 )
 
 def handleGameProductIntent(*serve.Context c) (
+  if refuseOldPaymentClient(c) (
+    return
+  )
   auto loaded = loadProject(c.param("id"))
   if !loaded.ok or !projectIsViewable(loaded.project.assert(object)) (
     c.notFound("project not found")

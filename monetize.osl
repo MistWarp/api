@@ -457,7 +457,21 @@ def recordSale(object project, string buyer, number price, number sellerAmount) 
   project.saleHistory = sales
 )
 
+// An editor or packaged game from before payment requests sends no returnUrl.
+// It would pay MistWarp the old way, which nothing delivers any more, so it's
+// told to reload before anything is asked of Rotur.
+def refuseOldPaymentClient(*serve.Context c) boolean (
+  if c.bodyJSON().contains("returnUrl") (
+    return false
+  )
+  c.json(409, {ok: false, code: "client_outdated", error: "MistWarp was updated, reload this page"})
+  return true
+)
+
 def handlePurchaseIntent(*serve.Context c) (
+  if refuseOldPaymentClient(c) (
+    return
+  )
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")

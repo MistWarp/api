@@ -396,6 +396,9 @@ def handleGetProjectComments(*serve.Context c) (
 )
 
 def handleProjectCommentDonationIntent(*serve.Context c) (
+  if refuseOldPaymentClient(c) (
+    return
+  )
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
