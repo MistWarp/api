@@ -105,7 +105,9 @@ def handleRoturAuth(*serve.Context c) (
   object data = {}
   for i keys.len (
     object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator))
-    if !resp.success and resp.status.toInt() != 403 (
+    // Rotur answers every validator with 200, valid or not.
+    number status = (resp.status ?? 0).toNum().toInt()
+    if status < 200 or status >= 300 (
       c.json(401, {ok: false, error: "failed to validate token"})
       return
     )
