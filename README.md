@@ -44,7 +44,7 @@ uses the same listener, domain, and deployment as the HTTP API.
 
 A MistWarp ban is also a ban from the MistWarp Rotur App (`PUT /v2/apps/<app>/bans/<user>`), so Rotur enforces it too: the person's MistWarp tokens stop working and Rotur won't let them sign in to MistWarp. Rotur shows them the ban's reason, and never who made it. Lifting a ban lifts both.
 
-Every five minutes, and whenever an admin opens the bans list, MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban Rotur couldn't be told about yet is sent again. Rotur won't ban the app's owner or managers, so their bans stay MistWarp-only.
+Every five minutes MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban or unban Rotur couldn't be told about yet is sent again. A ban lifted in MistWarp is never brought back from Rotur while that's pending. Rotur won't ban the app's owner or managers, classroom students, or accounts it doesn't know, so those bans stay MistWarp-only. Bans whose reason only names a report are sent with a general reason instead.
 
 ## Safety signals
 
