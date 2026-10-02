@@ -120,21 +120,31 @@ def handleRoturAuth(*serve.Context c) (
     )
   )
 
-  if data.valid != true and data.contains("error") and data.error != null and (data.code ?? "").toStr() != "invalid_validator" (
-    string code = "error"
-    if data.contains("code") and data.code != null (
-      code = data.code.toStr()
+  // Rotur answers every "no" with valid false and a code. Only a real "yes"
+  // signs anyone in.
+  if data.valid != true (
+    string code = (data.code ?? "").toStr()
+    if code != "" and code != "invalid_validator" (
+      object refusal = {ok: false, code: code, error: (data.error ?? "Rotur refused this sign-in.").toStr(), redirectUrl: (data.redirect_url ?? "https://rotur.dev/me").toStr()}
+      // An app ban says why, and until when.
+      if (data.reason ?? "").toStr() != "" (
+        refusal.reason = data.reason.toStr()
+      )
+      if (data.until ?? 0).toNum() > 0 (
+        refusal.until = data.until.toNum()
+      )
+      c.json(403, refusal)
+      return
     )
-    string redirectUrl = "https://rotur.dev/me"
-    if data.contains("redirect_url") and data.redirect_url != null (
-      redirectUrl = data.redirect_url.toStr()
-    )
-    c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
+    c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
     return
   )
 
-  if !data.contains("valid") or data.valid == false (
-    c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
+  // Old-key validators skip Rotur's checks for the app. One made by another
+  // Rotur App's sign-in was passed on to MistWarp, so it isn't accepted.
+  string madeBy = (data.app ?? "").toStr()
+  if roturClientId != "" and madeBy.startsWith("app_") and madeBy != roturClientId (
+    c.json(401, {ok: false, error: "this sign-in was made for another app", redirectUrl: "https://rotur.dev"})
     return
   )
 

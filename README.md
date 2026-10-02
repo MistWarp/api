@@ -163,6 +163,10 @@ A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletio
 2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_CLIENT_ID>"}` and the token in the `Authorization` header, never the URL. MistWarp's own token can always make validators for its app, without `validators:generate`. Older editors send `ROTUR_APP_KEY` instead. It must be the same Rotur instance the server validates against.
 3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate`, with the app ID first and then the old key, and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted. For the app ID, Rotur also refuses anyone the app has banned, or who otherwise can't use MistWarp, with a message for them.
 
+Only MistWarp's own sign-in token can make app-ID validators (rotur/api#85), so the desktop app, which still uses the old sign-in, and older tokens send the old key. Rotur doesn't check the old key against MistWarp's Rotur App, so for those sign-ins Rotur's suspension, adults-only, parental approval and age settings aren't enforced, and a rotur.dev ban only applies once the five-minute ban sync has brought it in. Old-key validators made by another Rotur App's sign-in are refused. The gap closes once the desktop app uses Sign in with Rotur through a loopback redirect, which needs Rotur to accept any port on `http://127.0.0.1`.
+
+A refusal from Rotur is answered with 403 and its `code`, `error`, and for an app ban its `reason` and `until`.
+
 
 ## Milestone notifications
 
