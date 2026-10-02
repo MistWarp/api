@@ -89,14 +89,6 @@ def reportCategory(object body, string reason) string (
   return "other"
 )
 
-def roturUserRef(string username) string (
-  string userId = userIdForUsername(username)
-  if userId != "" (
-    return userId
-  )
-  return username
-)
-
 def fileRoturReport(object report) (
   string targetUser = reportTargetUser(report)
   if targetUser == "" or !roturAppReady() (
