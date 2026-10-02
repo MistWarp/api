@@ -19,7 +19,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | PORT | 5627 | Listen port |
 | HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
-| ROTUR_APP_KEY | mistwarp | Rotur validator app key |
+| ROTUR_APP_KEY | mistwarp | The old validator key, for editors that predate validators keyed to the Rotur App |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
 | ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
 | ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
@@ -160,8 +160,8 @@ A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletio
 ## Auth flow
 
 1. Client holds a Rotur token from Sign in with Rotur, with the `validators:generate` scope.
-2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_APP_KEY>"}` and the token in the `Authorization` header, never the URL. It must be the same Rotur instance the server validates against.
-3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
+2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_CLIENT_ID>"}` and the token in the `Authorization` header, never the URL. MistWarp's own token can always make validators for its app, without `validators:generate`. Older editors send `ROTUR_APP_KEY` instead. It must be the same Rotur instance the server validates against.
+3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate`, with the app ID first and then the old key, and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted. For the app ID, Rotur also refuses anyone the app has banned, or who otherwise can't use MistWarp, with a message for them.
 
 
 ## Milestone notifications
