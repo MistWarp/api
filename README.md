@@ -20,9 +20,10 @@ The server loads `.env` automatically. Real environment variables override `.env
 | HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | The old validator key, for editors that predate validators keyed to the Rotur App |
-| COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
+| COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS`. Only bounty awards and the groups integration still use it |
 | ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
 | ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
+| MISTWARP_ROTUR_USER | | Rotur account that gets MistWarp's share of sales. Without it, the MistWarp Rotur App's owner gets it |
 | ROTUR_WEBHOOK_SECRET | | Signing secret (`whsec_…`) of the MistWarp Rotur App's webhook. Without it `POST /v1/rotur/webhook` answers 503 |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
@@ -52,12 +53,23 @@ The MistWarp Rotur App declares that people can talk and can spend credits. Befo
 
 Rotur only answers about people who have used MistWarp through Sign in with Rotur, or made their account on MistWarp. For anyone else, or if Rotur can't be reached, MistWarp carries on as it did before. Rotur counts credits towards a parent's monthly limit when it moves them, so the purchase signal only asks.
 
+## Payments
+
+Buying a project or a game product, donating with a comment and refunding a game product are Rotur payment requests (`POST /v2/apps/<app>/payment-requests`). mistwarp-api never holds a permission to spend anyone's credits.
+
+1. The editor asks for an intent. mistwarp-api asks Rotur for the payment, with a purchase key (`mwbuy_`, `mwgame_`, `mwdonate_` or `mwrefund_`) as its `reference`, and answers with the key and Rotur's `approveUrl`.
+2. The person approves it on rotur.dev with their password. Rotur moves the credits, shared between everyone the sale pays: the creator, collaborators, the remixed project's creator and MistWarp's fee.
+3. Rotur's `payment.completed` webhook marks the key paid and delivers projects and game products. The editor's confirm call does the same if it gets there first, asking Rotur whether the request was paid. Whichever comes second finds it done.
+
+Donations are delivered when their comment is posted, and refunds when the product is revoked. Paid keys waiting for that are kept for 30 days, and unpaid ones for an hour (Rotur's requests expire after 15 minutes).
+
 ## Rotur webhooks
 
 Set the MistWarp Rotur App's webhook to `https://api.mistwarp.org/v1/rotur/webhook` on rotur.dev/me/developer, with privacy requests on, and put its signing secret in `ROTUR_WEBHOOK_SECRET`.
 
 - `user.deleted`, `user.left` and `user.banned` erase everything MistWarp holds about that person, the same as deleting their data from Settings.
 - A `privacy.request` for `erasure` does the same. One for `access` sends them a MistWarp notification pointing to the download in Settings.
+- `payment.completed` finishes the purchase it names (see Payments).
 
 Deliveries are checked against `Rotur-Signature` and refused if their timestamp is more than five minutes out. Each is saved to `data/rotur-webhooks.json`, answered, then handled in the background, and a retried delivery is only handled once. Anything not yet handled when the server stops is handled when it starts.
 

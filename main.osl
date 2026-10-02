@@ -131,7 +131,6 @@ if historyMigrationWorkers > 8 (
   historyMigrationWorkers = 8
 )
 string purchaseKeysFile = "data/purchase-keys.json"
-string pendingPayoutsFile = "data/pending-payouts.json"
 
 boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
 string localBlobsDir = "data/blobs/"
@@ -162,6 +161,7 @@ import "./cache-policy.osl"
 import "./git-inspection.osl"
 import "./gitea.osl"
 import "./rotur-app.osl"
+import "./rotur-payments.osl"
 import "./rotur-signals.osl"
 import "./rotur-badges.osl"
 import "./auth.osl"
@@ -216,6 +216,7 @@ import "./history-migration.osl"
 
 auto remoteMilestoneChecks = cache.create(10000, 10)
 auto viewDedup = cache.create(100000, 21600)
+auto roturAppOwnerCache = cache.create(4, 3600)
 auto viewIndexFlush = cache.create(100000, 600)
 auto userIdsCache = cache.create(10000, 300)
 auto identityRefreshCache = cache.create(10000, 300)
@@ -441,6 +442,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/projects/:id/products/:product/purchase/confirm", requireAuth, handleGameProductConfirm)
   api.POST("/projects/:id/products/:product/grant", requireAuth, handleGrantGameProduct)
   api.POST("/projects/:id/products/:product/revoke", requireAuth, handleRevokeGameProduct)
+  api.POST("/projects/:id/products/:product/refund/intent", requireAuth, handleGameProductRefundIntent)
   api.GET("/projects/:id/game-inventory-config", requireAuth, handleGetGameInventoryConfig)
   api.GET("/projects/:id/me/inventory", requireAuth, handleGetProjectInventory)
   api.POST("/projects/:id/me/inventory/grant", requireAuth, handleGrantProjectItem)
@@ -567,8 +569,6 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/admin/stats", requireAdmin, handleAdminStats)
   api.GET("/admin/storage", requireAdmin, handleAdminStorageStats)
   api.POST("/admin/storage/sync", requireAdmin, handleAdminSyncR2StorageStats)
-  api.GET("/admin/payouts", requireAdmin, handleListPendingPayouts)
-  api.POST("/admin/payouts/retry", requireAdmin, handleRetryPendingPayouts)
   api.GET("/admin/users", requireAdmin, handleListUsers)
   api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
   api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)

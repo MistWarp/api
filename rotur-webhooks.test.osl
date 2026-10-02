@@ -50,6 +50,11 @@ def addNotification(string target, string actor, string notifType, object payloa
   sent.append({target: target, type: notifType, message: payload.message})
 )
 
+array completed = []
+def completeRoturPayment(string reference, string requestId) (
+  completed.append(reference ++ "|" ++ requestId)
+)
+
 import "./rotur-webhooks.osl"
 roturWebhooksFile = dir ++ "rotur-webhooks.json"
 
@@ -76,11 +81,13 @@ queueRoturWebhook({id: "evt_3", type: "user.banned", data: {user_id: "mwc_studen
 queueRoturWebhook({id: "evt_4", type: "privacy.request", data: {user_id: "u-sam", kind: "access"}})
 queueRoturWebhook({id: "evt_5", type: "privacy.request", data: {user_id: "u-sam", kind: "erasure"}})
 queueRoturWebhook({id: "evt_6", type: "app.test", data: {message: "This is a test from Rotur."}})
+queueRoturWebhook({id: "evt_7", type: "payment.completed", data: {payment_request: "payreq_1", reference: "mwbuy_abc", user_id: "u-sam", amount: 5}})
 processRoturWebhooks()
 testing.assert(erased.len == 3, "erases on leaving, deleting the account and an erasure request: " ++ json.stringify(erased))
 testing.assert(erased.contains("u-sam|sam"), "erases someone MistWarp knows")
 testing.assert(erased.contains("u-unknown|"), "still erases what is keyed by ID for someone it doesn't")
 testing.assert(!erased.contains("mwc_student|"), "never acts on classroom students")
+testing.assert(completed.len == 1 and completed[1] == "mwbuy_abc|payreq_1", "hands a completed payment to its purchase: " ++ json.stringify(completed))
 testing.assert(sent.len == 1 and sent[1].target == "sam" and sent[1].type == "moderation", "answers an access request in MistWarp")
 
 processRoturWebhooks()

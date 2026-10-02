@@ -1,0 +1,139 @@
+// Payments through Rotur payment requests:
+// https://docs.rotur.dev/build-an-app/payments
+//
+// mistwarp-api asks Rotur, with the app's credentials, for someone to pay. They
+// approve it on rotur.dev with their password, Rotur moves the credits (shared
+// between everyone a sale pays), and Rotur tells MistWarp with the
+// payment.completed webhook. MistWarp never holds a permission to spend
+// anyone's credits.
+//
+// Each purchase key (data/purchase-keys.json) remembers its payment request.
+// The key is the request's reference, so the webhook knows which purchase was
+// paid, and the editor's confirm call asks Rotur directly if the webhook hasn't
+// come yet.
+
+// MistWarp's share of a sale goes to its own Rotur account: MISTWARP_ROTUR_USER,
+// or the MistWarp Rotur App's owner.
+def mistwarpFeeAccount() string (
+  if mistwarpRoturUser != "" (
+    return mistwarpRoturUser
+  )
+  if roturAppOwnerCache.has("owner") (
+    return roturAppOwnerCache.get("owner").toStr()
+  )
+  object result = roturApp("GET", "", {})
+  string owner = ""
+  if result.ok (
+    owner = (result.data.owner.username ?? "").toStr()
+  )
+  if owner != "" (
+    roturAppOwnerCache.set("owner", owner)
+  )
+  return owner
+)
+
+// Asks Rotur for a payment of amount from payer to payee, shared by splits
+// ([{username, basis_points}]) when there is more than one. Returns {ok, id,
+// approveUrl} or {ok: false, error}.
+def requestRoturPayment(string payer, string payee, array splits, number amount, string note, string reference, string returnUrl) object (
+  object body = {payer: roturUserRef(payer), "to": roturUserRef(payee), amount: amount, note: note.trim(1, 160), reference: reference}
+  if splits.len > 1 (
+    array shares = []
+    for i splits.len (
+      object split = splits[i].assert(object)
+      shares.append({"to": roturUserRef(split.username.toStr()), basis_points: split.basis_points})
+    )
+    body.splits = shares
+  )
+  if returnUrl != "" (
+    body.return_url = returnUrl
+  )
+  object result = roturApp("POST", "/payment-requests", body)
+  if !result.ok and (result.data.code ?? "").toStr() == "invalid_return_url" (
+    // The editor's page isn't on one of the app's origins: no way back, but
+    // the editor still sees the window close.
+    body.delete("return_url")
+    result = roturApp("POST", "/payment-requests", body)
+  )
+  if !result.ok (
+    return {ok: false, error: (result.data.error ?? "payments are not available right now").toStr()}
+  )
+  return {ok: true, id: result.data.id.toStr(), approveUrl: result.data.approve_url.toStr()}
+)
+
+def roturPaymentPaid(string requestId, string reference) boolean (
+  if requestId == "" (
+    return false
+  )
+  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  return result.ok and result.data.status == "paid" and (result.data.reference ?? "").toStr() == reference
+)
+
+// Starts a purchase: saves its key and asks Rotur for the payment. Returns what
+// the editor needs to open Rotur's window, or {ok: false, error}.
+def startPurchase(string prefix, object entry, string payer, string payee, array splits, number amount, string note, string returnUrl) object (
+  string key = prefix ++ randomString(16)
+  object request = requestRoturPayment(payer, payee, splits, amount, note, key, returnUrl)
+  if !request.ok (
+    return request
+  )
+  entry.requestId = request.id
+  entry.at = timestamp
+  sync.lock("purchase-keys")
+  object store = prunePurchaseKeys(loadPurchaseKeys())
+  object keys = store.keys
+  keys[key] = entry
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl}
+)
+
+// The purchase key's entry, once it has been paid, else {}. Rotur is asked if
+// the webhook hasn't said so yet.
+def paidPurchase(string key) object (
+  object keys = loadPurchaseKeys().keys
+  if key == "" or !keys.contains(key) (
+    return {}
+  )
+  object entry = keys[key].assert(object)
+  if entry.paid != true and !roturPaymentPaid((entry.requestId ?? "").toStr(), key) (
+    return {}
+  )
+  entry.paid = true
+  return entry
+)
+
+def forgetPurchase(string key) (
+  sync.lock("purchase-keys")
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  keys.delete(key)
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+)
+
+// payment.completed: mark the purchase paid, and deliver what needs no more
+// from the buyer. Donations and refunds wait for the comment or the revoke
+// that started them.
+def completeRoturPayment(string reference, string requestId) (
+  sync.lock("purchase-keys")
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  if !keys.contains(reference) or (keys[reference].requestId ?? "").toStr() != requestId (
+    sync.unlock("purchase-keys")
+    return
+  )
+  object entry = keys[reference].assert(object)
+  entry.paid = true
+  keys[reference] = entry
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+  if reference.startsWith("mwbuy_") (
+    completeProjectPurchase(reference)
+  ) else if reference.startsWith("mwgame_") (
+    completeGameProductPurchase(reference)
+  )
+)
