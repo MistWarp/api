@@ -63,6 +63,30 @@ Deliveries are checked against `Rotur-Signature` and refused if their timestamp 
 
 Rotur only sends these for people who have used MistWarp through Sign in with Rotur, or whose account was made on MistWarp. The five-minute check of `/accounts/deleted_check` stays for everyone else.
 
+## Badges
+
+MistWarp gives badges on people's Rotur profiles as the MistWarp Rotur App. Which badges exist, and what earns them, is data. Define the badges on rotur.dev/me/developer, then map MistWarp's events to them in `data/rotur-badges.json`:
+
+```json
+{"events": {
+  "project_shared": [{"badge": "creator", "delta": 1}],
+  "love_received": [{"badge": "loved", "delta": 1}],
+  "remixed": [{"badge": "remixed", "delta": 1}],
+  "comment_posted": [{"badge": "commenter", "delta": 1}],
+  "streak": [{"badge": "streak", "progress": "value"}]
+}}
+```
+
+| Event | When |
+| --- | --- |
+| `project_shared` | Someone shares a project for the first time |
+| `love_received` | Someone else loves their project, counted once per person per project |
+| `remixed` | Someone else shares a remix of their project |
+| `comment_posted` | They post a comment anywhere |
+| `streak` | They save a project on a new day. The value is how many days in a row they have done so |
+
+`delta` adds to their progress. `"progress": "value"` sets it to the event's value. A rule with neither is skipped. Updates are sent in the background, and Rotur only gives badges to people who have used MistWarp through Sign in with Rotur. Without the file, nothing is sent. The file is read on every event, so changing it needs no restart.
+
 ## Development feed
 
 `/v1/development/pulls` lists MistWarp's own open and recently merged pull
