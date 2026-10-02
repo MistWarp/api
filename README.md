@@ -21,6 +21,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
 | ROTUR_APP_KEY | mistwarp | Rotur validator app key |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
+| ROTUR_WEBHOOK_SECRET | | Signing secret (`whsec_…`) of the MistWarp Rotur App's webhook. Without it `POST /v1/rotur/webhook` answers 503 |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
 | R2_ACCESS_KEY_ID | | R2 access key |
@@ -36,6 +37,17 @@ The server loads `.env` automatically. Real environment variables override `.env
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.
+
+## Rotur webhooks
+
+Set the MistWarp Rotur App's webhook to `https://api.mistwarp.org/v1/rotur/webhook` on rotur.dev/me/developer, with privacy requests on, and put its signing secret in `ROTUR_WEBHOOK_SECRET`.
+
+- `user.deleted`, `user.left` and `user.banned` erase everything MistWarp holds about that person, the same as deleting their data from Settings.
+- A `privacy.request` for `erasure` does the same. One for `access` sends them a MistWarp notification pointing to the download in Settings.
+
+Deliveries are checked against `Rotur-Signature` and refused if their timestamp is more than five minutes out. Each is saved to `data/rotur-webhooks.json`, answered, then handled in the background, and a retried delivery is only handled once. Anything not yet handled when the server stops is handled when it starts.
+
+Rotur only sends these for people who have used MistWarp through Sign in with Rotur, or whose account was made on MistWarp. The five-minute check of `/accounts/deleted_check` stays for everyone else.
 
 ## Development feed
 

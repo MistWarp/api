@@ -201,3 +201,25 @@ def handleResolveReport(*serve.Context c) (
   )
   c.json(200, {ok: true})
 )
+
+// Reports someone filed stay for moderation, without saying who filed them.
+def anonymiseReportsBy(string username, string userId) (
+  string key = normalizeUsername(username)
+  string sourceKey = "user:" ++ userId
+  sync.lock("reports-storage")
+  array reports = loadReports()
+  boolean changed = false
+  for i reports.len (
+    object report = reports[i].assert(object)
+    if normalizeUsername((report.reporter ?? "").toStr()) == key or (report.sourceKey ?? "").toStr() == sourceKey (
+      report.reporter = "Deleted User"
+      report.sourceKey = ""
+      reports[i] = report
+      changed = true
+    )
+  )
+  if changed (
+    saveReports(reports)
+  )
+  sync.unlock("reports-storage")
+)

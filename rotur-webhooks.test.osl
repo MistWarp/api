@@ -1,0 +1,91 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:sync"
+import "std:thread"
+import "std:serve"
+import "std:crypto"
+import "std:regex"
+
+string dir = "/tmp/mistwarp-rotur-webhooks-" ++ timestamp.toStr() ++ "/"
+fs.mkdirAll(dir)
+
+def configValue(string name, string fallback) string (
+  if name == "ROTUR_WEBHOOK_SECRET" (
+    return "whsec_test"
+  )
+  return fallback
+)
+
+def readFile(string path) object (
+  if !fs.exists(path) (
+    return {ok: false}
+  )
+  return {ok: true, data: json.parse(fs.readFile(path), {type: "object"}).unwrap()}
+)
+
+def writeFile(string path, object data) boolean (
+  fs.writeFile(path, json.stringify(data))
+  return true
+)
+
+def isStudentUserId(string id) boolean (
+  return id.startsWith("mwc_")
+)
+
+def usernameForId(string id) string (
+  if id == "u-sam" (
+    return "sam"
+  )
+  return ""
+)
+
+array erased = []
+def eraseUser(string userId, string username) (
+  erased.append(userId ++ "|" ++ username)
+)
+
+array sent = []
+def addNotification(string target, string actor, string notifType, object payload) (
+  sent.append({target: target, type: notifType, message: payload.message})
+)
+
+import "./rotur-webhooks.osl"
+roturWebhooksFile = dir ++ "rotur-webhooks.json"
+
+// Signatures are checked the way Rotur makes them.
+string body = "{\"id\":\"evt_1\",\"type\":\"user.left\",\"data\":{\"user_id\":\"u-sam\"}}"
+// Made the way Rotur makes it (internal/core/app_webhooks.go, WebhookSignature).
+string signature = "v1=" ++ crypto.hmacSha256("whsec_test", "evt_1.1790000000." ++ body)
+testing.assert(signature == roturWebhookSignature("whsec_test", "evt_1", "1790000000", body), "signs like Rotur")
+testing.assert(signature.len == 67, "a hex SHA-256 HMAC")
+testing.assert(roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1790000060), "accepts a signed delivery")
+testing.assert(!roturWebhookValid("whsec_other", "evt_1", "1790000000", body, signature, 1790000060), "refuses another secret")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body ++ " ", signature, 1790000060), "refuses a changed body")
+testing.assert(!roturWebhookValid("whsec_test", "evt_2", "1790000000", body, signature, 1790000060), "refuses another event id")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1790000400), "refuses an old delivery")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1789999600), "refuses one from the future")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "soon", body, signature, 1790000060), "refuses a malformed timestamp")
+testing.assert(!roturWebhookValid("", "evt_1", "1790000000", body, signature, 1790000060), "refuses everything without a secret")
+
+// Each event is handled once, even when Rotur retries it.
+testing.assert(queueRoturWebhook({id: "evt_1", type: "user.left", data: {user_id: "u-sam"}}), "queues a new event")
+testing.assert(!queueRoturWebhook({id: "evt_1", type: "user.left", data: {user_id: "u-sam"}}), "ignores a retried event")
+queueRoturWebhook({id: "evt_2", type: "user.deleted", data: {user_id: "u-unknown"}})
+queueRoturWebhook({id: "evt_3", type: "user.banned", data: {user_id: "mwc_student"}})
+queueRoturWebhook({id: "evt_4", type: "privacy.request", data: {user_id: "u-sam", kind: "access"}})
+queueRoturWebhook({id: "evt_5", type: "privacy.request", data: {user_id: "u-sam", kind: "erasure"}})
+queueRoturWebhook({id: "evt_6", type: "app.test", data: {message: "This is a test from Rotur."}})
+processRoturWebhooks()
+testing.assert(erased.len == 3, "erases on leaving, deleting the account and an erasure request: " ++ json.stringify(erased))
+testing.assert(erased.contains("u-sam|sam"), "erases someone MistWarp knows")
+testing.assert(erased.contains("u-unknown|"), "still erases what is keyed by ID for someone it doesn't")
+testing.assert(!erased.contains("mwc_student|"), "never acts on classroom students")
+testing.assert(sent.len == 1 and sent[1].target == "sam" and sent[1].type == "moderation", "answers an access request in MistWarp")
+
+processRoturWebhooks()
+testing.assert(erased.len == 3, "handled events are not handled again")
+object store = loadRoturWebhooks()
+testing.assert(store.events.evt_1.done == true and store.events.evt_6.done == true, "marks events done")
+
+fs.remove(dir)
