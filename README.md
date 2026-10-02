@@ -19,7 +19,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | PORT | 5627 | Listen port |
 | HISTORY_MIGRATION_WORKERS | 4 | Concurrent background workers used to backfill missing project histories (clamped to 1-8) |
 | APP_URL | https://api.mistwarp.org | Public URL of this API |
-| ROTUR_APP_KEY | mistwarp | Rotur validator app key |
+| ROTUR_APP_KEY | mistwarp | The old validator key, for editors that predate validators keyed to the Rotur App |
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS` |
 | ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
 | ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
@@ -70,6 +70,30 @@ Every report is also filed in the MistWarp Rotur App's report queue (`POST /v2/a
 Who a report is about, and the snapshot sent with it, are worked out by mistwarp-api from the content when the report is made, never taken from the reporter: a project's owner and its title, description, instructions and notes; a comment's author and its text; a profile's owner and bio. Moderation actions on a report (ban, warn) use the same person. A report whose subject can't be found stays MistWarp-only, because Rotur needs someone to name.
 
 A report Rotur couldn't be reached for stays pending and is filed by the five-minute reconcile loop. One closed in MistWarp before Rotur had it is closed on Rotur as soon as it's filed.
+
+## Badges
+
+MistWarp gives badges on people's Rotur profiles as the MistWarp Rotur App. Which badges exist, and what earns them, is data. Define the badges on rotur.dev/me/developer, then map MistWarp's events to them in `data/rotur-badges.json`:
+
+```json
+{"events": {
+  "project_shared": [{"badge": "creator", "delta": 1}],
+  "love_received": [{"badge": "loved", "delta": 1}],
+  "remixed": [{"badge": "remixed", "delta": 1}],
+  "comment_posted": [{"badge": "commenter", "delta": 1}],
+  "streak": [{"badge": "streak", "progress": "value"}]
+}}
+```
+
+| Event | When |
+| --- | --- |
+| `project_shared` | Someone shares a project for the first time |
+| `love_received` | Someone else loves their project, counted once per person per project |
+| `remixed` | Someone else shares a remix of their project |
+| `comment_posted` | They post a comment anywhere |
+| `streak` | They save a project on a new day. The value is how many days in a row they have done so |
+
+`delta` adds to their progress. `"progress": "value"` sets it to the event's value. A rule with neither is skipped. Updates are sent in the background, and Rotur only gives badges to people who have used MistWarp through Sign in with Rotur. Without the file, nothing is sent. The file is read on every event, so changing it needs no restart.
 
 ## Development feed
 
@@ -168,8 +192,12 @@ A body may be up to 20 MB and a backpack holds up to 2000 items. Account deletio
 ## Auth flow
 
 1. Client holds a Rotur token from Sign in with Rotur, with the `validators:generate` scope.
-2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_APP_KEY>"}` and the token in the `Authorization` header, never the URL. It must be the same Rotur instance the server validates against.
-3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate` and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted.
+2. Client calls `POST https://api.rotur.dev/v2/validators` with `{"key": "<ROTUR_CLIENT_ID>"}` and the token in the `Authorization` header, never the URL. MistWarp's own token can always make validators for its app, without `validators:generate`. Older editors send `ROTUR_APP_KEY` instead. It must be the same Rotur instance the server validates against.
+3. Client calls `POST /v1/auth?v=<validator>`; the API validates it against `https://api.rotur.dev/validate`, with the app ID first and then the old key, and returns a 7 day session token (also set as the auth_token cookie). Bearer header and cookie are both accepted. For the app ID, Rotur also refuses anyone the app has banned, or who otherwise can't use MistWarp, with a message for them.
+
+Only MistWarp's own sign-in token can make app-ID validators (rotur/api#85), so the desktop app, which still uses the old sign-in, and older tokens send the old key. Rotur doesn't check the old key against MistWarp's Rotur App, so for those sign-ins Rotur's suspension, adults-only, parental approval and age settings aren't enforced, and a rotur.dev ban only applies once the five-minute ban sync has brought it in. Old-key validators made by another Rotur App's sign-in are refused. The gap closes once the desktop app uses Sign in with Rotur through a loopback redirect, which needs Rotur to accept any port on `http://127.0.0.1`.
+
+A refusal from Rotur is answered with 403 and its `code`, `error`, and for an app ban its `reason` and `until`.
 
 
 ## Milestone notifications

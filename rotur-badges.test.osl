@@ -1,0 +1,60 @@
+import "std:testing"
+import "std:json"
+import "std:url"
+import "std:thread"
+import "std:process"
+
+object profiles = {}
+def loadProfile(string username) object (
+  return (profiles[username] ?? {}).assertElse(object, {})
+)
+def saveProfile(object profile) boolean (
+  profiles["sam"] = profile
+  return true
+)
+def isStudentUsername(string username) boolean (
+  return username.contains("~")
+)
+def roturUserRef(string username) string (
+  return "id-" ++ username
+)
+def roturAppReady() boolean (
+  return true
+)
+array sent = []
+def roturApp(string method, string path, object body) object (
+  sent.append(method ++ " " ++ path ++ " " ++ json.stringify(body))
+  return {ok: true, status: 200, data: {}}
+)
+object rules = {events: {
+  streak: [{badge: "streak", progress: "value"}],
+  comment_posted: [{badge: "chatty", delta: 1}],
+  remixed: [{badge: "remixer"}, {progress: "value"}]
+}}
+def readFile(string path) object (
+  return {ok: true, data: rules}
+)
+
+import "./rotur-badges.osl"
+
+// Days in a row count up; a missed day starts again; the same day counts once.
+timestamp = 86400000 * 100 + 5000
+recordCreatingDay("sam")
+recordCreatingDay("sam")
+timestamp = 86400000 * 101 + 5000
+recordCreatingDay("sam")
+timestamp = 86400000 * 103 + 5000
+recordCreatingDay("sam")
+recordCreatingDay("class~student")
+roturBadgeEvent("sam", "comment_posted", 0)
+roturBadgeEvent("sam", "love_received", 0)
+roturBadgeEvent("sam", "remixed", 0)
+process.sleep(0.5)
+testing.assert(profiles.sam.creatingStreak.count == 1 and profiles.sam.creatingStreak.day == 103, "a missed day starts the streak again")
+testing.assert(sent.contains("PUT /badges/streak/users/id-sam {\"progress\":1}"), "the first day sets progress 1: " ++ json.stringify(sent))
+testing.assert(sent.contains("PUT /badges/streak/users/id-sam {\"progress\":2}"), "the next day sets progress 2")
+testing.assert(sent.filter((any line) boolean -> line.toStr().contains("streak")).len == 3, "the same day isn't counted twice")
+testing.assert(sent.contains("PUT /badges/chatty/users/id-sam {\"delta\":1}"), "a mapped event sends its delta")
+testing.assert(!json.stringify(sent).contains("student"), "classroom students are never sent")
+testing.assert(!json.stringify(sent).contains("remixer"), "a rule with neither delta nor progress is skipped, not sent as progress 0")
+testing.assert(sent.len == 4, "an unmapped event sends nothing")
