@@ -74,6 +74,7 @@ def createComment(string key, string author, string authorId, string content, st
   if !saved (
     return {ok: false, error: "could not save comment"}
   )
+  roturBadgeEvent(author, "comment_posted", 0)
   return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 

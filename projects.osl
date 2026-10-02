@@ -544,6 +544,13 @@ def ownedProjectSlotCount(string userId, string username) number (
   return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
 )
 
+// A project is shared for the first time, from either way of sharing it.
+def projectFirstShared(object project) (
+  addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+  notifyPublishedRemix(project)
+  roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
+)
+
 def notifyPublishedRemix(object project) (
   if !project.contains("remixNotified") or project.remixNotified != false or !project.contains("remixParent") or project.remixParent.toStr() == "" (
     return
@@ -554,6 +561,9 @@ def notifyPublishedRemix(object project) (
   )
   object parent = parentResult.project.assert(object)
   addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) (
+    roturBadgeEvent(parent.owner.toStr(), "remixed", 0)
+  )
   addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
   project.remixNotified = true
   saveProject(project)
@@ -1876,6 +1886,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
   project.lastUploadAt = timestamp
   project.pendingJson = false
+  recordCreatingDay(c.getString("username"))
   if !storedJson (
     if project.contains("workspaceLayers") and project.workspaceLayers != null (
       array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
@@ -2847,8 +2858,7 @@ def handlePublishProject(*serve.Context c) (
   saveProject(project)
   upsertIndexEntry(project)
   if firstShare (
-    addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
-    notifyPublishedRemix(project)
+    projectFirstShared(project)
   )
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
@@ -2993,6 +3003,9 @@ def handleReactProjectLocked(*serve.Context c) (
   notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
   if addedHeart (
     addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
+    if normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
+      roturBadgeEvent(project.owner.toStr(), "love_received", 0)
+    )
     addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
   )
 
