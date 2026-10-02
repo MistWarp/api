@@ -464,11 +464,13 @@ def ensureUserIdentity(string userId, string username) (
   userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
+// Requests to Rotur give up after 10 seconds, so a slow Rotur can't hold up
+// MistWarp's own requests (perks are read while serving projects).
 def roturServiceOptions() object (
   if mistwarpRoturToken == "" (
-    return {}
+    return {timeout: 10}
   )
-  return {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}}
+  return {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}, timeout: 10}
 )
 
 def refreshUsernameForId(string userId) string (
