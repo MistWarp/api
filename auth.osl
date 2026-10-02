@@ -94,34 +94,59 @@ def handleRoturAuth(*serve.Context c) (
     return
   )
 
-  object resp = requests.get(roturBase ++ "/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
-  if !resp.success (
-    c.json(401, {ok: false, error: "failed to validate token"})
-    return
+  // The editor makes validators keyed to MistWarp's Rotur App, which its own
+  // sign-in token can do without validators:generate; Rotur then also refuses
+  // anyone the app has banned. Older editors use the old key. A validator
+  // checked against the wrong key is just invalid, so try the next.
+  array keys = [roturAppKey]
+  if roturClientId != "" (
+    keys = [roturClientId, roturAppKey]
   )
-
-  auto parsed = json.parse(resp.body, {type: "object"})
-  if parsed.isErr() (
-    c.json(401, {ok: false, error: "invalid response from rotur"})
-    return
-  )
-  object data = parsed.unwrap().assert(object)
-
-  if data.contains("error") and data.error != null (
-    string code = "error"
-    if data.contains("code") and data.code != null (
-      code = data.code.toStr()
+  object data = {}
+  for i keys.len (
+    object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator))
+    // Rotur answers every validator with 200, valid or not.
+    number status = (resp.status ?? 0).toNum().toInt()
+    if status < 200 or status >= 300 (
+      c.json(401, {ok: false, error: "failed to validate token"})
+      return
     )
-    string redirectUrl = "https://rotur.dev/me"
-    if data.contains("redirect_url") and data.redirect_url != null (
-      redirectUrl = data.redirect_url.toStr()
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+      c.json(401, {ok: false, error: "invalid response from rotur"})
+      return
     )
-    c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
-    return
+    data = parsed.unwrap().assert(object)
+    if (data.code ?? "").toStr() != "invalid_validator" (
+      break
+    )
   )
 
-  if !data.contains("valid") or data.valid == false (
+  // Rotur answers every "no" with valid false and a code. Only a real "yes"
+  // signs anyone in.
+  if data.valid != true (
+    string code = (data.code ?? "").toStr()
+    if code != "" and code != "invalid_validator" (
+      object refusal = {ok: false, code: code, error: (data.error ?? "Rotur refused this sign-in.").toStr(), redirectUrl: (data.redirect_url ?? "https://rotur.dev/me").toStr()}
+      // An app ban says why, and until when.
+      if (data.reason ?? "").toStr() != "" (
+        refusal.reason = data.reason.toStr()
+      )
+      if (data.until ?? 0).toNum() > 0 (
+        refusal.until = data.until.toNum()
+      )
+      c.json(403, refusal)
+      return
+    )
     c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
+    return
+  )
+
+  // Old-key validators skip Rotur's checks for the app. One made by another
+  // Rotur App's sign-in was passed on to MistWarp, so it isn't accepted.
+  string madeBy = (data.app ?? "").toStr()
+  if roturClientId != "" and madeBy.startsWith("app_") and madeBy != roturClientId (
+    c.json(401, {ok: false, error: "this sign-in was made for another app", redirectUrl: "https://rotur.dev"})
     return
   )
 
