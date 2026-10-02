@@ -884,6 +884,7 @@ def reconcileLoop() (
   while true (
     reconcileDeletedUsers()
     syncRoturBans()
+    fileUnfiledRoturReports()
     process.sleep(300)
   )
 )
