@@ -1,0 +1,71 @@
+// Badges on people's Rotur profiles, given by MistWarp's Rotur App:
+// https://docs.rotur.dev/build-an-app/badges
+//
+// Which badges exist, and what earns them, is data, not code. Define the
+// badges on rotur.dev/me/developer, then map MistWarp's events to them in
+// data/rotur-badges.json, for example:
+//
+//   {"events": {
+//     "project_shared": [{"badge": "creator", "delta": 1}],
+//     "streak": [{"badge": "streak", "progress": "value"}]
+//   }}
+//
+// "delta" adds to someone's progress. "progress": "value" sets it to the
+// event's value. The events are project_shared (a project shared for the first
+// time), love_received, remixed (a remix of your project was shared),
+// comment_posted, and streak (days in a row you've saved a project). Without
+// the file, nothing is sent.
+
+string roturBadgesFile = "data/rotur-badges.json"
+
+def roturBadgeRules(string event) array (
+  auto result = readFile(roturBadgesFile)
+  if !result.ok (
+    return []
+  )
+  object events = (result.data.assert(object).events ?? {}).assertElse(object, {})
+  return (events[event] ?? []).assertElse(array, [])
+)
+
+def awardRoturBadges(string username, string event, number value) (
+  array rules = roturBadgeRules(event)
+  string person = url.escape(roturUserRef(username))
+  for i rules.len (
+    object rule = rules[i].assert(object)
+    object change = {progress: value}
+    if rule.contains("delta") (
+      change = {delta: rule.delta.toNum()}
+    )
+    roturApp("PUT", "/badges/" ++ url.escape(rule.badge.toStr()) ++ "/users/" ++ person, change)
+  )
+)
+
+// Badge updates go out in the background, so they never slow a request down.
+// Rotur only gives badges to MistWarp's own users, and ignores anyone else.
+def roturBadgeEvent(string username, string event, number value) (
+  if username == "" or isStudentUsername(username) or !roturAppReady() or roturBadgeRules(event).len == 0 (
+    return
+  )
+  thread.new(awardRoturBadges, username, event, value)
+)
+
+// Counts days in a row on which someone saved a project.
+def recordCreatingDay(string username) (
+  if username == "" or isStudentUsername(username) (
+    return
+  )
+  number today = (timestamp / 86400000).toInt()
+  object profile = loadProfile(username)
+  object streak = (profile.creatingStreak ?? {day: 0, count: 0}).assertElse(object, {day: 0, count: 0})
+  number day = streak.day.toNum()
+  if day == today (
+    return
+  )
+  number count = 1
+  if day == today - 1 (
+    count = streak.count.toNum() + 1
+  )
+  profile.creatingStreak = {day: today, count: count}
+  saveProfile(profile)
+  roturBadgeEvent(username, "streak", count)
+)
