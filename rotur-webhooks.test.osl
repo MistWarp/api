@@ -4,7 +4,8 @@ import "std:json"
 import "std:sync"
 import "std:thread"
 import "std:serve"
-import "go:mistwarp.local/roturwebhook"
+import "std:crypto"
+import "std:regex"
 
 string dir = "/tmp/mistwarp-rotur-webhooks-" ++ timestamp.toStr() ++ "/"
 fs.mkdirAll(dir)
@@ -54,11 +55,18 @@ roturWebhooksFile = dir ++ "rotur-webhooks.json"
 
 // Signatures are checked the way Rotur makes them.
 string body = "{\"id\":\"evt_1\",\"type\":\"user.left\",\"data\":{\"user_id\":\"u-sam\"}}"
-string signature = roturwebhook.Sign("whsec_test", "evt_1", "1790000000", body)
-testing.assert(roturwebhook.VerifyAt("whsec_test", "evt_1", "1790000000", body, signature, 1790000060), "accepts a signed delivery")
-testing.assert(!roturwebhook.VerifyAt("whsec_other", "evt_1", "1790000000", body, signature, 1790000060), "refuses another secret")
-testing.assert(!roturwebhook.VerifyAt("whsec_test", "evt_1", "1790000000", body ++ " ", signature, 1790000060), "refuses a changed body")
-testing.assert(!roturwebhook.VerifyAt("whsec_test", "evt_1", "1790000000", body, signature, 1790000400), "refuses an old delivery")
+// Made the way Rotur makes it (internal/core/app_webhooks.go, WebhookSignature).
+string signature = "v1=" ++ crypto.hmacSha256("whsec_test", "evt_1.1790000000." ++ body)
+testing.assert(signature == roturWebhookSignature("whsec_test", "evt_1", "1790000000", body), "signs like Rotur")
+testing.assert(signature.len == 67, "a hex SHA-256 HMAC")
+testing.assert(roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1790000060), "accepts a signed delivery")
+testing.assert(!roturWebhookValid("whsec_other", "evt_1", "1790000000", body, signature, 1790000060), "refuses another secret")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body ++ " ", signature, 1790000060), "refuses a changed body")
+testing.assert(!roturWebhookValid("whsec_test", "evt_2", "1790000000", body, signature, 1790000060), "refuses another event id")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1790000400), "refuses an old delivery")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1789999600), "refuses one from the future")
+testing.assert(!roturWebhookValid("whsec_test", "evt_1", "soon", body, signature, 1790000060), "refuses a malformed timestamp")
+testing.assert(!roturWebhookValid("", "evt_1", "1790000000", body, signature, 1790000060), "refuses everything without a secret")
 
 // Each event is handled once, even when Rotur retries it.
 testing.assert(queueRoturWebhook({id: "evt_1", type: "user.left", data: {user_id: "u-sam"}}), "queues a new event")
