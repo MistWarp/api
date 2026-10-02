@@ -94,20 +94,33 @@ def handleRoturAuth(*serve.Context c) (
     return
   )
 
-  object resp = requests.get(roturBase ++ "/validate?key=" ++ roturAppKey ++ "&v=" ++ url.escape(validator))
-  if !resp.success (
-    c.json(401, {ok: false, error: "failed to validate token"})
-    return
+  // The editor makes validators keyed to MistWarp's Rotur App, which its own
+  // sign-in token can do without validators:generate; Rotur then also refuses
+  // anyone the app has banned. Older editors use the old key. A validator
+  // checked against the wrong key is just invalid, so try the next.
+  array keys = [roturAppKey]
+  if roturClientId != "" (
+    keys = [roturClientId, roturAppKey]
+  )
+  object data = {}
+  for i keys.len (
+    object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator))
+    if !resp.success and resp.status.toInt() != 403 (
+      c.json(401, {ok: false, error: "failed to validate token"})
+      return
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+      c.json(401, {ok: false, error: "invalid response from rotur"})
+      return
+    )
+    data = parsed.unwrap().assert(object)
+    if (data.code ?? "").toStr() != "invalid_validator" (
+      break
+    )
   )
 
-  auto parsed = json.parse(resp.body, {type: "object"})
-  if parsed.isErr() (
-    c.json(401, {ok: false, error: "invalid response from rotur"})
-    return
-  )
-  object data = parsed.unwrap().assert(object)
-
-  if data.contains("error") and data.error != null (
+  if data.valid != true and data.contains("error") and data.error != null and (data.code ?? "").toStr() != "invalid_validator" (
     string code = "error"
     if data.contains("code") and data.code != null (
       code = data.code.toStr()
