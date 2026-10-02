@@ -166,6 +166,10 @@ def handleGameProductIntent(*serve.Context c) (
   )
 
   array splits = projectCommerceSplits(project)
+  if splits.len == 0 (
+    c.json(503, {ok: false, error: "MistWarp can't take payments right now. Try again in a few minutes."})
+    return
+  )
   object entry = {type: "game_product", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(c.getString("username")), userId: c.getString("userId"), price: product.price}
   object started = startPurchase("mwgame_", entry, c.getString("username"), project.owner.toStr(), splits, product.price.toNum(), (product.name ?? product.id).toStr() ++ " in " ++ project.title.toStr(), (c.bodyJSON().returnUrl ?? "").toStr())
   if !started.ok (
@@ -174,7 +178,6 @@ def handleGameProductIntent(*serve.Context c) (
   )
   started.amount = product.price
   started.title = product.name
-  started.splits = splits
   c.json(200, started))
 
 // Delivers a paid game product, once, whether the editor or Rotur's webhook
@@ -202,8 +205,10 @@ def completeGameProductPurchase(string key) object (
       sync.unlock("purchase:" ++ key)
       return {ok: false, error: "failed to grant game product"}
     )
-    addPurchaseRecord(buyer, {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: product.price, at: timestamp, type: "game_product"})
-    addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: product.price})
+    // What the buyer paid, which a refund pays back.
+    number paid = (entry.price ?? product.price).toNum()
+    addPurchaseRecord(buyer, {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: paid, at: timestamp, type: "game_product"})
+    addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: paid})
   )
   forgetPurchase(key)
   sync.unlock("purchase:" ++ key)
@@ -238,6 +243,20 @@ def handleGameProductConfirm(*serve.Context c) (
   c.json(200, {ok: true, product: gameProductResponse(completed.project.assert(object), completed.product.assert(object), c)})
 )
 
+// What the buyer last paid for this product, from their purchase records, or 0
+// if they never paid for it (a creator grant or a free claim).
+def gameProductAmountPaid(string buyer, string projectId, string productId) number (
+  object profile = loadProfile(normalizeUsername(buyer))
+  array purchases = (profile.purchases ?? []).assertElse(array, [])
+  for i purchases.len (
+    object record = purchases[i].assertElse(object, {})
+    if (record.type ?? "").toStr() == "game_product" and (record.projectId ?? "").toStr() == projectId and (record.productId ?? "").toStr() == productId (
+      return (record.amount ?? 0).toNum()
+    )
+  )
+  return 0
+)
+
 // The creator pays the buyer back through Rotur before revoking a paid
 // product: this asks Rotur for that payment.
 def handleGameProductRefundIntent(*serve.Context c) (
@@ -256,8 +275,13 @@ def handleGameProductRefundIntent(*serve.Context c) (
     return
   )
   object product = found.product.assert(object)
-  object entry = {type: "game_refund", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(c.getString("username")), refundTo: buyerId}
-  object started = startPurchase("mwrefund_", entry, c.getString("username"), buyer, [], product.price.toNum(), "Refund for " ++ (product.name ?? product.id).toStr(), (body.returnUrl ?? "").toStr())
+  number paid = gameProductAmountPaid(buyer, project.id.toStr(), product.id.toStr())
+  if paid <= 0 (
+    c.badRequest("there's no payment from them to refund, revoke without a refund")
+    return
+  )
+  object entry = {type: "game_refund", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(c.getString("username")), refundTo: buyerId, amount: paid}
+  object started = startPurchase("mwrefund_", entry, c.getString("username"), buyer, [], paid, "Refund for " ++ (product.name ?? product.id).toStr(), (body.returnUrl ?? "").toStr())
   if !started.ok (
     c.json(503, started)
     return
@@ -339,12 +363,15 @@ def handleRevokeGameProduct(*serve.Context c) (
       c.json(402, {ok: false, error: "refund payment not received yet, send the refund first or revoke without refund"})
       return
     )
-    forgetPurchase(refundKey)
     refunded = true
   )
   if !removeGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr()) (
+    // The refund key stays, so revoking can be tried again with it.
     c.internalError("failed to revoke game product")
     return
+  )
+  if refunded (
+    forgetPurchase((body.refundKey ?? "").toStr())
   )
   c.json(200, {ok: true, removed: true, refunded: refunded})
 )

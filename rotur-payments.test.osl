@@ -116,13 +116,35 @@ testing.assert(asked.return_url == "https://mistwarp.org/projects/p1", "comes ba
 object tip = startPurchase("mwdonate_", {kind: "comment_donation", projectId: "p1", buyer: "sam", amount: 2}, "sam", "kit", [], 2, "Donation", "")
 testing.assert(tip.ok and !calls[calls.len].body.assert(object).contains("splits") and !calls[calls.len].body.assert(object).contains("return_url"), "a donation goes to one person")
 
+// Starting the same purchase again while its request is open gets that
+// request back, not a second one to pay.
+number postsBefore = calls.len
+object again = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 10}, "sam", "kit", [{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], 10, "A game", "")
+testing.assert(again.ok and again.key == sale.key and again.requestId == sale.requestId and again.approveUrl == sale.approveUrl, "reuses the open request: " ++ json.stringify(again))
+testing.assert(calls.len == postsBefore, "asks Rotur for nothing new")
+object otherPrice = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 12}, "sam", "kit", [], 12, "A game", "")
+testing.assert(otherPrice.ok and otherPrice.key != sale.key, "a different price is a different purchase")
+object store = loadPurchaseKeys()
+store.keys[otherPrice.key].expiresAt = timestamp + 30000
+savePurchaseKeys(store)
+object afterExpiry = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 12}, "sam", "kit", [], 12, "A game", "")
+testing.assert(afterExpiry.ok and afterExpiry.key != otherPrice.key, "a request about to expire isn't reused")
+
+// The payer is never in the splits: their share goes to the next person.
+array shares = splitsWithoutPayer([{username: "mist", basis_points: 1000}, {username: "Sam", basis_points: 1000}, {username: "kit", basis_points: 8000}], "sam")
+testing.assert(json.stringify(shares) == json.stringify([{username: "mist", basis_points: 1000}, {username: "kit", basis_points: 9000}]), "a remix parent buying gives their share on: " ++ json.stringify(shares))
+shares = splitsWithoutPayer([{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], "mist")
+testing.assert(json.stringify(shares) == json.stringify([{username: "kit", basis_points: 10000}]), "the fee account buying gives its share to the one before it: " ++ json.stringify(shares))
+object ownSale = startPurchase("mwbuy_", {projectId: "p2", buyer: "mist", price: 10}, "mist", "kit", [{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], 10, "A game", "")
+testing.assert(ownSale.ok and !calls[calls.len].body.assert(object).contains("splits") and loadPurchaseKeys().keys[ownSale.key].splits.len == 1, "with only the creator left, no splits are sent, and the key keeps what was used")
+
 // A page Rotur won't send people back to still gets a request.
 object elsewhere = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 1}, "sam", "kit", [], 1, "A game", "https://evil.example/")
 testing.assert(elsewhere.ok and !calls[calls.len].body.assert(object).contains("return_url"), "retries without the return URL")
 
 object refused = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 0}, "sam", "kit", [], 0, "A game", "")
 testing.assert(!refused.ok and refused.error == "amount must be positive", "passes Rotur's refusal on")
-testing.assert(!loadPurchaseKeys().keys.assert(object).contains("mwbuy_k4"), "a refused request saves no key")
+testing.assert(!loadPurchaseKeys().keys.assert(object).contains("mwbuy_k" ++ keyCount.toStr()), "a refused request saves no key")
 
 // Nothing counts as paid until Rotur says so.
 testing.assert(paidPurchase(sale.key).len == 0, "an unpaid purchase is not paid")

@@ -159,9 +159,17 @@ def projectCommerceSplits(object project) array (
   if platformPoints > 5000 (
     platformPoints = 5000
   )
-  string platformUser = mistwarpFeeAccount()
+  string platformUser = ""
+  if platformPoints > 0 (
+    platformUser = mistwarpFeeAccount()
+    if platformUser == "" (
+      // Without the fee account its share would go to the creator. No splits
+      // means the sale can't start.
+      return []
+    )
+  )
   number allocated = 0
-  if platformUser != "" and platformPoints > 0 (
+  if platformPoints > 0 (
     addCommerceSplit(totals, platformUser, platformPoints)
     allocated = platformPoints
   )
@@ -482,6 +490,10 @@ def handlePurchaseIntent(*serve.Context c) (
   )
 
   array splits = projectCommerceSplits(project)
+  if splits.len == 0 (
+    c.json(503, {ok: false, error: "MistWarp can't take payments right now. Try again in a few minutes."})
+    return
+  )
   object started = startPurchase("mwbuy_", {projectId: project.id.toStr(), buyer: buyerLower, price: price}, buyerLower, project.owner.toStr(), splits, price, project.title.toStr(), (c.bodyJSON().returnUrl ?? "").toStr())
   if !started.ok (
     c.json(503, started)
@@ -489,7 +501,6 @@ def handlePurchaseIntent(*serve.Context c) (
   )
   started.amount = price
   started.title = project.title
-  started.splits = splits
   c.json(200, started)
 )
 
@@ -508,7 +519,9 @@ def completeProjectPurchase(string key) object (
   if !hasBought(project, buyer) (
     number owed = entry.price.toNum()
     string seller = project.owner.toStr()
-    recordSale(project, buyer, owed, ownerAmountFromSplits(project, owed, projectCommerceSplits(project)))
+    // The splits Rotur paid, as they were when the purchase started.
+    array splits = (entry.splits ?? projectCommerceSplits(project)).assertElse(array, [])
+    recordSale(project, buyer, owed, ownerAmountFromSplits(project, owed, splits))
     if addToLibrary(buyer, project.id.toStr()) (
       project.saves = projectSaves(project) + 1
     )
