@@ -1,0 +1,47 @@
+// MistWarp's Rotur App, called with its client ID and secret:
+// https://docs.rotur.dev/build-an-app/apps-api
+//
+// This is how mistwarp-api talks to Rotur about MistWarp itself: bans,
+// reports, safety signals, badges and payment requests.
+
+string roturClientId = configValue("ROTUR_CLIENT_ID", "")
+string roturClientSecret = configValue("ROTUR_CLIENT_SECRET", "")
+
+def roturAppReady() boolean (
+  return roturClientId != "" and roturClientSecret != ""
+)
+
+// Calls https://api.rotur.dev/v2/apps/<client id><path>. Returns {ok, status,
+// data}: ok is false when the app isn't set up or Rotur didn't say yes.
+def roturApp(string method, string path, object body) object (
+  if !roturAppReady() (
+    return {ok: false, status: 0, data: {}}
+  )
+  object options = {timeout: 10, headers: {
+    "Authorization": "Basic " ++ crypto.base64Encode(roturClientId ++ ":" ++ roturClientSecret),
+    "Content-Type": "application/json"
+  }}
+  if method == "POST" or method == "PUT" or method == "PATCH" (
+    options.body = json.stringify(body)
+  )
+  string target = roturBase ++ "/v2/apps/" ++ url.escape(roturClientId) ++ path
+  object resp = {}
+  if method == "GET" (
+    resp = requests.get(target, options)
+  ) else if method == "POST" (
+    resp = requests.post(target, options)
+  ) else if method == "PUT" (
+    resp = requests.put(target, options)
+  ) else if method == "PATCH" (
+    resp = requests.patch(target, options)
+  ) else (
+    resp = requests.delete(target, options)
+  )
+  number status = (resp.status ?? 0).toNum().toInt()
+  object data = {}
+  auto parsed = json.parse((resp.body ?? "").toStr(), {type: "object"})
+  if !parsed.isErr() (
+    data = parsed.unwrap().assert(object)
+  )
+  return {ok: status >= 200 and status < 300, status: status, data: data}
+)

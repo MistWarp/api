@@ -116,14 +116,6 @@ def handleRoturAuth(*serve.Context c) (
     if data.contains("redirect_url") and data.redirect_url != null (
       redirectUrl = data.redirect_url.toStr()
     )
-    if data.contains("username") and data.username != null and data.username.toStr() != "" (
-      string uname = data.username.toStr()
-      string reason = "Account restricted on Rotur"
-      if data.contains("reason") and data.reason != null (
-        reason = data.reason.toStr()
-      )
-      banUser(uname, reason, "rotur_sync")
-    )
     c.json(403, {ok: false, code: code, error: data.error.toStr(), redirectUrl: redirectUrl})
     return
   )
