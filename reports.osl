@@ -60,6 +60,92 @@ def canAppendPendingReport(array reports, string sourceKey) boolean (
   return totalPending < 1000 and sourcePending < 10
 )
 
+// Reports also go to the MistWarp Rotur App's report queue. Reports in a
+// priority category (child sexual exploitation or abuse, a threat to life,
+// encouraging suicide or self-harm, terrorism) reach Rotur's safety team as
+// soon as they're filed. MistWarp's own queue and tools are unchanged, and
+// closing a report here closes it on Rotur too.
+array roturReportCategories = ["spam", "harassment", "hate", "sexual", "violence", "scam", "other", "csea", "threat_to_life", "self_harm", "terrorism"]
+
+def reportCategory(object body, string reason) string (
+  string category = (body.category ?? "").toStr()
+  if roturReportCategories.contains(category) (
+    return category
+  )
+  // Older clients only send the category's wording at the start of the reason.
+  object worded = {
+    "Inappropriate or explicit content": "sexual",
+    "Harassment or bullying": "harassment",
+    "Spam or misleading": "spam",
+    "Hateful or abusive behaviour": "hate",
+    "Dangerous or illegal activity": "violence"
+  }
+  array wordings = worded.getKeys()
+  for i wordings.len (
+    if reason.startsWith(wordings[i].toStr()) (
+      return worded[wordings[i].toStr()].toStr()
+    )
+  )
+  return "other"
+)
+
+def roturUserRef(string username) string (
+  string userId = userIdForUsername(username)
+  if userId != "" (
+    return userId
+  )
+  return username
+)
+
+def fileRoturReport(object report) (
+  string targetUser = reportTargetUser(report)
+  if targetUser == "" or !roturAppReady() (
+    return
+  )
+  string targetType = "content"
+  if report.type.toStr() == "user" (
+    targetType = "user"
+  )
+  object request = {
+    target_type: targetType,
+    target_id: report.type.toStr() ++ ":" ++ report.target.toStr(),
+    target_user: roturUserRef(targetUser),
+    category: report.category.toStr(),
+    reason: report.reason.toStr().trim(1, 1000),
+    snapshot: (report.context ?? "").toStr().trim(1, 4000),
+    reporter: roturUserRef(report.reporter.toStr())
+  }
+  object result = roturApp("POST", "/reports", request)
+  if !result.ok and result.status == 400 (
+    // Only people who have used MistWarp through Rotur can be named.
+    request.delete("reporter")
+    result = roturApp("POST", "/reports", request)
+  )
+  if !result.ok (
+    return
+  )
+  sync.lock("reports-storage")
+  array reports = loadReports()
+  for i reports.len (
+    object stored = reports[i].assert(object)
+    if stored.id.toStr() == report.id.toStr() (
+      stored.roturReportId = (result.data.report_id ?? "").toStr()
+      reports[i] = stored
+    )
+  )
+  saveReports(reports)
+  sync.unlock("reports-storage")
+)
+
+// outcome is "resolved" (action taken) or "dismissed". Rotur keeps reports
+// it is reviewing, and says no to closing them, which is fine.
+def closeRoturReport(object report, string outcome) (
+  string reportId = (report.roturReportId ?? "").toStr()
+  if reportId != "" (
+    roturApp("POST", "/reports/" ++ url.escape(reportId) ++ "/resolve", {outcome: outcome})
+  )
+)
+
 def handleCreateReport(*serve.Context c) (
   object body = c.bodyJSON()
   string reportType = body.type.toStr()
@@ -86,6 +172,7 @@ def handleCreateReport(*serve.Context c) (
     type: reportType,
     target: target,
     reason: reason,
+    category: reportCategory(body, reason),
     created: timestamp,
     resolved: false
   }
@@ -115,6 +202,7 @@ def handleCreateReport(*serve.Context c) (
   if reportType == "project" (
     snapshotProjectEvidence(target)
   )
+  thread.new(fileRoturReport, report)
   c.json(201, {ok: true})
 )
 
@@ -175,11 +263,13 @@ def handleResolveReport(*serve.Context c) (
   array reports = loadReports()
   boolean found = false
   string projectTarget = ""
+  object resolved = {}
   for i reports.len (
     object report = reports[i]
     if report.id.toStr() == id (
       report.resolved = true
       found = true
+      resolved = report
       if report.type.toStr() == "project" (
         projectTarget = report.target.toStr()
       )
@@ -199,6 +289,7 @@ def handleResolveReport(*serve.Context c) (
   if projectTarget != "" (
     maybeClearProjectEvidence(projectTarget)
   )
+  closeRoturReport(resolved, "resolved")
   c.json(200, {ok: true})
 )
 
