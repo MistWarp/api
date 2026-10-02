@@ -1,0 +1,155 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:sync"
+import "std:cache"
+import "std:url"
+
+string dir = "/tmp/mistwarp-rotur-payments-" ++ timestamp.toStr() ++ "/"
+fs.mkdirAll(dir)
+string purchaseKeysFile = dir ++ "purchase-keys.json"
+string mistwarpRoturUser = ""
+auto roturAppOwnerCache = cache.create(4, 3600)
+
+def readFile(string path) object (
+  if !fs.exists(path) (
+    return {ok: false}
+  )
+  return {ok: true, data: json.parse(fs.readFile(path), {type: "object"}).unwrap()}
+)
+
+def writeFile(string path, object data) boolean (
+  fs.writeFile(path, json.stringify(data))
+  return true
+)
+
+def loadPurchaseKeys() object (
+  auto result = readFile(purchaseKeysFile)
+  if !result.ok (
+    return {keys: {}}
+  )
+  return result.data.assert(object)
+)
+
+def savePurchaseKeys(object store) boolean (
+  return writeFile(purchaseKeysFile, store)
+)
+
+def prunePurchaseKeys(object store) object (
+  return store
+)
+
+number keyCount = 0
+def randomString(number length) string (
+  keyCount += 1
+  return "k" ++ keyCount.toStr()
+)
+
+def roturUserRef(string username) string (
+  if username == "sam" (
+    return "u-sam"
+  )
+  return username
+)
+
+// A pretend Rotur: payment requests by ID, and every call made.
+array calls = []
+object requests = {}
+def roturApp(string method, string path, object body) object (
+  calls.append({method: method, path: path, body: body})
+  if method == "GET" and path == "" (
+    return {ok: true, status: 200, data: {owner: {username: "mist"}}}
+  )
+  if method == "POST" and path == "/payment-requests" (
+    if body.contains("return_url") and body.return_url.toStr().startsWith("https://evil") (
+      return {ok: false, status: 400, data: {code: "invalid_return_url", error: "not one of the app's origins"}}
+    )
+    if body.amount.toNum() <= 0 (
+      return {ok: false, status: 400, data: {code: "invalid_amount", error: "amount must be positive"}}
+    )
+    string id = "payreq_" ++ (requests.getKeys().len + 1).toStr()
+    requests[id] = {id: id, status: "pending", reference: body.reference}
+    return {ok: true, status: 201, data: {id: id, approve_url: "https://rotur.dev/pay/approve/" ++ id}}
+  )
+  if method == "GET" and path.startsWith("/payment-requests/") (
+    string id = path.split("/")[3]
+    if requests.contains(id) (
+      return {ok: true, status: 200, data: requests[id]}
+    )
+    return {ok: false, status: 404, data: {}}
+  )
+  return {ok: false, status: 404, data: {}}
+)
+
+array delivered = []
+def completeProjectPurchase(string key) object (
+  delivered.append(key)
+  return {ok: true}
+)
+def completeGameProductPurchase(string key) object (
+  delivered.append(key)
+  return {ok: true}
+)
+
+import "./rotur-payments.osl"
+
+// MistWarp's share goes to the app owner unless MISTWARP_ROTUR_USER says otherwise.
+testing.assert(mistwarpFeeAccount() == "mist", "the app owner gets MistWarp's share")
+mistwarpFeeAccount()
+number ownerLookups = 0
+for i calls.len (
+  if calls[i].method == "GET" and calls[i].path == "" (
+    ownerLookups += 1
+  )
+)
+testing.assert(ownerLookups == 1, "the owner is looked up once")
+
+// A sale shared between people asks Rotur for one request with splits.
+object sale = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 10}, "sam", "kit", [{username: "kit", basis_points: 9000}, {username: "mist", basis_points: 1000}], 10, "A game", "https://mistwarp.org/projects/p1")
+testing.assert(sale.ok and sale.key == "mwbuy_k1" and sale.approveUrl == "https://rotur.dev/pay/approve/" ++ sale.requestId, "starts a purchase: " ++ json.stringify(sale))
+object asked = calls[calls.len].body
+testing.assert(asked.payer == "u-sam" and asked["to"] == "kit" and asked.amount == 10 and asked.reference == sale.key, "asks the buyer to pay the creator, with the key as reference")
+testing.assert(asked.splits.len == 2 and asked.splits[1].basis_points == 9000 and asked.splits[2]["to"] == "mist", "shares the sale")
+testing.assert(asked.return_url == "https://mistwarp.org/projects/p1", "comes back to the page")
+
+// One person paid needs no splits.
+object tip = startPurchase("mwdonate_", {kind: "comment_donation", projectId: "p1", buyer: "sam", amount: 2}, "sam", "kit", [], 2, "Donation", "")
+testing.assert(tip.ok and !calls[calls.len].body.assert(object).contains("splits") and !calls[calls.len].body.assert(object).contains("return_url"), "a donation goes to one person")
+
+// A page Rotur won't send people back to still gets a request.
+object elsewhere = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 1}, "sam", "kit", [], 1, "A game", "https://evil.example/")
+testing.assert(elsewhere.ok and !calls[calls.len].body.assert(object).contains("return_url"), "retries without the return URL")
+
+object refused = startPurchase("mwbuy_", {projectId: "p1", buyer: "sam", price: 0}, "sam", "kit", [], 0, "A game", "")
+testing.assert(!refused.ok and refused.error == "amount must be positive", "passes Rotur's refusal on")
+testing.assert(!loadPurchaseKeys().keys.assert(object).contains("mwbuy_k4"), "a refused request saves no key")
+
+// Nothing counts as paid until Rotur says so.
+testing.assert(paidPurchase(sale.key).len == 0, "an unpaid purchase is not paid")
+testing.assert(paidPurchase("mwbuy_nope").len == 0, "an unknown key is not paid")
+testing.assert(paidPurchase("").len == 0, "no key is not paid")
+
+// The editor's confirm can ask Rotur before the webhook comes.
+requests[sale.requestId].status = "paid"
+testing.assert(paidPurchase(sale.key).paid == true, "a paid request is paid")
+requests[tip.requestId].status = "paid"
+requests[tip.requestId].reference = "mwdonate_other"
+testing.assert(paidPurchase(tip.key).len == 0, "a paid request for another reference doesn't count")
+
+// The webhook marks the purchase paid and delivers sales.
+completeRoturPayment(sale.key, "payreq_wrong")
+testing.assert(delivered.len == 0 and loadPurchaseKeys().keys[sale.key].paid != true, "ignores a request that isn't the key's")
+completeRoturPayment(sale.key, sale.requestId)
+testing.assert(delivered.len == 1 and delivered[1] == sale.key, "delivers a paid sale")
+testing.assert(loadPurchaseKeys().keys[sale.key].paid == true, "remembers it was paid")
+completeRoturPayment(tip.key, tip.requestId)
+testing.assert(delivered.len == 1, "a donation waits for its comment")
+requests[tip.requestId].status = "pending"
+testing.assert(paidPurchase(tip.key).paid == true, "once the webhook says so, Rotur isn't asked again")
+completeRoturPayment("mwbuy_unknown", "payreq_1")
+testing.assert(delivered.len == 1, "ignores unknown references")
+
+forgetPurchase(sale.key)
+testing.assert(!loadPurchaseKeys().keys.assert(object).contains(sale.key), "forgets a delivered purchase")
+
+fs.remove(dir)

@@ -674,12 +674,6 @@ def handleAdminStats(*serve.Context c) (
   object bans = banData.bans
   number bannedUsers = bans.getKeys().len
   array news = loadNews()
-  object payoutStore = loadPendingPayouts()
-  array pendingPayouts = payoutStore.payouts.assert(array)
-  number pendingPayoutAmount = 0
-  for i pendingPayouts.len (
-    pendingPayoutAmount += pendingPayouts[i].amount.toNum()
-  )
   c.json(200, {
     ok: true,
     totalProjects: totalProjects,
@@ -694,8 +688,6 @@ def handleAdminStats(*serve.Context c) (
     openErrors: openErrors,
     bannedUsers: bannedUsers,
     newsPosts: news.len,
-    pendingPayouts: pendingPayouts.len,
-    pendingPayoutAmount: pendingPayoutAmount,
     days: days,
     averageProjectBytes: if totalProjects > 0 then totalBytes / totalProjects else 0,
     averageViews: if totalProjects > 0 then totalViews / totalProjects else 0,
