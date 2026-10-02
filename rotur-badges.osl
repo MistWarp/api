@@ -12,9 +12,10 @@
 //
 // "delta" adds to someone's progress. "progress": "value" sets it to the
 // event's value. The events are project_shared (a project shared for the first
-// time), love_received, remixed (a remix of your project was shared),
-// comment_posted, and streak (days in a row you've saved a project). Without
-// the file, nothing is sent.
+// time), love_received (once per person per project), remixed (a remix of
+// your project was shared), comment_posted, and streak (days in a row you've
+// saved a project). A rule with neither is skipped. Without the file, nothing
+// is sent.
 
 string roturBadgesFile = "data/rotur-badges.json"
 
@@ -31,12 +32,18 @@ def awardRoturBadges(string username, string event, number value) (
   array rules = roturBadgeRules(event)
   string person = url.escape(roturUserRef(username))
   for i rules.len (
-    object rule = rules[i].assert(object)
-    object change = {progress: value}
+    object rule = rules[i].assertElse(object, {})
+    string badge = (rule.badge ?? "").toStr()
+    object change = {}
     if rule.contains("delta") (
       change = {delta: rule.delta.toNum()}
+    ) else if (rule.progress ?? "").toStr() == "value" (
+      change = {progress: value}
     )
-    roturApp("PUT", "/badges/" ++ url.escape(rule.badge.toStr()) ++ "/users/" ++ person, change)
+    // A rule that says neither is a mistake; sending it would reset progress.
+    if badge != "" and change.len > 0 (
+      roturApp("PUT", "/badges/" ++ url.escape(badge) ++ "/users/" ++ person, change)
+    )
   )
 )
 

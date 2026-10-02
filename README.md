@@ -80,12 +80,12 @@ MistWarp gives badges on people's Rotur profiles as the MistWarp Rotur App. Whic
 | Event | When |
 | --- | --- |
 | `project_shared` | Someone shares a project for the first time |
-| `love_received` | Someone else loves their project |
+| `love_received` | Someone else loves their project, counted once per person per project |
 | `remixed` | Someone else shares a remix of their project |
 | `comment_posted` | They post a comment anywhere |
 | `streak` | They save a project on a new day. The value is how many days in a row they have done so |
 
-`delta` adds to their progress. `"progress": "value"` sets it to the event's value. Updates are sent in the background, and Rotur only gives badges to people who have used MistWarp through Sign in with Rotur. Without the file, nothing is sent. The file is read on every event, so changing it needs no restart.
+`delta` adds to their progress. `"progress": "value"` sets it to the event's value. A rule with neither is skipped. Updates are sent in the background, and Rotur only gives badges to people who have used MistWarp through Sign in with Rotur. Without the file, nothing is sent. The file is read on every event, so changing it needs no restart.
 
 ## Development feed
 

@@ -1886,7 +1886,6 @@ def handleUploadProjectLocked(*serve.Context c) (
   boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
   project.lastUploadAt = timestamp
   project.pendingJson = false
-  recordCreatingDay(c.getString("username"))
   if !storedJson (
     if project.contains("workspaceLayers") and project.workspaceLayers != null (
       array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
@@ -1902,6 +1901,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     fs.remove(extractDir)
     return
   )
+  recordCreatingDay(c.getString("username"))
 
   // The wrapper holds the publication lock from the initial version read.
   boolean savedProject = saveProject(project)
@@ -2985,9 +2985,17 @@ def handleReactProjectLocked(*serve.Context c) (
   loves = removeString(loves, viewer)
   broken = removeString(broken, viewer)
   boolean addedHeart = false
+  boolean firstLove = false
   if reactionType == "heart" and !hadHeart (
     loves.append(viewer)
     addedHeart = true
+    // Badges count each person's love once, however often it's toggled.
+    array everLoved = (project.everLoved ?? []).assertElse(array, [])
+    if !everLoved.contains(viewer) (
+      everLoved.append(viewer)
+      project.everLoved = everLoved
+      firstLove = true
+    )
   )
   if reactionType == "brokenheart" and !hadBroken (
     broken.append(viewer)
@@ -3003,7 +3011,7 @@ def handleReactProjectLocked(*serve.Context c) (
   notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
   if addedHeart (
     addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
-    if normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
+    if firstLove and normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
       roturBadgeEvent(project.owner.toStr(), "love_received", 0)
     )
     addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
