@@ -218,10 +218,25 @@ def syncRoturBans() (
       changed = true
     )
   )
+  // Unbanned while the ban was being pushed: Rotur has it again, so lift it
+  // again next time.
+  array pushedKeys = pushed.getKeys()
+  for i pushedKeys.len (
+    string key = pushedKeys[i].toStr()
+    if pushed[key] == "yes" and !bans.contains(key) and unbans.contains(key) (
+      object unban = unbans[key].assertElse(object, {})
+      unban.lifted = false
+      unbans[key] = unban
+      changed = true
+    )
+  )
   array current = bans.getKeys()
   for i current.len (
     string key = current[i].toStr()
-    object ban = bans[key].assert(object)
+    object ban = bans[key].assertElse(object, {})
+    if ban.len == 0 (
+      continue
+    )
     string state = (ban.rotur ?? "").toStr()
     if ban.by.toStr() == "rotur_sync" (
       // Rotur enforces its own account bans now; these copies were never lifted.
@@ -235,6 +250,20 @@ def syncRoturBans() (
       // Lifted on rotur.dev.
       bans.delete(key)
       changed = true
+    )
+  )
+  // Banned again while the old ban was being lifted: the lift may have
+  // removed the new ban from Rotur, so push it again.
+  array liftedKeys = liftedNow.getKeys()
+  for i liftedKeys.len (
+    string key = liftedKeys[i].toStr()
+    if bans.contains(key) (
+      object ban = bans[key].assertElse(object, {})
+      if ban.len > 0 and (ban.rotur ?? "").toStr() != "" (
+        ban.rotur = ""
+        bans[key] = ban
+        changed = true
+      )
     )
   )
   array remoteKeys = remote.getKeys()
