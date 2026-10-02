@@ -57,6 +57,10 @@ A MistWarp ban is also a ban from the MistWarp Rotur App (`PUT /v2/apps/<app>/ba
 
 Every five minutes, and whenever an admin opens the bans list, MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban Rotur couldn't be told about yet is sent again. Rotur won't ban the app's owner or managers, so their bans stay MistWarp-only.
 
+## Reports
+
+Every report is also filed in the MistWarp Rotur App's report queue (`POST /v2/apps/<app>/reports`), naming the reporter when Rotur knows them as a MistWarp user. Reports use Rotur's categories. One in a priority category (`csea`, `threat_to_life`, `self_harm`, `terrorism`) goes to Rotur's safety team as soon as it's filed. MistWarp's own queue and actions are unchanged. Dismissing a report closes it on Rotur as dismissed, and any other action closes it as resolved, except reports Rotur is still reviewing.
+
 ## Development feed
 
 `/v1/development/pulls` lists MistWarp's own open and recently merged pull

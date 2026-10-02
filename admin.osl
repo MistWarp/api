@@ -842,6 +842,7 @@ def handleReportAction(*serve.Context c) (
   if found.type.toStr() == "project" (
     maybeClearProjectEvidence(found.target.toStr())
   )
+  closeRoturReport(found, if action == "dismiss" then "dismissed" else "resolved")
   addNotification(found.reporter.toStr(), c.getString("username"), "report_update", {action: action, reportType: found.type})
   c.json(200, {ok: true})
 )
