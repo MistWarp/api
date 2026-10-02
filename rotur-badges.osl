@@ -24,7 +24,7 @@ def roturBadgeRules(string event) array (
   if !result.ok (
     return []
   )
-  object events = (result.data.assert(object).events ?? {}).assertElse(object, {})
+  object events = (result.data.assertElse(object, {}).events ?? {}).assertElse(object, {})
   return (events[event] ?? []).assertElse(array, [])
 )
 

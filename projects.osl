@@ -2980,6 +2980,10 @@ def handleReactProjectLocked(*serve.Context c) (
     broken = project.brokenhearts.assert(array)
   )
   number previousLikes = loves.len
+  // Projects from before everLoved count everyone who loves them now.
+  if !project.contains("everLoved") or project.everLoved == null (
+    project.everLoved = loves.clone()
+  )
   boolean hadHeart = loves.contains(viewer)
   boolean hadBroken = broken.contains(viewer)
   loves = removeString(loves, viewer)
