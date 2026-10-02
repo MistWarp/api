@@ -58,7 +58,52 @@ def requestRoturPayment(string payer, string payee, array splits, number amount,
   if !result.ok (
     return {ok: false, error: (result.data.error ?? "payments are not available right now").toStr()}
   )
-  return {ok: true, id: result.data.id.toStr(), approveUrl: result.data.approve_url.toStr()}
+  number expiresAt = (result.data.expires_at ?? 0).toNum()
+  if expiresAt <= 0 (
+    // Rotur's requests last 15 minutes.
+    expiresAt = timestamp + 900000
+  )
+  return {ok: true, id: result.data.id.toStr(), approveUrl: result.data.approve_url.toStr(), expiresAt: expiresAt}
+)
+
+// Rotur refuses splits that pay the payer, as when someone buys a remix of
+// their own project, or the fee account buys something. Their share goes to
+// the next person in the splits instead.
+def splitsWithoutPayer(array splits, string payer) array (
+  array kept = []
+  number carried = 0
+  for i splits.len (
+    object split = splits[i].assertElse(object, {})
+    number points = (split.basis_points ?? 0).toNum().toInt() + carried
+    if split.username.toStr().toLower() == payer.toLower() (
+      carried = points
+    ) else (
+      kept.append({username: split.username.toStr(), basis_points: points})
+      carried = 0
+    )
+  )
+  if carried > 0 and kept.len > 0 (
+    object last = kept[kept.len].assertElse(object, {})
+    last.basis_points = last.basis_points.toNum().toInt() + carried
+    kept[kept.len] = last
+  )
+  return kept
+)
+
+// The same purchase, started again before it was paid: everything the caller
+// said about it matches, and Rotur's request has a minute or more left.
+def samePurchase(object stored, object entry, string prefix, string key) boolean (
+  if !key.startsWith(prefix) or stored.paid == true or (stored.expiresAt ?? 0).toNum() < timestamp + 60000 or (stored.approveUrl ?? "").toStr() == "" (
+    return false
+  )
+  array fields = entry.getKeys()
+  for i fields.len (
+    string field = fields[i].toStr()
+    if json.stringify(stored[field]) != json.stringify(entry[field]) (
+      return false
+    )
+  )
+  return true
 )
 
 def roturPaymentPaid(string requestId, string reference) boolean (
@@ -70,14 +115,29 @@ def roturPaymentPaid(string requestId, string reference) boolean (
 )
 
 // Starts a purchase: saves its key and asks Rotur for the payment. Returns what
-// the editor needs to open Rotur's window, or {ok: false, error}.
+// the editor needs to open Rotur's window, with the splits Rotur was given, or
+// {ok: false, error}. The same purchase started again while its request is
+// still open gets that request back, so one purchase is only ever one payment.
 def startPurchase(string prefix, object entry, string payer, string payee, array splits, number amount, string note, string returnUrl) object (
+  array shares = splitsWithoutPayer(splits, payer)
+  entry.splits = shares
+  object open = loadPurchaseKeys().keys.assertElse(object, {})
+  array openKeys = open.getKeys()
+  for i openKeys.len (
+    string openKey = openKeys[i].toStr()
+    object stored = open[openKey].assertElse(object, {})
+    if samePurchase(stored, entry, prefix, openKey) (
+      return {ok: true, key: openKey, requestId: stored.requestId.toStr(), approveUrl: stored.approveUrl.toStr(), splits: shares}
+    )
+  )
   string key = prefix ++ randomString(16)
-  object request = requestRoturPayment(payer, payee, splits, amount, note, key, returnUrl)
+  object request = requestRoturPayment(payer, payee, shares, amount, note, key, returnUrl)
   if !request.ok (
     return request
   )
   entry.requestId = request.id
+  entry.approveUrl = request.approveUrl
+  entry.expiresAt = request.expiresAt
   entry.at = timestamp
   sync.lock("purchase-keys")
   object store = prunePurchaseKeys(loadPurchaseKeys())
@@ -86,7 +146,7 @@ def startPurchase(string prefix, object entry, string payer, string payee, array
   store.keys = keys
   savePurchaseKeys(store)
   sync.unlock("purchase-keys")
-  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl}
+  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl, splits: shares}
 )
 
 // The purchase key's entry, once it has been paid, else {}. Rotur is asked if
