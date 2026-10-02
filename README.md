@@ -63,10 +63,6 @@ Deliveries are checked against `Rotur-Signature` and refused if their timestamp 
 
 Rotur only sends these for people who have used MistWarp through Sign in with Rotur, or whose account was made on MistWarp. The five-minute check of `/accounts/deleted_check` stays for everyone else.
 
-## Reports
-
-Every report is also filed in the MistWarp Rotur App's report queue (`POST /v2/apps/<app>/reports`), naming the reporter when Rotur knows them as a MistWarp user. Reports use Rotur's categories. One in a priority category (`csea`, `threat_to_life`, `self_harm`, `terrorism`) goes to Rotur's safety team as soon as it's filed. MistWarp's own queue and actions are unchanged. Dismissing a report closes it on Rotur as dismissed, and any other action closes it as resolved, except reports Rotur is still reviewing.
-
 ## Badges
 
 MistWarp gives badges on people's Rotur profiles as the MistWarp Rotur App. Which badges exist, and what earns them, is data. Define the badges on rotur.dev/me/developer, then map MistWarp's events to them in `data/rotur-badges.json`:
