@@ -15,6 +15,25 @@ string roturWebhooksFile = "data/rotur-webhooks.json"
 // Handled events are kept this long, longer than Rotur retries (36 minutes).
 number roturWebhookRetention = 604800000
 
+// Rotur-Signature is v1= and the hex HMAC-SHA256 of "<id>.<timestamp>.<raw
+// body>", keyed with the whole signing secret.
+def roturWebhookSignature(string secret, string id, string sentAt, string body) string (
+  return "v1=" ++ crypto.hmacSha256(secret, id ++ "." ++ sentAt ++ "." ++ body)
+)
+
+// A delivery is genuine if it is signed with the secret and was sent within
+// five minutes of now (in Unix seconds), so an old one can't be replayed.
+def roturWebhookValid(string secret, string id, string sentAt, string body, string signature, number now) boolean (
+  if secret == "" or id == "" or signature == "" or !regex.match("^[0-9]{1,12}$", sentAt) (
+    return false
+  )
+  number sent = sentAt.toNum()
+  if sent < now - 300 or sent > now + 300 (
+    return false
+  )
+  return crypto.constantTimeCompare(signature, roturWebhookSignature(secret, id, sentAt, body))
+)
+
 def loadRoturWebhooks() object (
   auto result = readFile(roturWebhooksFile)
   if !result.ok (
@@ -115,7 +134,7 @@ def handleRoturWebhook(*serve.Context c) (
   )
   string body = c.body()
   string id = c.header("Rotur-Webhook-Id")
-  if !roturwebhook.Verify(roturWebhookSecret, id, c.header("Rotur-Webhook-Timestamp"), body, c.header("Rotur-Signature")) (
+  if !roturWebhookValid(roturWebhookSecret, id, c.header("Rotur-Webhook-Timestamp"), body, c.header("Rotur-Signature"), (timestamp / 1000).toInt()) (
     c.json(401, {ok: false, error: "invalid signature"})
     return
   )
