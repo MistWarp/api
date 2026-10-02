@@ -488,11 +488,6 @@ def refreshUsernameForId(string userId) string (
     )
   )
   if resp.status.toInt() == 404 (
-    string fallback = usernameForId(userId)
-    if fallback != "" (
-      log "Lazy detection: purging deleted rotur user " ++ userId ++ " (" ++ fallback ++ ")"
-      purgeUser(userId, fallback)
-    )
     identityRefreshCache.set(userId, "")
     return ""
   )
@@ -866,10 +861,8 @@ def reconcileDeletedUsers() (
     if uname == "" and fallbackUsernames.contains(uid) (
       uname = fallbackUsernames[uid].toStr()
     )
-    if uname != "" (
-      log "Purging deleted rotur account " ++ uid ++ " (" ++ uname ++ ")"
-      purgeUser(uid, uname)
-    )
+    log "Erasing deleted rotur account " ++ uid
+    eraseUser(uid, uname)
   )
 )
 
