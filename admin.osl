@@ -71,26 +71,213 @@ def banReasonFor(string username) string (
   return ""
 )
 
+// MistWarp's bans are also bans from MistWarp's Rotur App, so Rotur enforces
+// them: the person's MistWarp tokens stop working, and they can't sign in to
+// MistWarp again until the ban is lifted. They see the reason, never who banned
+// them. The local list stays the source MistWarp checks on every request.
+
+def roturBanPath(string username) string (
+  return "/bans/" ++ url.escape(roturUserRef(username))
+)
+
+// "yes" once Rotur has the ban, "refused" if Rotur won't ban them (they are on
+// the app's team, a classroom student, or not a Rotur account it can ban), ""
+// to try again later.
+def pushRoturBan(string username, string reason) string (
+  string shown = reason.strip()
+  // Older bans from a report only name the report, which means nothing to the
+  // person banned.
+  if shown == "" or regex.match("^report r[A-Za-z0-9_-]+$", shown) (
+    shown = "You broke MistWarp's community guidelines."
+  )
+  object result = roturApp("PUT", roturBanPath(username), {reason: shown.trim(1, 300), note: "Banned in MistWarp"})
+  if result.ok (
+    return "yes"
+  )
+  if result.status == 400 or result.status == 404 (
+    return "refused"
+  )
+  return ""
+)
+
+// Lifts the ban on Rotur. True once Rotur no longer has it.
+def liftRoturBan(string username) boolean (
+  object result = roturApp("DELETE", roturBanPath(username), {})
+  return result.ok or result.status == 404
+)
+
+// The bans file is changed between these two, after any calls to Rotur, and
+// re-read so nothing written meanwhile is lost.
+def lockBans() object (
+  sync.lock("bans")
+  object data = loadBans()
+  data.unbans = (data.unbans ?? {}).assertElse(object, {})
+  return data
+)
+
+def saveAndUnlockBans(object data) boolean (
+  boolean saved = saveBans(data)
+  sync.unlock("bans")
+  return saved
+)
+
 def banUser(string username, string reason, string actor) boolean (
   string key = normalizeUsername(username)
   if !isSafePathPart(key) (
     return false
   )
-  object data = loadBans()
+  string rotur = pushRoturBan(username, reason)
+  object data = lockBans()
   object bans = data.bans
-  bans[key] = {reason: reason, by: actor, created: timestamp}
-  return saveBans(data)
+  object unbans = data.unbans
+  bans[key] = {reason: reason, by: actor, created: timestamp, rotur: rotur}
+  unbans.delete(key)
+  return saveAndUnlockBans(data)
 )
 
 def unbanUser(string username) boolean (
   string key = normalizeUsername(username)
-  object data = loadBans()
-  object bans = data.bans
-  if !bans.contains(key) (
+  if !cachedBans().bans.assertElse(object, {}).contains(key) (
     return false
   )
+  // Remembered until a sync has seen Rotur without it, so the sync keeps
+  // trying if Rotur couldn't be told, and never brings the ban back.
+  boolean lifted = liftRoturBan(username)
+  object data = lockBans()
+  object bans = data.bans
+  object unbans = data.unbans
   bans.delete(key)
-  return saveBans(data)
+  unbans[key] = {at: timestamp, lifted: lifted}
+  return saveAndUnlockBans(data)
+)
+
+// Keeps MistWarp's bans and the Rotur App's in step, every few minutes: bans
+// made or lifted on rotur.dev/me/developer reach MistWarp, and bans and unbans
+// Rotur couldn't be told about yet are sent again.
+def syncRoturBans() (
+  number started = timestamp
+  object snapshot = lockBans()
+  sync.unlock("bans")
+  object snapshotBans = snapshot.bans.assertElse(object, {})
+  object snapshotUnbans = snapshot.unbans
+  // Unbans first, so the list read next already reflects them.
+  object liftedNow = {}
+  array unbanKeys = snapshotUnbans.getKeys()
+  for i unbanKeys.len (
+    string key = unbanKeys[i].toStr()
+    if snapshotUnbans[key].lifted != true and liftRoturBan(key) (
+      liftedNow[key] = true
+    )
+  )
+  object result = roturApp("GET", "/bans", {})
+  if !result.ok (
+    return
+  )
+  // Rotur lists accounts it has banned itself with no username, so match on
+  // the ID too.
+  object remote = {}
+  object remoteIds = {}
+  array listed = (result.data.bans ?? []).assertElse(array, [])
+  for i listed.len (
+    object ban = listed[i].assert(object)
+    string userId = (ban.id ?? "").toStr()
+    string name = (ban.username ?? "").toStr()
+    if name == "" (
+      name = usernameForId(userId)
+    )
+    remoteIds[userId] = true
+    if name != "" (
+      remote[normalizeUsername(name)] = ban
+    )
+  )
+  object pushed = {}
+  array keys = snapshotBans.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    if (snapshotBans[key].rotur ?? "").toStr() == "" (
+      pushed[key] = pushRoturBan(key, (snapshotBans[key].reason ?? "").toStr())
+    )
+  )
+
+  object data = lockBans()
+  object bans = data.bans
+  object unbans = data.unbans
+  boolean changed = false
+  array pending = unbans.getKeys()
+  for i pending.len (
+    string key = pending[i].toStr()
+    object unban = unbans[key].assertElse(object, {})
+    boolean lifted = unban.lifted == true or liftedNow.contains(key)
+    if lifted and (unban.at ?? 0).toNum() < started (
+      // Rotur's list was read after it lifted this one.
+      unbans.delete(key)
+      changed = true
+    ) else if lifted and unban.lifted != true (
+      unban.lifted = true
+      unbans[key] = unban
+      changed = true
+    )
+  )
+  // Unbanned while the ban was being pushed: Rotur has it again, so lift it
+  // again next time.
+  array pushedKeys = pushed.getKeys()
+  for i pushedKeys.len (
+    string key = pushedKeys[i].toStr()
+    if pushed[key] == "yes" and !bans.contains(key) and unbans.contains(key) (
+      object unban = unbans[key].assertElse(object, {})
+      unban.lifted = false
+      unbans[key] = unban
+      changed = true
+    )
+  )
+  array current = bans.getKeys()
+  for i current.len (
+    string key = current[i].toStr()
+    object ban = bans[key].assertElse(object, {})
+    if ban.len == 0 (
+      continue
+    )
+    string state = (ban.rotur ?? "").toStr()
+    if ban.by.toStr() == "rotur_sync" (
+      // Rotur enforces its own account bans now; these copies were never lifted.
+      bans.delete(key)
+      changed = true
+    ) else if state == "" and pushed.contains(key) and pushed[key] != "" (
+      ban.rotur = pushed[key]
+      bans[key] = ban
+      changed = true
+    ) else if state == "yes" and ban.created.toNum() < started and !remote.contains(key) and !remoteIds.contains(userIdForUsername(key)) (
+      // Lifted on rotur.dev.
+      bans.delete(key)
+      changed = true
+    )
+  )
+  // Banned again while the old ban was being lifted: the lift may have
+  // removed the new ban from Rotur, so push it again.
+  array liftedKeys = liftedNow.getKeys()
+  for i liftedKeys.len (
+    string key = liftedKeys[i].toStr()
+    if bans.contains(key) (
+      object ban = bans[key].assertElse(object, {})
+      if ban.len > 0 and (ban.rotur ?? "").toStr() != "" (
+        ban.rotur = ""
+        bans[key] = ban
+        changed = true
+      )
+    )
+  )
+  array remoteKeys = remote.getKeys()
+  for i remoteKeys.len (
+    string key = remoteKeys[i].toStr()
+    if !bans.contains(key) and !pending.contains(key) and isSafePathPart(key) (
+      bans[key] = {reason: (remote[key].reason ?? "").toStr(), by: "rotur.dev", created: timestamp, rotur: "yes"}
+      changed = true
+    )
+  )
+  if changed (
+    saveBans(data)
+  )
+  sync.unlock("bans")
 )
 
 def isSuperAdmin(string username) boolean (
@@ -696,7 +883,11 @@ def handleReportAction(*serve.Context c) (
       c.badRequest("cannot ban an admin")
       return
     )
-    banUser(name, "report " ++ id, c.getString("username"))
+    string banReason = ""
+    if body.contains("reason") and body.reason != null (
+      banReason = body.reason.toStr().strip()
+    )
+    banUser(name, banReason, c.getString("username"))
   )
   if action == "warn_user" (
     string name = reportTargetUser(found)

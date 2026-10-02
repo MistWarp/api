@@ -869,6 +869,7 @@ def reconcileDeletedUsers() (
 def reconcileLoop() (
   while true (
     reconcileDeletedUsers()
+    syncRoturBans()
     process.sleep(300)
   )
 )
