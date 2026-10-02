@@ -789,19 +789,14 @@ def handleAdminSearchProjects(*serve.Context c) (
   c.json(200, {ok: true, projects: matches})
 )
 
+// Who a report is about, as worked out from the content when it was filed.
+// Older reports are worked out now, never from what the reporter said.
 def reportTargetUser(object found) string (
-  string name = found.target.toStr()
-  if found.contains("targetUser") and found.targetUser != null and found.targetUser.toStr() != "" (
-    return found.targetUser.toStr()
+  string subject = (found.subject ?? "").toStr()
+  if subject != "" (
+    return subject
   )
-  if found.type.toStr() == "project" (
-    auto result = loadProject(found.target.toStr())
-    if result.ok (
-      object project = result.project.assert(object)
-      name = project.owner.toStr()
-    )
-  )
-  return name
+  return reportedContent(found).user.toStr()
 )
 
 def handleReportAction(*serve.Context c) (
@@ -850,6 +845,10 @@ def handleReportAction(*serve.Context c) (
   )
   if action == "ban_user" (
     string name = reportTargetUser(found)
+    if name == "" (
+      c.badRequest("can't tell who this report is about")
+      return
+    )
     if isAdminUser(name) (
       c.badRequest("cannot ban an admin")
       return
@@ -862,6 +861,10 @@ def handleReportAction(*serve.Context c) (
   )
   if action == "warn_user" (
     string name = reportTargetUser(found)
+    if name == "" (
+      c.badRequest("can't tell who this report is about")
+      return
+    )
     if isAdminUser(name) (
       c.badRequest("cannot warn an admin")
       return

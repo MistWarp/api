@@ -67,6 +67,10 @@ Rotur only sends these for people who have used MistWarp through Sign in with Ro
 
 Every report is also filed in the MistWarp Rotur App's report queue (`POST /v2/apps/<app>/reports`), naming the reporter when Rotur knows them as a MistWarp user. Reports use Rotur's categories. One in a priority category (`csea`, `threat_to_life`, `self_harm`, `terrorism`) goes to Rotur's safety team as soon as it's filed. MistWarp's own queue and actions are unchanged. Dismissing a report closes it on Rotur as dismissed, and any other action closes it as resolved, except reports Rotur is still reviewing.
 
+Who a report is about, and the snapshot sent with it, are worked out by mistwarp-api from the content when the report is made, never taken from the reporter: a project's owner and its title, description, instructions and notes; a comment's author and its text; a profile's owner and bio. Moderation actions on a report (ban, warn) use the same person. A report whose subject can't be found stays MistWarp-only, because Rotur needs someone to name.
+
+A report Rotur couldn't be reached for stays pending and is filed by the five-minute reconcile loop. One closed in MistWarp before Rotur had it is closed on Rotur as soon as it's filed.
+
 ## Development feed
 
 `/v1/development/pulls` lists MistWarp's own open and recently merged pull
