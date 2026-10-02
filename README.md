@@ -61,6 +61,12 @@ Every five minutes, and whenever an admin opens the bans list, MistWarp reads th
 
 Every report is also filed in the MistWarp Rotur App's report queue (`POST /v2/apps/<app>/reports`), naming the reporter when Rotur knows them as a MistWarp user. Reports use Rotur's categories. One in a priority category (`csea`, `threat_to_life`, `self_harm`, `terrorism`) goes to Rotur's safety team as soon as it's filed. MistWarp's own queue and actions are unchanged. Dismissing a report closes it on Rotur as dismissed, and any other action closes it as resolved, except reports Rotur is still reviewing.
 
+## Safety signals
+
+The MistWarp Rotur App declares that people can talk and can spend credits. Before a comment reaches someone (the owner of the project or profile, and the author of the comment it replies to), mistwarp-api asks Rotur's message signal. Before a purchase or donation starts, it asks the purchase signal. A "no" is shown to the person in Rotur's own words.
+
+Rotur only answers about people who have used MistWarp through Sign in with Rotur, or made their account on MistWarp. For anyone else, or if Rotur can't be reached, MistWarp carries on as it did before. Rotur counts credits towards a parent's monthly limit when it moves them, so the purchase signal only asks.
+
 ## Development feed
 
 `/v1/development/pulls` lists MistWarp's own open and recently merged pull

@@ -6,6 +6,10 @@ def createComment(string key, string author, string authorId, string content, st
   if trimmed.len > 500 (
     return {ok: false, error: "comment too long"}
   )
+  string refusal = commentRefusal(key, author, parentId)
+  if refusal != "" (
+    return {ok: false, error: refusal}
+  )
 
   string lockName = "comments:" ++ key
   sync.lock(lockName)
@@ -429,6 +433,12 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
   )
   if amount < 0.01 or amount > 100000 (
     c.badRequest("donation must be between 0.01 and 100000 credits")
+    return
+  )
+
+  string refusal = roturPurchaseRefusal(donor, amount, "Donation to " ++ project.title.toStr())
+  if refusal != "" (
+    c.json(403, {ok: false, error: refusal})
     return
   )
 

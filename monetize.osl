@@ -684,6 +684,12 @@ def handlePurchaseIntent(*serve.Context c) (
     return
   )
 
+  string refusal = roturPurchaseRefusal(buyerLower, price, project.title.toStr())
+  if refusal != "" (
+    c.json(403, {ok: false, error: refusal})
+    return
+  )
+
   string key = "mwbuy_" ++ randomString(16)
   object store = prunePurchaseKeys(loadPurchaseKeys())
   object keys = store.keys
