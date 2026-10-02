@@ -77,11 +77,7 @@ def banReasonFor(string username) string (
 // them. The local list stays the source MistWarp checks on every request.
 
 def roturBanPath(string username) string (
-  string userId = userIdForUsername(username)
-  if userId == "" (
-    userId = username
-  )
-  return "/bans/" ++ url.escape(userId)
+  return "/bans/" ++ url.escape(roturUserRef(username))
 )
 
 // "yes" once Rotur has the ban, "refused" if Rotur won't ban them (they are on
