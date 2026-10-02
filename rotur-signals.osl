@@ -1,0 +1,72 @@
+// Rotur's safety signals: https://docs.rotur.dev/build-an-app/safety
+//
+// MistWarp declares that people can talk to each other and can spend credits,
+// so before a comment reaches someone, and before a purchase, it asks Rotur
+// whether that's allowed. Rotur answers from blocks, parental controls, teen
+// defaults and people's own message settings, without saying which, so MistWarp
+// shows Rotur's sentence and offers no way round it.
+//
+// Rotur only answers about MistWarp's own users: people who signed in through
+// Sign in with Rotur, or made their account on MistWarp. For anyone else, or if
+// Rotur can't be reached, MistWarp carries on as it did before.
+
+// "" when the message is allowed, else the sentence to show the sender.
+def roturMessageRefusal(string sender, string recipient) string (
+  if sender == "" or recipient == "" or normalizeUsername(sender) == normalizeUsername(recipient) (
+    return ""
+  )
+  object result = roturApp("POST", "/signals/message", {"from": roturUserRef(sender), "to": roturUserRef(recipient)})
+  if !result.ok or result.data.allowed == true (
+    return ""
+  )
+  return (result.data.reason ?? "Rotur settings don't allow this message.").toStr()
+)
+
+// "" when the purchase is allowed, else the sentence to show the buyer. Rotur
+// counts credits towards a parent's monthly limit when it moves them, so this
+// only asks.
+def roturPurchaseRefusal(string buyer, number amount, string note) string (
+  if buyer == "" or amount <= 0 (
+    return ""
+  )
+  object result = roturApp("POST", "/signals/purchase", {user: roturUserRef(buyer), amount: amount, currency: "credits", record: false, note: note.trim(1, 80)})
+  if !result.ok or result.data.allowed == true (
+    return ""
+  )
+  return (result.data.reason ?? "Rotur settings don't allow this purchase.").toStr()
+)
+
+// Who a comment reaches: the owner of the project or profile it's on, and the
+// author of the comment it replies to.
+def commentRecipients(string key, string parentId) array (
+  array recipients = []
+  if key.startsWith("project-") (
+    auto loaded = loadProject(key.replace("project-", ""))
+    if loaded.ok (
+      recipients.append(loaded.project.owner.toStr())
+    )
+  ) else if key.startsWith("profile-") (
+    recipients.append(key.replace("profile-", ""))
+  )
+  if parentId != "" (
+    array comments = loadComments(key)
+    for i comments.len (
+      object existing = comments[i].assert(object)
+      if existing.id.toStr() == parentId (
+        recipients.append(existing.author.toStr())
+      )
+    )
+  )
+  return recipients
+)
+
+def commentRefusal(string key, string author, string parentId) string (
+  array recipients = commentRecipients(key, parentId)
+  for i recipients.len (
+    string refusal = roturMessageRefusal(author, recipients[i].toStr())
+    if refusal != "" (
+      return refusal
+    )
+  )
+  return ""
+)
