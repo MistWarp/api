@@ -121,8 +121,13 @@ def ensureViewKey(object project) (
     project.viewKey = randomString(16)
     saveProject(project)
   )
-  if projectOwnerBanned(project) and bannedViewKey(project) == "" (
+  boolean ownerBanned = projectOwnerBanned(project)
+  if ownerBanned and bannedViewKey(project) == "" (
     project.bannedViewKey = randomString(16)
+    saveProject(project)
+  ) else if !ownerBanned and bannedViewKey(project) != "" (
+    // A later ban gets a new key.
+    project.delete("bannedViewKey")
     saveProject(project)
   )
 )
@@ -307,10 +312,10 @@ def projectResponse(object project,*serve.Context c) object (
       locked = true
     )
   )
-  // Only admins get here for a banned owner's project.
+  // The key that plays a banned owner's project is only for admins.
   boolean ownerBanned = projectOwnerBanned(project)
-  if ownerBanned and jsonUrl != "" (
-    jsonUrl = jsonBase ++ "?k=" ++ bannedViewKey(project)
+  if ownerBanned (
+    jsonUrl = if c.getBool("isAdmin") and jsonUrl != "" then jsonBase ++ "?k=" ++ bannedViewKey(project) else ""
   )
   if !hasContent (
     jsonUrl = ""
