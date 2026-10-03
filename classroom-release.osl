@@ -222,7 +222,7 @@ def handleRedeemClaim(*serve.Context c) (
   deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
   studentDocs.deleteOne({_id: studentId})
   sync.unlock(lockName)
-  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  invalidateClassroomPool(classDoc.ownerId.toStr())
   recordClassroomAudit(classDoc["_id"].toStr(), c, "student_released", {studentId: studentId, displayName: student.displayName, to: claimantName, projects: moved.len})
   array teachers = classTeacherIds(classDoc)
   for i teachers.len (
