@@ -396,8 +396,7 @@ def handleGetProjectComments(*serve.Context c) (
 )
 
 def handleProjectCommentDonationIntent(*serve.Context c) (
-  if commerceServiceKey == "" (
-    c.json(503, {ok: false, error: "donations are not available right now"})
+  if refuseOldPaymentClient(c) (
     return
   )
   auto result = loadProject(c.param("id"))
@@ -443,22 +442,14 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
     return
   )
 
-  string key = "mwdonate_" ++ randomString(16)
-  object store = prunePurchaseKeys(loadPurchaseKeys())
-  object keys = store.keys
-  keys[key] = {kind: "comment_donation", projectId: project.id.toStr(), buyer: donor, amount: amount, at: timestamp}
-  store.keys = keys
-  savePurchaseKeys(store)
-  c.json(200, {
-    ok: true,
-    key: key,
-    amount: amount,
-    projectId: project.id,
-    title: project.title,
-    recipient: project.owner,
-    splits: [{username: project.owner, basis_points: 10000}]
-  })
-)
+  object started = startPurchase("mwdonate_", {kind: "comment_donation", projectId: project.id.toStr(), buyer: donor, amount: amount}, donor, project.owner.toStr(), [], amount, "Donation to " ++ project.title.toStr(), (body.returnUrl ?? "").toStr())
+  if !started.ok (
+    c.json(503, started)
+    return
+  )
+  started.amount = amount
+  started.recipient = project.owner
+  c.json(200, started))
 
 def handleCreateProjectComment(*serve.Context c) (
   auto result = loadProject(c.param("id"))
@@ -513,13 +504,10 @@ def handleCreateProjectComment(*serve.Context c) (
       return
     )
     object donation = body.donation.assertElse(object, {})
-    if donation.contains("key") and donation.key != null (
-      donationKey = donation.key.toStr().strip()
-    )
-    if donation.contains("paymentId") and donation.paymentId != null (
-      donationPaymentId = donation.paymentId.toStr().strip()
-    )
-    if donationKey == "" or donationPaymentId == "" (
+    donationKey = (donation.key ?? "").toStr().strip()
+    object pendingDonation = paidPurchase(donationKey)
+    donationPaymentId = (pendingDonation.requestId ?? "").toStr()
+    if !donationKey.startsWith("mwdonate_") (
       c.badRequest("missing donation confirmation")
       return
     )
@@ -533,22 +521,15 @@ def handleCreateProjectComment(*serve.Context c) (
       )
     )
 
-    object donationStore = loadPurchaseKeys()
-    object donationKeys = donationStore.keys
-    if !donationKeys.contains(donationKey) (
-      c.badRequest("this donation expired, start again")
+    if donationPaymentId == "" (
+      c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
       return
     )
-    object pendingDonation = donationKeys[donationKey].assert(object)
-    if !pendingDonation.contains("kind") or pendingDonation.kind.toStr() != "comment_donation" or pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
+    if pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
       c.badRequest("this donation key does not match")
       return
     )
     donationAmount = pendingDonation.amount.toNum()
-    if !verifyCommerceCommentDonation(donationPaymentId, c.getString("username"), project, donationAmount) (
-      c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
-      return
-    )
   )
 
   object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
@@ -557,11 +538,7 @@ def handleCreateProjectComment(*serve.Context c) (
     return
   )
   if donationKey != "" (
-    object donationStore = loadPurchaseKeys()
-    object donationKeys = donationStore.keys
-    donationKeys.delete(donationKey)
-    donationStore.keys = donationKeys
-    savePurchaseKeys(donationStore)
+    forgetPurchase(donationKey)
   )
   if created.contains("duplicate") and created.duplicate == true (
     created.comment = commentResponse(created.comment.assert(object), c.getString("username"))

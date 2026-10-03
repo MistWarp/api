@@ -4,7 +4,9 @@
 // leaves MistWarp from rotur.dev/me/apps (user.left) or is banned from Rotur
 // (user.banned). MistWarp must then delete what it holds about them within 30
 // days, so it does it straight away. With privacy requests turned on, people
-// can also ask for a copy of their data or for it to be deleted.
+// can also ask for a copy of their data or for it to be deleted. When someone
+// approves a payment request, payment.completed says which purchase was paid
+// (rotur-payments.osl).
 //
 // Rotur waits 10 seconds for an answer, and erasing someone can take longer,
 // so each delivery is saved to disk, answered, then handled by a worker. Saved
@@ -69,6 +71,8 @@ def queueRoturWebhook(object event) boolean (
     type: event.type.toStr(),
     userId: (data.user_id ?? "").toStr(),
     kind: (data.kind ?? "").toStr(),
+    reference: (data.reference ?? "").toStr(),
+    paymentRequest: (data.payment_request ?? "").toStr(),
     received: timestamp,
     done: false
   }
@@ -94,6 +98,10 @@ def markRoturWebhookDone(string id) (
 
 def handleRoturEvent(object event) (
   string type = event.type.toStr()
+  if type == "payment.completed" (
+    completeRoturPayment((event.reference ?? "").toStr(), (event.paymentRequest ?? "").toStr())
+    return
+  )
   string userId = event.userId.toStr()
   if userId == "" or isStudentUserId(userId) (
     return
