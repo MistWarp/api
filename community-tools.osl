@@ -746,6 +746,7 @@ def challengeProjects(object space,*serve.Context c) array (
       )
     )
   )
+  projects = projectsVisibleTo(projects, c)
   if showResults (
     projects.sortBy("judgeScore", "descending")
     for i projects.len (
@@ -784,6 +785,7 @@ def spaceResponse(object space,*serve.Context c) object (
         )
       )
     )
+    projects = projectsVisibleTo(projects, c)
   )
   object response = space
   response.projects = projects
@@ -856,7 +858,8 @@ def spaceListResponse(object space,*serve.Context c) object (
   boolean canManage = canManageSpace(space, c)
   for i ids.len (
     object project = projectSearchDocs.findById(ids[i].toStr())
-    if project.len > 0 and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
+    boolean hidden = projectHiddenFrom(project, c)
+    if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
       projectCount += 1
       if thumbnailURL == "" and project.contains("thumbUrl") (
         thumbnailURL = project.thumbUrl.toStr()

@@ -31,7 +31,7 @@ def loadBans() object (
 
 def saveBans(object data) boolean (
   bansCache.delete("bans")
-  sharedProjectsCache.delete("projects")
+  bansCache.delete("owners")
   return writeFile(bansFile, data)
 )
 
@@ -42,6 +42,53 @@ def cachedBans() object (
   object data = loadBans()
   bansCache.set("bans", data)
   return data
+)
+
+// Rebuilt whenever the bans file is saved (a ban, an unban, a rename, or the
+// Rotur sync dropping a ban that ended there), and at most 5 minutes old.
+def bannedOwners() object (
+  if bansCache.has("owners") (
+    return bansCache.get("owners").assert(object)
+  )
+  // One rebuild at a time; the rest wait for it and use its result.
+  sync.lock("banned-owners")
+  if bansCache.has("owners") (
+    object built = bansCache.get("owners").assert(object)
+    sync.unlock("banned-owners")
+    return built
+  )
+  object bans = cachedBans().bans.assertElse(object, {})
+  object users = loadUserIds().users.assertElse(object, {})
+  object idsByKey = {}
+  array userIds = users.getKeys()
+  for i userIds.len (
+    string userId = userIds[i].toStr()
+    string key = normalizeUsername(users[userId].toStr())
+    if bans.contains(key) (
+      idsByKey[key] = userId
+    )
+  )
+  object banned = bannedOwnerSet(bans, idsByKey)
+  bansCache.set("owners", banned)
+  sync.unlock("banned-owners")
+  return banned
+)
+
+def projectOwnerBanned(object project) boolean (
+  return entryOwnerBanned(bannedOwners(), project)
+)
+
+def projectHiddenFrom(object project,*serve.Context c) boolean (
+  return bannedProjectHidden(bannedOwners(), project, c.getBool("isAdmin"))
+)
+
+def projectsVisibleTo(array entries,*serve.Context c) array (
+  return projectEntriesVisible(entries, bannedOwners(), c.getBool("isAdmin"))
+)
+
+// For lists that are cached publicly, so never differ for admins.
+def projectsVisibleToEveryone(array entries) array (
+  return projectEntriesVisible(entries, bannedOwners(), false)
 )
 
 def isBannedUser(string username) boolean (
@@ -803,6 +850,7 @@ def handleAdminSearchProjects(*serve.Context c) (
       matches.append(entry)
     )
   )
+  matches = projectsVisibleTo(matches, c)
   matches.sortBy("edited", "descending")
   if matches.len > 60 (
     matches = matches.trim(1, 60)
