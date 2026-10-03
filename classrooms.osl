@@ -628,7 +628,8 @@ def handleGetClassStudent(*serve.Context c) (
     projects.append({id: entry.id, title: entry.title, edited: entry.edited, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum()})
   )
   array submissions = submissionDocs.where("studentId", db.equal, student["_id"].toStr()).all()
-  c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions})
+  object claim = pendingClaimForStudent(student["_id"].toStr())
+  c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions, release: if claim.len == 0 then null else claimResponse(claim)})
 )
 
 def handleUpdateClassStudent(*serve.Context c) (

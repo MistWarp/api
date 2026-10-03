@@ -218,6 +218,7 @@ import "./classrooms.osl"
 import "./classroom-billing-policy.osl"
 import "./classroom-billing.osl"
 import "./classroom-groups.osl"
+import "./classroom-release.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
@@ -424,6 +425,10 @@ def setupApiRoutes(*serve.Router api) (
   api.DELETE("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleDeleteClassStudent)
   api.POST("/classroom/classes/:id/students/:sid/reset", requireClassroomTeacher, handleResetStudentLogin)
   api.POST("/classroom/classes/:id/students/:sid/move", requireClassroomTeacher, handleMoveClassStudent)
+  api.POST("/classroom/classes/:id/students/:sid/release", requireClassroomTeacher, handleReleaseStudent)
+  api.DELETE("/classroom/classes/:id/students/:sid/release", requireClassroomTeacher, handleCancelStudentRelease)
+  api.GET("/classroom/claim/:code", serve.rateLimit(30, 60), handleGetClaim)
+  api.POST("/classroom/claim/:code", requireAuth, serve.rateLimit(10, 60), handleRedeemClaim)
   api.POST("/classroom/classes/:id/assignments", requireClassroomTeacher, handleCreateAssignment)
   api.GET("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleGetAssignment)
   api.PUT("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleUpdateAssignment)
