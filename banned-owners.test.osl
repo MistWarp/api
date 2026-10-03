@@ -1,0 +1,52 @@
+import "std:testing"
+import "./banned-owners.osl"
+
+def normalizeUsername(string name) string (
+  return name.toLower().strip()
+)
+
+def ids(array projects) string (
+  string result = ""
+  for i projects.len (
+    object project = projects[i]
+    result ++= project.id.toStr()
+  )
+  return result
+)
+
+array entries = [
+  {id: "a", owner: "Alice", ownerId: "u-alice"},
+  {id: "b", owner: "Spammer", ownerId: "u-spam"},
+  {id: "c", owner: "old-name", ownerId: "u-spam"},
+  {id: "d", owner: "legacy", ownerId: ""},
+  {id: "e", owner: "bob", ownerId: "u-bob"}
+]
+
+// Bans are kept by normalized username; IDs are looked up when the set is built.
+object bans = {spammer: {reason: "spam"}, legacy: {reason: "spam"}}
+object banned = bannedOwnerSet(bans, {spammer: "u-spam", legacy: ""})
+
+testing.assert(ids(projectEntriesVisible(entries, banned, false)) == "ae", "lists leave out banned owners' projects")
+testing.assert(ids(projectEntriesVisible(entries, banned, true)) == "abcde", "admins still see every project")
+
+array forAdmin = projectEntriesVisible(entries, banned, true)
+testing.assert(forAdmin[2].ownerBanned == true, "admins see the owner is banned")
+testing.assert(forAdmin[1].ownerBanned == null, "other projects are not marked")
+testing.assert(entries[2].ownerBanned == null, "marking copies the entry, so cached lists stay unmarked")
+
+testing.assert(entryOwnerBanned(banned, {owner: "SPAMMER ", ownerId: ""}), "usernames match whatever their case")
+testing.assert(entryOwnerBanned(banned, entries[3]), "a stale owner name still matches by user ID after a rename")
+testing.assert(entryOwnerBanned(banned, entries[4]), "projects with no owner ID match by username")
+
+testing.assert(bannedProjectHidden(banned, entries[2], false), "a direct lookup by anyone else is not found")
+testing.assert(!bannedProjectHidden(banned, entries[2], true), "a direct lookup by an admin works")
+testing.assert(!bannedProjectHidden(banned, entries[1], false), "other owners' projects are found")
+
+// Unbanning, or the Rotur sync dropping a ban once it ends there, rewrites the
+// bans file and the set is rebuilt from it.
+object afterUnban = bannedOwnerSet({legacy: {reason: "spam"}}, {legacy: ""})
+testing.assert(ids(projectEntriesVisible(entries, afterUnban, false)) == "abce", "an unbanned owner's projects come back")
+testing.assert(!bannedProjectHidden(afterUnban, entries[2], false), "an unbanned owner's project is found again")
+
+object noBans = bannedOwnerSet({}, {})
+testing.assert(ids(projectEntriesVisible(entries, noBans, false)) == "abcde", "with every ban ended, everything is listed")

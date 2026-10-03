@@ -22,9 +22,6 @@ def sortProjectsByEditedDesc(array items) array (
 )
 
 def ownerIndexEntries(string owner, boolean includeUnshared) array (
-  if isBannedUser(owner) (
-    return []
-  )
   string ownerKey = normalizeUsername(owner)
   string ownerId = userIdForUsername(owner)
   object seen = {}
@@ -229,6 +226,7 @@ def userPlaytimeLibrary(string name,*serve.Context c) array (
       library.append(project)
     )
   )
+  library = projectsVisibleTo(library, c)
   library.sortBy("duration", "descending")
   return library
 )
@@ -493,20 +491,20 @@ def handleGetUserProjects(*serve.Context c) (
     discoverUserIdentity(name)
   )
   boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
+  array projects = projectsVisibleTo(ownerIndexEntries(name, includeUnshared), c)
   number requestedLimit = c.queryInt("limit", 0)
   if requestedLimit > 0 (
-    number total = ownerIndexCount(name, includeUnshared)
+    number total = projects.len
     number offset = clampNumber(c.queryInt("offset", 0), 0, total)
     number limit = clampNumber(requestedLimit, 1, 100)
     c.json(200, {
       ok: true,
-      projects: ownerIndexPage(name, includeUnshared, offset, limit),
+      projects: paginate(projects, offset, limit),
       total: total,
       nextOffset: clampNumber(offset + limit, 0, total)
     })
     return
   )
-  array projects = ownerIndexEntries(name, includeUnshared)
   c.json(200, {ok: true, projects: projects, total: projects.len})
 )
 

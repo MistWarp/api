@@ -170,6 +170,7 @@ import "./upgrade-policy.osl"
 import "./perks.osl"
 import "./quota-policy.osl"
 import "./groups.osl"
+import "./banned-owners.osl"
 import "./related-projects.osl"
 import "./random-projects.osl"
 import "./projects.osl"
@@ -277,7 +278,7 @@ app.use(realtimeUpgradeGuard)
 app.use(serve.corsOpen())
 app.use(serve.logger())
 
-app.static("/thumbnails", "./data/thumbnails")
+app.GET("/thumbnails/:file", handleGetThumbnail)
 app.GET("/blobs/assets/:name", handleGetAssetBlob)
 app.GET("/blobs/backpack/:folder/:file", handleGetBackpackBlob)
 app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
