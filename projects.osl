@@ -70,7 +70,7 @@ def canViewForkProject(object project,*serve.Context c) boolean (
 )
 
 def canViewProject(object project,*serve.Context c) boolean (
-  if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
+  if projectHiddenFrom(project, c) (
     return false
   )
   if projectIsViewable(project) (
@@ -89,8 +89,8 @@ def canViewProject(object project,*serve.Context c) boolean (
 )
 
 def canViewProjectJson(object project,*serve.Context c) boolean (
-  if isBannedUser(project.owner.toStr()) and !c.getBool("isAdmin") (
-    return false
+  if projectHiddenFrom(project, c) (
+    return bannedKeyMatches(project, c.query("k"))
   )
   if canSaveLiveProject(project, c) return true
   if validPreviewKey(project.id.toStr(), c.query("k")) (
@@ -121,6 +121,21 @@ def ensureViewKey(object project) (
     project.viewKey = randomString(16)
     saveProject(project)
   )
+  if projectOwnerBanned(project) and bannedViewKey(project) == "" (
+    project.bannedViewKey = randomString(16)
+    saveProject(project)
+  )
+)
+
+// While the owner is banned, a project's JSON is only served with this key,
+// which only admins are handed (the player fetches the JSON signed out).
+// Older view keys stop working until the ban is lifted.
+def bannedViewKey(object project) string (
+  return (project.bannedViewKey ?? "").toStr()
+)
+
+def bannedKeyMatches(object project, string key) boolean (
+  return bannedViewKey(project) != "" and key == bannedViewKey(project)
 )
 
 def projectMustStayPrivate(object project) boolean (
@@ -292,6 +307,11 @@ def projectResponse(object project,*serve.Context c) object (
       locked = true
     )
   )
+  // Only admins get here for a banned owner's project.
+  boolean ownerBanned = projectOwnerBanned(project)
+  if ownerBanned and jsonUrl != "" (
+    jsonUrl = jsonBase ++ "?k=" ++ bannedViewKey(project)
+  )
   if !hasContent (
     jsonUrl = ""
   )
@@ -349,6 +369,9 @@ def projectResponse(object project,*serve.Context c) object (
     sizeBytes: projectSizeBytes(project),
     isOwner: isOwner
   }
+  if ownerBanned (
+    response.ownerBanned = true
+  )
   response.workspaceUrl = ""
   response.canViewSource = canSeeInsideProject(project, c)
   if response.canViewSource == true and project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
@@ -2048,7 +2071,9 @@ def handleGetProject(*serve.Context c) (
   ensureViewKey(project)
   maybeFlushProject(project)
   object response = projectResponse(project, c)
-  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" (
+  // Admins reviewing a banned owner's project play the saved JSON, which
+  // takes the key; the release route doesn't.
+  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true (
     object release = releaseDocs.findById(project.publicRelease.toStr())
     if release.len > 0 and release.contains("jsonUrl") (
       response.projectJsonUrl = release.jsonUrl
@@ -2082,6 +2107,10 @@ def handleGetEditorProject(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
+  if projectHiddenFrom(project, c) (
+    c.notFound("project not found")
+    return
+  )
   if !canSeeInsideProject(project, c) (
     c.forbidden("see inside is disabled for this project")
     return
@@ -3037,25 +3066,15 @@ def handleReactProjectLocked(*serve.Context c) (
   })
 )
 
-def snapshotIndexList(array values) array (
-  array snapshot = []
-  for i values.len (
-    snapshot.append(values[i])
-  )
-  return snapshot
-)
-
 def sharedIndexEntries() array (
   if sharedProjectsCache.has("projects") (
     return sharedProjectsCache.get("projects").assert(array)
   )
-  object banData = cachedBans()
-  object bans = banData.bans
   array entries = []
   array stored = projectSearchDocs.find({shared: true, visibility: "public"})
   for i stored.len (
     object entry = stored[i].assert(object)
-    if entry.shared == true and !bans.contains(normalizeUsername(entry.owner.toStr())) (
+    if entry.shared == true (
       entries.append(entry)
     )
   )
@@ -3064,7 +3083,7 @@ def sharedIndexEntries() array (
 )
 
 def handleExplore(*serve.Context c) (
-  array entries = snapshotIndexList(sharedIndexEntries())
+  array entries = projectsVisibleTo(sharedIndexEntries(), c)
 
   string q = c.query("q").toLower().strip()
   string tag = c.query("tag").toLower().strip()
@@ -3142,7 +3161,7 @@ def handleExplore(*serve.Context c) (
 )
 
 def handleRandomProject(*serve.Context c) (
-  object project = randomProjectEntry(sharedIndexEntries(), c.query("exclude").strip())
+  object project = randomProjectEntry(projectsVisibleToEveryone(sharedIndexEntries()), c.query("exclude").strip())
   if !project.contains("id") (
     c.json(404, {ok: false, error: "no shared projects yet"})
     return
@@ -3151,14 +3170,14 @@ def handleRandomProject(*serve.Context c) (
 )
 
 def handleRelatedProjects(*serve.Context c) (
-  array entries = snapshotIndexList(sharedIndexEntries())
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("weekViews", "descending")
   number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
   c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), c.query("exclude").split(","), limit)})
 )
 
 def handleFeaturedProject(*serve.Context c) (
-  array entries = snapshotIndexList(sharedIndexEntries())
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("weekViews", "descending")
   array pool = []
   for i entries.len (
@@ -3182,7 +3201,7 @@ def sitemapUrl(string path) string (
 )
 
 def handleSitemap(*serve.Context c) (
-  array entries = snapshotIndexList(sharedIndexEntries())
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("views", "descending")
   array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
   string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
@@ -3215,7 +3234,7 @@ def handleSitemap(*serve.Context c) (
 )
 
 def handleLeaderboard(*serve.Context c) (
-  array entries = sharedIndexEntries()
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
   object totals = {}
   for i entries.len (
     object entry = entries[i]
@@ -3254,7 +3273,7 @@ def handleLeaderboard(*serve.Context c) (
 )
 
 def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
-  if isBannedUser(entry.owner.toStr()) and !c.getBool("isAdmin") (
+  if projectHiddenFrom(entry, c) (
     return false
   )
   if entry.shared == true and projectVisibility(entry) == "public" (

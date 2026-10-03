@@ -15,10 +15,8 @@ def projectVisibility(object project) string (
 )
 
 def projectIsViewable(object project) boolean (
-  if project.contains("owner") and project.owner != null (
-    if isBannedUser(project.owner.toStr()) (
-      return false
-    )
+  if projectOwnerBanned(project) (
+    return false
   )
   return projectVisibility(project) != "private"
 )
@@ -103,6 +101,9 @@ def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
 def canSeeInsideProject(object project,*serve.Context c) boolean (
   if c.getBool("authenticated") and c.getBool("isAdmin") (
     return true
+  )
+  if projectOwnerBanned(project) (
+    return false
   )
   if !canEditProject(project, c) and canSaveLiveProject(project, c) (
     return true

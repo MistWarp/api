@@ -132,6 +132,7 @@ def handleGetMistWarpGroup(*serve.Context c) (
       projects.append(project)
     )
   )
+  projects = projectsVisibleTo(projects, c)
   array spaces = []
   array spaceEntries = spaceDocs.where("groupTag", db.equal, tag).sort("edited", db.desc).all()
   for i spaceEntries.len (
