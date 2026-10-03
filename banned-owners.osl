@@ -1,0 +1,57 @@
+// A banned user's projects are hidden everywhere except from admins. Bans are
+// kept by username; the set also holds each banned user's ID, so a project
+// still matches if its stored owner name is out of date after a rename.
+// Nothing is moved or deleted: lifting the ban brings everything back.
+
+def bannedOwnerSet(object bans, object idsByKey) object (
+  object names = {}
+  object ids = {}
+  array keys = bans.getKeys()
+  for i keys.len (
+    string key = normalizeUsername(keys[i].toStr())
+    if key != "" (
+      names[key] = true
+      string userId = (idsByKey[keys[i].toStr()] ?? "").toStr()
+      if userId != "" (
+        ids[userId] = true
+      )
+    )
+  )
+  return {names: names, ids: ids}
+)
+
+def ownerInBannedSet(object banned, string owner, string ownerId) boolean (
+  object ids = banned.ids.assertElse(object, {})
+  if ownerId != "" and ids.contains(ownerId) (
+    return true
+  )
+  object names = banned.names.assertElse(object, {})
+  string key = normalizeUsername(owner)
+  return key != "" and names.contains(key)
+)
+
+def entryOwnerBanned(object banned, object entry) boolean (
+  return ownerInBannedSet(banned, (entry.owner ?? "").toStr(), (entry.ownerId ?? "").toStr())
+)
+
+// A direct lookup of a hidden project answers like a missing one.
+def bannedProjectHidden(object banned, object project, boolean isAdmin) boolean (
+  return !isAdmin and entryOwnerBanned(banned, project)
+)
+
+// Always a new list, so callers can sort it without touching a cached one.
+// Admins get every entry, with banned owners' copies marked ownerBanned.
+def projectEntriesVisible(array entries, object banned, boolean isAdmin) array (
+  array visible = []
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    if !entryOwnerBanned(banned, entry) (
+      visible.append(entry)
+    ) else if isAdmin (
+      object marked = entry.clone()
+      marked.ownerBanned = true
+      visible.append(marked)
+    )
+  )
+  return visible
+)
