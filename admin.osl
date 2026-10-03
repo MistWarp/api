@@ -50,15 +50,27 @@ def bannedOwners() object (
   if bansCache.has("owners") (
     return bansCache.get("owners").assert(object)
   )
+  // One rebuild at a time; the rest wait for it and use its result.
+  sync.lock("banned-owners")
+  if bansCache.has("owners") (
+    object built = bansCache.get("owners").assert(object)
+    sync.unlock("banned-owners")
+    return built
+  )
   object bans = cachedBans().bans.assertElse(object, {})
+  object users = loadUserIds().users.assertElse(object, {})
   object idsByKey = {}
-  array keys = bans.getKeys()
-  for i keys.len (
-    string key = keys[i].toStr()
-    idsByKey[key] = userIdForUsername(key)
+  array userIds = users.getKeys()
+  for i userIds.len (
+    string userId = userIds[i].toStr()
+    string key = normalizeUsername(users[userId].toStr())
+    if bans.contains(key) (
+      idsByKey[key] = userId
+    )
   )
   object banned = bannedOwnerSet(bans, idsByKey)
   bansCache.set("owners", banned)
+  sync.unlock("banned-owners")
   return banned
 )
 
