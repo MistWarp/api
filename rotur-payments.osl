@@ -1,0 +1,218 @@
+// Payments through Rotur payment requests:
+// https://docs.rotur.dev/build-an-app/payments
+//
+// mistwarp-api asks Rotur, with the app's credentials, for someone to pay. They
+// approve it on rotur.dev with their password, Rotur moves the credits (shared
+// between everyone a sale pays), and Rotur tells MistWarp with the
+// payment.completed webhook. MistWarp never holds a permission to spend
+// anyone's credits.
+//
+// Each purchase key (data/purchase-keys.json) remembers its payment request.
+// The key is the request's reference, so the webhook knows which purchase was
+// paid, and the editor's confirm call asks Rotur directly if the webhook hasn't
+// come yet.
+
+// MistWarp's share of a sale goes to its own Rotur account: MISTWARP_ROTUR_USER,
+// or the MistWarp Rotur App's owner.
+def mistwarpFeeAccount() string (
+  if mistwarpRoturUser != "" (
+    return mistwarpRoturUser
+  )
+  if roturAppOwnerCache.has("owner") (
+    return roturAppOwnerCache.get("owner").toStr()
+  )
+  object result = roturApp("GET", "", {})
+  string owner = ""
+  if result.ok (
+    owner = (result.data.owner.username ?? "").toStr()
+  )
+  if owner != "" (
+    roturAppOwnerCache.set("owner", owner)
+  )
+  return owner
+)
+
+// Asks Rotur for a payment of amount from payer to payee, shared by splits
+// ([{username, basis_points}]) when there is more than one. Returns {ok, id,
+// approveUrl} or {ok: false, error}.
+def requestRoturPayment(string payer, string payee, array splits, number amount, string note, string reference, string returnUrl) object (
+  object body = {payer: roturUserRef(payer), "to": roturUserRef(payee), amount: amount, note: note.trim(1, 160), reference: reference}
+  if splits.len > 1 (
+    array shares = []
+    for i splits.len (
+      object split = splits[i].assert(object)
+      shares.append({"to": roturUserRef(split.username.toStr()), basis_points: split.basis_points})
+    )
+    body.splits = shares
+  )
+  if returnUrl != "" (
+    body.return_url = returnUrl
+  )
+  object result = roturApp("POST", "/payment-requests", body)
+  if !result.ok and (result.data.code ?? "").toStr() == "invalid_return_url" (
+    // The editor's page isn't on one of the app's origins: no way back, but
+    // the editor still sees the window close.
+    body.delete("return_url")
+    result = roturApp("POST", "/payment-requests", body)
+  )
+  if !result.ok (
+    return {ok: false, error: (result.data.error ?? "payments are not available right now").toStr()}
+  )
+  number expiresAt = (result.data.expires_at ?? 0).toNum()
+  if expiresAt <= 0 (
+    // Rotur's requests last 15 minutes.
+    expiresAt = timestamp + 900000
+  )
+  return {ok: true, id: result.data.id.toStr(), approveUrl: result.data.approve_url.toStr(), expiresAt: expiresAt}
+)
+
+// Rotur refuses splits that pay the payer, as when someone buys a remix of
+// their own project, or the fee account buys something. Their share goes to
+// the next person in the splits instead.
+def splitsWithoutPayer(array splits, string payer) array (
+  array kept = []
+  number carried = 0
+  for i splits.len (
+    object split = splits[i].assertElse(object, {})
+    number points = (split.basis_points ?? 0).toNum().toInt() + carried
+    if split.username.toStr().toLower() == payer.toLower() (
+      carried = points
+    ) else (
+      kept.append({username: split.username.toStr(), basis_points: points})
+      carried = 0
+    )
+  )
+  if carried > 0 and kept.len > 0 (
+    object last = kept[kept.len].assertElse(object, {})
+    last.basis_points = last.basis_points.toNum().toInt() + carried
+    kept[kept.len] = last
+  )
+  return kept
+)
+
+// The same purchase, started again before it was paid: everything the caller
+// said about it matches, and Rotur's request has a minute or more left.
+def samePurchase(object stored, object entry, string prefix, string key) boolean (
+  if !key.startsWith(prefix) or stored.paid == true or (stored.expiresAt ?? 0).toNum() < timestamp + 60000 or (stored.approveUrl ?? "").toStr() == "" (
+    return false
+  )
+  array fields = entry.getKeys()
+  for i fields.len (
+    string field = fields[i].toStr()
+    if json.stringify(stored[field]) != json.stringify(entry[field]) (
+      return false
+    )
+  )
+  return true
+)
+
+// Rotur's status for a payment request: "pending", "paid", "declined",
+// "cancelled" or "expired", or "" if it couldn't be read.
+def roturPaymentStatus(string requestId) string (
+  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  if !result.ok (
+    return ""
+  )
+  return (result.data.status ?? "").toStr()
+)
+
+def roturPaymentPaid(string requestId, string reference) boolean (
+  if requestId == "" (
+    return false
+  )
+  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  return result.ok and result.data.status == "paid" and (result.data.reference ?? "").toStr() == reference
+)
+
+// Starts a purchase: saves its key and asks Rotur for the payment. Returns what
+// the editor needs to open Rotur's window, with the splits Rotur was given, or
+// {ok: false, error}. The same purchase started again while its request is
+// still open gets that request back, so one purchase is only ever one payment.
+def startPurchase(string prefix, object entry, string payer, string payee, array splits, number amount, string note, string returnUrl) object (
+  array shares = splitsWithoutPayer(splits, payer)
+  entry.splits = shares
+  // One start at a time for the same purchase, so two clicks can't both miss
+  // the open request and make two.
+  string lock = "purchase-start:" ++ prefix ++ json.stringify(entry)
+  sync.lock(lock)
+  object open = loadPurchaseKeys().keys.assertElse(object, {})
+  array openKeys = open.getKeys()
+  for i openKeys.len (
+    string openKey = openKeys[i].toStr()
+    object stored = open[openKey].assertElse(object, {})
+    // Only a request still waiting for an answer is reused. A declined one
+    // would leave the person unable to try again until it expired.
+    if samePurchase(stored, entry, prefix, openKey) and roturPaymentStatus(stored.requestId.toStr()) == "pending" (
+      sync.unlock(lock)
+      return {ok: true, key: openKey, requestId: stored.requestId.toStr(), approveUrl: stored.approveUrl.toStr(), splits: shares}
+    )
+  )
+  string key = prefix ++ randomString(16)
+  object request = requestRoturPayment(payer, payee, shares, amount, note, key, returnUrl)
+  if !request.ok (
+    sync.unlock(lock)
+    return request
+  )
+  entry.requestId = request.id
+  entry.approveUrl = request.approveUrl
+  entry.expiresAt = request.expiresAt
+  entry.at = timestamp
+  sync.lock("purchase-keys")
+  object store = prunePurchaseKeys(loadPurchaseKeys())
+  object keys = store.keys
+  keys[key] = entry
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+  sync.unlock(lock)
+  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl, splits: shares}
+)
+
+// The purchase key's entry, once it has been paid, else {}. Rotur is asked if
+// the webhook hasn't said so yet.
+def paidPurchase(string key) object (
+  object keys = loadPurchaseKeys().keys
+  if key == "" or !keys.contains(key) (
+    return {}
+  )
+  object entry = keys[key].assert(object)
+  if entry.paid != true and !roturPaymentPaid((entry.requestId ?? "").toStr(), key) (
+    return {}
+  )
+  entry.paid = true
+  return entry
+)
+
+def forgetPurchase(string key) (
+  sync.lock("purchase-keys")
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  keys.delete(key)
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+)
+
+// payment.completed: mark the purchase paid, and deliver what needs no more
+// from the buyer. Donations and refunds wait for the comment or the revoke
+// that started them.
+def completeRoturPayment(string reference, string requestId) (
+  sync.lock("purchase-keys")
+  object store = loadPurchaseKeys()
+  object keys = store.keys
+  if !keys.contains(reference) or (keys[reference].requestId ?? "").toStr() != requestId (
+    sync.unlock("purchase-keys")
+    return
+  )
+  object entry = keys[reference].assert(object)
+  entry.paid = true
+  keys[reference] = entry
+  store.keys = keys
+  savePurchaseKeys(store)
+  sync.unlock("purchase-keys")
+  if reference.startsWith("mwbuy_") (
+    completeProjectPurchase(reference)
+  ) else if reference.startsWith("mwgame_") (
+    completeGameProductPurchase(reference)
+  )
+)
