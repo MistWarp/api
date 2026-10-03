@@ -160,13 +160,16 @@ def indexEntryFromProject(object project) object (
   if project.contains("vanitySlug") and project.vanitySlug != null (
     vanitySlug = project.vanitySlug.toStr()
   )
+  // vanityClaim holds the URL while it's lapsed. vanitySlug is what lists link
+  // to, so it's empty until the owner's plan includes vanity URLs again.
   return {
     id: project.id,
     owner: project.owner,
     ownerId: ownerId,
     ownerKey: normalizeUsername(project.owner.toStr()),
     groupTag: groupTag,
-    vanitySlug: vanitySlug,
+    vanityClaim: vanitySlug,
+    vanitySlug: if (project.vanityLapsedAt ?? 0).toNum() > 0 then "" else vanitySlug,
     title: project.title,
     thumbUrl: thumbUrlFor(project),
     views: project.views,

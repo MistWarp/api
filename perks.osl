@@ -13,30 +13,75 @@ def normalizeRoturTier(string rawTier) string (
 )
 
 def roturTierForUser(string userId) string (
+  return roturTierLookup(userId).tier.toStr()
+)
+
+// The user's Rotur tier, and whether Rotur gave it in the last 5 minutes.
+// While Rotur can't be reached, the last tier it gave is kept (known: false),
+// so an outage doesn't take anyone's perks away.
+def roturTierLookup(string userId) object (
   if userId == "" or isStudentUserId(userId) (
-    return "Free"
+    return {tier: "Free", known: true}
   )
   if paidPerksCache.has(userId) (
     object cached = paidPerksCache.get(userId).assertElse(object, {})
     if cached.contains("expires") and cached.expires.toNum() > timestamp (
-      return cached.tier.toStr()
+      return {tier: cached.tier.toStr(), known: true}
     )
   )
+  // Rotur failed in the last minute: don't make every request wait on it again.
+  if roturTierUnreachable.has(userId) (
+    return lastKnownRoturTier(userId)
+  )
   object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
-  if !response.success or response.status.toInt() != 200 (
-    return "Free"
-  )
-  auto parsed = json.parse(response.body, {type: "object"})
-  if parsed.isErr() (
-    return "Free"
-  )
-  object profile = parsed.unwrap().assert(object)
   string tier = "Free"
-  if profile.contains("subscription") and profile.subscription != null (
-    tier = normalizeRoturTier(profile.subscription.toStr())
+  if response.success and response.status.toInt() == 404 (
+    // No such Rotur account, so no plan.
+    tier = "Free"
+  ) else if !response.success or response.status.toInt() != 200 (
+    roturTierUnreachable.set(userId, true)
+    return lastKnownRoturTier(userId)
+  ) else (
+    auto parsed = json.parse(response.body, {type: "object"})
+    if parsed.isErr() (
+      roturTierUnreachable.set(userId, true)
+      return lastKnownRoturTier(userId)
+    )
+    object profile = parsed.unwrap().assert(object)
+    if profile.contains("subscription") and profile.subscription != null (
+      tier = normalizeRoturTier(profile.subscription.toStr())
+    )
   )
   paidPerksCache.set(userId, {tier: tier, expires: timestamp + 300000})
-  return tier
+  lastKnownTiers.set(userId, tier)
+  return {tier: tier, known: true}
+)
+
+def lastKnownRoturTier(string userId) object (
+  if lastKnownTiers.has(userId) (
+    return {tier: lastKnownTiers.get(userId).toStr(), known: false}
+  )
+  return {tier: "Free", known: false}
+)
+
+// "yes" or "no" for whether the project owner's plan includes vanity URLs,
+// or "unknown" while Rotur can't be reached.
+def vanityEligibility(object project) string (
+  string ownerId = (project.ownerId ?? "").toStr()
+  if ownerId == "" (
+    ownerId = userIdForUsername((project.owner ?? "").toStr())
+  )
+  if ownerId == "" (
+    return "unknown"
+  )
+  if isStudentUserId(ownerId) (
+    return if classroomStudentBenefits(ownerId).vanityProjectUrls == true then "yes" else "no"
+  )
+  object lookup = roturTierLookup(ownerId)
+  if lookup.known != true (
+    return "unknown"
+  )
+  return if mistwarpBenefitsForTier(lookup.tier.toStr()).vanityProjectUrls == true then "yes" else "no"
 )
 
 def mistwarpBenefitsForTier(string rawTier) object (
