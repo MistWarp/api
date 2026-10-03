@@ -306,7 +306,7 @@ def projectResponse(object project,*serve.Context c) object (
     owner: project.owner,
     groupTag: groupTagOf(project),
     branding: if project.contains("branding") then project.branding else {},
-    vanitySlug: if project.contains("vanitySlug") then project.vanitySlug else "",
+    vanitySlug: activeVanitySlug(project),
     title: project.title,
     tags: tags,
     compatibility: compatibility,
@@ -2059,16 +2059,93 @@ def handleGetProject(*serve.Context c) (
   c.json(200, {ok: true, project: response})
 )
 
+// The vanity URL that works for a project right now, or "" while the owner's
+// plan doesn't include one.
+def activeVanitySlug(object project) string (
+  string slug = (project.vanitySlug ?? "").toStr()
+  if slug == "" (
+    return ""
+  )
+  object after = vanityAfter(slug, (project.vanityLapsedAt ?? 0).toNum(), vanityEligibility(project), timestamp)
+  return if after.active == true then slug else ""
+)
+
+// Projects holding a vanity URL, including lapsed ones. Entries indexed before
+// vanityClaim existed only have vanitySlug.
+def vanityClaimEntries(string slug) array (
+  array found = projectSearchDocs.where("vanityClaim", db.equal, slug).all()
+  object seen = {}
+  for i found.len (
+    seen[found[i].assert(object).id.toStr()] = true
+  )
+  array legacy = projectSearchDocs.where("vanitySlug", db.equal, slug).all()
+  for i legacy.len (
+    object entry = legacy[i].assert(object)
+    if !seen.contains(entry.id.toStr()) (
+      found.append(entry)
+    )
+  )
+  return found
+)
+
+// Records when the project's vanity URL lapsed, clears that once the owner's
+// plan includes vanity URLs again, and releases the URL after 30 days lapsed.
+// Call with the project's upload lock held, and its owner's eligibility looked
+// up beforehand, so a slow Rotur never holds the lock. Returns the URL it
+// still holds.
+def applyVanityLapseLocked(string id, string slug, string eligibility) string (
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    return if loaded.missing == true then "" else slug
+  )
+  object project = loaded.project.assert(object)
+  string current = (project.vanitySlug ?? "").toStr()
+  number lapsedAt = (project.vanityLapsedAt ?? 0).toNum()
+  object after = vanityAfter(current, lapsedAt, eligibility, timestamp)
+  if after.slug.toStr() != current or after.lapsedAt.toNum() != lapsedAt (
+    project.vanitySlug = after.slug
+    if after.lapsedAt.toNum() > 0 (
+      project.vanityLapsedAt = after.lapsedAt
+    ) else (
+      project.delete("vanityLapsedAt")
+    )
+    saveProject(project)
+    upsertIndexEntry(project)
+  )
+  return after.slug.toStr()
+)
+
+// Notices lapsed vanity URLs and releases them on time, even if nobody visits.
+def vanityLapseLoop() (
+  while true (
+    process.sleep(900)
+    array entries = projectSearchDocs.all()
+    for i entries.len (
+      object entry = entries[i].assert(object)
+      string slug = (entry.vanityClaim ?? entry.vanitySlug ?? "").toStr()
+      string eligibility = if slug == "" then "unknown" else vanityEligibility(entry)
+      boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
+      // Nothing changes while Rotur can't be reached, or for a URL in use.
+      if eligibility == "no" or (eligibility == "yes" and lapsed) (
+        string lockName = "project-upload:" ++ entry.id.toStr()
+        sync.lock(lockName)
+        applyVanityLapseLocked(entry.id.toStr(), slug, eligibility)
+        sync.unlock(lockName)
+      )
+    )
+  )
+)
+
 def handleResolveVanityProject(*serve.Context c) (
   string slug = c.param("slug").toLower().strip()
-  array matches = projectSearchDocs.where("vanitySlug", db.equal, slug).all()
+  array matches = vanityClaimEntries(slug)
   if matches.len == 0 (
     c.notFound("vanity project not found")
     return
   )
   object entry = matches[1].assert(object)
   auto result = loadProject(entry.id.toStr())
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  if !result.ok or !canViewProject(result.project.assert(object), c) or activeVanitySlug(result.project.assert(object)) != slug (
     c.notFound("vanity project not found")
     return
   )
@@ -2199,6 +2276,11 @@ def handleUpdateProjectLocked(*serve.Context c) (
   if body.contains("vanitySlug") (
     string slug = body.vanitySlug.toStr().toLower().strip()
     string currentSlug = if project.contains("vanitySlug") then project.vanitySlug.toStr() else ""
+    // A lapsed URL isn't shown, even to the owner, so the settings form sends
+    // it back empty: keep it reserved.
+    if slug == "" and currentSlug != "" and activeVanitySlug(project) == "" (
+      slug = currentSlug
+    )
     if slug != "" and slug != currentSlug and creatorBenefits.vanityProjectUrls != true (
       c.forbidden("vanity project URLs require Rotur Pro")
       return
@@ -2207,14 +2289,30 @@ def handleUpdateProjectLocked(*serve.Context c) (
       c.badRequest("vanity URLs must be 3 to 40 letters, numbers, or hyphens")
       return
     )
-    if slug != "" (
-      array matches = projectSearchDocs.where("vanitySlug", db.equal, slug).all()
+    if slug != "" and slug != currentSlug (
+      array matches = vanityClaimEntries(slug)
       for i matches.len (
-        if matches[i].assert(object).id.toStr() != project.id.toStr() (
-          c.json(409, {ok: false, error: "that vanity URL is already taken"})
-          return
+        object holder = matches[i].assert(object)
+        string holderId = holder.id.toStr()
+        if holderId != project.id.toStr() (
+          // Free if it has been lapsed for 30 days. Never wait on the other
+          // project's lock while holding this one's.
+          string holderEligibility = vanityEligibility(holder)
+          string holderLock = "project-upload:" ++ holderId
+          boolean held = true
+          if sync.tryLock(holderLock) (
+            held = applyVanityLapseLocked(holderId, slug, holderEligibility) == slug
+            sync.unlock(holderLock)
+          )
+          if held (
+            c.json(409, {ok: false, error: "that vanity URL is already taken"})
+            return
+          )
         )
       )
+    )
+    if slug != currentSlug (
+      project.delete("vanityLapsedAt")
     )
     project.vanitySlug = slug
   )
