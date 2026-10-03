@@ -1,0 +1,37 @@
+import "std:testing"
+import "./vanity-policy.osl"
+
+number day = 86400000
+number now = 400 * day
+
+object active = vanityAfter("my-game", 0, "yes", now)
+testing.assert(active.active == true and active.slug == "my-game", "an active plan's vanity URL resolves")
+testing.assert(active.lapsedAt == 0, "an active plan records no lapse")
+
+object justLapsed = vanityAfter("my-game", 0, "no", now)
+testing.assert(justLapsed.active == false, "a lapsed vanity URL is not found")
+testing.assert(justLapsed.slug == "my-game", "a lapsed vanity URL stays reserved")
+testing.assert(justLapsed.lapsedAt == now, "the lapse is recorded when first seen")
+
+object stillLapsed = vanityAfter("my-game", now - (29 * day), "no", now)
+testing.assert(stillLapsed.active == false and stillLapsed.slug == "my-game", "under 30 days lapsed: not found, still reserved")
+testing.assert(stillLapsed.lapsedAt == now - (29 * day), "the lapse keeps its first date")
+
+object released = vanityAfter("my-game", now - (30 * day), "no", now)
+testing.assert(released.slug == "" and released.active == false, "30 days lapsed: released, so anyone can claim it")
+testing.assert(released.lapsedAt == 0, "a released URL leaves no lapse behind")
+
+object resubscribed = vanityAfter("my-game", now - (29 * day), "yes", now)
+testing.assert(resubscribed.active == true and resubscribed.slug == "my-game", "resubscribing inside 30 days brings it back")
+testing.assert(resubscribed.lapsedAt == 0, "resubscribing clears the lapse")
+
+object outage = vanityAfter("my-game", 0, "unknown", now)
+testing.assert(outage.active == true and outage.lapsedAt == 0, "a Rotur outage doesn't hide a working URL or start the 30 days")
+
+object outageWhileLapsed = vanityAfter("my-game", now - (40 * day), "unknown", now)
+testing.assert(outageWhileLapsed.slug == "my-game", "a Rotur outage never releases a URL")
+testing.assert(outageWhileLapsed.active == false, "a lapsed URL stays hidden during an outage")
+testing.assert(outageWhileLapsed.lapsedAt == now - (40 * day), "a Rotur outage doesn't move the lapse")
+
+object none = vanityAfter("", 0, "yes", now)
+testing.assert(none.active == false and none.slug == "", "projects without a vanity URL have nothing to resolve")

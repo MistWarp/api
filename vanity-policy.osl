@@ -1,0 +1,26 @@
+// A vanity project URL needs a plan that includes one. Once the owner's plan
+// stops including it, the URL stops working but stays reserved for them for
+// 30 days, so resubscribing brings it straight back. After that it is
+// released for anyone to claim.
+number vanityReserveMs = 2592000000
+
+// What a project's vanity URL becomes, given whether its owner's plan includes
+// one right now: "yes", "no", or "unknown" when Rotur couldn't be asked. An
+// unknown plan changes nothing, so a Rotur outage never starts or advances
+// the 30 days.
+def vanityAfter(string slug, number lapsedAt, string eligibility, number now) object (
+  if slug == "" (
+    return {slug: "", lapsedAt: 0, active: false}
+  )
+  if eligibility == "yes" (
+    return {slug: slug, lapsedAt: 0, active: true}
+  )
+  if eligibility == "unknown" (
+    return {slug: slug, lapsedAt: lapsedAt, active: lapsedAt == 0}
+  )
+  number since = if lapsedAt > 0 then lapsedAt else now
+  if now - since >= vanityReserveMs (
+    return {slug: "", lapsedAt: 0, active: false}
+  )
+  return {slug: slug, lapsedAt: since, active: false}
+)
