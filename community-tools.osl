@@ -760,7 +760,7 @@ def challengeProjects(object space,*serve.Context c) array (
         entry.audienceVoteCount = summary.audienceVoteCount
         entry.rankScore = entry.judgeScore
         if audienceJudged (
-          entry.rankScore = ((summary.audienceScore.toNum() * 100) + 0.5).toInt() * 1000000 + clampNumber(summary.audienceVoteCount.toNum(), 0, 999999)
+          entry.rankScore = (((summary.audienceScore.toNum() * 100) + 0.5).toInt() * 1000000) + clampNumber(summary.audienceVoteCount.toNum(), 0, 999999)
         )
         entry.myVote = summary.myVote
         entry.myScore = if isChallengeJudge(space, c.getString("username")) then summary.myScore else {}
