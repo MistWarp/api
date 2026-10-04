@@ -635,7 +635,25 @@ def challengePhase(object space) string (
   return "awaiting-results"
 )
 
+def challengeVotingMode(object space) string (
+  if space.contains("votingMode") and space.votingMode.toStr() == "audience" (
+    return "audience"
+  )
+  return "judges"
+)
+
+def challengeAudienceJudged(object space) boolean (
+  return challengeVotingMode(space) == "audience"
+)
+
+def challengeAudienceVotingEnabled(object space) boolean (
+  return challengeAudienceJudged(space) or (space.contains("communityVoting") and space.communityVoting == true)
+)
+
 def challengeJudges(object space) array (
+  if challengeAudienceJudged(space) (
+    return []
+  )
   array judges = challengeArray(space, "judges")
   string tag = groupTagOf(space)
   if tag != "" (
@@ -728,6 +746,7 @@ def challengeProjects(object space,*serve.Context c) array (
   array projects = []
   array ids = spaceProjectIds(space)
   boolean showResults = (space.contains("resultsPublishedAt") and space.resultsPublishedAt.toNum() > 0) or canManageSpace(space, c)
+  boolean audienceJudged = challengeAudienceJudged(space)
   for i ids.len (
     auto loaded = loadProject(ids[i].toStr())
     if loaded.ok == true (
@@ -737,8 +756,12 @@ def challengeProjects(object space,*serve.Context c) array (
         object summary = challengeScoreSummary(space, project.id.toStr(), c.getString("username"))
         entry.judgeScore = if showResults then summary.judgeScore else 0
         entry.judgeScoreCount = summary.judgeScoreCount
-        entry.audienceScore = if showResults then summary.audienceScore else 0
+        entry.audienceScore = summary.audienceScore
         entry.audienceVoteCount = summary.audienceVoteCount
+        entry.rankScore = entry.judgeScore
+        if audienceJudged (
+          entry.rankScore = ((summary.audienceScore.toNum() * 100) + 0.5).toInt() * 1000000 + clampNumber(summary.audienceVoteCount.toNum(), 0, 999999)
+        )
         entry.myVote = summary.myVote
         entry.myScore = if isChallengeJudge(space, c.getString("username")) then summary.myScore else {}
         entry.scoreBreakdown = if canManageSpace(space, c) then summary.scores else []
@@ -748,7 +771,7 @@ def challengeProjects(object space,*serve.Context c) array (
   )
   projects = projectsVisibleTo(projects, c)
   if showResults (
-    projects.sortBy("judgeScore", "descending")
+    projects.sortBy("rankScore", "descending")
     for i projects.len (
       object ranked = projects[i].assert(object)
       ranked.place = i + 1
@@ -832,6 +855,7 @@ def spaceResponse(object space,*serve.Context c) object (
     if !response.contains("communityVoting") (
       response.communityVoting = false
     )
+    response.votingMode = challengeVotingMode(space)
     if !response.contains("resultsPublishedAt") (
       response.resultsPublishedAt = 0
     )
@@ -1049,6 +1073,14 @@ def handleCreateSpace(*serve.Context c) (
     c.badRequest("challenge dates must be in order")
     return
   )
+  string votingMode = "judges"
+  if body.contains("votingMode") (
+    votingMode = body.votingMode.toStr().toLower().strip()
+  )
+  if votingMode != "judges" and votingMode != "audience" (
+    c.badRequest("invalid voting mode")
+    return
+  )
   string id = "s" ++ randomString(12)
   object space = {
     _id: id,
@@ -1080,6 +1112,7 @@ def handleCreateSpace(*serve.Context c) (
     participants: [],
     commentCount: 0,
     communityVoting: false,
+    votingMode: votingMode,
     resultsPublishedAt: 0,
     created: timestamp,
     edited: timestamp
@@ -1189,6 +1222,18 @@ def handleUpdateSpace(*serve.Context c) (
   )
   if body.contains("communityVoting") (
     space.communityVoting = body.communityVoting == true
+  )
+  if body.contains("votingMode") and space.kind.toStr() == "challenge" (
+    string votingMode = body.votingMode.toStr().toLower().strip()
+    if votingMode != "judges" and votingMode != "audience" (
+      c.badRequest("invalid voting mode")
+      return
+    )
+    if votingMode != challengeVotingMode(space) and challengePhase(space) == "results" (
+      c.badRequest("the voting mode cannot change after results are published")
+      return
+    )
+    space.votingMode = votingMode
   )
   if body.contains("criteria") and space.kind.toStr() == "challenge" (
     if challengeArray(space, "scores").len > 0 (
@@ -1357,6 +1402,10 @@ def handleInviteChallengeJudge(*serve.Context c) (
   )
   if !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
+    return
+  )
+  if challengeAudienceJudged(space) (
+    c.badRequest("this challenge is decided by audience ratings")
     return
   )
   string requested = c.bodyJSON().username.toStr().strip()
@@ -1563,8 +1612,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
     c.notFound("challenge entry not found")
     return
   )
-  boolean votingEnabled = space.contains("communityVoting") and space.communityVoting == true
-  if !votingEnabled or challengePhase(space) != "judging" (
+  if !challengeAudienceVotingEnabled(space) or challengePhase(space) != "judging" (
     c.badRequest("community voting is not open")
     return
   )
@@ -1603,7 +1651,12 @@ def handlePublishChallengeResults(*serve.Context c) (
     c.badRequest("submissions must close before results can be published")
     return
   )
-  if challengeArray(space, "scores").len == 0 (
+  if challengeAudienceJudged(space) (
+    if challengeArray(space, "audienceVotes").len == 0 (
+      c.badRequest("at least one entry needs an audience rating")
+      return
+    )
+  ) else if challengeArray(space, "scores").len == 0 (
     c.badRequest("at least one entry needs a judge score")
     return
   )
