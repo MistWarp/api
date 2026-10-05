@@ -747,6 +747,8 @@ def challengeProjects(object space,*serve.Context c) array (
   array ids = spaceProjectIds(space)
   boolean showResults = (space.contains("resultsPublishedAt") and space.resultsPublishedAt.toNum() > 0) or canManageSpace(space, c)
   boolean audienceJudged = challengeAudienceJudged(space)
+  string phase = challengePhase(space)
+  boolean revealRatings = phase == "awaiting-results" or phase == "results" or canManageSpace(space, c)
   for i ids.len (
     auto loaded = loadProject(ids[i].toStr())
     if loaded.ok == true (
@@ -756,10 +758,10 @@ def challengeProjects(object space,*serve.Context c) array (
         object summary = challengeScoreSummary(space, project.id.toStr(), c.getString("username"))
         entry.judgeScore = if showResults then summary.judgeScore else 0
         entry.judgeScoreCount = summary.judgeScoreCount
-        entry.audienceScore = summary.audienceScore
-        entry.audienceVoteCount = summary.audienceVoteCount
+        entry.audienceScore = if revealRatings then summary.audienceScore else 0
+        entry.audienceVoteCount = if revealRatings then summary.audienceVoteCount else 0
         entry.rankScore = entry.judgeScore
-        if audienceJudged (
+        if audienceJudged and showResults (
           entry.rankScore = (((summary.audienceScore.toNum() * 100) + 0.5).toInt() * 1000000) + clampNumber(summary.audienceVoteCount.toNum(), 0, 999999)
         )
         entry.myVote = summary.myVote
@@ -779,6 +781,29 @@ def challengeProjects(object space,*serve.Context c) array (
     )
   )
   return projects
+)
+
+def challengeWinner(object space, array projects) object (
+  if challengePhase(space) != "results" (
+    return {}
+  )
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    if entry.contains("place") and entry.place.toNum() == 1 (
+      boolean audienceJudged = challengeAudienceJudged(space)
+      return {
+        id: entry.id,
+        title: entry.title,
+        owner: entry.owner,
+        thumbUrl: entry.thumbUrl,
+        vanitySlug: entry.vanitySlug,
+        score: if audienceJudged then entry.audienceScore else entry.judgeScore,
+        scoreOutOf: if audienceJudged then 5 else 10,
+        voteCount: entry.audienceVoteCount
+      }
+    )
+  )
+  return {}
 )
 
 def spaceTotalPlaytime(array ids) number (
@@ -856,6 +881,7 @@ def spaceResponse(object space,*serve.Context c) object (
       response.communityVoting = false
     )
     response.votingMode = challengeVotingMode(space)
+    response.winner = challengeWinner(space, projects)
     if !response.contains("resultsPublishedAt") (
       response.resultsPublishedAt = 0
     )
@@ -940,7 +966,24 @@ def handleListSpaces(*serve.Context c) (
   number offset = c.queryInt("offset", 0)
   number startsBefore = c.queryInt("startsBefore", 0)
   number endsAfter = c.queryInt("endsAfter", 0)
+  number resultsAfter = c.queryInt("resultsAfter", 0)
   array stored = []
+
+  if q == "" and kind == "challenge" and resultsAfter > 0 (
+    stored = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).and("resultsPublishedAt", db.greaterEqual, resultsAfter).sort("resultsPublishedAt", db.desc).limit(limit).all()
+    array spaces = []
+    for i stored.len (
+      object published = stored[i].assert(object)
+      object listed = spaceListResponse(published, c)
+      listed.resultsPublishedAt = published.resultsPublishedAt
+      listed.winner = challengeWinner(published, challengeProjects(published, c))
+      if listed.winner.len > 0 (
+        spaces.append(listed)
+      )
+    )
+    c.json(200, {ok: true, total: spaces.len, spaces: spaces})
+    return
+  )
 
   if q == "" and kind == "challenge" and startsBefore > 0 and endsAfter > 0 (
     number total = spaceDocs.where("visibility", db.equal, "public").and("kind", db.equal, kind).and("startsAt", db.lessEqual, startsBefore).and("endsAt", db.greaterEqual, endsAfter).count()
