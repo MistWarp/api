@@ -20,7 +20,6 @@ def loadComments(string key) array (
   return [{id: "c1", author: "commenter"}]
 )
 
-// A pretend Rotur that refuses some pairs with a code.
 object refusals = {}
 array asked = []
 
@@ -36,8 +35,6 @@ def roturApp(string method, string path, object body) object (
 
 import "./rotur-signals.osl"
 
-// The profile owner replying on their own profile to someone with friends-only
-// messages: the reply is posted, and only the notification is held back.
 refusals = {"owner>commenter": "settings"}
 testing.assert(commentRefusal("profile-owner", "owner", "c1") == "", "a message setting doesn't stop a public reply")
 testing.assert(roturMessageRefusal("owner", "commenter") == "refused: settings", "it does stop the reply notifying them")

@@ -12,11 +12,6 @@ def normalizeRoturTier(string rawTier) string (
   return "Free"
 )
 
-// The user's plan as {reached, tier}, with reached false when Rotur couldn't
-// be asked. Rotur's apps API answers whatever the person's privacy settings,
-// so a private profile doesn't lose the perks they paid for. It only knows
-// people who signed in to MistWarp through Rotur, and an older Rotur doesn't
-// have it, so a 404 or a refusal falls back to the public profile.
 def fetchRoturTier(string userId) object (
   object plan = roturApp("GET", "/users/" ++ url.escape(userId) ++ "/plan", {})
   object data = plan.data.assertElse(object, {})

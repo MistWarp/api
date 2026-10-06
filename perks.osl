@@ -30,9 +30,6 @@ def roturTierLookup(string userId) object (
   return {tier: tier, known: true}
 )
 
-// The plan on the user's public profile. Rotur leaves it off when the balance
-// is hidden, so this reads Free for those people: fetchRoturTier only falls
-// back to it for someone the apps API can't answer about.
 def profileRoturTier(string userId) object (
   object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
   if response.success and response.status.toInt() == 404 (
