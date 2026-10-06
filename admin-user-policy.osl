@@ -1,0 +1,69 @@
+def adminReportRole(object report, string key) string (
+  string subject = (report.subject ?? report.targetUser ?? "").toStr()
+  if subject == "" and report.type.toStr() == "user" (
+    subject = report.target.toStr()
+  )
+  if subject != "" and subject.toLower().strip() == key (
+    return "about"
+  )
+  if report.reporter.toStr().toLower().strip() == key (
+    return "filed"
+  )
+  return ""
+)
+
+def adminReportView(object report) object (
+  return {
+    id: report.id,
+    type: report.type,
+    category: report.category ?? "",
+    reason: (report.reason ?? "").toStr().trim(1, 500),
+    target: report.target ?? "",
+    reporter: report.reporter ?? "",
+    subject: report.subject ?? report.targetUser ?? "",
+    snapshot: (report.snapshot ?? "").toStr().trim(1, 300),
+    created: report.created ?? 0,
+    resolved: report.resolved == true,
+    action: report.action ?? "",
+    resolvedBy: report.resolvedBy ?? ""
+  }
+)
+
+def adminSessionSummary(array sessions, string userId, string key, number now) object (
+  number active = 0
+  number lastSignIn = 0
+  for i sessions.len (
+    object session = sessions[i].assertElse(object, {})
+    string sessionId = (session.userId ?? "").toStr()
+    boolean mine = if userId != "" and sessionId != "" then sessionId == userId else (session.username ?? "").toStr().toLower().strip() == key
+    number created = (session.createdAt ?? 0).toNum()
+    if mine and now - created <= 604800000 (
+      active += 1
+      if created > lastSignIn (
+        lastSignIn = created
+      )
+    )
+  )
+  return {active: active, lastSignIn: lastSignIn}
+)
+
+def adminUserMatchesFilter(object entry, string filter, object banned, array admins, number now) boolean (
+  string key = (entry.usernameKey ?? "").toStr()
+  if filter == "banned" (
+    return banned.contains(key)
+  )
+  if filter == "flagged" (
+    string standing = (entry.standing ?? "good").toStr()
+    return banned.contains(key) or standing == "warning" or standing == "suspended"
+  )
+  if filter == "new" (
+    return now - (entry.created ?? 0).toNum() <= 604800000
+  )
+  if filter == "minor" (
+    return entry.minor == true
+  )
+  if filter == "admin" (
+    return admins.contains(key)
+  )
+  return true
+)

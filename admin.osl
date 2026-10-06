@@ -427,64 +427,6 @@ def handleListBans(*serve.Context c) (
   c.json(200, {ok: true, bans: out})
 )
 
-def handleListUsers(*serve.Context c) (
-  string q = normalizeUsername(c.query("q"))
-  string sort = c.query("sort").toLower().strip()
-  number offset = if c.query("offset") == "" then 0 else c.query("offset").toNum().toInt()
-  number limit = if c.query("limit") == "" then 30 else c.query("limit").toNum().toInt()
-  if offset < 0 (
-    offset = 0
-  )
-  if limit < 1 (
-    limit = 1
-  ) else if limit > 50 (
-    limit = 50
-  )
-  number total = 0
-  array stored = []
-  if q != "" (
-    total = profileSearchDocs.where("usernameKey", db.contains, q).count()
-    if sort == "followers" (
-      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("followers", db.desc).limit(offset + limit).all()
-    ) else if sort == "recent" (
-      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("created", db.desc).limit(offset + limit).all()
-    ) else (
-      stored = profileSearchDocs.where("usernameKey", db.contains, q).sort("usernameKey", db.asc).limit(offset + limit).all()
-    )
-  ) else (
-    total = profileSearchDocs.count({})
-    if sort == "followers" (
-      stored = profileSearchDocs.sort("followers", db.desc).limit(offset + limit).all()
-    ) else if sort == "recent" (
-      stored = profileSearchDocs.sort("created", db.desc).limit(offset + limit).all()
-    ) else (
-      stored = profileSearchDocs.sort("usernameKey", db.asc).limit(offset + limit).all()
-    )
-  )
-  array out = []
-  for i stored.len (
-    if i >= offset (
-      object entry = stored[i].assert(object)
-      string key = entry.usernameKey.toStr()
-      object profile = loadProfile(key)
-      object quota = storageDetails(key)
-      object standing = standingInfo(key)
-      number projectCount = projectSearchDocs.where("ownerKey", db.equal, key).count()
-      out.append({
-        username: profile.username,
-        created: profile.created,
-        followerCount: profile.followers.assert(array).len,
-        projectCount: projectCount,
-        quotaUsed: quota.used,
-        quotaLimit: quota.limit,
-        standingLevel: standing.level,
-        banned: isBannedUser(key)
-      })
-    )
-  )
-  c.json(200, {ok: true, users: out, total: total, offset: offset, limit: limit})
-)
-
 def localRuntimeStorageStats() object (
   string encoded = runtimeinfo.StatsJSON("data")
   auto parsed = json.parse(encoded, {type: "object"})
