@@ -183,32 +183,6 @@ def handleMessageUser(*serve.Context c) (
   c.json(200, {ok: true})
 )
 
-def handleGetUserAdmin(*serve.Context c) (
-  string name = c.query("username")
-  if normalizeUsername(name) == "" (
-    c.badRequest("username is required")
-    return
-  )
-  object profile = loadProfile(name)
-  boolean commentsOff = effectiveProfileCommentsOff(profile)
-  array followers = profile.followers.assert(array)
-  array following = profile.following.assert(array)
-  c.json(200, {
-    ok: true,
-    username: profile.username,
-    featuredProject: profile.featuredProject,
-    commentsOff: commentsOff,
-    followerCount: followers.len,
-    followingCount: following.len,
-    created: profile.created,
-    standing: standingInfo(name),
-    banned: isBannedUser(name),
-    admin: isAdminUser(name),
-    projects: ownerIndexEntries(name, true),
-    quota: storageDetails(name)
-  })
-)
-
 def handleAdminUpdateProfile(*serve.Context c) (
   object body = c.bodyJSON()
   string name = body.username.toStr()

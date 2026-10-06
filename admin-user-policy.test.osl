@@ -1,0 +1,35 @@
+import "std:testing"
+import "./admin-user-policy.osl"
+
+testing.assert(adminReportRole({type: "comment", target: "c1", reporter: "kit", subject: "Sam"}, "sam") == "about", "a report about someone's content is about them")
+testing.assert(adminReportRole({type: "user", target: "Sam", reporter: "kit"}, "sam") == "about", "a report on a profile is about its owner")
+testing.assert(adminReportRole({type: "project", target: "p1", reporter: "Sam", subject: "kit"}, "sam") == "filed", "a report someone made is filed by them")
+testing.assert(adminReportRole({type: "support", target: "sam", reporter: "sam"}, "sam") == "filed", "a support request counts as filed, not about them")
+testing.assert(adminReportRole({type: "project", target: "p1", reporter: "kit", subject: "lee"}, "sam") == "", "other people's reports are left out")
+
+object view = adminReportView({id: "r1", type: "comment", target: "c1", reporter: "kit", subject: "sam", sourceKey: "ip:abc", reason: "spam", created: 5})
+testing.assert(!view.contains("sourceKey"), "the reporter's IP hash isn't passed on")
+testing.assert(view.subject == "sam" and view.resolved == false, "the view keeps who and whether it's open")
+
+number now = 1000000000000
+array sessions = [
+  {username: "sam", userId: "u1", createdAt: now - 1000},
+  {username: "sam", userId: "u1", createdAt: now - 5000},
+  {username: "sam", userId: "u1", createdAt: now - 700000000},
+  {username: "Sam", userId: "", createdAt: now - 10},
+  {username: "kit", userId: "u2", createdAt: now - 1}
+]
+object summary = adminSessionSummary(sessions, "u1", "sam", now)
+testing.assert(summary.active == 3 and summary.lastSignIn == now - 10, "counts live sessions by ID, or by name when the session has no ID")
+testing.assert(adminSessionSummary(sessions, "u3", "nobody", now).active == 0, "someone never signed in has no sessions")
+
+object banned = {sam: {reason: "spam"}}
+array admins = ["mist"]
+testing.assert(adminUserMatchesFilter({usernameKey: "sam"}, "banned", banned, admins, now), "finds banned people")
+testing.assert(adminUserMatchesFilter({usernameKey: "kit", standing: "warning"}, "flagged", banned, admins, now), "a warning is flagged")
+testing.assert(!adminUserMatchesFilter({usernameKey: "kit", standing: "good"}, "flagged", banned, admins, now), "good standing isn't flagged")
+testing.assert(adminUserMatchesFilter({usernameKey: "new", created: now - 1000}, "new", banned, admins, now), "joined this week is new")
+testing.assert(!adminUserMatchesFilter({usernameKey: "old", created: now - 900000000}, "new", banned, admins, now), "joined last month isn't new")
+testing.assert(adminUserMatchesFilter({usernameKey: "teen", minor: true}, "minor", banned, admins, now), "finds people marked under 18")
+testing.assert(adminUserMatchesFilter({usernameKey: "mist"}, "admin", banned, admins, now), "finds admins")
+testing.assert(adminUserMatchesFilter({usernameKey: "anyone"}, "", banned, admins, now), "no filter keeps everyone")

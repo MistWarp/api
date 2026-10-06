@@ -75,6 +75,7 @@ def createComment(string key, string author, string authorId, string content, st
     return {ok: false, error: "could not save comment"}
   )
   roturBadgeEvent(author, "comment_posted", 0)
+  indexComment(key, comment)
   return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 
@@ -201,6 +202,8 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
     object existing = comments[i]
     if existing.id.toStr() != cid and commentParentId(existing) != cid (
       next.append(existing)
+    ) else (
+      unindexComment(key, existing.id.toStr())
     )
   )
   boolean saved = saveComments(key, next)
@@ -254,6 +257,7 @@ def editComment(string key, string cid, string requester, string content) object
   if !saved (
     return {ok: false, error: "could not edit comment", status: 500}
   )
+  indexComment(key, target)
   return {ok: true, comment: target}
 )
 

@@ -22,6 +22,7 @@ auto communityDb = db.open("data/community.db")
 *db.Collection assignmentDocs = communityDb.collection("classroom_assignments")
 *db.Collection submissionDocs = communityDb.collection("classroom_submissions")
 *db.Collection classroomAuditDocs = communityDb.collection("classroom_audit")
+*db.Collection commentIndexDocs = communityDb.collection("comment_index")
 
 def putDocument(*db.Collection collection, string id, object value) boolean (
   value["_id"] = id
@@ -105,7 +106,7 @@ def syncSearchProfile(object profile) boolean (
     userId = profile.userId.toStr()
   )
   number created = if profile.contains("created") then profile.created.toNum() else 0
-  object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, minor: profileIsMinor(profile), edited: timestamp}
+  object entry = {_id: key, userId: userId, username: profile.username, usernameKey: key, bio: profile.bio, followers: followers.len, created: created, minor: profileIsMinor(profile), standing: (profile.standing ?? "good").toStr(), edited: timestamp}
   return putDocument(profileSearchDocs, key, entry)
 )
 
@@ -217,7 +218,7 @@ def initCommunityDatabase() boolean (
       putDocument(reviewDocs, review["_id"].toStr(), review)
     )
   )
-  return migratePullCommentCounts()
+  return migratePullCommentCounts() and migrateCommentIndex()
 )
 
 def validPreviewKey(string projectId, string key) boolean (
