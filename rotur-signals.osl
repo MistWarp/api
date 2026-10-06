@@ -1,25 +1,61 @@
 // Rotur's safety signals: https://docs.rotur.dev/build-an-app/safety
 //
 // MistWarp declares that people can talk to each other and can spend credits,
-// so before a comment reaches someone, and before a purchase, it asks Rotur
-// whether that's allowed. Rotur answers from blocks, parental controls, teen
-// defaults and people's own message settings, without saying which, so MistWarp
-// shows Rotur's sentence and offers no way round it.
+// so it asks Rotur about comments and purchases. Rotur answers from blocks,
+// parental controls, teen defaults and people's own message settings, without
+// saying which, so MistWarp shows Rotur's sentence and offers no way round it.
+//
+// A comment is public, not a direct message, so it follows Rotur's own posts:
+// a block or a ban stops it, and message settings only decide whether it
+// notifies the person (see addNotification). Every account without a date of
+// birth gets friends-only messages, so treating comments as messages stopped
+// most people replying to each other at all.
 //
 // Rotur only answers about MistWarp's own users: people who signed in through
 // Sign in with Rotur, or made their account on MistWarp. For anyone else, or if
 // Rotur can't be reached, MistWarp carries on as it did before.
 
-// "" when the message is allowed, else the sentence to show the sender.
-def roturMessageRefusal(string sender, string recipient) string (
-  if sender == "" or recipient == "" or normalizeUsername(sender) == normalizeUsername(recipient) (
-    return ""
+// Rotur's answer to whether sender may message recipient: {allowed, code,
+// reason}. Answers are kept for a minute, since posting a comment asks once to
+// check it and again to notify.
+def roturMessageSignal(string sender, string recipient) object (
+  string senderKey = normalizeUsername(sender)
+  string recipientKey = normalizeUsername(recipient)
+  if senderKey == "" or recipientKey == "" or senderKey == recipientKey (
+    return {allowed: true, code: "", reason: ""}
+  )
+  string cacheKey = senderKey ++ ">" ++ recipientKey
+  if roturMessageSignals.has(cacheKey) (
+    return roturMessageSignals.get(cacheKey).assertElse(object, {allowed: true, code: "", reason: ""})
   )
   object result = roturApp("POST", "/signals/message", {"from": roturUserRef(sender), "to": roturUserRef(recipient)})
-  if !result.ok or result.data.allowed == true (
+  object signal = {allowed: true, code: "", reason: ""}
+  if result.ok and result.data.allowed != true (
+    signal = {
+      allowed: false,
+      code: (result.data.code ?? "settings").toStr(),
+      reason: (result.data.reason ?? "Rotur settings don't allow this message.").toStr()
+    }
+  )
+  if result.ok (
+    roturMessageSignals.set(cacheKey, signal)
+  )
+  return signal
+)
+
+// "" when sender may message recipient, else the sentence to show the sender.
+def roturMessageRefusal(string sender, string recipient) string (
+  object signal = roturMessageSignal(sender, recipient)
+  if signal.allowed == true (
     return ""
   )
-  return (result.data.reason ?? "Rotur settings don't allow this message.").toStr()
+  return signal.reason.toStr()
+)
+
+// Notifications that carry someone's words to the target. They only arrive
+// where Rotur would let the actor message the target.
+def isMessageNotification(string notifType) boolean (
+  return ["comment", "reply", "mention", "profile_comment", "space_comment", "roadmap_comment", "donation"].contains(notifType)
 )
 
 // "" when the purchase is allowed, else the sentence to show the buyer. Rotur
@@ -60,12 +96,16 @@ def commentRecipients(string key, string parentId) array (
   return recipients
 )
 
+// "" when the comment may be posted, else the sentence to show the author.
+// Only a block or a ban refuses it: a recipient whose settings don't take
+// messages from the author still sees the comment on the page, but isn't
+// notified about it.
 def commentRefusal(string key, string author, string parentId) string (
   array recipients = commentRecipients(key, parentId)
   for i recipients.len (
-    string refusal = roturMessageRefusal(author, recipients[i].toStr())
-    if refusal != "" (
-      return refusal
+    object signal = roturMessageSignal(author, recipients[i].toStr())
+    if signal.allowed != true and (signal.code == "blocked" or signal.code == "banned") (
+      return signal.reason.toStr()
     )
   )
   return ""

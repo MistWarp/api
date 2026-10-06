@@ -1,17 +1,3 @@
-def normalizeRoturTier(string rawTier) string (
-  string tier = rawTier.toLower().strip()
-  if tier == "lite" (
-    return "Lite"
-  )
-  if tier == "plus" (
-    return "Plus"
-  )
-  if tier == "pro" or tier == "drive" or tier == "max" (
-    return "Pro"
-  )
-  return "Free"
-)
-
 def roturTierForUser(string userId) string (
   return roturTierLookup(userId).tier.toStr()
 )
@@ -33,28 +19,38 @@ def roturTierLookup(string userId) object (
   if roturTierUnreachable.has(userId) (
     return lastKnownRoturTier(userId)
   )
-  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
-  string tier = "Free"
-  if response.success and response.status.toInt() == 404 (
-    // No such Rotur account, so no plan.
-    tier = "Free"
-  ) else if !response.success or response.status.toInt() != 200 (
+  object fetched = fetchRoturTier(userId)
+  if fetched.reached != true (
     roturTierUnreachable.set(userId, true)
     return lastKnownRoturTier(userId)
-  ) else (
-    auto parsed = json.parse(response.body, {type: "object"})
-    if parsed.isErr() (
-      roturTierUnreachable.set(userId, true)
-      return lastKnownRoturTier(userId)
-    )
-    object profile = parsed.unwrap().assert(object)
-    if profile.contains("subscription") and profile.subscription != null (
-      tier = normalizeRoturTier(profile.subscription.toStr())
-    )
   )
+  string tier = fetched.tier.toStr()
   paidPerksCache.set(userId, {tier: tier, expires: timestamp + 300000})
   lastKnownTiers.set(userId, tier)
   return {tier: tier, known: true}
+)
+
+// The plan on the user's public profile. Rotur leaves it off when the balance
+// is hidden, so this reads Free for those people: fetchRoturTier only falls
+// back to it for someone the apps API can't answer about.
+def profileRoturTier(string userId) object (
+  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
+  if response.success and response.status.toInt() == 404 (
+    // No such Rotur account, so no plan.
+    return {reached: true, tier: "Free"}
+  )
+  if !response.success or response.status.toInt() != 200 (
+    return {reached: false, tier: "Free"}
+  )
+  auto parsed = json.parse(response.body, {type: "object"})
+  if parsed.isErr() (
+    return {reached: false, tier: "Free"}
+  )
+  object profile = parsed.unwrap().assert(object)
+  if profile.contains("subscription") and profile.subscription != null (
+    return {reached: true, tier: normalizeRoturTier(profile.subscription.toStr())}
+  )
+  return {reached: true, tier: "Free"}
 )
 
 def lastKnownRoturTier(string userId) object (
