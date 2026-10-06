@@ -327,6 +327,9 @@ def addNotification(string target, string actor, string notifType, object extra)
   if actorKey != "" and userHasBlocked(actor, target) (
     return
   )
+  if isMessageNotification(notifType) and roturMessageRefusal(actor, target) != "" (
+    return
+  )
   object payload = sanitizeNotificationPayload(extra, notifType, actor)
 
   object item = {

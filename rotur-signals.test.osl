@@ -1,0 +1,61 @@
+import "std:testing"
+import "std:json"
+import "std:cache"
+
+auto roturMessageSignals = cache.create(100, 60)
+
+def normalizeUsername(string name) string (
+  return name.toLower().strip()
+)
+
+def roturUserRef(string username) string (
+  return username
+)
+
+def loadProject(string id) object (
+  return {ok: true, project: {owner: "owner"}}
+)
+
+def loadComments(string key) array (
+  return [{id: "c1", author: "commenter"}]
+)
+
+// A pretend Rotur that refuses some pairs with a code.
+object refusals = {}
+array asked = []
+
+def roturApp(string method, string path, object body) object (
+  string pair = body["from"].toStr() ++ ">" ++ body["to"].toStr()
+  asked.append(pair)
+  if refusals.contains(pair) (
+    string code = refusals[pair].toStr()
+    return {ok: true, status: 200, data: {allowed: false, code: code, reason: "refused: " ++ code}}
+  )
+  return {ok: true, status: 200, data: {allowed: true}}
+)
+
+import "./rotur-signals.osl"
+
+// The profile owner replying on their own profile to someone with friends-only
+// messages: the reply is posted, and only the notification is held back.
+refusals = {"owner>commenter": "settings"}
+testing.assert(commentRefusal("profile-owner", "owner", "c1") == "", "a message setting doesn't stop a public reply")
+testing.assert(roturMessageRefusal("owner", "commenter") == "refused: settings", "it does stop the reply notifying them")
+testing.assert(isMessageNotification("reply") and isMessageNotification("mention") and !isMessageNotification("follow"), "replies and mentions carry words, follows don't")
+
+refusals = {"stranger>owner": "unavailable"}
+testing.assert(commentRefusal("project-p1", "stranger", "") == "", "someone who can't use MistWarp right now still has comments on their project")
+
+refusals = {"blocker>owner": "blocked"}
+testing.assert(commentRefusal("project-p1", "blocker", "") == "refused: blocked", "a block stops the comment")
+
+refusals = {"banned>commenter": "banned"}
+testing.assert(commentRefusal("project-p1", "banned", "c1") == "refused: banned", "a ban stops the comment")
+
+testing.assert(commentRefusal("profile-owner", "owner", "") == "", "commenting on your own profile asks nothing")
+
+asked = []
+refusals = {}
+roturMessageRefusal("a", "b")
+roturMessageRefusal("a", "b")
+testing.assert(asked.len == 1, "an answer is kept for a minute: " ++ json.stringify(asked))
