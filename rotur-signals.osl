@@ -5,19 +5,10 @@
 // parental controls, teen defaults and people's own message settings, without
 // saying which, so MistWarp shows Rotur's sentence and offers no way round it.
 //
-// A comment is public, not a direct message, so it follows Rotur's own posts:
-// a block or a ban stops it, and message settings only decide whether it
-// notifies the person (see addNotification). Every account without a date of
-// birth gets friends-only messages, so treating comments as messages stopped
-// most people replying to each other at all.
-//
 // Rotur only answers about MistWarp's own users: people who signed in through
 // Sign in with Rotur, or made their account on MistWarp. For anyone else, or if
 // Rotur can't be reached, MistWarp carries on as it did before.
 
-// Rotur's answer to whether sender may message recipient: {allowed, code,
-// reason}. Answers are kept for a minute, since posting a comment asks once to
-// check it and again to notify.
 def roturMessageSignal(string sender, string recipient) object (
   string senderKey = normalizeUsername(sender)
   string recipientKey = normalizeUsername(recipient)
@@ -43,7 +34,7 @@ def roturMessageSignal(string sender, string recipient) object (
   return signal
 )
 
-// "" when sender may message recipient, else the sentence to show the sender.
+// "" when the message is allowed, else the sentence to show the sender.
 def roturMessageRefusal(string sender, string recipient) string (
   object signal = roturMessageSignal(sender, recipient)
   if signal.allowed == true (
@@ -52,8 +43,6 @@ def roturMessageRefusal(string sender, string recipient) string (
   return signal.reason.toStr()
 )
 
-// Notifications that carry someone's words to the target. They only arrive
-// where Rotur would let the actor message the target.
 def isMessageNotification(string notifType) boolean (
   return ["comment", "reply", "mention", "profile_comment", "space_comment", "roadmap_comment", "donation"].contains(notifType)
 )
@@ -96,10 +85,6 @@ def commentRecipients(string key, string parentId) array (
   return recipients
 )
 
-// "" when the comment may be posted, else the sentence to show the author.
-// Only a block or a ban refuses it: a recipient whose settings don't take
-// messages from the author still sees the comment on the page, but isn't
-// notified about it.
 def commentRefusal(string key, string author, string parentId) string (
   array recipients = commentRecipients(key, parentId)
   for i recipients.len (
