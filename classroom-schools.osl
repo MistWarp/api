@@ -1,0 +1,301 @@
+def schoolForTeacher(string userId) object (
+  if userId == "" or isStudentUserId(userId) (
+    return {}
+  )
+  array schools = schoolDocs.all()
+  for i schools.len (
+    object school = schools[i].assert(object)
+    if schoolMemberIds(school).contains(userId) (
+      return school
+    )
+  )
+  return {}
+)
+
+def schoolMemberIds(object school) array (
+  array ids = []
+  array admins = (school.adminIds ?? []).assertElse(array, [])
+  array teachers = (school.teacherIds ?? []).assertElse(array, [])
+  for i admins.len (
+    if !ids.contains(admins[i].toStr()) (
+      ids.append(admins[i].toStr())
+    )
+  )
+  for i teachers.len (
+    if !ids.contains(teachers[i].toStr()) (
+      ids.append(teachers[i].toStr())
+    )
+  )
+  return ids
+)
+
+def classroomPlanKey(string ownerId) string (
+  object school = schoolForTeacher(ownerId)
+  if school.len == 0 (
+    return ownerId
+  )
+  return school["_id"].toStr()
+)
+
+def planMemberIds(string key) array (
+  object school = schoolDocs.findById(key)
+  if school.len == 0 (
+    return [key]
+  )
+  return schoolMemberIds(school)
+)
+
+def isSchoolAdmin(object school, string userId) boolean (
+  return userId != "" and (school.adminIds ?? []).assertElse(array, []).contains(userId)
+)
+
+def schoolSummary(object school, string viewerId) object (
+  return {id: school["_id"], name: school.name, isAdmin: isSchoolAdmin(school, viewerId)}
+)
+
+def adminSchoolOrFail(*serve.Context c) object (
+  object school = schoolForTeacher(c.getString("userId"))
+  if school.len == 0 or !isSchoolAdmin(school, c.getString("userId")) (
+    c.notFound("school not found")
+    return {}
+  )
+  return school
+)
+
+def schoolTeacherRows(object school) array (
+  array rows = []
+  array ids = schoolMemberIds(school)
+  for i ids.len (
+    string teacherId = ids[i].toStr()
+    array classes = classesOwnedBy(teacherId)
+    number students = 0
+    for j classes.len (
+      students += studentDocs.where("classId", db.equal, classes[j].assert(object)["_id"].toStr()).count()
+    )
+    rows.append({userId: teacherId, username: usernameForId(teacherId), isAdmin: isSchoolAdmin(school, teacherId), classes: classes.len, students: students})
+  )
+  return rows
+)
+
+def handleGetSchool(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  string userId = c.getString("userId")
+  array classes = classesForPlanOwner(userId)
+  array classRows = []
+  for i classes.len (
+    object classDoc = classes[i].assert(object)
+    classRows.append({
+      id: classDoc["_id"],
+      name: classDoc.name,
+      owner: classDoc.owner,
+      archived: classDoc.archived == true,
+      studentCount: studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count()
+    })
+  )
+  c.json(200, {
+    ok: true,
+    school: schoolSummary(school, userId),
+    plan: classroomPlanFor(userId),
+    usage: classroomUsage(userId),
+    teachers: schoolTeacherRows(school),
+    classes: classRows
+  })
+)
+
+def handleAddSchoolTeacher(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  object body = c.bodyJSON()
+  string teacherId = teacherIdForUsername((body.username ?? "").toStr())
+  if teacherId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  object existing = schoolForTeacher(teacherId)
+  if existing.len > 0 (
+    c.badRequest("this teacher already belongs to a school")
+    return
+  )
+  object plan = classroomPlanFor(c.getString("userId"))
+  object usage = classroomUsage(c.getString("userId"))
+  number incomingStudents = studentsForPlanOwner(teacherId).len
+  number incomingClasses = classesOwnedBy(teacherId).len
+  if usage.seats.toNum() + incomingStudents > plan.seats.toNum() or usage.classes.toNum() + incomingClasses > plan.maxClasses.toNum() (
+    c.json(413, {ok: false, code: "seat_limit", error: "The school plan does not have room for this teacher's classes and students."})
+    return
+  )
+  array teachers = (school.teacherIds ?? []).assertElse(array, [])
+  teachers.append(teacherId)
+  school.teacherIds = teachers
+  putDocument(schoolDocs, school["_id"].toStr(), school)
+  invalidateClassroomPool(teacherId)
+  addNotification(usernameForId(teacherId), c.getString("username"), "classroom_school_joined", {schoolId: school["_id"], schoolName: school.name})
+  c.json(200, {ok: true, teachers: schoolTeacherRows(school)})
+)
+
+def handleRemoveSchoolTeacher(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  string teacherId = c.param("teacher")
+  array admins = (school.adminIds ?? []).assertElse(array, [])
+  if admins.contains(teacherId) and admins.len == 1 (
+    c.badRequest("a school needs at least one admin")
+    return
+  )
+  school.teacherIds = (school.teacherIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != teacherId)
+  school.adminIds = admins.filter((any id) boolean -> id.toStr() != teacherId)
+  putDocument(schoolDocs, school["_id"].toStr(), school)
+  invalidateClassroomPool(teacherId)
+  classroomPoolCache.delete(school["_id"].toStr())
+  c.json(200, {ok: true, teachers: schoolTeacherRows(school)})
+)
+
+def handleSetSchoolAdmin(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  string teacherId = c.param("teacher")
+  if !schoolMemberIds(school).contains(teacherId) (
+    c.notFound("teacher not found")
+    return
+  )
+  object body = c.bodyJSON()
+  array admins = (school.adminIds ?? []).assertElse(array, [])
+  if body.admin == true (
+    if !admins.contains(teacherId) (
+      admins.append(teacherId)
+    )
+  ) else (
+    if admins.len == 1 and admins.contains(teacherId) (
+      c.badRequest("a school needs at least one admin")
+      return
+    )
+    admins = admins.filter((any id) boolean -> id.toStr() != teacherId)
+    array teachers = (school.teacherIds ?? []).assertElse(array, [])
+    if !teachers.contains(teacherId) (
+      teachers.append(teacherId)
+      school.teacherIds = teachers
+    )
+  )
+  school.adminIds = admins
+  putDocument(schoolDocs, school["_id"].toStr(), school)
+  c.json(200, {ok: true, teachers: schoolTeacherRows(school)})
+)
+
+def schoolClassIds(object school) array (
+  array ids = []
+  array members = schoolMemberIds(school)
+  for i members.len (
+    array classes = classesOwnedBy(members[i].toStr())
+    for j classes.len (
+      ids.append(classes[j].assert(object)["_id"].toStr())
+    )
+  )
+  return ids
+)
+
+def handleGetSchoolAudit(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  array classIds = schoolClassIds(school)
+  array events = []
+  for i classIds.len (
+    events ++= classroomAuditDocs.where("classId", db.equal, classIds[i].toStr()).sort("at", db.desc).limit(500).all()
+  )
+  events.sortBy("at", "descending")
+  c.json(200, {ok: true, events: paginate(events, 0, clampNumber(c.queryInt("limit", 200), 1, 2000))})
+)
+
+def handleExportSchool(*serve.Context c) (
+  object school = adminSchoolOrFail(c)
+  if school.len == 0 (
+    return
+  )
+  array classIds = schoolClassIds(school)
+  array classes = []
+  for i classIds.len (
+    string classId = classIds[i].toStr()
+    object classDoc = loadClass(classId)
+    array students = []
+    array studentRows = studentsInClass(classId)
+    for j studentRows.len (
+      object student = studentRows[j].assert(object)
+      students.append({
+        id: student["_id"],
+        displayName: student.displayName,
+        username: student.username,
+        disabled: student.disabled == true,
+        createdAt: student.createdAt,
+        lastLoginAt: student.lastLoginAt ?? 0,
+        projects: ownerIndexEntries(student.username.toStr(), true).map((any entry) any -> {id: entry.id, title: entry.title, edited: entry.edited})
+      })
+    )
+    classes.append({
+      id: classId,
+      name: classDoc.name,
+      owner: classDoc.owner,
+      coTeachers: classDoc.coTeachers ?? [],
+      createdAt: classDoc.createdAt,
+      students: students,
+      assignments: assignmentDocs.where("classId", db.equal, classId).all(),
+      submissions: submissionDocs.where("classId", db.equal, classId).all(),
+      groups: classroomGroupDocs.where("classId", db.equal, classId).all()
+    })
+  )
+  c.setHeader("Content-Disposition", "attachment; filename=\"mistwarp-school-" ++ school["_id"].toStr() ++ ".json\"")
+  c.json(200, {ok: true, exportedAt: timestamp, school: {id: school["_id"], name: school.name}, teachers: schoolTeacherRows(school), classes: classes})
+)
+
+def handleAdminListSchools(*serve.Context c) (
+  array schools = schoolDocs.all()
+  array rows = []
+  for i schools.len (
+    object school = schools[i].assert(object)
+    string key = school["_id"].toStr()
+    rows.append({id: key, name: school.name, admins: (school.adminIds ?? []).assertElse(array, []).map((any id) any -> usernameForId(id.toStr())), plan: effectiveClassroomPlan(classroomPlanDocs.findById(key), timestamp)})
+  )
+  c.json(200, {ok: true, schools: rows})
+)
+
+def handleAdminCreateSchool(*serve.Context c) (
+  object body = c.bodyJSON()
+  string name = (body.name ?? "").toStr().strip()
+  if name == "" or name.len > 120 (
+    c.badRequest("school names must be between 1 and 120 characters")
+    return
+  )
+  string adminId = teacherIdForUsername((body.adminUsername ?? "").toStr())
+  if adminId == "" (
+    c.badRequest("Rotur user not found")
+    return
+  )
+  if schoolForTeacher(adminId).len > 0 (
+    c.badRequest("this teacher already belongs to a school")
+    return
+  )
+  string id = "sch" ++ randomString(10)
+  schoolDocs.insertOne({_id: id, name: name, adminIds: [adminId], teacherIds: [], createdAt: timestamp, createdBy: c.getString("username")})
+  putDocument(classroomPlanDocs, id, {
+    _id: id,
+    tier: "school",
+    seats: (body.seats ?? 0).toNum(),
+    storageBytes: (body.storageGb ?? 0).toNum() * classroomGiB,
+    maxClasses: (body.maxClasses ?? 0).toNum(),
+    expiresAt: (body.expiresAt ?? 0).toNum(),
+    source: "admin",
+    updatedBy: c.getString("username"),
+    updatedAt: timestamp
+  })
+  invalidateClassroomPool(adminId)
+  c.json(201, {ok: true, school: {id: id, name: name}, plan: effectiveClassroomPlan(classroomPlanDocs.findById(id), timestamp)})
+)

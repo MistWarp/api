@@ -172,7 +172,7 @@ def handleCreateClassGroup(*serve.Context c) (
       })
     )
   )
-  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  invalidateClassroomPool(classDoc.ownerId.toStr())
   recordClassroomAudit(classId, c, "group_created", {groupId: groupId, name: name, count: students.len})
   c.json(201, {ok: true, group: groupResponse(group)})
 )
