@@ -1,0 +1,50 @@
+import "std:testing"
+import "std:url"
+import "std:json"
+
+// A pretend Rotur: the apps API's answer, and what the profile would say.
+object planAnswer = {ok: true, status: 200, data: {tier: "lite"}}
+boolean appReady = true
+object profileAnswer = {reached: true, tier: "Free"}
+array asked = []
+
+def roturApp(string method, string path, object body) object (
+  asked.append(method ++ " " ++ path)
+  return planAnswer
+)
+
+def roturAppReady() boolean (
+  return appReady
+)
+
+def profileRoturTier(string userId) object (
+  asked.append("profile " ++ userId)
+  return profileAnswer
+)
+
+import "./rotur-plan.osl"
+
+object lite = fetchRoturTier("u-1")
+testing.assert(lite.reached == true and lite.tier == "Lite", "the apps API gives the plan: " ++ json.stringify(lite))
+testing.assert(asked.len == 1 and asked[1] == "GET /users/u-1/plan", "a private profile is never read when the apps API answers: " ++ json.stringify(asked))
+
+planAnswer = {ok: true, status: 200, data: {tier: "Max"}}
+testing.assert(fetchRoturTier("u-1").tier == "Pro", "Max gives MistWarp's Pro perks")
+
+asked = []
+planAnswer = {ok: false, status: 404, data: {error: "Not one of your app's users"}}
+profileAnswer = {reached: true, tier: "Plus"}
+object fallback = fetchRoturTier("u-2")
+testing.assert(fallback.reached == true and fallback.tier == "Plus" and asked[2] == "profile u-2", "someone the apps API doesn't know is read from the profile: " ++ json.stringify(fallback))
+
+planAnswer = {ok: false, status: 502, data: {}}
+asked = []
+object outage = fetchRoturTier("u-3")
+testing.assert(outage.reached == false and asked.len == 1, "an outage isn't read as Free from a profile that may hide the plan")
+
+planAnswer = {ok: false, status: 0, data: {}}
+testing.assert(fetchRoturTier("u-3").reached == false, "an unreachable Rotur is an outage")
+
+appReady = false
+asked = []
+testing.assert(fetchRoturTier("u-4").tier == "Plus" and asked[2] == "profile u-4", "without app credentials the profile is read")

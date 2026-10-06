@@ -47,9 +47,13 @@ A MistWarp ban is also a ban from the MistWarp Rotur App (`PUT /v2/apps/<app>/ba
 
 Every five minutes MistWarp reads the app's bans. Bans made or lifted on rotur.dev/me/developer reach MistWarp's own list, and any ban or unban Rotur couldn't be told about yet is sent again. A ban lifted in MistWarp is never brought back from Rotur while that's pending. Rotur won't ban the app's owner or managers, classroom students, or accounts it doesn't know, so those bans stay MistWarp-only. Bans whose reason only names a report are sent with a general reason instead.
 
+## Plans
+
+Perks follow the person's Rotur plan. mistwarp-api asks the apps API (`GET /v2/apps/<client id>/users/<id>/plan`), which answers whatever their privacy settings. Rotur's public profile hides the plan from anyone who can't see the balance, which covers every account without a date of birth, so it's only read for people the apps API doesn't know. Answers are kept for 5 minutes, and during an outage the last known plan stays.
+
 ## Safety signals
 
-The MistWarp Rotur App declares that people can talk and can spend credits. Before a comment reaches someone (the owner of the project or profile, and the author of the comment it replies to), mistwarp-api asks Rotur's message signal. Before a purchase or donation starts, it asks the purchase signal. A "no" is shown to the person in Rotur's own words.
+The MistWarp Rotur App declares that people can talk and can spend credits. Before a comment is posted, mistwarp-api asks Rotur's message signal about the owner of the project or profile and the author of the comment it replies to. Comments are public, like replies to Rotur posts, so only a block or a ban (`blocked`, `banned`) stops one. When someone's message settings don't take messages from the author (`settings`, `unavailable`), the comment is still posted but doesn't notify them, and the same goes for replies, mentions and other notifications that carry someone's words. Before a purchase or donation starts, it asks the purchase signal. A "no" is shown to the person in Rotur's own words.
 
 Rotur only answers about people who have used MistWarp through Sign in with Rotur, or made their account on MistWarp. For anyone else, or if Rotur can't be reached, MistWarp carries on as it did before. Rotur counts credits towards a parent's monthly limit when it moves them, so the purchase signal only asks.
 
