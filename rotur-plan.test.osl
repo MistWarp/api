@@ -2,7 +2,6 @@ import "std:testing"
 import "std:url"
 import "std:json"
 
-// A pretend Rotur: the apps API's answer, and what the profile would say.
 object planAnswer = {ok: true, status: 200, data: {tier: "lite"}}
 boolean appReady = true
 object profileAnswer = {reached: true, tier: "Free"}
