@@ -164,6 +164,8 @@ import "./rotur-app.osl"
 import "./rotur-payments.osl"
 import "./rotur-signals.osl"
 import "./rotur-badges.osl"
+import "./admin-user-policy.osl"
+import "./admin-users.osl"
 import "./rotur-plan.osl"
 import "./auth.osl"
 import "./middleware.osl"
@@ -572,6 +574,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/admin/user", requireAdmin, handleGetUserAdmin)
   api.POST("/admin/user/message", requireAdmin, handleMessageUser)
   api.POST("/admin/user/profile", requireAdmin, handleAdminUpdateProfile)
+  api.POST("/admin/user/note", requireAdmin, handleSetAdminNote)
   api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
   api.GET("/admin/stats", requireAdmin, handleAdminStats)
   api.GET("/admin/storage", requireAdmin, handleAdminStorageStats)
