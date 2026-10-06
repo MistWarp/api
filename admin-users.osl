@@ -1,0 +1,324 @@
+def adminNotesFile() string (
+  return "data/admin-notes.json"
+)
+
+def loadAdminNotes() object (
+  auto result = readFile(adminNotesFile())
+  if !result.ok (
+    return {notes: {}}
+  )
+  object data = result.data.assertElse(object, {})
+  if !data.contains("notes") (
+    data.notes = {}
+  )
+  return data
+)
+
+def adminNoteFor(string key) object (
+  object notes = loadAdminNotes().notes.assertElse(object, {})
+  if notes.contains(key) (
+    return notes[key].assertElse(object, {text: "", by: "", updated: 0})
+  )
+  return {text: "", by: "", updated: 0}
+)
+
+def adminLookupUsername(string raw) string (
+  string trimmed = raw.strip()
+  if trimmed.startsWith("@") (
+    trimmed = trimmed.trim(2, trimmed.len)
+  )
+  if trimmed == "" (
+    return ""
+  )
+  if !profileExists(trimmed) (
+    string byId = usernameForId(trimmed)
+    if byId != "" (
+      return byId
+    )
+  )
+  return trimmed
+)
+
+def adminSessionsFor(string userId, string key) object (
+  array sessions = []
+  array files = fs.readDir(sessionsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto res = readFile(sessionsDir ++ name)
+      if res.ok (
+        sessions.append(res.data.assertElse(object, {}))
+      )
+    )
+  )
+  return adminSessionSummary(sessions, userId, key, timestamp)
+)
+
+def adminReportsFor(string key) object (
+  array about = []
+  array filed = []
+  number openAbout = 0
+  array reports = loadReports()
+  for i reports.len (
+    object report = reports[(reports.len - i) + 1].assertElse(object, {})
+    string role = adminReportRole(report, key)
+    if role == "about" (
+      if report.resolved != true (
+        openAbout += 1
+      )
+      about.append(adminReportView(report))
+    ) else if role == "filed" (
+      filed.append(adminReportView(report))
+    )
+  )
+  return {aboutCount: about.len, openAboutCount: openAbout, filedCount: filed.len, about: paginate(about, 0, 25), filed: paginate(filed, 0, 25)}
+)
+
+def adminRecentComments(string key) array (
+  array out = []
+  array docs = commentIndexDocs.where("authorKey", db.equal, key).sort("created", db.desc).limit(30).all()
+  for i docs.len (
+    object doc = docs[i].assertElse(object, {})
+    out.append({key: doc.key, id: doc.commentId, content: doc.content, created: doc.created, parent: doc.parent ?? ""})
+  )
+  return out
+)
+
+def indexComment(string key, object comment) (
+  string author = normalizeUsername((comment.author ?? "").toStr())
+  if author == "" (
+    return
+  )
+  putDocument(commentIndexDocs, key ++ ":" ++ comment.id.toStr(), {
+    key: key,
+    commentId: comment.id,
+    authorKey: author,
+    content: (comment.content ?? "").toStr().trim(1, 300),
+    parent: comment.parent ?? "",
+    created: comment.created ?? timestamp
+  })
+)
+
+def unindexComment(string key, string cid) (
+  commentIndexDocs.deleteOne({_id: key ++ ":" ++ cid})
+)
+
+def migrateCommentIndex() boolean (
+  string migrationId = "migration:comment-index-v1"
+  if diagnosticDocs.findById(migrationId).len > 0 (
+    return true
+  )
+  array files = fs.readDir(commentsDir)
+  for i files.len (
+    string name = files[i].toStr()
+    string key = if name.endsWith(".jsonl") then name.trim(1, name.len - 6) else if name.endsWith(".json") then name.trim(1, name.len - 5) else ""
+    if key != "" (
+      array comments = loadComments(key)
+      for j comments.len (
+        indexComment(key, comments[j].assertElse(object, {}))
+      )
+    )
+  )
+  array users = fs.readDir(usersDir)
+  for i users.len (
+    string file = users[i].toStr()
+    if file.endsWith(".json") (
+      object profile = loadProfile(file.replace(".json", ""))
+      if profile.contains("standing") and profile.standing != null and profile.standing.toStr() != "good" (
+        syncSearchProfile(profile)
+      )
+    )
+  )
+  return putDocument(diagnosticDocs, migrationId, {type: "migration", created: timestamp})
+)
+
+def adminProjectTotals(array projects) object (
+  number views = 0
+  number hearts = 0
+  number revenue = 0
+  number shared = 0
+  for i projects.len (
+    object entry = projects[i].assertElse(object, {})
+    views += (entry.views ?? 0).toNum()
+    hearts += (entry.loveCount ?? 0).toNum()
+    revenue += (entry.revenue ?? 0).toNum()
+    if entry.shared == true (
+      shared += 1
+    )
+  )
+  return {projects: projects.len, shared: shared, views: views, hearts: hearts, revenue: revenue}
+)
+
+def handleGetUserAdmin(*serve.Context c) (
+  string name = adminLookupUsername(c.query("username"))
+  string key = normalizeUsername(name)
+  if key == "" or !isSafePathPart(key) (
+    c.badRequest("username is required")
+    return
+  )
+  if !profileExists(name) (
+    c.notFound("no MistWarp user with that name or ID")
+    return
+  )
+  object profile = loadProfile(name)
+  string userId = (profile.userId ?? "").toStr()
+  if userId == "" (
+    userId = userIdForUsername(name)
+  )
+  boolean student = isStudentUserId(userId)
+  object plan = if student then {tier: "Student", known: true} else roturTierLookup(userId)
+  array projects = ownerIndexEntries(name, true)
+  array spaces = []
+  array classes = []
+  if userId != "" (
+    array ownedSpaces = spaceDocs.where("ownerId", db.equal, userId).all()
+    for i ownedSpaces.len (
+      object space = ownedSpaces[i].assertElse(object, {})
+      spaces.append({id: space["_id"], title: space.title, kind: space.kind, visibility: space.visibility})
+    )
+    array owned = classesOwnedBy(userId)
+    for i owned.len (
+      object klass = owned[i].assertElse(object, {})
+      classes.append({id: klass["_id"], name: klass.name, archived: klass.archived == true, created: klass.createdAt})
+    )
+  )
+  object bans = cachedBans().bans.assertElse(object, {})
+  object ban = if bans.contains(key) then bans[key].assertElse(object, {}) else {}
+  array followers = profile.followers.assertElse(array, [])
+  array following = profile.following.assertElse(array, [])
+  c.json(200, {
+    ok: true,
+    username: profile.username,
+    userId: userId,
+    created: profile.created,
+    bio: (profile.bio ?? "").toStr(),
+    minor: profileIsMinor(profile),
+    student: student,
+    admin: isAdminUser(name),
+    banned: isBannedUser(name),
+    ban: ban,
+    plan: plan,
+    featuredProject: profile.featuredProject,
+    commentsOff: effectiveProfileCommentsOff(profile),
+    followerCount: followers.len,
+    followingCount: following.len,
+    standing: standingInfo(name),
+    sessions: adminSessionsFor(userId, key),
+    totals: adminProjectTotals(projects),
+    projects: projects,
+    quota: storageDetails(name),
+    reports: adminReportsFor(key),
+    comments: adminRecentComments(key),
+    activity: paginate(loadActivity(key), 0, 30),
+    spaces: spaces,
+    classes: classes,
+    note: adminNoteFor(key)
+  })
+)
+
+def handleSetAdminNote(*serve.Context c) (
+  object body = c.bodyJSON()
+  string key = normalizeUsername(body.username.toStr())
+  string text = (body.note ?? "").toStr().strip()
+  if key == "" or !isSafePathPart(key) (
+    c.badRequest("username is required")
+    return
+  )
+  if text.len > 4000 (
+    c.badRequest("note is too long")
+    return
+  )
+  sync.lock("admin-notes")
+  object data = loadAdminNotes()
+  object notes = data.notes.assertElse(object, {})
+  if text == "" (
+    notes.delete(key)
+  ) else (
+    notes[key] = {text: text, by: c.getString("username"), updated: timestamp}
+  )
+  data.notes = notes
+  boolean saved = writeFile(adminNotesFile(), data)
+  sync.unlock("admin-notes")
+  if !saved (
+    c.internalError("could not save the note")
+    return
+  )
+  c.json(200, {ok: true, note: adminNoteFor(key)})
+)
+
+def handleListUsers(*serve.Context c) (
+  string raw = c.query("q").strip()
+  string q = normalizeUsername(raw)
+  string sort = c.query("sort").toLower().strip()
+  string filter = c.query("filter").toLower().strip()
+  number offset = if c.query("offset") == "" then 0 else c.query("offset").toNum().toInt()
+  number limit = if c.query("limit") == "" then 30 else c.query("limit").toNum().toInt()
+  if offset < 0 (
+    offset = 0
+  )
+  if limit < 1 (
+    limit = 1
+  ) else if limit > 50 (
+    limit = 50
+  )
+  string sortField = if sort == "followers" then "followers" else if sort == "recent" then "created" else "usernameKey"
+  auto direction = if sort == "followers" or sort == "recent" then db.desc else db.asc
+  array matched = []
+  if q != "" (
+    array byName = profileSearchDocs.where("usernameKey", db.contains, q).sort(sortField, direction).all()
+    array byId = profileSearchDocs.where("userId", db.equal, raw).all()
+    for i byId.len (
+      object entry = byId[i].assertElse(object, {})
+      if !(entry.usernameKey ?? "").toStr().contains(q) (
+        matched.append(entry)
+      )
+    )
+    for i byName.len (
+      matched.append(byName[i])
+    )
+  ) else (
+    matched = profileSearchDocs.sort(sortField, direction).all()
+  )
+  array filtered = matched
+  if filter != "" (
+    object banned = cachedBans().bans.assertElse(object, {})
+    array admins = []
+    for i adminUsers.len (
+      admins.append(normalizeUsername(adminUsers[i].toStr()))
+    )
+    array stored = loadAdmins()
+    for i stored.len (
+      admins.append(normalizeUsername(stored[i].toStr()))
+    )
+    filtered = []
+    for i matched.len (
+      object entry = matched[i].assertElse(object, {})
+      if adminUserMatchesFilter(entry, filter, banned, admins, timestamp) (
+        filtered.append(entry)
+      )
+    )
+  )
+  array page = paginate(filtered, offset, limit)
+  array out = []
+  for i page.len (
+    object entry = page[i].assertElse(object, {})
+    string key = entry.usernameKey.toStr()
+    object profile = loadProfile(key)
+    object quota = storageDetails(key)
+    object standing = standingInfo(key)
+    out.append({
+      username: profile.username,
+      userId: entry.userId ?? "",
+      created: profile.created,
+      minor: profileIsMinor(profile),
+      followerCount: profile.followers.assertElse(array, []).len,
+      projectCount: projectSearchDocs.where("ownerKey", db.equal, key).count(),
+      quotaUsed: quota.used,
+      quotaLimit: quota.limit,
+      standingLevel: standing.level,
+      banned: isBannedUser(key),
+      admin: isAdminUser(key)
+    })
+  )
+  c.json(200, {ok: true, users: out, total: filtered.len, offset: offset, limit: limit})
+)
