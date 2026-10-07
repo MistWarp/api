@@ -1,0 +1,9 @@
+def rankChallengeEntries(array projects) array (
+  array ranked = projects.sortBy("rankScore", "descending")
+  for i ranked.len (
+    object entry = ranked[i].assert(object)
+    entry.place = i
+    ranked[i] = entry
+  )
+  return ranked
+)
