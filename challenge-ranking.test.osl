@@ -1,0 +1,13 @@
+import "std:testing"
+import "./challenge-ranking.osl"
+
+array ranked = rankChallengeEntries([
+  {id: "b", rankScore: 350000008},
+  {id: "a", rankScore: 380000005},
+  {id: "c", rankScore: 350000002}
+])
+testing.assert(ranked.len == 3, "ranking keeps every entry")
+testing.assert(ranked[1].id == "a" and ranked[1].place == 1, "the highest score is placed first")
+testing.assert(ranked[2].id == "b" and ranked[2].place == 2, "the second highest score is placed second")
+testing.assert(ranked[3].id == "c" and ranked[3].place == 3, "the lowest score is placed last")
+testing.assert(rankChallengeEntries([]).len == 0, "an empty challenge has no places")
