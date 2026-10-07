@@ -773,12 +773,7 @@ def challengeProjects(object space,*serve.Context c) array (
   )
   projects = projectsVisibleTo(projects, c)
   if showResults (
-    projects.sortBy("rankScore", "descending")
-    for i projects.len (
-      object ranked = projects[i].assert(object)
-      ranked.place = i + 1
-      projects[i] = ranked
-    )
+    projects = rankChallengeEntries(projects)
   )
   return projects
 )
