@@ -1604,6 +1604,11 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.badRequest("judging is not open")
     return
   )
+  object project = projectSearchDocs.findById(projectId)
+  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+    c.forbidden("you cannot score your own entry")
+    return
+  )
   object body = c.bodyJSON()
   array rawRatings = body.ratings.assertElse(array, [])
   array ratings = []
