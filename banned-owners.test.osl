@@ -50,3 +50,50 @@ testing.assert(!bannedProjectHidden(afterUnban, entries[2], false), "an unbanned
 
 object noBans = bannedOwnerSet({}, {})
 testing.assert(ids(projectEntriesVisible(entries, noBans, false)) == "abcde", "with every ban ended, everything is listed")
+
+object shadowed = shadowBanSet({sneaky: {reason: "spam"}}, {e: {reason: "eval only"}}, {sneaky: "u-sneak"})
+array mixed = [
+  {id: "a", owner: "Alice", ownerId: "u-alice"},
+  {id: "s", owner: "sneaky", ownerId: "u-sneak"},
+  {id: "r", owner: "renamed", ownerId: "u-sneak"},
+  {id: "e", owner: "bob", ownerId: "u-bob"},
+  {id: "b", owner: "Spammer", ownerId: "u-spam"}
+]
+
+testing.assert(ids(projectEntriesListed(mixed, banned, shadowed, "", "", false)) == "a", "lists leave out shadow banned owners and projects")
+testing.assert(ids(projectEntriesListed(mixed, banned, shadowed, "sneaky", "u-sneak", false)) == "asr", "a shadow banned owner still sees their own projects")
+testing.assert(ids(projectEntriesListed(mixed, banned, shadowed, "bob", "u-bob", false)) == "ae", "the owner of a shadow banned project still sees it")
+testing.assert(ids(projectEntriesListed(mixed, banned, shadowed, "bob", "", false)) == "ae", "owners match by name when there is no user ID")
+testing.assert(ids(projectEntriesListed(mixed, banned, shadowed, "", "", true)) == "asreb", "admins see every project")
+
+array markedForAdmin = projectEntriesListed(mixed, banned, shadowed, "", "", true)
+testing.assert(markedForAdmin[2].ownerShadowBanned == true, "admins see the owner is shadow banned")
+testing.assert(markedForAdmin[4].projectShadowBanned == true, "admins see the project is shadow banned")
+testing.assert(markedForAdmin[5].ownerBanned == true, "admins still see banned owners")
+testing.assert(markedForAdmin[1].ownerShadowBanned == null, "other projects are not marked")
+testing.assert(mixed[2].ownerShadowBanned == null, "marking copies the entry")
+
+array ownView = projectEntriesListed(mixed, banned, shadowed, "sneaky", "u-sneak", false)
+testing.assert(ownView[2].ownerShadowBanned == null, "the shadow banned owner is never told")
+
+testing.assert(!bannedProjectHidden(banned, mixed[2], false), "a direct lookup of a shadow banned project still works")
+testing.assert(entryShadowBanned(shadowed, mixed[3]), "a renamed shadow banned owner still matches by user ID")
+
+array thread = [
+  {id: "c1", author: "Alice", authorId: "u-alice", parent: ""},
+  {id: "c2", author: "sneaky", authorId: "u-sneak", parent: ""},
+  {id: "c3", author: "Alice", authorId: "u-alice", parent: "c2"},
+  {id: "c4", author: "sneaky", authorId: "u-sneak", parent: "c1"},
+  {id: "c5", author: "bob", authorId: "", parent: "c1"}
+]
+
+testing.assert(ids(commentsListed(thread.clone(), shadowed, "bob", "u-bob", false)) == "c1c5", "comments by a shadow banned user and replies under them are hidden")
+testing.assert(ids(commentsListed(thread.clone(), shadowed, "sneaky", "u-sneak", false)) == "c1c2c3c4c5", "a shadow banned user sees their own comments")
+testing.assert(ids(commentsListed(thread.clone(), shadowed, "", "", false)) == "c1c5", "signed out viewers do not see them")
+
+array adminThread = commentsListed(thread.clone(), shadowed, "mist", "u-mist", true)
+testing.assert(ids(adminThread) == "c1c2c3c4c5", "admins see every comment")
+testing.assert(adminThread[2].authorShadowBanned == true, "admins see the author is shadow banned")
+
+testing.assert(authoredItemListed(shadowed, "alice", "", "", "", false), "other authors are listed")
+testing.assert(!authoredItemListed(shadowed, "Sneaky", "", "bob", "", false), "shadow banned authors are not listed for others")
