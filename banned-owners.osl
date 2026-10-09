@@ -55,3 +55,97 @@ def projectEntriesVisible(array entries, object banned, boolean isAdmin) array (
   )
   return visible
 )
+
+def shadowBanSet(object users, object projects, object idsByKey) object (
+  object set = bannedOwnerSet(users, idsByKey)
+  object projectIds = {}
+  array keys = projects.getKeys()
+  for i keys.len (
+    projectIds[keys[i].toStr()] = true
+  )
+  set.projects = projectIds
+  return set
+)
+
+def entryProjectShadowBanned(object shadowed, object entry) boolean (
+  object projectIds = shadowed.projects.assertElse(object, {})
+  string id = (entry.id ?? "").toStr()
+  return id != "" and projectIds.contains(id)
+)
+
+def entryShadowBanned(object shadowed, object entry) boolean (
+  return entryProjectShadowBanned(shadowed, entry) or entryOwnerBanned(shadowed, entry)
+)
+
+def viewerIsAuthor(string author, string authorId, string viewerKey, string viewerId) boolean (
+  if authorId != "" and viewerId != "" (
+    return authorId == viewerId
+  )
+  return viewerKey != "" and normalizeUsername(author) == viewerKey
+)
+
+def projectEntriesListed(array entries, object banned, object shadowed, string viewerKey, string viewerId, boolean isAdmin) array (
+  array visible = []
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    boolean ownerBanned = entryOwnerBanned(banned, entry)
+    boolean projectShadowed = entryProjectShadowBanned(shadowed, entry)
+    boolean ownerShadowed = entryOwnerBanned(shadowed, entry)
+    if isAdmin (
+      if ownerBanned or projectShadowed or ownerShadowed (
+        object marked = entry.clone()
+        if ownerBanned (
+          marked.ownerBanned = true
+        )
+        if projectShadowed (
+          marked.projectShadowBanned = true
+        )
+        if ownerShadowed (
+          marked.ownerShadowBanned = true
+        )
+        visible.append(marked)
+      ) else (
+        visible.append(entry)
+      )
+    ) else if !ownerBanned (
+      boolean shadowedEntry = projectShadowed or ownerShadowed
+      if !shadowedEntry or viewerIsAuthor((entry.owner ?? "").toStr(), (entry.ownerId ?? "").toStr(), viewerKey, viewerId) (
+        visible.append(entry)
+      )
+    )
+  )
+  return visible
+)
+
+def authoredItemListed(object shadowed, string author, string authorId, string viewerKey, string viewerId, boolean isAdmin) boolean (
+  if isAdmin or !ownerInBannedSet(shadowed, author, authorId) (
+    return true
+  )
+  return viewerIsAuthor(author, authorId, viewerKey, viewerId)
+)
+
+def commentsListed(array comments, object shadowed, string viewerKey, string viewerId, boolean isAdmin) array (
+  object hiddenRoots = {}
+  array kept = []
+  for i comments.len (
+    object comment = comments[i].assertElse(object, {})
+    string author = (comment.author ?? "").toStr()
+    string authorId = (comment.authorId ?? "").toStr()
+    if authoredItemListed(shadowed, author, authorId, viewerKey, viewerId, isAdmin) (
+      if isAdmin and ownerInBannedSet(shadowed, author, authorId) (
+        comment.authorShadowBanned = true
+      )
+      kept.append(comment)
+    ) else if (comment.parent ?? "").toStr() == "" (
+      hiddenRoots[(comment.id ?? "").toStr()] = true
+    )
+  )
+  array visible = []
+  for i kept.len (
+    object comment = kept[i].assertElse(object, {})
+    if !hiddenRoots.contains((comment.parent ?? "").toStr()) (
+      visible.append(comment)
+    )
+  )
+  return visible
+)

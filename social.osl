@@ -255,8 +255,9 @@ def handleGetUser(*serve.Context c) (
     viewerSafety = loadSafety(viewer)
   )
   number projectLimit = 24
-  number projectTotal = ownerIndexCount(name, false)
-  array projects = ownerIndexPage(name, false, 0, projectLimit)
+  array listedProjects = projectsVisibleTo(ownerIndexEntries(name, false), c)
+  number projectTotal = listedProjects.len
+  array projects = paginate(listedProjects, 0, projectLimit)
   string featuredId = profile.featuredProject.toStr()
   if featuredId != "" (
     boolean featuredIncluded = false
@@ -267,7 +268,7 @@ def handleGetUser(*serve.Context c) (
     )
     if !featuredIncluded (
       object featured = projectSearchDocs.findById(featuredId)
-      if featured.len > 0 and featured.shared == true and featured.ownerKey.toStr() == key (
+      if featured.len > 0 and featured.shared == true and featured.ownerKey.toStr() == key and projectsVisibleTo([featured], c).len > 0 (
         projects.append(featured)
       )
     )
@@ -335,7 +336,7 @@ def handleSearchUsers(*serve.Context c) (
   array ranked = []
   for i found.len (
     object profile = found[i].assert(object)
-    if !profileSearchable(profile) (
+    if !profileSearchable(profile) or !viewerSeesShadowBanned(profile.username.toStr(), (profile.userId ?? "").toStr(), c) (
       total -= 1
       continue
     )
@@ -746,7 +747,7 @@ def handleGetActivity(*serve.Context c) (
   for i users.len (
     if count < 50 (
       string username = normalizeUsername(users[i].toStr())
-      if username != "" and !selectedUsers.contains(username) (
+      if username != "" and !selectedUsers.contains(username) and viewerSeesShadowBanned(username, userIdForUsername(username), c) (
         selectedUsers[username] = true
         object privacy = activityPrivacy(loadProfile(username))
         array userItems = publicActivityItems(loadActivity(username), privacy, 40)

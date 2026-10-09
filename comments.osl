@@ -278,7 +278,8 @@ def commentResponse(object comment, string username) object (
   return comment
 )
 
-def commentPage(array comments,*serve.Context c) object (
+def commentPage(array allComments,*serve.Context c) object (
+  array comments = commentsVisibleTo(allComments, c)
   for i comments.len (
     comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
   )

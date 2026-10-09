@@ -2556,7 +2556,7 @@ def handleListProjectReviews(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  array reviews = reviewDocs.where("projectId", db.equal, c.param("id")).sort("edited", db.desc).limit(200).all()
+  array reviews = reviewsVisibleTo(reviewDocs.where("projectId", db.equal, c.param("id")).sort("edited", db.desc).limit(200).all(), c)
   number ratingTotal = 0
   object myReview = {}
   for i reviews.len (
@@ -2591,7 +2591,7 @@ def handleListUserReviews(*serve.Context c) (
     if review.contains("authorId") and review.authorId != null (
       authorId = review.authorId.toStr()
     )
-    if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < limit (
+    if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < limit and viewerSeesShadowBanned(review.author.toStr(), authorId, c) (
       auto result = loadProject(review.projectId.toStr())
       if result.ok and canViewProject(result.project.assert(object), c) (
         object project = result.project.assert(object)

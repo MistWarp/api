@@ -416,6 +416,7 @@ def renameUser(string userId, string oldName, string newName) (
     bans.delete(oldKey)
     saveBans(banData)
   )
+  renameShadowBannedUser(oldKey, newKey)
 )
 
 def backfillOwnerIdForUserProjects(string userId, string username) (
@@ -791,6 +792,7 @@ def purgeUser(string userId, string username) (
     bans.delete(key)
     saveBans(banData)
   )
+  removeShadowBannedUser(key)
   purgeUserSessions(userId)
   object idData = loadUserIds()
   object idUsers = idData.users

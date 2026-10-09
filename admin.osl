@@ -83,12 +83,12 @@ def projectHiddenFrom(object project,*serve.Context c) boolean (
 )
 
 def projectsVisibleTo(array entries,*serve.Context c) array (
-  return projectEntriesVisible(entries, bannedOwners(), c.getBool("isAdmin"))
+  return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
 )
 
 // For lists that are cached publicly, so never differ for admins.
 def projectsVisibleToEveryone(array entries) array (
-  return projectEntriesVisible(entries, bannedOwners(), false)
+  return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), "", "", false)
 )
 
 def isBannedUser(string username) boolean (
@@ -814,7 +814,7 @@ def handleReportAction(*serve.Context c) (
   object body = c.bodyJSON()
   string id = body.id.toStr()
   string action = body.action.toStr()
-  boolean validAction = action == "dismiss" or action == "unshare_project" or action == "ban_user" or action == "warn_user"
+  boolean validAction = action == "dismiss" or action == "unshare_project" or action == "hide_project" or action == "ban_user" or action == "warn_user"
   if !validAction (
     c.badRequest("invalid action")
     return
@@ -835,6 +835,19 @@ def handleReportAction(*serve.Context c) (
     return
   )
 
+  if action == "hide_project" (
+    string hideReason = moderationReason(body)
+    if hideReason == "" or hideReason.len > 1000 (
+      c.badRequest("tell the creator why their project is hidden")
+      return
+    )
+    auto hideResult = loadProject(found.target.toStr())
+    if !hideResult.ok (
+      c.notFound("project not found")
+      return
+    )
+    hideProjectForModeration(hideResult.project.assert(object), hideReason, c.getString("username"))
+  )
   if action == "unshare_project" (
     auto result = loadProject(found.target.toStr())
     if !result.ok (
