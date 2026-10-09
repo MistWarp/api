@@ -197,6 +197,7 @@ def handleGetUserAdmin(*serve.Context c) (
     admin: isAdminUser(name),
     banned: isBannedUser(name),
     ban: ban,
+    shadowBan: shadowBanEntryFor(name),
     plan: plan,
     featuredProject: profile.featuredProject,
     commentsOff: effectiveProfileCommentsOff(profile),
@@ -291,9 +292,14 @@ def handleListUsers(*serve.Context c) (
       admins.append(normalizeUsername(stored[i].toStr()))
     )
     filtered = []
+    object shadowed = shadowBannedSet()
     for i matched.len (
       object entry = matched[i].assertElse(object, {})
-      if adminUserMatchesFilter(entry, filter, banned, admins, timestamp) (
+      if filter == "shadowbanned" (
+        if ownerInBannedSet(shadowed, (entry.usernameKey ?? "").toStr(), (entry.userId ?? "").toStr()) (
+          filtered.append(entry)
+        )
+      ) else if adminUserMatchesFilter(entry, filter, banned, admins, timestamp) (
         filtered.append(entry)
       )
     )
@@ -317,6 +323,7 @@ def handleListUsers(*serve.Context c) (
       quotaLimit: quota.limit,
       standingLevel: standing.level,
       banned: isBannedUser(key),
+      shadowBanned: userShadowBanned(key),
       admin: isAdminUser(key)
     })
   )

@@ -191,6 +191,7 @@ def indexEntryFromProject(object project) object (
     teamSize: contributors.len + 1,
     contributors: contributors,
     acceptedChanges: acceptedChanges,
+    moderationHidden: project.contains("moderationHidden") and project.moderationHidden != null,
     tags: tags
   }
 )

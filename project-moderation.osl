@@ -1,0 +1,361 @@
+def loadShadowBans() object (
+  auto result = readFile(shadowBansFile)
+  if !result.ok (
+    return {users: {}, projects: {}}
+  )
+  object data = result.data.assertElse(object, {})
+  data.users = (data.users ?? {}).assertElse(object, {})
+  data.projects = (data.projects ?? {}).assertElse(object, {})
+  return data
+)
+
+def saveShadowBans(object data) boolean (
+  boolean saved = writeFile(shadowBansFile, data)
+  shadowBansCache.delete("data")
+  shadowBansCache.delete("set")
+  return saved
+)
+
+def cachedShadowBans() object (
+  if shadowBansCache.has("data") (
+    return shadowBansCache.get("data").assert(object)
+  )
+  object data = loadShadowBans()
+  shadowBansCache.set("data", data)
+  return data
+)
+
+def shadowBannedSet() object (
+  if shadowBansCache.has("set") (
+    return shadowBansCache.get("set").assert(object)
+  )
+  object data = cachedShadowBans()
+  object users = data.users.assertElse(object, {})
+  object idsByKey = {}
+  array keys = users.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    object entry = users[key].assertElse(object, {})
+    idsByKey[key] = (entry.userId ?? "").toStr()
+  )
+  object built = shadowBanSet(users, data.projects.assertElse(object, {}), idsByKey)
+  shadowBansCache.set("set", built)
+  return built
+)
+
+def userShadowBanned(string username) boolean (
+  string key = normalizeUsername(username)
+  if key == "" (
+    return false
+  )
+  return ownerInBannedSet(shadowBannedSet(), key, userIdForUsername(username))
+)
+
+def shadowBanEntryFor(string username) object (
+  object users = cachedShadowBans().users.assertElse(object, {})
+  string key = normalizeUsername(username)
+  if users.contains(key) (
+    return users[key].assertElse(object, {})
+  )
+  string userId = userIdForUsername(username)
+  if userId == "" (
+    return {}
+  )
+  array keys = users.getKeys()
+  for i keys.len (
+    object entry = users[keys[i].toStr()].assertElse(object, {})
+    if (entry.userId ?? "").toStr() == userId (
+      return entry
+    )
+  )
+  return {}
+)
+
+def projectShadowBanEntry(string projectId) object (
+  object projects = cachedShadowBans().projects.assertElse(object, {})
+  if projects.contains(projectId) (
+    return projects[projectId].assertElse(object, {})
+  )
+  return {}
+)
+
+def viewerSeesShadowBanned(string author, string authorId,*serve.Context c) boolean (
+  return authoredItemListed(shadowBannedSet(), author, authorId, normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
+)
+
+def reviewsVisibleTo(array reviews,*serve.Context c) array (
+  array visible = []
+  for i reviews.len (
+    object review = reviews[i].assertElse(object, {})
+    if viewerSeesShadowBanned((review.author ?? "").toStr(), (review.authorId ?? "").toStr(), c) (
+      visible.append(review)
+    )
+  )
+  return visible
+)
+
+def commentsVisibleTo(array comments,*serve.Context c) array (
+  return commentsListed(comments, shadowBannedSet(), normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
+)
+
+def renameShadowBannedUser(string oldKey, string newKey) (
+  sync.lock("shadowbans")
+  object data = loadShadowBans()
+  object users = data.users.assertElse(object, {})
+  if users.contains(oldKey) (
+    object entry = users[oldKey].assertElse(object, {})
+    entry.username = newKey
+    users[newKey] = entry
+    users.delete(oldKey)
+    data.users = users
+    saveShadowBans(data)
+  )
+  sync.unlock("shadowbans")
+)
+
+def removeShadowBannedUser(string key) (
+  sync.lock("shadowbans")
+  object data = loadShadowBans()
+  object users = data.users.assertElse(object, {})
+  if users.contains(key) (
+    users.delete(key)
+    data.users = users
+    saveShadowBans(data)
+  )
+  sync.unlock("shadowbans")
+)
+
+def removeShadowBannedProject(string projectId) (
+  if !cachedShadowBans().projects.assertElse(object, {}).contains(projectId) (
+    return
+  )
+  sync.lock("shadowbans")
+  object data = loadShadowBans()
+  object projects = data.projects.assertElse(object, {})
+  projects.delete(projectId)
+  data.projects = projects
+  saveShadowBans(data)
+  sync.unlock("shadowbans")
+)
+
+def moderationReason(object body) string (
+  if body.contains("reason") and body.reason != null (
+    return body.reason.toStr().strip()
+  )
+  return ""
+)
+
+def handleShadowBanUser(*serve.Context c) (
+  object body = c.bodyJSON()
+  string name = (body.username ?? "").toStr()
+  string key = normalizeUsername(name)
+  string reason = moderationReason(body)
+  if key == "" or !isSafePathPart(key) (
+    c.badRequest("username is required")
+    return
+  )
+  if reason.len > 1000 (
+    c.badRequest("reason is too long")
+    return
+  )
+  if isAdminUser(name) (
+    c.badRequest("cannot shadow ban an admin")
+    return
+  )
+  sync.lock("shadowbans")
+  object data = loadShadowBans()
+  object users = data.users.assertElse(object, {})
+  users[key] = {username: key, userId: userIdForUsername(name), reason: reason, by: c.getString("username"), created: timestamp}
+  data.users = users
+  boolean saved = saveShadowBans(data)
+  sync.unlock("shadowbans")
+  if !saved (
+    c.internalError("could not save the shadow ban")
+    return
+  )
+  c.json(200, {ok: true, shadowBan: shadowBanEntryFor(name)})
+)
+
+def handleLiftShadowBan(*serve.Context c) (
+  object body = c.bodyJSON()
+  string name = (body.username ?? "").toStr()
+  object entry = shadowBanEntryFor(name)
+  if entry.len == 0 (
+    c.notFound("that user is not shadow banned")
+    return
+  )
+  removeShadowBannedUser((entry.username ?? normalizeUsername(name)).toStr())
+  c.json(200, {ok: true})
+)
+
+def handleListShadowBans(*serve.Context c) (
+  object data = loadShadowBans()
+  object users = data.users.assertElse(object, {})
+  array userRows = []
+  array userKeys = users.getKeys()
+  for i userKeys.len (
+    object entry = users[userKeys[i].toStr()].assertElse(object, {})
+    userRows.append({username: entry.username ?? userKeys[i], reason: entry.reason ?? "", by: entry.by ?? "", created: entry.created ?? 0})
+  )
+  userRows.sortBy("created", "descending")
+  object projects = data.projects.assertElse(object, {})
+  array projectRows = []
+  array projectIds = projects.getKeys()
+  for i projectIds.len (
+    string id = projectIds[i].toStr()
+    object entry = projects[id].assertElse(object, {})
+    object indexed = projectSearchDocs.findById(id)
+    projectRows.append({
+      id: id,
+      title: if indexed.len > 0 then indexed.title else entry.title ?? "",
+      owner: if indexed.len > 0 then indexed.owner else entry.owner ?? "",
+      reason: entry.reason ?? "",
+      by: entry.by ?? "",
+      created: entry.created ?? 0
+    })
+  )
+  projectRows.sortBy("created", "descending")
+  c.json(200, {ok: true, users: userRows, projects: projectRows})
+)
+
+def loadModeratedProject(*serve.Context c) object (
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return {}
+  )
+  return result.project.assert(object)
+)
+
+def handleShadowBanProject(*serve.Context c) (
+  object project = loadModeratedProject(c)
+  if project.len == 0 (
+    return
+  )
+  string reason = moderationReason(c.bodyJSON())
+  if reason.len > 1000 (
+    c.badRequest("reason is too long")
+    return
+  )
+  string id = project.id.toStr()
+  sync.lock("shadowbans")
+  object data = loadShadowBans()
+  object projects = data.projects.assertElse(object, {})
+  projects[id] = {reason: reason, by: c.getString("username"), created: timestamp, title: project.title, owner: project.owner}
+  data.projects = projects
+  boolean saved = saveShadowBans(data)
+  sync.unlock("shadowbans")
+  if !saved (
+    c.internalError("could not save the shadow ban")
+    return
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleLiftProjectShadowBan(*serve.Context c) (
+  object project = loadModeratedProject(c)
+  if project.len == 0 (
+    return
+  )
+  removeShadowBannedProject(project.id.toStr())
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def projectModerationHold(object project) object (
+  if project.contains("moderationHidden") and project.moderationHidden != null (
+    return project.moderationHidden.assertElse(object, {})
+  )
+  return {}
+)
+
+def projectHiddenByModerator(object project) boolean (
+  return projectModerationHold(project).len > 0
+)
+
+def refuseIfHiddenByModerator(object project,*serve.Context c) boolean (
+  if !projectHiddenByModerator(project) (
+    return false
+  )
+  c.json(403, {ok: false, error: "A moderator hid this project, so it can't be shared until they restore it.", moderationHidden: true})
+  return true
+)
+
+def moderationHoldResponse(object project,*serve.Context c) object (
+  object hold = projectModerationHold(project)
+  object response = {reason: (hold.reason ?? "").toStr(), created: hold.created ?? 0}
+  if c.getBool("isAdmin") (
+    response.by = (hold.by ?? "").toStr()
+  )
+  return response
+)
+
+def handleHideProject(*serve.Context c) (
+  object project = loadModeratedProject(c)
+  if project.len == 0 (
+    return
+  )
+  string reason = moderationReason(c.bodyJSON())
+  if reason == "" (
+    c.badRequest("tell the creator why their project is hidden")
+    return
+  )
+  if reason.len > 1000 (
+    c.badRequest("reason is too long")
+    return
+  )
+  hideProjectForModeration(project, reason, c.getString("username"))
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def hideProjectForModeration(object project, string reason, string actor) (
+  object previous = {shared: project.shared == true, visibility: projectVisibility(project)}
+  object existing = projectModerationHold(project)
+  if existing.contains("previous") (
+    previous = existing.previous.assertElse(object, previous)
+  )
+  project.moderationHidden = {reason: reason, by: actor, created: timestamp, previous: previous}
+  project.shared = false
+  project.visibility = "private"
+  project.viewKey = randomString(16)
+  saveProject(project)
+  upsertIndexEntry(project)
+  object ownerProfile = loadProfile(project.owner.toStr())
+  if ownerProfile.featuredProject.toStr() == project.id.toStr() (
+    ownerProfile.featuredProject = ""
+    saveProfile(ownerProfile)
+  )
+  addNotification(project.owner.toStr(), actor, "project_hidden", {projectId: project.id, projectTitle: project.title, reason: reason})
+)
+
+def handleRestoreHiddenProject(*serve.Context c) (
+  object project = loadModeratedProject(c)
+  if project.len == 0 (
+    return
+  )
+  object hold = projectModerationHold(project)
+  if hold.len == 0 (
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+  object previous = (hold.previous ?? {}).assertElse(object, {})
+  string visibility = (previous.visibility ?? "private").toStr()
+  boolean everUploaded = project.lastUploadAt.toNum() > 0 or (project.contains("pendingJson") and project.pendingJson == true)
+  if !everUploaded or projectMustStayPrivate(project) or projectBlockedExtension(project) != "" (
+    visibility = "private"
+  )
+  project.delete("moderationHidden")
+  if visibility == "public" (
+    project.shared = true
+    project.visibility = "public"
+    if project.sharedAt.toNum() == 0 (
+      project.sharedAt = timestamp
+    )
+  ) else if visibility == "unlisted" (
+    project.shared = false
+    project.visibility = "unlisted"
+  )
+  saveProject(project)
+  upsertIndexEntry(project)
+  addNotification(project.owner.toStr(), c.getString("username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)

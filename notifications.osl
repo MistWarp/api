@@ -186,6 +186,17 @@ def notificationBody(string actor, string notifType, object extra) string (
     )
     return "Your account standing is now " ++ level
   )
+  if notifType == "project_hidden" (
+    string hiddenTitle = if projectTitle != "" then projectTitle else "Your project"
+    if extra.contains("reason") and extra.reason != null and extra.reason.toStr() != "" (
+      return "A moderator hid " ++ hiddenTitle ++ ": " ++ extra.reason.toStr() ++ " " ++ projectLink
+    )
+    return "A moderator hid " ++ hiddenTitle ++ ": " ++ projectLink
+  )
+  if notifType == "project_restored" (
+    string restoredTitle = if projectTitle != "" then projectTitle else "Your project"
+    return "A moderator restored " ++ restoredTitle ++ ": " ++ projectLink
+  )
   if notifType == "moderation" (
     if extra.contains("message") (
       return extra.message.toStr()
@@ -325,6 +336,9 @@ def addNotification(string target, string actor, string notifType, object extra)
     return
   )
   if actorKey != "" and userHasBlocked(actor, target) (
+    return
+  )
+  if actorKey != "" and userShadowBanned(actor) (
     return
   )
   if isMessageNotification(notifType) and roturMessageRefusal(actor, target) != "" (
