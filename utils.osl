@@ -12,7 +12,7 @@ def generateCommentId() string (
 )
 
 def isSafePathPart(string value) boolean (
-  return value != "" and !value.contains("/") and !value.contains(".") and !value.contains("\\")
+  return value != "" and value != "." and value != ".." and !value.contains("/") and !value.contains("\\")
 )
 
 def normalizeUsername(string username) string (

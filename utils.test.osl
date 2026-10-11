@@ -1,0 +1,13 @@
+import "std:testing"
+import "std:crypto"
+import "std:regex"
+import "go:mistwarp.local/storagefs"
+import "./utils.osl"
+
+testing.assert(isSafePathPart("test.name"), "dotted usernames are safe path parts")
+testing.assert(isSafePathPart("test-name."), "trailing-dot usernames are safe path parts")
+testing.assert(!isSafePathPart(""), "empty path parts are unsafe")
+testing.assert(!isSafePathPart("."), "current-directory path part is unsafe")
+testing.assert(!isSafePathPart(".."), "parent-directory path part is unsafe")
+testing.assert(!isSafePathPart("../outside"), "forward-slash traversal is unsafe")
+testing.assert(!isSafePathPart("..\\outside"), "backslash traversal is unsafe")
