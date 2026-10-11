@@ -383,6 +383,18 @@ def projectResponse(object project,*serve.Context c) object (
   if ownerBanned (
     response.ownerBanned = true
   )
+  if isOwner and projectHiddenByModerator(project) (
+    response.moderationHidden = moderationHoldResponse(project, c)
+  )
+  if c.getBool("isAdmin") (
+    object shadowed = shadowBannedSet()
+    object projectShadow = projectShadowBanEntry(project.id.toStr())
+    response.shadowBan = {
+      project: projectShadow.len > 0,
+      projectReason: (projectShadow.reason ?? "").toStr(),
+      owner: entryOwnerBanned(shadowed, {owner: project.owner, ownerId: project.ownerId ?? ""})
+    }
+  )
   response.workspaceUrl = ""
   response.canViewSource = canSeeInsideProject(project, c)
   if response.canViewSource == true and project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
@@ -2979,6 +2991,9 @@ def handlePublishProject(*serve.Context c) (
     c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
     return
   )
+  if refuseIfHiddenByModerator(project, c) (
+    return
+  )
   if project.shared == true and projectVisibility(project) == "public" (
     c.json(200, {ok: true, project: projectResponse(project, c)})
     return
@@ -3394,6 +3409,9 @@ def handleLeaderboard(*serve.Context c) (
 
 def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
   if projectHiddenFrom(entry, c) (
+    return false
+  )
+  if projectsVisibleTo([entry], c).len == 0 (
     return false
   )
   if entry.shared == true and projectVisibility(entry) == "public" (
