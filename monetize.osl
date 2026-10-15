@@ -237,7 +237,7 @@ def awardContributionBounty(string bountyId, string projectId, string recipient)
         resource_id: projectId
       })
     }
-  )
+  ).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   return response.success and response.status.toInt() == 200
 )
 
@@ -372,7 +372,7 @@ def handleSetVisibility(*serve.Context c) (
     return
   )
 
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string target = ""
   if body.contains("visibility") and body.visibility != null (
     target = body.visibility.toStr()
@@ -465,7 +465,7 @@ def recordSale(object project, string buyer, number price, number sellerAmount) 
 // It would pay MistWarp the old way, which nothing delivers any more, so it's
 // told to reload before anything is asked of Rotur.
 def refuseOldPaymentClient(*serve.Context c) boolean (
-  if c.bodyJSON().contains("returnUrl") (
+  if requestJSON(c).contains("returnUrl") (
     return false
   )
   c.json(409, {ok: false, code: "client_outdated", error: "MistWarp was updated, reload this page"})
@@ -512,7 +512,7 @@ def handlePurchaseIntent(*serve.Context c) (
     c.json(503, {ok: false, error: "MistWarp can't take payments right now. Try again in a few minutes."})
     return
   )
-  object started = startPurchase("mwbuy_", {projectId: project.id.toStr(), buyer: buyerLower, price: price}, buyerLower, project.owner.toStr(), splits, price, project.title.toStr(), (c.bodyJSON().returnUrl ?? "").toStr())
+  object started = startPurchase("mwbuy_", {projectId: project.id.toStr(), buyer: buyerLower, price: price}, buyerLower, project.owner.toStr(), splits, price, project.title.toStr(), (requestJSON(c).returnUrl ?? "").toStr())
   if !started.ok (
     c.json(503, started)
     return
@@ -555,7 +555,7 @@ def completeProjectPurchase(string key) object (
 )
 
 def handlePurchaseConfirm(*serve.Context c) (
-  string key = (c.bodyJSON().key ?? "").toStr().strip()
+  string key = (requestJSON(c).key ?? "").toStr().strip()
   object pending = loadPurchaseKeys().keys[key] ?? {}
   boolean mine = key.startsWith("mwbuy_") and (pending.buyer ?? "").toStr() == normalizeUsername(c.getString("username")) and (pending.projectId ?? "").toStr() == c.param("id")
   object completed = {ok: false}

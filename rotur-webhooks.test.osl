@@ -8,7 +8,7 @@ import "std:crypto"
 import "std:regex"
 
 string dir = "/tmp/mistwarp-rotur-webhooks-" ++ timestamp.toStr() ++ "/"
-fs.mkdirAll(dir)
+void fs.mkdirAll(dir)
 
 def configValue(string name, string fallback) string (
   if name == "ROTUR_WEBHOOK_SECRET" (
@@ -25,7 +25,7 @@ def readFile(string path) object (
 )
 
 def writeFile(string path, object data) boolean (
-  fs.writeFile(path, json.stringify(data))
+  void fs.writeFile(path, json.stringify(data))
   return true
 )
 
@@ -95,4 +95,4 @@ testing.assert(erased.len == 3, "handled events are not handled again")
 object store = loadRoturWebhooks()
 testing.assert(store.events.evt_1.done == true and store.events.evt_6.done == true, "marks events done")
 
-fs.remove(dir)
+void fs.remove(dir)

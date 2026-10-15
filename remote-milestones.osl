@@ -5,7 +5,7 @@ def remoteMilestoneData(string path) object (
 )
 
 def milestoneDataFromUrl(string endpoint) object (
-  object response = requests.get(endpoint, {timeout: 5, max_bytes: 2097152})
+  object response = requests.get(endpoint, {timeout: 5, max_bytes: 2097152}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !response.success or response.status.toInt() != 200 (
     return {}
   )
@@ -19,7 +19,7 @@ def milestoneDataFromUrl(string endpoint) object (
 def observeRemoteMilestone(string target, string kind, string id, number count, string path, object extra) (
   string key = "observed:" ++ kind ++ ":" ++ id
   sync.lock(key)
-  object previous = likeMilestoneDocs.findById(key)
+  object previous = (likeMilestoneDocs.findById(key) ?? {})
   // First observation establishes a baseline; an exact milestone still counts.
   number before = count - 1
   if previous.contains("count") (

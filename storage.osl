@@ -75,7 +75,7 @@ def readFile(string path) object (
   if !fs.exists(path) (
     return {ok: false, error: "file not found"}
   )
-  string content = fs.readFile(path)
+  string content = fs.readFile(path).unwrapOr("")
   auto parsed = json.parse(content, {type: "object"})
   if parsed.isErr() (
     return {ok: false, error: "invalid json"}
@@ -89,7 +89,7 @@ def writeFile(string path, object data) boolean (
     return false
   )
   if !fs.rename(tmpPath, path) (
-    fs.remove(tmpPath)
+    void fs.remove(tmpPath)
     return false
   )
   return true
@@ -380,10 +380,10 @@ def saveComments(string key, array comments) boolean (
   )
   boolean ok = fs.rename(tmpPath, path)
   if !ok (
-    fs.remove(tmpPath)
+    void fs.remove(tmpPath)
     return false
   )
-  fs.remove(commentsDir ++ key ++ ".json")
+  void fs.remove(commentsDir ++ key ++ ".json")
   return true
 )
 

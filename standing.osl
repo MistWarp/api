@@ -149,7 +149,7 @@ def requireGoodStanding(*serve.Context c) (
 )
 
 def handleSetStanding(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = body.username.toStr()
   string level = body.level.toStr()
   string reason = ""
@@ -172,7 +172,7 @@ def handleSetStanding(*serve.Context c) (
 )
 
 def handleMessageUser(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = body.username.toStr()
   string message = body.message.toStr().strip()
   if normalizeUsername(name) == "" or message == "" or message.len > 1000 (
@@ -184,7 +184,7 @@ def handleMessageUser(*serve.Context c) (
 )
 
 def handleAdminUpdateProfile(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = body.username.toStr()
   if normalizeUsername(name) == "" (
     c.badRequest("username is required")

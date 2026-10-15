@@ -31,7 +31,7 @@ def handleGetThumbnail(*serve.Context c) (
     c.notFound("thumbnail not found")
     return
   )
-  object entry = projectSearchDocs.findById(id)
+  object entry = (projectSearchDocs.findById(id) ?? {})
   if entry.len > 0 and projectOwnerBanned(entry) (
     c.notFound("thumbnail not found")
     return
@@ -230,7 +230,7 @@ def parentDirOf(string path) string (
 def r2PutEncoded(string key, BlobBody body, string contentType, string contentEncoding) boolean (
   if r2Local (
     string path = localBlobPath(key)
-    fs.mkdirAll(parentDirOf(path))
+    void fs.mkdirAll(parentDirOf(path))
     return fs.writeFileBytes(path, body)
   )
   object input = {"key": key, "body": body, "content_type": contentType}
@@ -400,17 +400,17 @@ def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
       string mergedPath = outputPath ++ ".layer." ++ i.toStr()
       boolean ok = copyStorageKeyToPath(keys[i].toStr(), deltaPath)
       ok = ok and mergeWorkspaceArchives(currentPath, deltaPath, mergedPath, maxProjectJsonBytes + 1073741824)
-      fs.remove(deltaPath)
-      fs.remove(currentPath)
+      void fs.remove(deltaPath)
+      void fs.remove(currentPath)
       if !ok (
-        fs.remove(mergedPath)
+        void fs.remove(mergedPath)
         return false
       )
       currentPath = mergedPath
     )
   )
   boolean copied = zip.copyFile(currentPath, outputPath)
-  fs.remove(currentPath)
+  void fs.remove(currentPath)
   return copied
 )
 
@@ -436,7 +436,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   if !signed.ok (
     return false
   )
-  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
+  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !fetched.success or fetched.status.toInt() != 200 (
     return false
   )
@@ -451,7 +451,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     return false
   )
   boolean compressed = zip.gzipLimited(plainPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
-  fs.remove(plainPath)
+  void fs.remove(plainPath)
   return compressed
 )
 
@@ -470,7 +470,7 @@ def serveNotModified(*serve.Context c, object project) boolean (
   string etag = projectJsonEtag(project)
   c.setHeader("ETag", etag)
   c.setHeader("Cache-Control", "no-cache")
-  if c.header("If-None-Match").contains(etag) (
+  if (c.header("If-None-Match") ?? "").contains(etag) (
     c.status(304)
     return true
   )
@@ -560,19 +560,19 @@ def handleGetProjectBlob(*serve.Context c) (
   )
   object project = projectResult.project.assert(object)
   if projectOwnerBanned(project) (
-    if !bannedKeyMatches(project, c.query("k")) (
+    if !bannedKeyMatches(project, (c.query("k") ?? "")) (
       c.notFound("blob not found")
       return
     )
   ) else if projectPrice(project) > 0 (
     string pk = projectViewKey(project)
-    if pk == "" or c.query("k") != pk (
+    if pk == "" or (c.query("k") ?? "") != pk (
       c.notFound("blob not found")
       return
     )
   ) else if project.shared != true and projectVisibility(project) != "unlisted" (
     string k = projectViewKey(project)
-    if k == "" or c.query("k") != k (
+    if k == "" or (c.query("k") ?? "") != k (
       c.notFound("blob not found")
       return
     )
@@ -595,8 +595,8 @@ def handleGetProjectWorkspace(*serve.Context c) (
   )
   object project = result.project.assert(object)
   boolean allowed = canSeeInsideProject(project, c)
-  if !allowed and c.query("pull") != "" (
-    allowed = canAccessPullWorkspace(project, c.query("pull"), c)
+  if !allowed and (c.query("pull") ?? "") != "" (
+    allowed = canAccessPullWorkspace(project, (c.query("pull") ?? ""), c)
   )
   array keys = projectWorkspaceKeys(project)
   if !allowed or keys.len == 0 (
@@ -608,7 +608,7 @@ def handleGetProjectWorkspace(*serve.Context c) (
   c.setHeader("Vary", "Authorization, Cookie")
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  if c.header("If-None-Match").contains(etag) (
+  if (c.header("If-None-Match") ?? "").contains(etag) (
     c.status(304)
     return
   )

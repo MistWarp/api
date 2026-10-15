@@ -55,18 +55,18 @@ def removeBackpackBlobs(object item) (
 
 def handleGetMyBackpack(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
-  string itemType = c.query("type")
+  string itemType = (c.query("type") ?? "")
   if itemType != "" and !backpackItemTypes.contains(itemType) (
     c.badRequest("unknown backpack item type")
     return
   )
   array items = loadBackpackItems(c.getString("userId"))
   array filtered = backpackFilterType(items, itemType)
-  number offset = c.query("offset").toNum().toInt()
+  number offset = (c.query("offset") ?? "").toNum().toInt()
   if offset < 0 (
     offset = 0
   )
-  array page = paginate(filtered, offset, backpackPageSize(c.query("limit")))
+  array page = paginate(filtered, offset, backpackPageSize((c.query("limit") ?? "")))
   array views = []
   for i page.len (
     views.append(backpackItemView(page[i].assert(object)))
@@ -77,8 +77,8 @@ def handleGetMyBackpack(*serve.Context c) (
 def handleCreateBackpackItem(*serve.Context c) (
   string username = c.getString("username")
   string userId = c.getString("userId")
-  string itemType = c.formValue("type").strip()
-  string mime = c.formValue("mime").strip()
+  string itemType = (c.formValue("type") ?? "").strip()
+  string mime = (c.formValue("mime") ?? "").strip()
   string bodyExt = backpackBodyExt(itemType, mime)
   if bodyExt == "" (
     c.badRequest("unsupported backpack item type")
@@ -89,7 +89,7 @@ def handleCreateBackpackItem(*serve.Context c) (
     c.badRequest("missing body file")
     return
   )
-  object body = bodyResult.unwrap().assert(object)
+  object body = bodyResult.unwrap()
   number bodyBytes = body.size.toNum()
   if bodyBytes <= 0 or bodyBytes > maxBackpackBodyBytes (
     c.json(413, {ok: false, code: "item_too_large", error: "This item is too large for the backpack."})
@@ -100,8 +100,8 @@ def handleCreateBackpackItem(*serve.Context c) (
   number thumbnailBytes = 0
   auto thumbnailResult = c.formFile("thumbnail")
   if !thumbnailResult.isErr() (
-    thumbnail = thumbnailResult.unwrap().assert(object)
-    thumbnailExt = backpackThumbnailExt(c.formValue("thumbnailMime"))
+    thumbnail = thumbnailResult.unwrap()
+    thumbnailExt = backpackThumbnailExt((c.formValue("thumbnailMime") ?? ""))
     thumbnailBytes = thumbnail.size.toNum()
     if thumbnailExt == "" (
       c.badRequest("thumbnails must be png or jpeg")
@@ -154,7 +154,7 @@ def handleCreateBackpackItem(*serve.Context c) (
     id: "b" ++ randomString(16),
     type: itemType,
     mime: mime.toLower(),
-    name: backpackItemName(c.formValue("name"), itemType),
+    name: backpackItemName((c.formValue("name") ?? ""), itemType),
     bodyKey: bodyKey,
     bodyBytes: bodyBytes,
     thumbnailKey: thumbnailKey,
@@ -177,7 +177,7 @@ def handleCreateBackpackItem(*serve.Context c) (
 )
 
 def handleUpdateBackpackItem(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string id = c.param("id")
   string userId = c.getString("userId")
   if !body.contains("name") (
@@ -245,7 +245,7 @@ def handleDeleteBackpackItem(*serve.Context c) (
 )
 
 def handleDeleteBackpackItems(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   array raw = (body.ids ?? []).assertElse(array, [])
   if raw.len == 0 or raw.len > maxBackpackItems (
     c.badRequest("ids must list between 1 and " ++ maxBackpackItems.toStr() ++ " items")
@@ -289,6 +289,6 @@ def purgeBackpackForUser(string userId) (
   for i items.len (
     removeBackpackBlobs(items[i].assert(object))
   )
-  fs.remove(backpackIndexPath(userId))
+  void fs.remove(backpackIndexPath(userId))
   sync.unlock(backpackLockName(userId))
 )

@@ -37,15 +37,15 @@ def roturApp(string method, string path, object body) object (
   string target = roturBase ++ "/v2/apps/" ++ url.escape(roturClientId) ++ path
   object resp = {}
   if method == "GET" (
-    resp = requests.get(target, options)
+    resp = requests.get(target, options).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   ) else if method == "POST" (
-    resp = requests.post(target, options)
+    resp = requests.post(target, options).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   ) else if method == "PUT" (
-    resp = requests.put(target, options)
+    resp = requests.put(target, options).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   ) else if method == "PATCH" (
-    resp = requests.patch(target, options)
+    resp = requests.patch(target, options).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   ) else (
-    resp = requests.delete(target, options)
+    resp = requests.delete(target, options).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   )
   number status = (resp.status ?? 0).toNum().toInt()
   object data = {}

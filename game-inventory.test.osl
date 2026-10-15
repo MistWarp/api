@@ -2,6 +2,7 @@ import "std:testing"
 import "std:sync"
 import "std:serve"
 import "std:regex"
+import "./request-body.osl"
 import "./game-inventory.osl"
 
 def isSafePathPart(string value) boolean (

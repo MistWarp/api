@@ -6,7 +6,7 @@ import "std:cache"
 import "std:url"
 
 string dir = "/tmp/mistwarp-rotur-payments-" ++ timestamp.toStr() ++ "/"
-fs.mkdirAll(dir)
+void fs.mkdirAll(dir)
 string purchaseKeysFile = dir ++ "purchase-keys.json"
 string mistwarpRoturUser = ""
 auto roturAppOwnerCache = cache.create(4, 3600)
@@ -19,7 +19,7 @@ def readFile(string path) object (
 )
 
 def writeFile(string path, object data) boolean (
-  fs.writeFile(path, json.stringify(data))
+  void fs.writeFile(path, json.stringify(data))
   return true
 )
 
@@ -179,4 +179,4 @@ testing.assert(delivered.len == 1, "ignores unknown references")
 forgetPurchase(sale.key)
 testing.assert(!loadPurchaseKeys().keys.assert(object).contains(sale.key), "forgets a delivered purchase")
 
-fs.remove(dir)
+void fs.remove(dir)

@@ -36,7 +36,7 @@ def cachedProjectWorkspacePath(object project) string (
     )
   )
   string cacheDir = tmpDir ++ "git-inspection/"
-  fs.mkdirAll(cacheDir)
+  void fs.mkdirAll(cacheDir)
   string cacheName = projectWorkspaceFingerprint(project) ++ ".mwp"
   pruneGitInspectionCache(cacheDir, cacheName)
   string cachedPath = cacheDir ++ cacheName
@@ -51,12 +51,12 @@ def cachedProjectWorkspacePath(object project) string (
   )
   string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
   if !copyProjectWorkspaceToPath(project, temporaryPath) (
-    fs.remove(temporaryPath)
+    void fs.remove(temporaryPath)
     sync.unlock(lockName)
     return ""
   )
   if !fs.rename(temporaryPath, cachedPath) (
-    fs.remove(temporaryPath)
+    void fs.remove(temporaryPath)
     if !fs.exists(cachedPath) (
       sync.unlock(lockName)
       return ""
@@ -153,12 +153,12 @@ def validGitFilePath(string path) boolean (
 
 def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, string sha, string operation, string requestedPath, string allowedHeads) string (
   string cacheDir = tmpDir ++ "git-inspection/"
-  fs.mkdirAll(cacheDir)
+  void fs.mkdirAll(cacheDir)
   string cacheName = gitInspectionCacheVersion() ++ "." ++ projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256() ++ ".json"
   pruneGitInspectionCache(cacheDir, cacheName)
   string cachePath = cacheDir ++ cacheName
   if fs.exists(cachePath) and fs.getSize(cachePath) <= 33554432 (
-    return fs.readFile(cachePath)
+    return fs.readFile(cachePath).unwrapOr("")
   )
   string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
   if resultJson.len <= 33554432 (
@@ -167,7 +167,7 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
       string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
       if fs.writeFile(temporaryPath, resultJson) (
         if !fs.rename(temporaryPath, cachePath) (
-          fs.remove(temporaryPath)
+          void fs.remove(temporaryPath)
         )
       )
     )
@@ -178,8 +178,8 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
 def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  string pullIndex = c.query("pull")
-  string pullTarget = c.query("pullTarget")
+  string pullIndex = (c.query("pull") ?? "")
+  string pullTarget = (c.query("pullTarget") ?? "")
   boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
   if !canSeeInsideProject(project, c) and !pullCommit (
     c.notFound("commit not found")
@@ -209,7 +209,7 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
   c.setHeader("Vary", "Authorization, Cookie")
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  if c.header("If-None-Match").contains(etag) (
+  if (c.header("If-None-Match") ?? "").contains(etag) (
     c.status(304)
     return
   )
@@ -238,7 +238,7 @@ def handleGetCommitInspection(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  string operation = if c.query("inline") == "1" then "commit-inline" else "commit"
+  string operation = if (c.query("inline") ?? "") == "1" then "commit-inline" else "commit"
   gitInspectionResponse(c, result.project.assert(object), c.param("sha"), operation, "")
 )
 
@@ -257,5 +257,5 @@ def handleGetCommitFile(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", c.query("path"))
+  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", (c.query("path") ?? ""))
 )

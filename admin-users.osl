@@ -41,7 +41,7 @@ def adminLookupUsername(string raw) string (
 
 def adminSessionsFor(string userId, string key) object (
   array sessions = []
-  array files = fs.readDir(sessionsDir)
+  array files = fs.readDir(sessionsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -100,15 +100,15 @@ def indexComment(string key, object comment) (
 )
 
 def unindexComment(string key, string cid) (
-  commentIndexDocs.deleteOne({_id: key ++ ":" ++ cid})
+  void commentIndexDocs.deleteOne({_id: key ++ ":" ++ cid})
 )
 
 def migrateCommentIndex() boolean (
   string migrationId = "migration:comment-index-v1"
-  if diagnosticDocs.findById(migrationId).len > 0 (
+  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
     return true
   )
-  array files = fs.readDir(commentsDir)
+  array files = fs.readDir(commentsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     string key = if name.endsWith(".jsonl") then name.trim(1, name.len - 6) else if name.endsWith(".json") then name.trim(1, name.len - 5) else ""
@@ -119,7 +119,7 @@ def migrateCommentIndex() boolean (
       )
     )
   )
-  array users = fs.readDir(usersDir)
+  array users = fs.readDir(usersDir).unwrapOr([])
   for i users.len (
     string file = users[i].toStr()
     if file.endsWith(".json") (
@@ -150,7 +150,7 @@ def adminProjectTotals(array projects) object (
 )
 
 def handleGetUserAdmin(*serve.Context c) (
-  string name = adminLookupUsername(c.query("username"))
+  string name = adminLookupUsername((c.query("username") ?? ""))
   string key = normalizeUsername(name)
   if key == "" or !isSafePathPart(key) (
     c.badRequest("username is required")
@@ -218,7 +218,7 @@ def handleGetUserAdmin(*serve.Context c) (
 )
 
 def handleSetAdminNote(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string key = normalizeUsername(body.username.toStr())
   string text = (body.note ?? "").toStr().strip()
   if key == "" or !isSafePathPart(key) (
@@ -248,12 +248,12 @@ def handleSetAdminNote(*serve.Context c) (
 )
 
 def handleListUsers(*serve.Context c) (
-  string raw = c.query("q").strip()
+  string raw = (c.query("q") ?? "").strip()
   string q = normalizeUsername(raw)
-  string sort = c.query("sort").toLower().strip()
-  string filter = c.query("filter").toLower().strip()
-  number offset = if c.query("offset") == "" then 0 else c.query("offset").toNum().toInt()
-  number limit = if c.query("limit") == "" then 30 else c.query("limit").toNum().toInt()
+  string sort = (c.query("sort") ?? "").toLower().strip()
+  string filter = (c.query("filter") ?? "").toLower().strip()
+  number offset = if (c.query("offset") ?? "") == "" then 0 else (c.query("offset") ?? "").toNum().toInt()
+  number limit = if (c.query("limit") ?? "") == "" then 30 else (c.query("limit") ?? "").toNum().toInt()
   if offset < 0 (
     offset = 0
   )

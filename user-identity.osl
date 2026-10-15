@@ -64,7 +64,7 @@ def identityMatches(string storedId, string storedUsername, string userId, strin
 
 def renameUserFile(string dir, string oldKey, string newKey) (
   if oldKey != newKey and fs.exists(dir ++ oldKey ++ ".json") (
-    fs.rename(dir ++ oldKey ++ ".json", dir ++ newKey ++ ".json")
+    void fs.rename(dir ++ oldKey ++ ".json", dir ++ newKey ++ ".json")
   )
 )
 
@@ -78,9 +78,9 @@ def renameUserInProfiles(string oldKey, string newKey, string newName) (
   profile.username = newName
   saveProfile(profile)
   if oldKey != newKey (
-    profileSearchDocs.deleteOne({_id: oldKey})
+    void profileSearchDocs.deleteOne({_id: oldKey})
   )
-  array files = fs.readDir(usersDir)
+  array files = fs.readDir(usersDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") and name != newKey ++ ".json" (
@@ -119,7 +119,7 @@ def renameUserInProfiles(string oldKey, string newKey, string newName) (
 )
 
 def renameUserInProjects(string oldKey, string newKey, string newName, string userId) (
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -272,7 +272,7 @@ def rekeyUserDocuments(*db.Collection collection, string nameField, string idFie
       document[idField] = userId
       putDocument(collection, newId, document)
       if newId != oldId (
-        collection.deleteOne({_id: oldId})
+        void collection.deleteOne({_id: oldId})
       )
     )
   )
@@ -298,10 +298,10 @@ def renameUserInComments(string oldKey, string newKey, string newName, string us
   if oldKey != newKey (
     renameUserFile(commentsDir, "profile-" ++ oldKey, "profile-" ++ newKey)
     if fs.exists(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl") (
-      fs.rename(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl", commentsDir ++ "profile-" ++ newKey ++ ".jsonl")
+      void fs.rename(commentsDir ++ "profile-" ++ oldKey ++ ".jsonl", commentsDir ++ "profile-" ++ newKey ++ ".jsonl")
     )
   )
-  array files = fs.readDir(commentsDir)
+  array files = fs.readDir(commentsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     string key = name.replace(".jsonl", "").replace(".json", "")
@@ -336,7 +336,7 @@ def rewriteNotificationIdentityFields(object data, string oldKey, string newName
 
 def renameUserInNotifications(string userId, string oldKey, string newKey, string newName) (
   renameUserFile(notificationsDir, oldKey, newKey)
-  array files = fs.readDir(notificationsDir)
+  array files = fs.readDir(notificationsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -484,7 +484,7 @@ def refreshUsernameForId(string userId) string (
   if identityRefreshCache.has(userId) (
     return identityRefreshCache.get(userId).toStr()
   )
-  object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
+  object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if resp.success and resp.status.toInt() == 200 (
     auto parsed = json.parse(resp.body, {type: "object"})
     if !parsed.isErr() (
@@ -513,7 +513,7 @@ def discoverUserIdentity(string username) string (
   if key == "" or isStudentUsername(key) (
     return ""
   )
-  object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions())
+  object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !resp.success (
     if resp.status.toInt() == 404 (
       string uid = userIdForUsername(username)
@@ -565,9 +565,9 @@ def removeUserFromArray(array items, string key) array (
 )
 
 def purgeUserFromProfiles(string key) (
-  fs.remove(usersDir ++ key ++ ".json")
-  profileSearchDocs.deleteOne({_id: key})
-  array files = fs.readDir(usersDir)
+  void fs.remove(usersDir ++ key ++ ".json")
+  void profileSearchDocs.deleteOne({_id: key})
+  array files = fs.readDir(usersDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -606,7 +606,7 @@ def purgeUserFromProfiles(string key) (
 )
 
 def purgeUserFromProjects(string key, string userId) (
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -678,7 +678,7 @@ def purgeUserFromProjects(string key, string userId) (
       )
     )
   )
-  array trashFiles = fs.readDir(trashDir)
+  array trashFiles = fs.readDir(trashDir).unwrapOr([])
   for i trashFiles.len (
     string name = trashFiles[i].toStr()
     if name.endsWith(".json") (
@@ -694,9 +694,9 @@ def purgeUserFromProjects(string key, string userId) (
 )
 
 def purgeUserFromComments(string key) (
-  fs.remove(commentsDir ++ "profile-" ++ key ++ ".jsonl")
-  fs.remove(commentsDir ++ "profile-" ++ key ++ ".json")
-  array files = fs.readDir(commentsDir)
+  void fs.remove(commentsDir ++ "profile-" ++ key ++ ".jsonl")
+  void fs.remove(commentsDir ++ "profile-" ++ key ++ ".json")
+  array files = fs.readDir(commentsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     string ckey = name.replace(".jsonl", "").replace(".json", "")
@@ -717,8 +717,8 @@ def purgeUserFromComments(string key) (
 )
 
 def purgeUserFromNotifications(string key) (
-  fs.remove(notificationsDir ++ key ++ ".json")
-  array files = fs.readDir(notificationsDir)
+  void fs.remove(notificationsDir ++ key ++ ".json")
+  array files = fs.readDir(notificationsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -746,7 +746,7 @@ def purgeUserFromNotifications(string key) (
 )
 
 def purgeUserSessions(string userId) (
-  array files = fs.readDir(sessionsDir)
+  array files = fs.readDir(sessionsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -754,7 +754,7 @@ def purgeUserSessions(string userId) (
       if res.ok (
         object session = res.data.assert(object)
         if session.userId.toStr() == userId (
-          fs.remove(sessionsDir ++ name)
+          void fs.remove(sessionsDir ++ name)
           sessionCache.delete(name.replace(".json", ""))
         )
       )
@@ -777,11 +777,11 @@ def purgeUser(string userId, string username) (
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)
   removeUserFromSafetyLists(username)
-  fs.remove(activityDir ++ key ++ ".json")
-  fs.remove(userSettingsDir ++ key ++ ".json")
-  fs.remove(quotaDir ++ key ++ ".json")
-  fs.remove(agreementAcceptDir ++ key ++ ".json")
-  fs.remove(safetyDir ++ key ++ ".json")
+  void fs.remove(activityDir ++ key ++ ".json")
+  void fs.remove(userSettingsDir ++ key ++ ".json")
+  void fs.remove(quotaDir ++ key ++ ".json")
+  void fs.remove(agreementAcceptDir ++ key ++ ".json")
+  void fs.remove(safetyDir ++ key ++ ".json")
   array admins = loadAdmins()
   if admins.contains(key) (
     saveAdmins(removeUserFromArray(admins, key))
@@ -810,7 +810,7 @@ def reconcileDeletedUsers() (
   object idUsers = idData.users
   array ids = idUsers.getKeys()
   object fallbackUsernames = {}
-  array profileFiles = fs.readDir(usersDir)
+  array profileFiles = fs.readDir(usersDir).unwrapOr([])
   for i profileFiles.len (
     string name = profileFiles[i].toStr()
     if name.endsWith(".json") (
@@ -827,7 +827,7 @@ def reconcileDeletedUsers() (
   array projectDirectories = [projectsDir, trashDir]
   for d projectDirectories.len (
     string directory = projectDirectories[d].toStr()
-    array projectFiles = fs.readDir(directory)
+    array projectFiles = fs.readDir(directory).unwrapOr([])
     for i projectFiles.len (
       string name = projectFiles[i].toStr()
       if name.endsWith(".json") (
@@ -852,7 +852,7 @@ def reconcileDeletedUsers() (
   if ids.len == 0 (
     return
   )
-  object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})})
+  object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !resp.success (
     log "reconcileDeletedUsers: rotur request failed"
     return

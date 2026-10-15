@@ -36,7 +36,7 @@ def getSession(string token) object (
     sessionCache.set(token, session)
   )
   if timestamp - session.createdAt.toNum() > 604800000 (
-    fs.remove(path)
+    void fs.remove(path)
     sessionCache.delete(token)
     return {ok: false, error: "session expired"}
   )
@@ -58,25 +58,25 @@ def deleteSession(string token) boolean (
 )
 
 def cleanupExpiredSessions() (
-  array files = fs.readDir(sessionsDir)
+  array files = fs.readDir(sessionsDir).unwrapOr([])
   for i files.len (
     string path = sessionsDir ++ files[i].toStr()
     auto res = readFile(path)
     if res.ok (
       object session = res.data.assert(object)
       if timestamp - session.createdAt.toNum() > 604800000 (
-        fs.remove(path)
+        void fs.remove(path)
       )
     )
   )
 )
 
 def requestToken(*serve.Context c) string (
-  string token = c.bearer()
+  string token = (c.bearer() ?? "")
   if token != "" (
     return token
   )
-  return c.cookie("auth_token")
+  return (c.cookie("auth_token") ?? "")
 )
 
 def isAdminUser(string username) boolean (
@@ -88,7 +88,7 @@ def isAdminUser(string username) boolean (
 )
 
 def handleRoturAuth(*serve.Context c) (
-  string validator = c.query("v")
+  string validator = (c.query("v") ?? "")
   if validator == "" (
     c.json(401, {ok: false, error: "missing validator"})
     return
@@ -104,7 +104,7 @@ def handleRoturAuth(*serve.Context c) (
   )
   object data = {}
   for i keys.len (
-    object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator))
+    object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator)).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
     // Rotur answers every validator with 200, valid or not.
     number status = (resp.status ?? 0).toNum().toInt()
     if status < 200 or status >= 300 (
@@ -237,7 +237,7 @@ def handleHealth(*serve.Context c) (
 
 def externalDependency(string url) object (
   number started = timestamp
-  object resp = requests.get(url)
+  object resp = requests.get(url).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   string status = "unavailable"
   if resp.success (
     status = "operational"
@@ -252,8 +252,8 @@ def handleDependencyHealth(*serve.Context c) (
   string probePath = tmpDir ++ "health-" ++ randomString(8)
   boolean storageOk = fs.writeFile(probePath, "ok")
   if storageOk (
-    storageOk = fs.readFile(probePath) == "ok"
-    fs.remove(probePath)
+    storageOk = fs.readFile(probePath).unwrapOr("") == "ok"
+    void fs.remove(probePath)
   )
 
   object roturStatus = externalDependency(roturBase)

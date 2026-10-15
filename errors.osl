@@ -3,7 +3,7 @@ def pruneSiteErrors() (
   for i stored.len (
     if i >= 1000 (
       object entry = stored[i].assert(object)
-      errorDocs.deleteOne({_id: entry["_id"]})
+      void errorDocs.deleteOne({_id: entry["_id"]})
     )
   )
 )
@@ -33,12 +33,12 @@ def isAllowedErrorOrigin(string origin, array allowed) boolean (
 )
 
 def handleRecordSiteError(*serve.Context c) (
-  string origin = siteErrorOrigin(c.header("Origin"), c.header("Referer"))
+  string origin = siteErrorOrigin((c.header("Origin") ?? ""), (c.header("Referer") ?? ""))
   if !isAllowedErrorOrigin(origin, errorReportOrigins) (
     c.json(200, {ok: true, ignored: true})
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string message = body.message.toStr().strip()
   if message == "" (
     c.badRequest("error message is required")
@@ -88,7 +88,7 @@ def handleRecordSiteError(*serve.Context c) (
   if body.contains("componentStack") and body.componentStack != null (
     componentStack = body.componentStack.toStr().trim(1, 10000)
   )
-  string userAgent = c.header("User-Agent").strip().trim(1, 500)
+  string userAgent = (c.header("User-Agent") ?? "").strip().trim(1, 500)
   string username = c.getString("username")
   object entry = {
     _id: "e" ++ randomString(16),
@@ -106,14 +106,14 @@ def handleRecordSiteError(*serve.Context c) (
     resolved: false
   }
   sync.lock("site-errors")
-  errorDocs.insertOne(entry)
+  void errorDocs.insertOne(entry)
   pruneSiteErrors()
   sync.unlock("site-errors")
   c.json(201, {ok: true})
 )
 
 def handleAdminGetErrors(*serve.Context c) (
-  string show = c.query("show").toLower().strip()
+  string show = (c.query("show") ?? "").toLower().strip()
   array items = errorDocs.sort("created", db.desc).limit(200).all()
   if show != "all" and show != "resolved" (
     array open = []
@@ -139,7 +139,7 @@ def handleAdminGetErrors(*serve.Context c) (
 )
 
 def handleAdminResolveSiteError(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string id = body.id.toStr()
   if id == "" (
     c.badRequest("error id is required")
@@ -149,7 +149,7 @@ def handleAdminResolveSiteError(*serve.Context c) (
   if body.contains("resolved") (
     resolved = body.resolved == true
   )
-  object entry = errorDocs.findById(id)
+  object entry = (errorDocs.findById(id) ?? {})
   if entry.len == 0 (
     c.notFound("error not found")
     return
@@ -169,7 +169,7 @@ def deleteAllSiteErrors() number (
   array entries = errorDocs.all()
   for i entries.len (
     object entry = entries[i].assert(object)
-    errorDocs.deleteOne({_id: entry["_id"]})
+    void errorDocs.deleteOne({_id: entry["_id"]})
   )
   sync.unlock("site-errors")
   return entries.len
@@ -181,16 +181,16 @@ def handleAdminDeleteAllSiteErrors(*serve.Context c) (
 )
 
 def handleAdminDeleteSiteError(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string id = body.id.toStr()
   if id == "" (
     c.badRequest("error id is required")
     return
   )
-  if errorDocs.findById(id).len == 0 (
+  if (errorDocs.findById(id) ?? {}).len == 0 (
     c.notFound("error not found")
     return
   )
-  errorDocs.deleteOne({_id: id})
+  void errorDocs.deleteOne({_id: id})
   c.json(200, {ok: true})
 )

@@ -7,7 +7,7 @@ def normalizeGroupTag(string value) string (
 )
 
 def roturPublicGroupSnapshot(string tag) object (
-  object publicResponse = requests.get(roturBase ++ "/groups/" ++ url.escape(tag))
+  object publicResponse = requests.get(roturBase ++ "/groups/" ++ url.escape(tag)).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !publicResponse.success or publicResponse.status.toInt() != 200 (
     return {ok: false, error: if publicResponse.status.toInt() == 404 then "group not found" else "could not load group"}
   )
@@ -34,7 +34,7 @@ def roturGroupSnapshot(string rawTag) object (
   object response = requests.get(
     roturBase ++ "/groups/" ++ url.escape(tag) ++ "/integrations/mistwarp",
     {headers: {"X-Commerce-Key": commerceServiceKey}}
-  )
+  ).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !response.success or response.status.toInt() != 200 (
     return roturPublicGroupSnapshot(tag)
   )

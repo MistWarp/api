@@ -92,7 +92,7 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
 def handlePatchCommit(*serve.Context c) (
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
-  object result = applyCommitPatch(c.param("id"), c.param("sha"), c.bodyJSON(), c.getString("username"), c.getBool("isAdmin"))
+  object result = applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), c.getString("username"), c.getBool("isAdmin"))
   sync.unlock(lockName)
   if result.status.toInt() == 404 (
     c.notFound(result.error.toStr())

@@ -76,7 +76,7 @@ def canViewProject(object project,*serve.Context c) boolean (
   if projectIsViewable(project) (
     return true
   )
-  if validPreviewKey(project.id.toStr(), c.query("k")) (
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
     return true
   )
   if projectRole(project, c.getString("username")) != "" (
@@ -90,10 +90,10 @@ def canViewProject(object project,*serve.Context c) boolean (
 
 def canViewProjectJson(object project,*serve.Context c) boolean (
   if projectHiddenFrom(project, c) (
-    return bannedKeyMatches(project, c.query("k"))
+    return bannedKeyMatches(project, (c.query("k") ?? ""))
   )
   if canSaveLiveProject(project, c) return true
-  if validPreviewKey(project.id.toStr(), c.query("k")) (
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
     return true
   )
   if canViewForkProject(project, c) (
@@ -104,13 +104,13 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
       return true
     )
     string pk = projectViewKey(project)
-    return pk != "" and c.query("k") == pk
+    return pk != "" and (c.query("k") ?? "") == pk
   )
   if project.shared == true or projectVisibility(project) == "unlisted" (
     return true
   )
   string k = projectViewKey(project)
-  if k != "" and c.query("k") == k (
+  if k != "" and (c.query("k") ?? "") == k (
     return true
   )
   return canEditProject(project, c)
@@ -299,8 +299,8 @@ def projectResponse(object project,*serve.Context c) object (
   string jsonUrl = jsonBase
   if project.shared != true and projectViewKey(project) != "" (
     string accessKey = projectViewKey(project)
-    if validPreviewKey(project.id.toStr(), c.query("k")) (
-      accessKey = c.query("k")
+    if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+      accessKey = (c.query("k") ?? "")
     )
     jsonUrl = jsonBase ++ "?k=" ++ accessKey
   )
@@ -488,7 +488,7 @@ def handleGetMyQuota(*serve.Context c) (
 )
 
 def handleCreateProject(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string username = c.getString("username")
   number projectLimit = mistwarpBenefitsForUserId(c.getString("userId")).maxProjects.toNum()
   if !c.getBool("isAdmin") and ownedProjectSlotCount(c.getString("userId"), username) >= projectLimit (
@@ -633,7 +633,7 @@ def pendingUploadEvents(string username) array (
 
 def trashedProjectsOwnedBy(string userId, string username) array (
   array owned = []
-  array trashFiles = fs.readDir(trashDir)
+  array trashFiles = fs.readDir(trashDir).unwrapOr([])
   for i trashFiles.len (
     string file = trashFiles[i].toStr()
     if file.endsWith(".json") (
@@ -732,8 +732,8 @@ def validStagedUploadPartKind(string kind) boolean (
 )
 
 def removeStagedUploadPart(string token, object metadata) (
-  fs.remove(stagedUploadPartDataPath(token))
-  fs.remove(stagedUploadPartMetaPath(token))
+  void fs.remove(stagedUploadPartDataPath(token))
+  void fs.remove(stagedUploadPartMetaPath(token))
 )
 
 def consumeStagedUploadPart(string token, string projectId, string kind, string userId) object (
@@ -755,7 +755,7 @@ def consumeStagedUploadPart(string token, string projectId, string kind, string 
   if metadata.contains("complete") and metadata.complete != true (
     return {ok: false, error: "staged upload is incomplete"}
   )
-  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token))
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token)).unwrapOr("".toBytes())
   if data.len != metadata.size.toNum() (
     removeStagedUploadPart(token, metadata)
     return {ok: false, error: "staged upload is incomplete"}
@@ -765,7 +765,7 @@ def consumeStagedUploadPart(string token, string projectId, string kind, string 
 )
 
 def cleanupExpiredStagedUploadParts() (
-  array files = fs.readDir(tmpDir)
+  array files = fs.readDir(tmpDir).unwrapOr([])
   for i files.len (
     string filename = files[i].toStr()
     if filename.startsWith("upload-part-") and filename.endsWith(".json") (
@@ -803,7 +803,7 @@ def handleUploadProjectAsset(*serve.Context c) (
     c.badRequest("missing asset file")
     return
   )
-  object file = fileResult.unwrap().assert(object)
+  object file = fileResult.unwrap()
   object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
   number assetLimit = benefits.maxProjectAssetBytes.toNum()
   if assetLimit > maxWorkspaceBytes (
@@ -872,7 +872,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
     c.badRequest("missing upload part")
     return
   )
-  object file = fileResult.unwrap().assert(object)
+  object file = fileResult.unwrap()
   if file.size.toNum() > maxWorkspaceBytes (
     c.json(413, {ok: false, error: "upload part exceeds the 90 MB limit", code: "upload_part_too_large"})
     return
@@ -905,7 +905,7 @@ def uploadPartChunkPath(string token, number index) string (
 
 def removeUploadPartChunks(string token, number count) (
   for i count (
-    fs.remove(uploadPartChunkPath(token, i))
+    void fs.remove(uploadPartChunkPath(token, i))
   )
 )
 
@@ -929,7 +929,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string kind = body.kind.toStr()
   string name = body.name.toStr()
   number size = body.size.toNum().toInt()
@@ -1022,8 +1022,8 @@ def handleUploadProjectPartChunk(*serve.Context c) (
     c.badRequest("missing upload chunk")
     return
   )
-  object chunk = chunkResult.unwrap().assert(object)
-  number index = c.formValue("index").toNum().toInt()
+  object chunk = chunkResult.unwrap()
+  number index = (c.formValue("index") ?? "").toNum().toInt()
   if index != metadata.nextChunk.toNum() or chunk.size.toNum() < 1 or chunk.size.toNum() > maxUploadChunkBytes (
     c.badRequest("unexpected upload chunk")
     return
@@ -1040,7 +1040,7 @@ def handleUploadProjectPartChunk(*serve.Context c) (
   metadata.received = metadata.received.toNum() + chunk.size.toNum()
   metadata.expires = timestamp + stagedUploadPartTtlMs
   if !writeFile(stagedUploadPartMetaPath(token), metadata) (
-    fs.remove(uploadPartChunkPath(token, index))
+    void fs.remove(uploadPartChunkPath(token, index))
     c.internalError("could not update upload")
     return
   )
@@ -1064,7 +1064,7 @@ def handleCompleteProjectUploadPart(*serve.Context c) (
     return
   )
   removeUploadPartChunks(token, metadata.chunks.toNum())
-  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token))
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token)).unwrapOr("".toBytes())
   string kind = metadata.kind.toStr()
   if kind == "asset" (
     string name = metadata.name.toStr()
@@ -1150,7 +1150,7 @@ def inspectProjectJson(string path) object (
 )
 
 def uploadProjectFiles(object project, string extractDir, object benefits, number storageAllowanceBytes) object (
-  array names = fs.readDir(extractDir)
+  array names = fs.readDir(extractDir).unwrapOr([])
   string jsonPath = extractDir ++ "/project.json"
   if !fs.exists(jsonPath) (
     return {ok: false, error: "sb3 has no project.json", status: 400}
@@ -1192,7 +1192,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
           number assetLimitMb = (assetLimit / 1048576).toInt()
           return {ok: false, error: "an asset exceeds your " ++ assetLimitMb.toStr() ++ " MB limit: " ++ name, code: "project_too_large", status: 413}
         )
-        string content = fs.readFile(assetPath)
+        string content = fs.readFile(assetPath).unwrapOr("")
         string actualHash = content.hashMD5()
         if actualHash != md5PartOf(name) (
           return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
@@ -1262,7 +1262,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
     object upload = pendingUploads[i].assert(object)
     string path = upload.path.toStr()
     string name = upload.name.toStr()
-    string content = fs.readFile(path)
+    string content = fs.readFile(path).unwrapOr("")
     if !stageR2Blob(assetObjectKey(name), content, contentTypeForExt(extPartOf(name)), "") (
       return {ok: false, error: "asset upload failed", status: 502}
     )
@@ -1277,10 +1277,10 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
 )
 
 def pushProjectJsonToR2(object project, string gzipPath) boolean (
-  if !r2PutEncoded(project.jsonKey.toStr(), fs.readFileBytes(gzipPath), "application/json", "gzip") (
+  if !r2PutEncoded(project.jsonKey.toStr(), fs.readFileBytes(gzipPath).unwrapOr("".toBytes()), "application/json", "gzip") (
     return false
   )
-  fs.remove(stagingJsonPath(project.id.toStr()))
+  void fs.remove(stagingJsonPath(project.id.toStr()))
   return true
 )
 
@@ -1291,7 +1291,7 @@ def stageProjectJson(object project, string gzipPath) boolean (
     return false
   )
   if !fs.rename(tmpPath, path) (
-    fs.remove(tmpPath)
+    void fs.remove(tmpPath)
     return false
   )
   return true
@@ -1309,7 +1309,7 @@ def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean
   array directories = [projectsDir, trashDir]
   for d directories.len (
     string directory = directories[d].toStr()
-    array files = fs.readDir(directory)
+    array files = fs.readDir(directory).unwrapOr([])
     for i files.len (
       auto loaded = readFile(directory ++ files[i].toStr())
       if loaded.ok (
@@ -1329,7 +1329,7 @@ def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean
     return true
   )
   if !workspace (
-    array evidenceIds = fs.readDir(reportEvidenceDir)
+    array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
     for i evidenceIds.len (
       object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
       if (evidence.evidenceJsonKey ?? "").toStr() == key (
@@ -1352,19 +1352,19 @@ def ensureProjectJsonSnapshot(object project) object (
   )
   string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".json.gz"
   if !copyStoredProjectJsonToPath(project, tempPath) (
-    fs.remove(tempPath)
+    void fs.remove(tempPath)
     return {ok: false}
   )
-  byte[] snapshotBody = fs.readFileBytes(tempPath)
+  byte[] snapshotBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
   string key = projectJsonSnapshotKey(contentHash(snapshotBody))
   if !stageR2Blob(key, snapshotBody, "application/json", "gzip") (
-    fs.remove(tempPath)
+    void fs.remove(tempPath)
     return {ok: false}
   )
   project.jsonKey = key
   project.jsonGzip = true
   project.pendingJson = false
-  fs.remove(tempPath)
+  void fs.remove(tempPath)
   // Return an immutable snapshot to the caller without rewriting the source
   // record. Another save may have advanced that record while storage was read.
   return {ok: true, project: project}
@@ -1380,16 +1380,16 @@ def ensureProjectWorkspaceSnapshots(object project) object (
   )
   string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
   if !copyProjectWorkspaceToPath(project, tempPath) (
-    fs.remove(tempPath)
+    void fs.remove(tempPath)
     return {ok: false}
   )
-  byte[] workspaceBody = fs.readFileBytes(tempPath)
+  byte[] workspaceBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
   string key = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
   if !stageR2Blob(key, workspaceBody, "application/x-mistwarp-project", "") (
-    fs.remove(tempPath)
+    void fs.remove(tempPath)
     return {ok: false}
   )
-  fs.remove(tempPath)
+  void fs.remove(tempPath)
   project.workspaceKey = key
   project.workspaceLayers = [key]
   project.historyBytes = workspaceBody.len
@@ -1425,7 +1425,7 @@ def flushProjectLocked(object project) (
           saveProject(project)
         )
         if gzipPath != path (
-          fs.remove(gzipPath)
+          void fs.remove(gzipPath)
         )
       )
     )
@@ -1433,7 +1433,7 @@ def flushProjectLocked(object project) (
 )
 
 def sweepStagedProjects() (
-  array files = fs.readDir(stagingDir)
+  array files = fs.readDir(stagingDir).unwrapOr([])
   for i files.len (
     array parts = files[i].toStr().split(".")
     string id = parts[1].toStr()
@@ -1455,7 +1455,7 @@ def handleCheckProjectAssets(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("assets") or body.assets == null (
     c.badRequest("assets list is required")
     return
@@ -1500,17 +1500,17 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
-  boolean replaceHistory = c.formValue("replaceHistory") == "true"
-  string expectedHead = c.formValue("expectedHead").strip()
-  string restoreCommit = c.formValue("restoreCommit").strip()
-  string restoreMessage = c.formValue("restoreMessage").strip()
-  string pullId = c.formValue("pullId").strip()
-  string mergeSourceBranch = c.formValue("mergeSourceBranch").strip()
-  string mergeTargetBranch = c.formValue("mergeTargetBranch").strip()
-  string requestedMergeSourceHead = c.formValue("mergeSourceHead").strip()
-  string requestedMergeTargetHead = c.formValue("mergeTargetHead").strip()
+  boolean replaceHistory = (c.formValue("replaceHistory") ?? "") == "true"
+  string expectedHead = (c.formValue("expectedHead") ?? "").strip()
+  string restoreCommit = (c.formValue("restoreCommit") ?? "").strip()
+  string restoreMessage = (c.formValue("restoreMessage") ?? "").strip()
+  string pullId = (c.formValue("pullId") ?? "").strip()
+  string mergeSourceBranch = (c.formValue("mergeSourceBranch") ?? "").strip()
+  string mergeTargetBranch = (c.formValue("mergeTargetBranch") ?? "").strip()
+  string requestedMergeSourceHead = (c.formValue("mergeSourceHead") ?? "").strip()
+  string requestedMergeTargetHead = (c.formValue("mergeTargetHead") ?? "").strip()
   string currentHead = projectGitHead(project)
-  string expectedEdited = c.formValue("expectedEdited").strip()
+  string expectedEdited = (c.formValue("expectedEdited") ?? "").strip()
   if !canEditProject(project, c) (
     if expectedEdited == "" or restoreCommit != "" or pullId != "" or mergeSourceBranch != "" or replaceHistory (
       c.forbidden("live contributors can save the current project; history and publishing require a maintainer")
@@ -1531,7 +1531,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
 
-  string gitMetadata = c.formValue("git")
+  string gitMetadata = (c.formValue("git") ?? "")
   object gitInfo = {}
   if gitMetadata != "" (
     auto parsedGit = json.parse(gitMetadata, {type: "object"})
@@ -1559,7 +1559,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     c.badRequest("missing project file")
     return
   )
-  object file = fileResult.unwrap().assert(object)
+  object file = fileResult.unwrap()
   object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
 
   string uploader = normalizeUsername(c.getString("username"))
@@ -1570,9 +1570,9 @@ def handleUploadProjectLocked(*serve.Context c) (
   object workspaceFile = {}
   object mergeTreeFile = {}
   if hasWorkspace (
-    workspaceFile = workspaceResult.unwrap().assert(object)
-  ) else if c.formValue("workspaceToken") != "" (
-    object stagedWorkspace = consumeStagedUploadPart(c.formValue("workspaceToken"), project.id.toStr(), "workspace", c.getString("userId"))
+    workspaceFile = workspaceResult.unwrap()
+  ) else if (c.formValue("workspaceToken") ?? "") != "" (
+    object stagedWorkspace = consumeStagedUploadPart((c.formValue("workspaceToken") ?? ""), project.id.toStr(), "workspace", c.getString("userId"))
     if !stagedWorkspace.ok (
       c.badRequest(stagedWorkspace.error.toStr())
       return
@@ -1581,9 +1581,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     hasWorkspace = true
   )
   if hasMergeTree (
-    mergeTreeFile = mergeTreeResult.unwrap().assert(object)
-  ) else if c.formValue("mergeTreeToken") != "" (
-    object stagedMergeTree = consumeStagedUploadPart(c.formValue("mergeTreeToken"), project.id.toStr(), "mergeTree", c.getString("userId"))
+    mergeTreeFile = mergeTreeResult.unwrap()
+  ) else if (c.formValue("mergeTreeToken") ?? "") != "" (
+    object stagedMergeTree = consumeStagedUploadPart((c.formValue("mergeTreeToken") ?? ""), project.id.toStr(), "mergeTree", c.getString("userId"))
     if !stagedMergeTree.ok (
       c.badRequest(stagedMergeTree.error.toStr())
       return
@@ -1604,35 +1604,35 @@ def handleUploadProjectLocked(*serve.Context c) (
 
   number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
   if !validateZipArchive(file.data.assertElse(byte[], []), maxProjectUploadRequestBytes, extractedLimit, maxAssetCount + 1, false) (
-    fs.remove(zipPath)
+    void fs.remove(zipPath)
     c.badRequest("invalid or unsafe sb3 file")
     return
   )
   if !zip.decompressLimited(zipPath, extractDir, extractedLimit, maxAssetCount + 1) (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     c.badRequest("invalid sb3 file")
     return
   )
 
   if replaceHistory and !hasWorkspace (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     c.badRequest("history replacement requires a full workspace")
     return
   )
 
   if hasWorkspace (
     if workspaceFile.size.toNum() > maxWorkspaceBytes or !validateZipArchive(workspaceFile.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
       return
     )
     object checked = validateUploadedHistoryMode(project, workspaceFile.data.assertElse(byte[], []), gitMetadata, currentHead, replaceHistory)
     if !checked.ok (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
       return
     )
@@ -1649,8 +1649,8 @@ def handleUploadProjectLocked(*serve.Context c) (
   if ordinaryVersionSave (
     string incomingHead = canonicalHistoryHead(gitInfo)
     if incomingHead == currentHead (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
       return
     )
@@ -1658,8 +1658,8 @@ def handleUploadProjectLocked(*serve.Context c) (
       byte[] incomingWorkspaceBody = workspaceFile.data.assertElse(byte[], [])
       number incomingWorkspaceSize = workspaceFile.size.toNum()
       if incomingWorkspaceSize > maxWorkspaceBytes or !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
         return
       )
@@ -1670,28 +1670,28 @@ def handleUploadProjectLocked(*serve.Context c) (
       if compareReady (
         comparisonJson = gitinspection.CommitTreesDiffer(compareBasePath, currentHead, compareIncomingPath, incomingHead)
       )
-      fs.remove(compareBasePath)
-      fs.remove(compareIncomingPath)
+      void fs.remove(compareBasePath)
+      void fs.remove(compareIncomingPath)
       auto parsedComparison = json.parse(comparisonJson, {type: "object"})
       if !compareReady or parsedComparison.isErr() or parsedComparison.unwrap().assert(object).ok != true (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.json(400, {ok: false, error: "could not validate the MistWarp project history", code: "invalid_workspace"})
         return
       )
       if parsedComparison.unwrap().assert(object).changed != true (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
         return
       )
     )
   )
 
-  object extensionResult = collectProjectExtensions(extractDir ++ "/project.json", c.formValue("extensions"))
+  object extensionResult = collectProjectExtensions(extractDir ++ "/project.json", (c.formValue("extensions") ?? ""))
   if !extensionResult.ok (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     object extensionError = {ok: false, error: extensionResult.error}
     if extensionResult.contains("code") (
       extensionError.code = extensionResult.code
@@ -1714,8 +1714,8 @@ def handleUploadProjectLocked(*serve.Context c) (
       string latestSourceHead = projectBranchHead(project, mergeSourceBranch)
       string latestTargetHead = projectBranchHead(project, mergeTargetBranch)
       if mergeSourceBranch == mergeTargetBranch or latestSourceHead == "" or latestTargetHead == "" or latestSourceHead != requestedMergeSourceHead or latestTargetHead != requestedMergeTargetHead (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.json(409, {ok: false, error: "a branch changed while this merge was processing", code: "branch_head_changed"})
         return
       )
@@ -1723,15 +1723,15 @@ def handleUploadProjectLocked(*serve.Context c) (
     ) else (
       mergePull = pullDocument(project.id.toStr(), pullId)
       if pullId == "" or mergePull.len == 0 or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
         return
       )
       auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
       if !mergeSourceResult.ok (
-        fs.remove(zipPath)
-        fs.remove(extractDir)
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
         c.notFound("merge source project not found")
         return
       )
@@ -1740,8 +1740,8 @@ def handleUploadProjectLocked(*serve.Context c) (
       mergeTargetHead = currentHead
     )
     if !validateZipArchive(mergeTree.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.badRequest("invalid merged project tree")
       return
     )
@@ -1764,24 +1764,24 @@ def handleUploadProjectLocked(*serve.Context c) (
     )
     auto parsedMerge = json.parse(mergeJson, {type: "object"})
     if !mergeReady or parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
-      fs.remove(mergeTargetPath)
-      fs.remove(mergeSourcePath)
-      fs.remove(mergeTreePath)
-      fs.remove(mergeDeltaPath)
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(mergeTargetPath)
+      void fs.remove(mergeSourcePath)
+      void fs.remove(mergeTreePath)
+      void fs.remove(mergeDeltaPath)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(409, {ok: false, error: "could not create the merge commit", code: "merge_unavailable"})
       return
     )
     object mergeResult = parsedMerge.unwrap().assert(object)
     gitInfo = mergeResult.manifest.assert(object)
     gitMetadata = json.stringify(gitInfo)
-    generatedWorkspaceBody = fs.readFileBytes(mergeDeltaPath)
+    generatedWorkspaceBody = fs.readFileBytes(mergeDeltaPath).unwrapOr("".toBytes())
     generatedWorkspace = true
-    fs.remove(mergeTargetPath)
-    fs.remove(mergeSourcePath)
-    fs.remove(mergeTreePath)
-    fs.remove(mergeDeltaPath)
+    void fs.remove(mergeTargetPath)
+    void fs.remove(mergeSourcePath)
+    void fs.remove(mergeTreePath)
+    void fs.remove(mergeDeltaPath)
   )
   if restoreCommit != "" and !hasWorkspace (
     string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
@@ -1797,27 +1797,27 @@ def handleUploadProjectLocked(*serve.Context c) (
     )
     auto parsedRestore = json.parse(restoreJson, {type: "object"})
     if !restoreReady or parsedRestore.isErr() or parsedRestore.unwrap().assert(object).ok != true (
-      fs.remove(restoreBasePath)
-      fs.remove(restoreDeltaPath)
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(restoreBasePath)
+      void fs.remove(restoreDeltaPath)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(409, {ok: false, error: "could not restore that project version", code: "restore_unavailable"})
       return
     )
     object restoreResult = parsedRestore.unwrap().assert(object)
     gitInfo = restoreResult.manifest.assert(object)
     gitMetadata = json.stringify(gitInfo)
-    generatedWorkspaceBody = fs.readFileBytes(restoreDeltaPath)
+    generatedWorkspaceBody = fs.readFileBytes(restoreDeltaPath).unwrapOr("".toBytes())
     generatedWorkspace = true
-    fs.remove(restoreBasePath)
-    fs.remove(restoreDeltaPath)
+    void fs.remove(restoreBasePath)
+    void fs.remove(restoreDeltaPath)
   )
 
   if generatedWorkspace (
     object checked = validateUploadedHistory(project, generatedWorkspaceBody, gitMetadata, historyBaseHead)
     if !checked.ok (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
       return
     )
@@ -1835,14 +1835,14 @@ def handleUploadProjectLocked(*serve.Context c) (
       incomingWorkspaceSize = workspaceFile.size.toNum()
     )
     if incomingWorkspaceSize > maxWorkspaceBytes (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(413, {ok: false, error: "one history update exceeds the 512 MB safety limit", code: "workspace_update_too_large"})
       return
     )
     if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
       return
     )
@@ -1850,8 +1850,8 @@ def handleUploadProjectLocked(*serve.Context c) (
     previousWorkspaceKeys = projectWorkspaceKeys(project)
     string workspaceKey = projectWorkspaceSnapshotKey(contentHash(incomingWorkspaceBody))
     if !stageR2Blob(workspaceKey, incomingWorkspaceBody, "application/x-mistwarp-project", "") (
-      fs.remove(zipPath)
-      fs.remove(extractDir)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
       c.internalError("failed to store MistWarp project history")
       return
     )
@@ -1877,8 +1877,8 @@ def handleUploadProjectLocked(*serve.Context c) (
         removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
       )
     )
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     if (uploadResult.code ?? "").toStr() == "storage_full" (
       storageFullResponse(c, storageDetails(project.owner.toStr()), uploadResult.overBytes.toNum())
       return
@@ -1893,17 +1893,17 @@ def handleUploadProjectLocked(*serve.Context c) (
 
   array projectExtensions = extensionResult.extensions.assert(array)
   if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     c.internalError("failed to store extension sources")
     return
   )
 
   auto thumbResult = c.formFile("thumbnail")
   if !thumbResult.isErr() (
-    object thumb = thumbResult.unwrap().assert(object)
+    object thumb = thumbResult.unwrap()
     if thumb.size.toNum() <= maxThumbBytes (
-      fs.writeFileBytes(thumbnailPath(id), thumb.data)
+      void fs.writeFileBytes(thumbnailPath(id), thumb.data)
     )
   )
 
@@ -1927,7 +1927,7 @@ def handleUploadProjectLocked(*serve.Context c) (
 
   // Use an immutable JSON key so a failed metadata publication cannot
   // overwrite the playable content referenced by the previous record.
-  byte[] jsonBody = fs.readFileBytes(gzipPath)
+  byte[] jsonBody = fs.readFileBytes(gzipPath).unwrapOr("".toBytes())
   project.jsonKey = projectJsonSnapshotKey(contentHash(jsonBody))
   boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
   project.lastUploadAt = timestamp
@@ -1943,8 +1943,8 @@ def handleUploadProjectLocked(*serve.Context c) (
       )
     )
     c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     return
   )
   recordCreatingDay(c.getString("username"))
@@ -1964,8 +1964,8 @@ def handleUploadProjectLocked(*serve.Context c) (
         )
       )
     )
-    fs.remove(zipPath)
-    fs.remove(extractDir)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
     c.internalError("failed to save project metadata")
     return
   )
@@ -1983,8 +1983,8 @@ def handleUploadProjectLocked(*serve.Context c) (
       )
     )
   )
-  fs.remove(zipPath)
-  fs.remove(extractDir)
+  void fs.remove(zipPath)
+  void fs.remove(extractDir)
 
   if !projectHasWorkspace(project) (
     object generatedHistory = ensureUploadedProjectHistory(project)
@@ -2060,7 +2060,7 @@ def handleSetThumbnail(*serve.Context c) (
     c.badRequest("missing thumbnail file")
     return
   )
-  object thumb = thumbResult.unwrap().assert(object)
+  object thumb = thumbResult.unwrap()
   if thumb.size.toNum() > maxThumbBytes (
     c.badRequest("thumbnail too large")
     return
@@ -2097,7 +2097,7 @@ def handleGetProject(*serve.Context c) (
   // Admins reviewing a banned owner's project play the saved JSON, which
   // takes the key; the release route doesn't.
   if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true (
-    object release = releaseDocs.findById(project.publicRelease.toStr())
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
     if release.len > 0 and release.contains("jsonUrl") (
       response.projectJsonUrl = release.jsonUrl
       response.releaseVersion = release.version
@@ -2273,7 +2273,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
     return
   )
 
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if isStudentUserId((project.ownerId ?? "").toStr()) and !c.getBool("isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
     c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
     return
@@ -2736,7 +2736,7 @@ def collectAssetsUsedByOthers(string excludeId) object (
   array directories = [projectsDir, trashDir]
   for d directories.len (
     string directory = directories[d].toStr()
-    array files = fs.readDir(directory)
+    array files = fs.readDir(directory).unwrapOr([])
     for i files.len (
       auto res = readFile(directory ++ files[i].toStr())
       if res.ok (
@@ -2750,7 +2750,7 @@ def collectAssetsUsedByOthers(string excludeId) object (
       )
     )
   )
-  array evidenceIds = fs.readDir(reportEvidenceDir)
+  array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
   for i evidenceIds.len (
     object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
     if evidence.id.toStr() != excludeId and evidence.contains("assets") and evidence.assets != null (
@@ -2795,10 +2795,10 @@ def purgeProjectStorage(object project, boolean cleanAssets) (
   removeProjectExtensionUsage(id, storedProjectExtensions(project))
   deleteProjectFile(id)
   removeFromIndex(id)
-  fs.remove(stagingJsonPath(id))
-  fs.remove(thumbnailPath(id))
-  fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
-  fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
+  void fs.remove(stagingJsonPath(id))
+  void fs.remove(thumbnailPath(id))
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
   removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), id, false)
   array workspaceKeys = projectWorkspaceKeys(project)
   for i workspaceKeys.len (
@@ -2812,7 +2812,7 @@ def purgeProjectStorage(object project, boolean cleanAssets) (
 
 def purgeProject(object project) (
   purgeProjectStorage(project, true)
-  fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
   deleteProjectCommunityRecords(project.id.toStr())
   removeProjectFromSpaces(project.id.toStr())
 )
@@ -2884,7 +2884,7 @@ def loadTrashedProject(string id) object (
 )
 
 def purgeExpiredTrash() (
-  array files = fs.readDir(trashDir)
+  array files = fs.readDir(trashDir).unwrapOr([])
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
@@ -2904,7 +2904,7 @@ def handleGetMyTrash(*serve.Context c) (
   array projects = []
   string userId = c.getString("userId")
   string username = c.getString("username")
-  array files = fs.readDir(trashDir)
+  array files = fs.readDir(trashDir).unwrapOr([])
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
@@ -2956,7 +2956,7 @@ def handleRestoreProject(*serve.Context c) (
     c.internalError("failed to restore the project")
     return
   )
-  fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
   upsertIndexEntry(project)
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
@@ -3116,7 +3116,7 @@ def handleReactProject(*serve.Context c) (
 )
 
 def handleReactProjectLocked(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string reactionType = body.type.toStr()
   if !isValidReaction(reactionType) (
     c.badRequest("invalid reaction")
@@ -3220,8 +3220,8 @@ def sharedIndexEntries() array (
 def handleExplore(*serve.Context c) (
   array entries = projectsVisibleTo(sharedIndexEntries(), c)
 
-  string q = c.query("q").toLower().strip()
-  string tag = c.query("tag").toLower().strip()
+  string q = (c.query("q") ?? "").toLower().strip()
+  string tag = (c.query("tag") ?? "").toLower().strip()
   if q.startsWith("#") (
     tag = normalizeTag(q)
     q = ""
@@ -3296,7 +3296,7 @@ def handleExplore(*serve.Context c) (
 )
 
 def handleRandomProject(*serve.Context c) (
-  object project = randomProjectEntry(projectsVisibleToEveryone(sharedIndexEntries()), c.query("exclude").strip())
+  object project = randomProjectEntry(projectsVisibleToEveryone(sharedIndexEntries()), (c.query("exclude") ?? "").strip())
   if !project.contains("id") (
     c.json(404, {ok: false, error: "no shared projects yet"})
     return
@@ -3308,7 +3308,7 @@ def handleRelatedProjects(*serve.Context c) (
   array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("weekViews", "descending")
   number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
-  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), c.query("exclude").split(","), limit)})
+  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), (c.query("exclude") ?? "").split(","), limit)})
 )
 
 def handleFeaturedProject(*serve.Context c) (
@@ -3478,7 +3478,7 @@ def handleGetRemixTree(*serve.Context c) (
 
   array nodes = []
   object seen = {}
-  object root = projectSearchDocs.findById(rootId)
+  object root = (projectSearchDocs.findById(rootId) ?? {})
   if root.len > 0 (
     nodes.append(root)
     seen[rootId] = true
@@ -3544,7 +3544,7 @@ def handleRemixProjectLocked(*serve.Context c) (
     c.forbidden("this project cannot be remixed")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string forkTitle = parent.title.toStr() ++ " fork"
   if body.contains("title") and body.title != null and body.title.toStr().strip() != "" (
     forkTitle = body.title.toStr().strip().trim(1, 100)
@@ -3614,12 +3614,12 @@ def forkProjectFor(object source, string username, string userId, string forkTit
   string forkJson = gitinspection.ForkHistoryArchiveJSON(sourcePath, forkPath, forkBranch, id, parentId)
   auto parsedFork = json.parse(forkJson, {type: "object"})
   if parsedFork.isErr() or parsedFork.unwrap().assert(object).ok != true (
-    fs.remove(forkPath)
+    void fs.remove(forkPath)
     return {ok: false, status: 409, code: "history_unavailable", error: "requested branch history is unavailable"}
   )
   object forkHistory = parsedFork.unwrap().assert(object).manifest.assert(object)
-  byte[] forkBody = fs.readFileBytes(forkPath)
-  fs.remove(forkPath)
+  byte[] forkBody = fs.readFileBytes(forkPath).unwrapOr("".toBytes())
+  void fs.remove(forkPath)
   number forkBytes = projectSizeBytes(parent) + forkBody.len
   if enforceLimits and storageAllowance(mistwarpBenefitsForUserId(userId).storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
     return {ok: false, status: 413, code: "storage_full", error: "storage full", username: username, bytes: forkBytes}
@@ -3668,7 +3668,7 @@ def forkProjectFor(object source, string username, string userId, string forkTit
     gitGraph: forkHistory.graph,
     collaborators: []
   }
-  object parentEntry = projectSearchDocs.findById(parentId)
+  object parentEntry = (projectSearchDocs.findById(parentId) ?? {})
   if parentEntry.len > 0 and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
     project.remixRoot = parentEntry.remixRoot
   )
@@ -3718,18 +3718,18 @@ def validateUploadedHistoryMode(object project, byte[] body, string metadata, st
   string projectId = project.id.toStr()
   string remixParent = (project.remixParent ?? "").toStr()
   string resultJson = gitinspection.ValidateHistoryArchiveJSON(basePath, incomingPath, outputPath, currentHead, forkBase, metadata, projectId, remixParent)
-  fs.remove(incomingPath)
+  void fs.remove(incomingPath)
   auto parsed = json.parse(resultJson, {type: "object"})
   if parsed.isErr() (
-    fs.remove(outputPath)
+    void fs.remove(outputPath)
     return {ok: false, error: "could not validate history"}
   )
   object result = parsed.unwrap().assert(object)
   if result.ok (
-    byte[] data = fs.readFileBytes(outputPath)
+    byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
     result.data = data
     result.size = data.len
   )
-  fs.remove(outputPath)
+  void fs.remove(outputPath)
   return result
 )

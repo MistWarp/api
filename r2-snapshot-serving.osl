@@ -6,7 +6,7 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
   string etag = "\"" ++ key ++ "\""
   c.setHeader("ETag", etag)
   c.setHeader("Cache-Control", "no-cache")
-  if c.header("If-None-Match").contains(etag) (
+  if (c.header("If-None-Match") ?? "").contains(etag) (
     c.status(304)
     return
   )
@@ -29,7 +29,7 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
     return
   )
   // An explicit encoding prevents the HTTP client from decompressing R2's body.
-  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}})
+  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if !fetched.success or fetched.status.toInt() != 200 (
     c.notFound("project snapshot not found")
     return

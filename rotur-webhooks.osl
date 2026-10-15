@@ -141,8 +141,8 @@ def handleRoturWebhook(*serve.Context c) (
     return
   )
   string body = c.body()
-  string id = c.header("Rotur-Webhook-Id")
-  if !roturWebhookValid(roturWebhookSecret, id, c.header("Rotur-Webhook-Timestamp"), body, c.header("Rotur-Signature"), (timestamp / 1000).toInt()) (
+  string id = (c.header("Rotur-Webhook-Id") ?? "")
+  if !roturWebhookValid(roturWebhookSecret, id, (c.header("Rotur-Webhook-Timestamp") ?? ""), body, (c.header("Rotur-Signature") ?? ""), (timestamp / 1000).toInt()) (
     c.json(401, {ok: false, error: "invalid signature"})
     return
   )

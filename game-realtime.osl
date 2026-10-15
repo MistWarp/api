@@ -225,7 +225,7 @@ def realtimeUpgradeGuard(*serve.Context c) (
     c.next()
     return
   )
-  string ticket = c.query("ticket")
+  string ticket = (c.query("ticket") ?? "")
   if ticket == "" (
     c.next()
     return
@@ -242,7 +242,7 @@ def realtimeUpgradeGuard(*serve.Context c) (
     c.abort()
     return
   )
-  string handshakeKey = c.header("Sec-WebSocket-Key")
+  string handshakeKey = (c.header("Sec-WebSocket-Key") ?? "")
   if handshakeKey == "" (
     c.json(400, {ok: false, error: "websocket handshake is incomplete"})
     c.abort()

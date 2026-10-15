@@ -38,7 +38,7 @@ def nowSeconds() number (
 )
 
 def developmentQuota() object (
-  object stored = developmentDocs.findById("quota")
+  object stored = (developmentDocs.findById("quota") ?? {})
   if stored.len == 0 (
     return {remaining: -1, reset: 0}
   )
@@ -53,8 +53,8 @@ def storeDevelopmentQuota(object quota) (
 
 def githubSearchPulls(string query, number limit) object (
   string endpoint = "https://api.github.com/search/issues?q=" ++ url.escape(query) ++ "&sort=updated&order=desc&per_page=" ++ limit.toStr()
-  object response = requests.get(endpoint, {headers: githubHeaders(), timeout: 10, max_bytes: 8388608})
-  object headers = response.headers.assertElse(object, {})
+  object response = requests.get(endpoint, {headers: githubHeaders(), timeout: 10, max_bytes: 8388608}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+  object headers = object(response.headers)
   number status = response.status.toInt()
   // 403 and 429 are how a spent quota arrives. Record when it reopens so the
   // next refresh waits instead of asking again.
@@ -95,7 +95,7 @@ def developmentSnapshot() object (
   if developmentCache.has("pulls") (
     return developmentCache.get("pulls").assertElse(object, {pulls: [], updated: 0})
   )
-  object stored = developmentDocs.findById("pulls")
+  object stored = (developmentDocs.findById("pulls") ?? {})
   if stored.len == 0 (
     return {pulls: [], updated: 0}
   )

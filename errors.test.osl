@@ -3,6 +3,7 @@ import "std:db"
 import "std:sync"
 import "std:serve"
 import "std:fs"
+import "./request-body.osl"
 
 string path = "/tmp/mistwarp-errors-" ++ timestamp.toStr() ++ ".db"
 auto testDb = db.open(path)
@@ -44,4 +45,4 @@ testing.assert(deleteAllSiteErrors() == 250, "deletes beyond the 200-entry respo
 testing.assert(errorDocs.count({}) == 0, "deletes both open and resolved errors")
 testing.assert(deleteAllSiteErrors() == 0, "deleting an empty collection succeeds")
 testDb.close()
-fs.remove(path)
+void fs.remove(path)

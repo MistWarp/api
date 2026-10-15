@@ -51,7 +51,7 @@ def canSaveLiveProject(object project,*serve.Context c) boolean (
   string role = projectRole(project, username)
   if role == "editor" return true
   if role == "" or role == "tester" return false
-  string branch = c.formValue("collaborationBranch")
+  string branch = (c.formValue("collaborationBranch") ?? "")
   if branch == "" (
     branch = project.gitBranch.assertElse(string, "main")
   )
@@ -76,7 +76,7 @@ def handleLiveCollaboration(*serve.Context c) (
     c.forbidden("only project team members can discover editing sessions")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string branch = body.branch.assertElse(string, project.gitBranch.assertElse(string, "main")).strip()
   if branch == "" or branch.len > 200 (
     c.badRequest("a project branch is required")

@@ -7,7 +7,7 @@ import "std:thread"
 import "go:mistwarp.local/gitinspection"
 
 string tmpDir = "/tmp/mistwarp-history-test-" ++ timestamp.toStr() ++ "/"
-fs.mkdirAll(tmpDir)
+void fs.mkdirAll(tmpDir)
 string projectsDir = tmpDir ++ "projects/"
 number historyMigrationWorkers = 1
 object records = {}
@@ -46,9 +46,9 @@ def projectGitHead(object project) string (
 
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   string plain = outputPath ++ ".json"
-  fs.writeFile(plain, "{\"targets\":[]}")
+  void fs.writeFile(plain, "{\"targets\":[]}")
   boolean ok = zip.gzipLimited(plain, outputPath, 1024, 1024)
-  fs.remove(plain)
+  void fs.remove(plain)
   return ok
 )
 
@@ -192,4 +192,4 @@ sync.lock("project-history-stale-upload")
 object staleHistory = ensureUploadedProjectHistory(staleUpload)
 sync.unlock("project-history-stale-upload")
 testing.assert(staleHistory.ok == false and saves == before, "history preparation rejects a replaced upload snapshot")
-fs.remove(tmpDir)
+void fs.remove(tmpDir)

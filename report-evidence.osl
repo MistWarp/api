@@ -34,7 +34,7 @@ def snapshotProjectEvidence(string projectId) (
 
   string thumb = thumbnailPath(projectId)
   if fs.exists(thumb) (
-    fs.writeFileBytes(dir ++ "thumbnail.png", fs.readFileBytes(thumb))
+    void fs.writeFileBytes(dir ++ "thumbnail.png", fs.readFileBytes(thumb).unwrapOr("".toBytes()))
   )
 )
 
@@ -54,17 +54,17 @@ def removeEvidenceDir(string id) (
   object meta = loadEvidenceMeta(id)
   string assetsDir = dir ++ "assets/"
   if fs.exists(assetsDir) (
-    array files = fs.readDir(assetsDir)
+    array files = fs.readDir(assetsDir).unwrapOr([])
     for i files.len (
-      fs.remove(assetsDir ++ files[i].toStr())
+      void fs.remove(assetsDir ++ files[i].toStr())
     )
-    fs.remove(assetsDir)
+    void fs.remove(assetsDir)
   )
-  fs.remove(dir ++ "project.json")
-  fs.remove(dir ++ "project.json.gz")
-  fs.remove(dir ++ "meta.json")
-  fs.remove(dir ++ "thumbnail.png")
-  fs.remove(dir)
+  void fs.remove(dir ++ "project.json")
+  void fs.remove(dir ++ "project.json.gz")
+  void fs.remove(dir ++ "meta.json")
+  void fs.remove(dir ++ "thumbnail.png")
+  void fs.remove(dir)
   string jsonKey = (meta.evidenceJsonKey ?? "").toStr()
   if jsonKey != "" (
     removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
@@ -97,7 +97,7 @@ def handleGetEvidenceJson(*serve.Context c) (
   if meta.contains("evidenceKey") and meta.evidenceKey != null (
     k = meta.evidenceKey.toStr()
   )
-  if k == "" or c.query("k") != k (
+  if k == "" or (c.query("k") ?? "") != k (
     c.notFound("not found")
     return
   )

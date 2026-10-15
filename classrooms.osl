@@ -44,14 +44,14 @@ def loadClass(string id) object (
   if id == "" (
     return {}
   )
-  return classDocs.findById(id)
+  return (classDocs.findById(id) ?? {})
 )
 
 def loadStudent(string id) object (
   if !isStudentUserId(id) (
     return {}
   )
-  return studentDocs.findById(id)
+  return (studentDocs.findById(id) ?? {})
 )
 
 def studentForUsername(string username) object (
@@ -74,7 +74,7 @@ def classForStudentId(string studentId) object (
 )
 
 def classesOwnedBy(string userId) array (
-  return classDocs.where("ownerId", db.equal, userId).all()
+  return array(classDocs.where("ownerId", db.equal, userId).all())
 )
 
 def classesTaughtBy(string userId) array (
@@ -107,7 +107,7 @@ def studentsForPlanOwner(string ownerId) array (
 )
 
 def classroomPlanFor(string ownerId) object (
-  return effectiveClassroomPlan(classroomPlanDocs.findById(ownerId), timestamp)
+  return effectiveClassroomPlan((classroomPlanDocs.findById(ownerId) ?? {}), timestamp)
 )
 
 def planOwnerStorageBytes(string ownerId) number (
@@ -153,7 +153,7 @@ def classroomStudentBenefits(string studentId) object (
 
 def recordClassroomAudit(string classId,*serve.Context c, string action, object detail) (
   string id = "ca" ++ storagefs.UniqueTimestamp() ++ randomString(4)
-  classroomAuditDocs.insertOne({
+  void classroomAuditDocs.insertOne({
     _id: id,
     classId: classId,
     actorId: c.getString("userId"),
@@ -261,7 +261,7 @@ def handleGetClassroom(*serve.Context c) (
 )
 
 def handleCreateClass(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = (body.name ?? "").toStr().strip()
   if !validClassName(name) (
     c.badRequest("class names must be between 1 and 80 characters")
@@ -301,7 +301,7 @@ def handleCreateClass(*serve.Context c) (
     coTeachers: [],
     createdAt: timestamp
   }
-  classDocs.insertOne(classDoc)
+  void classDocs.insertOne(classDoc)
   sync.unlock(lockName)
   recordClassroomAudit(id, c, "class_created", {name: name})
   c.json(201, {ok: true, class: classResponse(classDoc, c)})
@@ -337,7 +337,7 @@ def handleGetClass(*serve.Context c) (
 def handleUpdateClass(*serve.Context c) (
   object classDoc = taughtClassOrFail(c)
   if classDoc.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if body.contains("name") (
     string name = body.name.toStr().strip()
     if !validClassName(name) (
@@ -376,7 +376,7 @@ def handleDeleteClass(*serve.Context c) (
   deleteDocumentsByField(assignmentDocs, "classId", classId)
   deleteDocumentsByField(submissionDocs, "classId", classId)
   deleteDocumentsByField(classroomAuditDocs, "classId", classId)
-  classDocs.deleteOne({_id: classId})
+  void classDocs.deleteOne({_id: classId})
   c.json(200, {ok: true})
 )
 
@@ -397,7 +397,7 @@ def handleResetClassCode(*serve.Context c) (
 def handleAddCoTeacher(*serve.Context c) (
   object classDoc = ownedClassOrFail(c)
   if classDoc.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string username = normalizeUsername((body.username ?? "").toStr())
   if username == "" or isStudentUsername(username) (
     c.badRequest("enter the Rotur username of a teacher")
@@ -451,7 +451,7 @@ def handleRemoveCoTeacher(*serve.Context c) (
 def handleTransferClass(*serve.Context c) (
   object classDoc = ownedClassOrFail(c)
   if classDoc.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string username = normalizeUsername((body.username ?? "").toStr())
   if username == "" or isStudentUsername(username) (
     c.badRequest("enter the Rotur username of a teacher")
@@ -550,7 +550,7 @@ def issueStudentCredentials(object student, string loginMode) object (
 def handleCreateStudents(*serve.Context c) (
   object classDoc = taughtClassOrFail(c)
   if classDoc.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   array names = (body.names ?? []).assertElse(array, [])
   array cleaned = []
   for i names.len (
@@ -607,7 +607,7 @@ def handleCreateStudents(*serve.Context c) (
     }
     object credentials = issueStudentCredentials(student, loginMode)
     registerStudentIdentity(studentId, username)
-    studentDocs.insertOne(student)
+    void studentDocs.insertOne(student)
     created.append({id: studentId, displayName: displayName, username: username, credentials: credentials})
   )
   sync.unlock(lockName)
@@ -635,7 +635,7 @@ def handleUpdateClassStudent(*serve.Context c) (
   if classDoc.len == 0 return
   object student = classStudentOrFail(c, classDoc)
   if student.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if body.contains("displayName") (
     string displayName = body.displayName.toStr().strip()
     if !validStudentDisplayName(displayName) (
@@ -679,7 +679,7 @@ def handleMoveClassStudent(*serve.Context c) (
   if classDoc.len == 0 return
   object student = classStudentOrFail(c, classDoc)
   if student.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   object target = loadClass((body.classId ?? "").toStr())
   if target.len == 0 or !isClassTeacher(target, c.getString("userId")) (
     c.badRequest("choose one of your classes")
@@ -714,7 +714,7 @@ def deleteStudentAccount(object student) (
   string studentId = student["_id"].toStr()
   purgeUser(studentId, student.username.toStr())
   deleteDocumentsByField(submissionDocs, "studentId", studentId)
-  studentDocs.deleteOne({_id: studentId})
+  void studentDocs.deleteOne({_id: studentId})
 )
 
 def handleDeleteClassStudent(*serve.Context c) (
@@ -775,7 +775,7 @@ def studentCredentialsMatch(object student, object body) boolean (
 )
 
 def handleClassroomLogin(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string code = normalizeClassCode((body.code ?? "").toStr())
   object student = loadStudent((body.studentId ?? "").toStr())
   string failure = "That sign-in did not match. Check with your teacher and try again."
@@ -880,7 +880,7 @@ def readAssignmentFields(*serve.Context c, object assignment, object body) boole
 def handleCreateAssignment(*serve.Context c) (
   object classDoc = taughtClassOrFail(c)
   if classDoc.len == 0 return
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("title") (
     c.badRequest("assignment titles must be between 1 and 120 characters")
     return
@@ -896,13 +896,13 @@ def handleCreateAssignment(*serve.Context c) (
     createdBy: c.getString("userId")
   }
   if !readAssignmentFields(c, assignment, body) return
-  assignmentDocs.insertOne(assignment)
+  void assignmentDocs.insertOne(assignment)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_created", {assignmentId: assignment["_id"], title: assignment.title})
   c.json(201, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
 )
 
 def classAssignmentOrFail(*serve.Context c, object classDoc) object (
-  object assignment = assignmentDocs.findById(c.param("aid"))
+  object assignment = (assignmentDocs.findById(c.param("aid")) ?? {})
   if assignment.len == 0 or assignment.classId.toStr() != classDoc["_id"].toStr() (
     c.notFound("assignment not found")
     return {}
@@ -920,7 +920,7 @@ def handleGetAssignment(*serve.Context c) (
   array rows = []
   for i students.len (
     object student = students[i].assert(object)
-    object submission = submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr())
+    object submission = (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()) ?? {})
     rows.append({
       student: {id: student["_id"], displayName: student.displayName},
       submission: if submission.len == 0 then null else submission
@@ -934,7 +934,7 @@ def handleUpdateAssignment(*serve.Context c) (
   if classDoc.len == 0 return
   object assignment = classAssignmentOrFail(c, classDoc)
   if assignment.len == 0 return
-  if !readAssignmentFields(c, assignment, c.bodyJSON()) return
+  if !readAssignmentFields(c, assignment, requestJSON(c)) return
   putDocument(assignmentDocs, assignment["_id"].toStr(), assignment)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_updated", {assignmentId: assignment["_id"]})
   c.json(200, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
@@ -946,7 +946,7 @@ def handleDeleteAssignment(*serve.Context c) (
   object assignment = classAssignmentOrFail(c, classDoc)
   if assignment.len == 0 return
   deleteDocumentsByField(submissionDocs, "assignmentId", assignment["_id"].toStr())
-  assignmentDocs.deleteOne({_id: assignment["_id"]})
+  void assignmentDocs.deleteOne({_id: assignment["_id"]})
   recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_deleted", {assignmentId: assignment["_id"], title: assignment.title})
   c.json(200, {ok: true})
 )
@@ -956,12 +956,12 @@ def handleReviewSubmission(*serve.Context c) (
   if classDoc.len == 0 return
   object assignment = classAssignmentOrFail(c, classDoc)
   if assignment.len == 0 return
-  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ c.param("sid"))
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ c.param("sid")) ?? {})
   if submission.len == 0 (
     c.notFound("this student has not started the assignment")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if body.contains("feedback") (
     string feedback = body.feedback.toStr().strip()
     if feedback.len > 5000 (
@@ -995,7 +995,7 @@ def studentAssignmentRows(object student) array (
   array rows = []
   for i assignments.len (
     object assignment = assignments[i].assert(object)
-    object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+    object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()) ?? {})
     rows.append({
       id: assignment["_id"],
       title: assignment.title,
@@ -1035,7 +1035,7 @@ def handleGetStudentClassroom(*serve.Context c) (
 
 def studentAssignmentOrFail(*serve.Context c) object (
   object student = loadStudent(c.getString("userId"))
-  object assignment = assignmentDocs.findById(c.param("aid"))
+  object assignment = (assignmentDocs.findById(c.param("aid")) ?? {})
   if student.len == 0 or assignment.len == 0 or assignment.classId.toStr() != student.classId.toStr() (
     c.notFound("assignment not found")
     return {}
@@ -1095,7 +1095,7 @@ def handleStartAssignment(*serve.Context c) (
   string submissionId = assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()
   string lockName = "classroom-submission-" ++ submissionId
   sync.lock(lockName)
-  object existing = submissionDocs.findById(submissionId)
+  object existing = (submissionDocs.findById(submissionId) ?? {})
   if existing.len > 0 (
     auto loaded = loadProject(existing.projectId.toStr())
     if loaded.ok (
@@ -1154,7 +1154,7 @@ def handleTurnInAssignment(*serve.Context c) (
   if found.len == 0 return
   object student = found.student.assert(object)
   object assignment = found.assignment.assert(object)
-  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()) ?? {})
   if submission.len == 0 or !submissionCanTurnIn(submission) (
     c.badRequest("start the assignment before turning it in")
     return
@@ -1183,7 +1183,7 @@ def handleUnsubmitAssignment(*serve.Context c) (
   if found.len == 0 return
   object student = found.student.assert(object)
   object assignment = found.assignment.assert(object)
-  object submission = submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr())
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()) ?? {})
   if submission.len == 0 or !submissionCanUnsubmit(submission) (
     c.badRequest("this work is not waiting for your teacher")
     return
@@ -1252,17 +1252,17 @@ def classroomAccessGuard(*serve.Context c) (
 )
 
 def handleAdminGetClassroomPlan(*serve.Context c) (
-  string username = c.query("username")
+  string username = (c.query("username") ?? "")
   string userId = teacherIdForUsername(username)
   if userId == "" (
     c.badRequest("Rotur user not found")
     return
   )
-  c.json(200, {ok: true, username: usernameForId(userId), stored: classroomPlanDocs.findById(userId), plan: classroomPlanFor(userId), usage: classroomUsage(userId)})
+  c.json(200, {ok: true, username: usernameForId(userId), stored: (classroomPlanDocs.findById(userId) ?? {}), plan: classroomPlanFor(userId), usage: classroomUsage(userId)})
 )
 
 def handleAdminSetClassroomPlan(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string userId = teacherIdForUsername((body.username ?? "").toStr())
   if userId == "" (
     c.badRequest("Rotur user not found")

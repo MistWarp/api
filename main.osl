@@ -15,7 +15,6 @@ import "std:sync"
 import "std:db"
 import "std:ws"
 
-import "go:time"
 import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/runtimeinfo"
 import "go:mistwarp.local/r2inventory"
@@ -137,16 +136,17 @@ boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
 string localBlobsDir = "data/blobs/"
 
 auto r2Client = s3.new({
-  "endpoint": r2Endpoint,
+  "endpoint": if r2Local then "http://127.0.0.1:9" else r2Endpoint,
   "bucket": r2Bucket,
   "access_key_id": r2AccessKeyId,
   "secret_access_key": r2SecretAccessKey,
   "region": "auto"
 })
 
-fs.mkdirAll("data/")
+void fs.mkdirAll("data/")
 
 import "./utils.osl"
+import "./request-body.osl"
 import "./search-ranking.osl"
 import "./request-limits.osl"
 import "./project-sharing-policy.osl"
@@ -258,7 +258,7 @@ migratePolicyNewsPosts()
 migrateSpaceMemberships()
 migrateExtensionUsage()
 refreshIndexUrls()
-fs.mkdirAll(localBlobsDir)
+void fs.mkdirAll(localBlobsDir)
 if r2Local (
   log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
 )

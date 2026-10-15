@@ -16,16 +16,16 @@ testing.assert(
 )
 
 string uploadedAssetPath = "data/tmp/asset-routing-uploaded.test"
-fs.mkdirAll("data/tmp")
-fs.writeFile(uploadedAssetPath, "asset")
+void fs.mkdirAll("data/tmp")
+void fs.writeFile(uploadedAssetPath, "asset")
 removeLocalAssetAfterUpload(uploadedAssetPath, true)
 testing.assert(!fs.exists(uploadedAssetPath), "removes the local asset after a successful R2 upload")
 
 string failedAssetPath = "data/tmp/asset-routing-failed.test"
-fs.writeFile(failedAssetPath, "asset")
+void fs.writeFile(failedAssetPath, "asset")
 removeLocalAssetAfterUpload(failedAssetPath, false)
 testing.assert(fs.exists(failedAssetPath), "keeps the local asset when no R2 upload completed")
-fs.remove(failedAssetPath)
+void fs.remove(failedAssetPath)
 
 testing.assert(
   assetNeedsUpload(true, true, true),

@@ -11,7 +11,7 @@ def loadR2BlobActivity() object (
   array directories = [projectsDir, trashDir]
   for d directories.len (
     string directory = directories[d].toStr()
-    array files = fs.readDir(directory)
+    array files = fs.readDir(directory).unwrapOr([])
     for i files.len (
       string name = files[i].toStr()
       if name.endsWith(".json") (
@@ -98,7 +98,7 @@ def stageR2Blob(string key, BlobBody body, string contentType, string contentEnc
   string path = localBlobPath(key)
   boolean saved = true
   if !fs.exists(path) (
-    fs.mkdirAll(parentDirOf(path))
+    void fs.mkdirAll(parentDirOf(path))
     saved = fs.writeFileBytes(path, body)
   )
   if saved and !r2Local (
@@ -138,7 +138,7 @@ def flushR2UploadQueue() (
     string key = storedKeys[i].toStr()
     if !queued.contains(key) and isSafeBlobKey(key) and !key.startsWith("projects/") and fs.exists(localBlobPath(key)) (
       if r2UploadReady({key: key, queuedAt: 0}, activity, now) (
-        fs.remove(localBlobPath(key))
+        void fs.remove(localBlobPath(key))
       )
     )
   )
@@ -155,7 +155,7 @@ def flushR2UploadQueue() (
       // Only immutable keys can use the inventory to skip an upload.
       boolean uploaded = (item.uploaded ?? false).assert(boolean) or (stored.contains(key) and !key.startsWith("projects/"))
       if !uploaded and uploadedItems < 64 and uploadedBytes < 268435456 and fs.exists(path) (
-        byte[] body = fs.readFileBytes(path)
+        byte[] body = fs.readFileBytes(path).unwrapOr("".toBytes())
         uploaded = r2PutEncoded(key, body, item.contentType.toStr(), item.contentEncoding.toStr())
         if uploaded (
           uploadedItems += 1
