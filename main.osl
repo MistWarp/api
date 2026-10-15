@@ -200,6 +200,13 @@ import "./pull-metadata.osl"
 import "./pulls.osl"
 import "./reports.osl"
 import "./errors.osl"
+array errorReportOrigins = []
+for entry in (editorOrigin ++ "," ++ configValue("ERROR_REPORT_ORIGINS", "")).split(",") (
+  string normalized = siteErrorOrigin(entry, "")
+  if normalized != "" (
+    errorReportOrigins.append(normalized)
+  )
+)
 import "./admin.osl"
 import "./project-moderation.osl"
 import "./like-milestone-policy.osl"
