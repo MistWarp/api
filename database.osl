@@ -26,6 +26,7 @@ auto communityDb = db.open("data/community.db")
 *db.Collection classroomClaimDocs = communityDb.collection("classroom_claims")
 *db.Collection schoolDocs = communityDb.collection("classroom_schools")
 *db.Collection classroomPresentationDocs = communityDb.collection("classroom_presentations")
+*db.Collection classroomTermsDocs = communityDb.collection("classroom_terms")
 
 def putDocument(*db.Collection collection, string id, object value) boolean (
   value["_id"] = id

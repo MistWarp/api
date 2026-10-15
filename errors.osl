@@ -1,8 +1,10 @@
+number siteErrorRetentionMs = 90 * 86400000
+
 def pruneSiteErrors() (
   array stored = errorDocs.sort("created", db.desc).limit(1100).all()
   for i stored.len (
-    if i >= 1000 (
-      object entry = stored[i].assert(object)
+    object entry = stored[i].assert(object)
+    if i >= 1000 or timestamp - (entry.created ?? 0).toNum() > siteErrorRetentionMs (
       errorDocs.deleteOne({_id: entry["_id"]})
     )
   )
@@ -65,7 +67,7 @@ def handleRecordSiteError(*serve.Context c) (
     componentStack = body.componentStack.toStr().trim(1, 10000)
   )
   string userAgent = c.header("User-Agent").strip().trim(1, 500)
-  string username = c.getString("username")
+  string username = if c.getBool("isStudent") then "" else c.getString("username")
   object entry = {
     _id: "e" ++ randomString(16),
     message: message,
