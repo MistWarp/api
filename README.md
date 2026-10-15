@@ -33,6 +33,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | GITEA_URL | https://git.rotur.dev | Optional Rotur Git instance |
 | GITEA_ADMIN_TOKEN | | Optional Rotur Git integration token |
 | EDITOR_ORIGIN | https://mistwarp.org | Public editor base URL used in links |
+| ERROR_REPORT_ORIGINS | (empty) | Comma-separated origins, besides EDITOR_ORIGIN, whose error reports `POST /errors` accepts. Reports from any other origin are ignored |
 | ADMIN_USERS | mist | Comma separated admin usernames |
 | GITHUB_ORG | MistWarp | GitHub org whose pull requests appear on the roadmap's Changes tab |
 | GITHUB_TOKEN | | Optional GitHub token; only raises the search rate limit, the feed works without one |

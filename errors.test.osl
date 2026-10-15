@@ -8,6 +8,8 @@ string path = "/tmp/mistwarp-errors-" ++ timestamp.toStr() ++ ".db"
 auto testDb = db.open(path)
 *db.Collection errorDocs = testDb.collection("site_errors")
 
+array errorReportOrigins = ["https://mistwarp.org"]
+
 def randomString(number length) string (
   return "unused"
 )
@@ -23,6 +25,17 @@ testing.assert(shouldIgnoreSiteError("ReferenceError: unsandboxed is not defined
 testing.assert(shouldIgnoreSiteError("Can't find variable: unsandboxed"), "ignores Safari extension ReferenceError")
 testing.assert(shouldIgnoreSiteError(" UNSANDBOXED IS NOT DEFINED "), "normalizes case and whitespace")
 testing.assert(!shouldIgnoreSiteError("Hyper Sense must run unsandboxed"), "retains other extension errors")
+
+testing.assert(siteErrorOrigin("https://mistwarp.org", "") == "https://mistwarp.org", "uses the Origin header")
+testing.assert(siteErrorOrigin(" HTTPS://MistWarp.org/ ", "") == "https://mistwarp.org", "normalizes case, whitespace and a trailing slash")
+testing.assert(siteErrorOrigin("", "https://mistwarp.org/editor#mw-p1") == "https://mistwarp.org", "falls back to the Referer origin")
+testing.assert(siteErrorOrigin("null", "https://mistwarp.org/embed") == "https://mistwarp.org", "treats an opaque origin as missing")
+testing.assert(siteErrorOrigin("", "") == "", "no origin without either header")
+testing.assert(siteErrorOrigin("", "not a url") == "", "ignores a Referer that is not a URL")
+testing.assert(isAllowedErrorOrigin("https://mistwarp.org", errorReportOrigins), "accepts reports from the editor origin")
+testing.assert(!isAllowedErrorOrigin("https://editor.turboshare.org.uk", errorReportOrigins), "rejects reports from other sites")
+testing.assert(!isAllowedErrorOrigin("https://mistwarp.org.evil.example", errorReportOrigins), "matches the whole origin")
+testing.assert(!isAllowedErrorOrigin("", errorReportOrigins), "rejects reports with no origin")
 
 for i 250 (
   errorDocs.insertOne({_id: "e" ++ i.toStr(), resolved: i % 2 == 0, created: i})
