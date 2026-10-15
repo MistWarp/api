@@ -70,7 +70,7 @@ def backfillTrashedProjectHistoryBytes(string file, object inventory) boolean (
 // Measure them once from local copies or the R2 inventory.
 def backfillProjectHistoryBytes() (
   string migrationId = "migration:project-history-bytes-v1"
-  if diagnosticDocs.findById(migrationId).len > 0 (
+  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
     return
   )
   object inventory = {}
@@ -86,14 +86,14 @@ def backfillProjectHistoryBytes() (
     )
   )
   number unresolved = 0
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") and !backfillLiveProjectHistoryBytes(file.replace(".json", ""), inventory) (
       unresolved += 1
     )
   )
-  array trashFiles = fs.readDir(trashDir)
+  array trashFiles = fs.readDir(trashDir).unwrapOr([])
   for i trashFiles.len (
     string file = trashFiles[i].toStr()
     if file.endsWith(".json") and !backfillTrashedProjectHistoryBytes(file, inventory) (

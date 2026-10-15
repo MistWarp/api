@@ -7,7 +7,7 @@ def projectHasWorkspace(object project) boolean (
 )
 
 def pullDocument(string targetId, string index) object (
-  return pullDocs.findById(targetId ++ ":" ++ index)
+  return (pullDocs.findById(targetId ++ ":" ++ index) ?? {})
 )
 
 def pullCommentKey(object pull) string (
@@ -177,7 +177,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     commentCount: 0,
     bountyId: bountyId
   }
-  if pullDocs.insertOne(pull) == null (
+  if pullDocs.insertOne(pull).isErr() (
     sync.unlock(sequenceLock)
     return {ok: false, status: 409, error: "another pull request was created at the same time, try again"}
   )
@@ -201,7 +201,7 @@ def handleGetCommits(*serve.Context c) (
   c.setHeader("Vary", "Authorization, Cookie")
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  if c.header("If-None-Match").contains(etag) (
+  if (c.header("If-None-Match") ?? "").contains(etag) (
     c.status(304)
     return
   )
@@ -278,7 +278,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
     c.forbidden("only project maintainers can manage branches")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string branch = (body.branch ?? "").toStr().strip()
   string name = (body.name ?? "").toStr().strip()
   string from = (body.from ?? "").toStr().strip()
@@ -288,7 +288,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   string sourcePath = tmpDir ++ project.id.toStr() ++ ".branches-source." ++ randomString(8) ++ ".mwp"
   string outputPath = tmpDir ++ project.id.toStr() ++ ".branches-output." ++ randomString(8) ++ ".mwp"
   if !copyProjectWorkspaceToPath(project, sourcePath) (
-    fs.remove(sourcePath)
+    void fs.remove(sourcePath)
     sync.unlock(lockName)
     c.json(409, {ok: false, error: "save the project before managing its branches", code: "branch_history_unavailable"})
     return
@@ -298,18 +298,18 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   string historyJson = json.stringify(history)
   string rewriteJson = gitinspection.ManageBranchArchiveJSON(sourcePath, outputPath, action, branch, name, from, historyJson)
   auto parsedRewrite = json.parse(rewriteJson, {type: "object"})
-  fs.remove(sourcePath)
+  void fs.remove(sourcePath)
   if parsedRewrite.isErr() or parsedRewrite.unwrap().assert(object).ok != true or !fs.exists(outputPath) (
     string message = if parsedRewrite.isErr() then "could not update the branch" else (parsedRewrite.unwrap().assert(object).error ?? "could not update the branch").toStr()
-    fs.remove(outputPath)
+    void fs.remove(outputPath)
     sync.unlock(lockName)
     c.json(409, {ok: false, error: message, code: "branch_update_unavailable"})
     return
   )
   object rewrite = parsedRewrite.unwrap().assert(object)
   object manifest = rewrite.manifest.assert(object)
-  byte[] workspaceBody = fs.readFileBytes(outputPath)
-  fs.remove(outputPath)
+  byte[] workspaceBody = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+  void fs.remove(outputPath)
   if workspaceBody.len > maxWorkspaceBytes (
     sync.unlock(lockName)
     c.json(413, {ok: false, error: "MistWarp project history exceeds the 512 MB limit", code: "workspace_too_large"})
@@ -372,7 +372,7 @@ def handlePrepareBranchMerge(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string sourceBranch = (body.source ?? "").toStr().strip()
   string targetBranch = (body.target ?? "").toStr().strip()
   if sourceBranch == "" or targetBranch == "" or sourceBranch == targetBranch (
@@ -426,7 +426,7 @@ def handleListPulls(*serve.Context c) (
 
 def handleCreatePull(*serve.Context c) (
   auto targetResult = loadProject(c.param("id"))
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   auto sourceResult = loadProject(body.sourceProjectId.toStr())
   if !targetResult.ok or !sourceResult.ok (
     c.notFound("project not found")
@@ -515,7 +515,7 @@ def handleCreatePullComment(*serve.Context c) (
     c.forbidden("you cannot comment on this pull request")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -588,7 +588,7 @@ def handleEditPullComment(*serve.Context c) (
     c.notFound("pull request not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -683,7 +683,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   string baseCommit = pull.baseCommit.toStr()
   string headCommit = pull.headCommit.toStr()
-  string inspectionJson = if c.query("inline") == "1" then gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) else gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+  string inspectionJson = if (c.query("inline") ?? "") == "1" then gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) else gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
   auto parsedInspection = json.parse(inspectionJson, {type: "object"})
   if parsedInspection.isErr() (
     c.internalError("could not inspect pull request changes")
@@ -781,15 +781,15 @@ def handleMergePull(*serve.Context c) (
     string mergeArchiveJson = gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, mergeTimestamp / 1000)
     auto parsedMergeArchive = json.parse(mergeArchiveJson, {type: "object"})
     if parsedMergeArchive.isErr() or parsedMergeArchive.unwrap().assert(object).ok != true or !fs.exists(mergeArchivePath) (
-      fs.remove(mergeArchivePath)
+      void fs.remove(mergeArchivePath)
       sync.unlock("project-history-" ++ target.id.toStr())
       c.internalError("could not create the pull request merge commit")
       return
     )
     object mergeArchiveResult = parsedMergeArchive.unwrap().assert(object)
     object mergeArchiveGit = mergeArchiveResult.manifest.assert(object)
-    byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath)
-    fs.remove(mergeArchivePath)
+    byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath).unwrapOr("".toBytes())
+    void fs.remove(mergeArchivePath)
     object checkedHistory = validateUploadedHistory(target, mergeArchiveBody, json.stringify(mergeArchiveGit), currentTargetHead)
     if !checkedHistory.ok (
       sync.unlock("project-history-" ++ target.id.toStr())

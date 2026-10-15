@@ -344,7 +344,7 @@ def migrateExtensionUsage() boolean (
     sync.unlock("extension-index-migration")
     return true
   )
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
     auto result = readFile(projectsDir ++ files[i].toStr())
     if result.ok (
@@ -397,13 +397,13 @@ def inspectStoredProjectExtensionUrls(object project) object (
   string gzipPath = tmpDir ++ workId ++ ".json.gz"
   string jsonPath = tmpDir ++ workId ++ ".json"
   if !copyStoredProjectJsonToPath(project, gzipPath) or !zip.gunzip(gzipPath, jsonPath) (
-    fs.remove(gzipPath)
-    fs.remove(jsonPath)
+    void fs.remove(gzipPath)
+    void fs.remove(jsonPath)
     return {ok: false, urls: []}
   )
   object inspected = inspectProjectExtensionUrls(jsonPath)
-  fs.remove(gzipPath)
-  fs.remove(jsonPath)
+  void fs.remove(gzipPath)
+  void fs.remove(jsonPath)
   return inspected
 )
 
@@ -458,7 +458,7 @@ def unshareProjectForBlockedExtension(object project) boolean (
 )
 
 def unshareProjectsUsingHash(string hash) object (
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   number affected = 0
   for i files.len (
     auto result = readFile(projectsDir ++ files[i].toStr())
@@ -476,7 +476,7 @@ def unshareProjectsUsingHash(string hash) object (
 )
 
 def unshareProjectsUsingUrl(string extensionUrl) object (
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   number affected = 0
   for i files.len (
     auto result = readFile(projectsDir ++ files[i].toStr())
@@ -548,7 +548,7 @@ def ensureExtensionRecords(object policy) boolean (
       )
     )
   )
-  array files = fs.readDir(extensionsDir)
+  array files = fs.readDir(extensionsDir).unwrapOr([])
   for i files.len (
     string fileName = files[i].toStr()
     if fileName.endsWith(".js") (
@@ -574,7 +574,7 @@ def handleAdminGetExtensions(*serve.Context c) (
     return
   )
   array extensions = []
-  array files = fs.readDir(extensionsDir)
+  array files = fs.readDir(extensionsDir).unwrapOr([])
   for i files.len (
     string fileName = files[i].toStr()
     if fileName.endsWith(".json") (
@@ -637,7 +637,7 @@ def handleAdminGetExtensionSource(*serve.Context c) (
 )
 
 def handleAdminSetExtensionPolicy(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("hash") or !body.contains("status") (
     c.badRequest("hash and status are required")
     return
@@ -680,7 +680,7 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
 )
 
 def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("url") or !body.contains("blocked") (
     c.badRequest("URL and blocked state are required")
     return
@@ -730,21 +730,21 @@ def handleAdminIndexProjectExtensions(*serve.Context c) (
   string gzipPath = tmpDir ++ workId ++ ".json.gz"
   string jsonPath = tmpDir ++ workId ++ ".json"
   if !copyStoredProjectJsonToPath(project, gzipPath) or !zip.gunzip(gzipPath, jsonPath) (
-    fs.remove(gzipPath)
-    fs.remove(jsonPath)
+    void fs.remove(gzipPath)
+    void fs.remove(jsonPath)
     c.internalError("could not inspect project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("sources") or body.sources == null (
-    fs.remove(gzipPath)
-    fs.remove(jsonPath)
+    void fs.remove(gzipPath)
+    void fs.remove(jsonPath)
     c.badRequest("extension sources are required")
     return
   )
   object collected = collectProjectExtensions(jsonPath, json.stringify(body.sources))
-  fs.remove(gzipPath)
-  fs.remove(jsonPath)
+  void fs.remove(gzipPath)
+  void fs.remove(jsonPath)
   if !collected.ok (
     if collected.contains("code") and collected.code.toStr() == "blocked_extension" (
       if !unshareProjectForBlockedExtension(project) (

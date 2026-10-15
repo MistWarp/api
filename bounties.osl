@@ -26,7 +26,7 @@ def handleGetBountyActivity(*serve.Context c) (
 )
 
 def handleCreateBountyComment(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -41,7 +41,7 @@ def handleCreateBountyComment(*serve.Context c) (
 )
 
 def handleEditBountyComment(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -78,7 +78,7 @@ def handleJoinBounty(*serve.Context c) (
 def handleLeaveBounty(*serve.Context c) (
   string id = bountyWorkerId(c.param("id"), c.getString("userId"))
   if bountyWorkerDocs.exists({_id: id}) (
-    bountyWorkerDocs.deleteOne({_id: id})
+    void bountyWorkerDocs.deleteOne({_id: id})
   )
   c.json(200, {ok: true, workers: bountyWorkers(c.param("id"), c.getString("username"))})
 )

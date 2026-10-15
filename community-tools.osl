@@ -186,18 +186,18 @@ def syncSpaceMemberships(object space) boolean (
   array keys = spaceRelatedUserKeys(space)
   string signature = json.stringify(keys)
   string stateId = "space:" ++ spaceId
-  object state = spaceMemberDocs.findById(stateId)
+  object state = (spaceMemberDocs.findById(stateId) ?? {})
   if state.len > 0 and state.signature.toStr() == signature (
     return true
   )
   array previous = spaceMemberDocs.where("spaceId", db.equal, spaceId).all()
   for i previous.len (
     object membership = previous[i].assert(object)
-    spaceMemberDocs.deleteOne({_id: membership["_id"]})
+    void spaceMemberDocs.deleteOne({_id: membership["_id"]})
   )
   for i keys.len (
     string userKey = keys[i].toStr()
-    spaceMemberDocs.insertOne({_id: "member:" ++ userKey ++ ":" ++ spaceId, kind: "member", userKey: userKey, spaceId: spaceId})
+    void spaceMemberDocs.insertOne({_id: "member:" ++ userKey ++ ":" ++ spaceId, kind: "member", userKey: userKey, spaceId: spaceId})
   )
   return putDocument(spaceMemberDocs, stateId, {kind: "state", signature: signature})
 )
@@ -214,21 +214,21 @@ def deleteSpaceMemberships(string spaceId) boolean (
   array memberships = spaceMemberDocs.where("spaceId", db.equal, spaceId).all()
   for i memberships.len (
     object membership = memberships[i].assert(object)
-    spaceMemberDocs.deleteOne({_id: membership["_id"]})
+    void spaceMemberDocs.deleteOne({_id: membership["_id"]})
   )
-  spaceMemberDocs.deleteOne({_id: "space:" ++ spaceId})
+  void spaceMemberDocs.deleteOne({_id: "space:" ++ spaceId})
   return true
 )
 
 def migrateSpaceMemberships() boolean (
   string migrationId = "migration:space-members-v1"
-  if spaceMemberDocs.findById(migrationId).len > 0 (
+  if (spaceMemberDocs.findById(migrationId) ?? {}).len > 0 (
     return true
   )
   array previous = spaceMemberDocs.all()
   for i previous.len (
     object document = previous[i].assert(object)
-    spaceMemberDocs.deleteOne({_id: document["_id"]})
+    void spaceMemberDocs.deleteOne({_id: document["_id"]})
   )
   array spaces = spaceDocs.all()
   for i spaces.len (
@@ -298,11 +298,11 @@ def purgeUserFromSpaces(string username) boolean (
     object space = spaces[i].assert(object)
     string spaceId = space["_id"].toStr()
     if normalizeUsername(space.owner.toStr()) == key (
-      spaceDocs.deleteOne({_id: space["_id"]})
+      void spaceDocs.deleteOne({_id: space["_id"]})
       deleteSpaceMemberships(spaceId)
-      fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")
-      fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".jsonl")
-      fs.remove(spaceThumbnailPath(spaceId))
+      void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")
+      void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".jsonl")
+      void fs.remove(spaceThumbnailPath(spaceId))
     ) else (
       boolean changed = spaceRelatedUserKeys(space).contains(key)
       array likes = spaceLikes(space)
@@ -376,7 +376,7 @@ def purgeUserCommunityRecords(string username, string userId) boolean (
     deleteDocumentsByField(playtimeDocs, "userId", userId)
     deleteDocumentsByField(feedbackDocs, "authorId", userId)
   )
-  playtimeSessionDocs.deleteOne({_id: key})
+  void playtimeSessionDocs.deleteOne({_id: key})
 
   array releases = releaseDocs.where("creator", db.equal, username).all()
   for i releases.len (
@@ -390,9 +390,9 @@ def purgeUserCommunityRecords(string username, string userId) boolean (
     object idea = ideas[i].assert(object)
     string ideaId = idea["_id"].toStr()
     if normalizeUsername(idea.author.toStr()) == key (
-      ideaDocs.deleteOne({_id: idea["_id"]})
-      fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".json")
-      fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".jsonl")
+      void ideaDocs.deleteOne({_id: idea["_id"]})
+      void fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".json")
+      void fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".jsonl")
     ) else (
       array likes = []
       if idea.contains("likes") (
@@ -509,7 +509,7 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
     string newId = review.projectId.toStr() ++ ":" ++ newKey
     review.author = newName
     review.authorKey = newKey
-    reviewDocs.deleteOne({_id: oldId})
+    void reviewDocs.deleteOne({_id: oldId})
     putDocument(reviewDocs, newId, review)
   )
 
@@ -519,19 +519,19 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
     if normalizeUsername(playtime.username.toStr()) == oldKey (
       string oldId = playtime["_id"].toStr()
       string newId = playtime.projectId.toStr() ++ ":" ++ newKey
-      object existing = playtimeDocs.findById(newId)
+      object existing = (playtimeDocs.findById(newId) ?? {})
       if existing.len > 0 and newId != oldId (
         playtime.duration = playtime.duration.toNum() + existing.duration.toNum()
       )
       playtime.username = newName
-      playtimeDocs.deleteOne({_id: oldId})
+      void playtimeDocs.deleteOne({_id: oldId})
       putDocument(playtimeDocs, newId, playtime)
     )
   )
-  object session = playtimeSessionDocs.findById(oldKey)
+  object session = (playtimeSessionDocs.findById(oldKey) ?? {})
   if session.len > 0 (
     session.username = newName
-    playtimeSessionDocs.deleteOne({_id: oldKey})
+    void playtimeSessionDocs.deleteOne({_id: oldKey})
     putDocument(playtimeSessionDocs, newKey, session)
   )
 
@@ -902,7 +902,7 @@ def spaceListResponse(object space,*serve.Context c) object (
   number projectCount = 0
   boolean canManage = canManageSpace(space, c)
   for i ids.len (
-    object project = projectSearchDocs.findById(ids[i].toStr())
+    object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
     boolean hidden = projectHiddenFrom(project, c)
     if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
       projectCount += 1
@@ -955,8 +955,8 @@ def spaceManagementResponse(object space,*serve.Context c) object (
 )
 
 def handleListSpaces(*serve.Context c) (
-  string kind = c.query("kind").toLower().strip()
-  string q = c.query("q").toLower().strip()
+  string kind = (c.query("kind") ?? "").toLower().strip()
+  string q = (c.query("q") ?? "").toLower().strip()
   number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
   number offset = c.queryInt("offset", 0)
   number startsBefore = c.queryInt("startsBefore", 0)
@@ -1046,7 +1046,7 @@ def handleListSpaces(*serve.Context c) (
 )
 
 def handleGetSpace(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -1055,7 +1055,7 @@ def handleGetSpace(*serve.Context c) (
 )
 
 def handleCreateSpace(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   number ownedSpaces = spaceDocs.where("ownerId", db.equal, c.getString("userId")).count()
   if !c.getBool("isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(c.getString("userId")).maxSpaces.toNum() (
     c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
@@ -1160,7 +1160,7 @@ def handleCreateSpace(*serve.Context c) (
 )
 
 def handleUpdateSpace(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1169,7 +1169,7 @@ def handleUpdateSpace(*serve.Context c) (
     c.forbidden("you cannot manage this space")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if body.contains("owner") (
     boolean canTransfer = isSpaceOwner(space, c) or canManageGroupContent(space, c)
     if !canTransfer (
@@ -1308,7 +1308,7 @@ def handleUpdateSpace(*serve.Context c) (
 )
 
 def handleDeleteSpace(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1317,18 +1317,18 @@ def handleDeleteSpace(*serve.Context c) (
     c.forbidden("only the owner can delete this space")
     return
   )
-  spaceDocs.deleteOne({_id: space["_id"]})
+  void spaceDocs.deleteOne({_id: space["_id"]})
   deleteSpaceMemberships(space["_id"].toStr())
-  fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
-  fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
+  void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
+  void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
   if fs.exists(spaceThumbnailPath(space["_id"].toStr())) (
-    fs.remove(spaceThumbnailPath(space["_id"].toStr()))
+    void fs.remove(spaceThumbnailPath(space["_id"].toStr()))
   )
   c.json(200, {ok: true})
 )
 
 def handleSetSpaceThumbnail(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1342,7 +1342,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.badRequest("missing thumbnail file")
     return
   )
-  object thumbnail = fileResult.unwrap().assert(object)
+  object thumbnail = fileResult.unwrap()
   if thumbnail.size.toNum() > maxThumbBytes (
     c.badRequest("thumbnail too large")
     return
@@ -1357,8 +1357,8 @@ def handleSetSpaceThumbnail(*serve.Context c) (
 )
 
 def handleAddSpaceProject(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
-  object project = projectSearchDocs.findById(c.param("project"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   if space.len == 0 or project.len == 0 (
     c.notFound("space or project not found")
     return
@@ -1401,12 +1401,12 @@ def handleAddSpaceProject(*serve.Context c) (
 )
 
 def handleRemoveSpaceProject(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
   )
-  object project = projectSearchDocs.findById(c.param("project"))
+  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   boolean allowed = canManageSpace(space, c)
   if project.len > 0 (
     allowed = allowed or searchEntryOwnedByContext(project, c)
@@ -1433,7 +1433,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
 )
 
 def handleInviteChallengeJudge(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
@@ -1446,9 +1446,9 @@ def handleInviteChallengeJudge(*serve.Context c) (
     c.badRequest("this challenge is decided by audience ratings")
     return
   )
-  string requested = c.bodyJSON().username.toStr().strip()
+  string requested = requestJSON(c).username.toStr().strip()
   string usernameKey = normalizeUsername(requested)
-  object profile = profileSearchDocs.findById(usernameKey)
+  object profile = (profileSearchDocs.findById(usernameKey) ?? {})
   if usernameKey == "" or profile.len == 0 (
     c.notFound("user not found")
     return
@@ -1468,7 +1468,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
 )
 
 def handleJoinChallenge(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" or !canViewSpace(space, c) (
     c.notFound("challenge not found")
     return
@@ -1492,7 +1492,7 @@ def handleJoinChallenge(*serve.Context c) (
 )
 
 def handleLeaveChallenge(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
@@ -1509,7 +1509,7 @@ def handleLeaveChallenge(*serve.Context c) (
   )
   array ids = spaceProjectIds(space)
   for i ids.len (
-    object project = projectSearchDocs.findById(ids[i].toStr())
+    object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
     if project.len > 0 and searchEntryOwnedByContext(project, c) (
       c.badRequest("remove your submission before leaving the challenge")
       return
@@ -1522,7 +1522,7 @@ def handleLeaveChallenge(*serve.Context c) (
 )
 
 def handleRespondChallengeJudgeInvite(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !isChallengeJudgeInvitee(space, c.getString("username")) (
     c.notFound("judge invitation not found")
     return
@@ -1536,7 +1536,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
     )
   )
   space.judgeInvites = nextInvites
-  if c.bodyJSON().accepted == true (
+  if requestJSON(c).accepted == true (
     array judges = challengeArray(space, "judges")
     if !stringArrayContainsUser(judges, c.getString("username")) (
       judges.append(c.getString("username"))
@@ -1550,7 +1550,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
 )
 
 def handleRemoveChallengeJudge(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return
@@ -1590,7 +1590,7 @@ def validChallengeCriterion(object space, string criterionId) boolean (
 )
 
 def handleScoreChallengeEntry(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   string projectId = c.param("project")
   if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
@@ -1604,12 +1604,12 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.badRequest("judging is not open")
     return
   )
-  object project = projectSearchDocs.findById(projectId)
+  object project = (projectSearchDocs.findById(projectId) ?? {})
   if project.len > 0 and searchEntryOwnedByContext(project, c) (
     c.forbidden("you cannot score your own entry")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   array rawRatings = body.ratings.assertElse(array, [])
   array ratings = []
   array ratedCriteria = []
@@ -1649,7 +1649,7 @@ def handleScoreChallengeEntry(*serve.Context c) (
 )
 
 def handleVoteChallengeEntry(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   string projectId = c.param("project")
   if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
@@ -1659,12 +1659,12 @@ def handleVoteChallengeEntry(*serve.Context c) (
     c.badRequest("community voting is not open")
     return
   )
-  object project = projectSearchDocs.findById(projectId)
+  object project = (projectSearchDocs.findById(projectId) ?? {})
   if project.len > 0 and searchEntryOwnedByContext(project, c) (
     c.forbidden("you cannot vote for your own entry")
     return
   )
-  number value = c.bodyJSON().value.toNum()
+  number value = requestJSON(c).value.toNum()
   if value < 1 or value > 5 (
     c.badRequest("rating must be between 1 and 5")
     return
@@ -1685,7 +1685,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
 )
 
 def handlePublishChallengeResults(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return
@@ -1710,7 +1710,7 @@ def handlePublishChallengeResults(*serve.Context c) (
 )
 
 def handleFollowSpace(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -1725,7 +1725,7 @@ def handleFollowSpace(*serve.Context c) (
 )
 
 def handleUnfollowSpace(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1746,7 +1746,7 @@ def handleMySpaces(*serve.Context c) (
   object seen = {}
   for i memberships.len (
     object membership = memberships[i].assert(object)
-    object space = spaceDocs.findById(membership.spaceId.toStr())
+    object space = (spaceDocs.findById(membership.spaceId.toStr()) ?? {})
     if space.len > 0 (
       seen[space["_id"].toStr()] = true
       stored.append(space)
@@ -1777,7 +1777,7 @@ def handleMySpaces(*serve.Context c) (
 )
 
 def handleGetSpaceManagement(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1790,7 +1790,7 @@ def handleGetSpaceManagement(*serve.Context c) (
 )
 
 def handleInviteSpaceCurator(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1799,13 +1799,13 @@ def handleInviteSpaceCurator(*serve.Context c) (
     c.forbidden("only the owner can invite curators")
     return
   )
-  string username = c.bodyJSON().username.toStr().strip()
+  string username = requestJSON(c).username.toStr().strip()
   string usernameKey = normalizeUsername(username)
   if usernameKey == "" or username.len > 20 or usernameKey == normalizeUsername(space.owner.toStr()) (
     c.badRequest("choose another user")
     return
   )
-  object profile = profileSearchDocs.findById(usernameKey)
+  object profile = (profileSearchDocs.findById(usernameKey) ?? {})
   if profile.len == 0 (
     c.notFound("user not found")
     return
@@ -1832,7 +1832,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
 )
 
 def handleRespondSpaceCuratorInvite(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1853,7 +1853,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
     c.notFound("invitation not found")
     return
   )
-  boolean accepted = c.bodyJSON().accepted == true
+  boolean accepted = requestJSON(c).accepted == true
   if accepted (
     array managers = spaceManagers(space)
     if !stringArrayContainsUser(managers, username) (
@@ -1873,7 +1873,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
 )
 
 def handleRemoveSpaceCurator(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1894,7 +1894,7 @@ def handleRemoveSpaceCurator(*serve.Context c) (
 )
 
 def handleCancelSpaceCuratorInvite(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -1931,12 +1931,12 @@ def handleReactSpace(*serve.Context c) (
 )
 
 def handleReactSpaceLocked(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
-  string reactionType = c.bodyJSON().type.toStr()
+  string reactionType = requestJSON(c).type.toStr()
   if !isValidReaction(reactionType) (
     c.badRequest("invalid reaction")
     return
@@ -1970,7 +1970,7 @@ def handleReactSpaceLocked(*serve.Context c) (
 )
 
 def handleGetSpaceComments(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -1981,12 +1981,12 @@ def handleGetSpaceComments(*serve.Context c) (
 )
 
 def handleCreateSpaceComment(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -2021,7 +2021,7 @@ def handleCreateSpaceComment(*serve.Context c) (
 )
 
 def handleDeleteSpaceComment(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -2045,12 +2045,12 @@ def handleDeleteSpaceComment(*serve.Context c) (
 )
 
 def handleEditSpaceComment(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -2064,7 +2064,7 @@ def handleEditSpaceComment(*serve.Context c) (
 )
 
 def handlePinSpaceComment(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -2073,7 +2073,7 @@ def handlePinSpaceComment(*serve.Context c) (
   if canManageSpace(space, c) (
     moderator = c.getString("username")
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   boolean pinned = true
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
@@ -2088,7 +2088,7 @@ def handlePinSpaceComment(*serve.Context c) (
 )
 
 def handleReactSpaceComment(*serve.Context c) (
-  object space = spaceDocs.findById(c.param("id"))
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -2116,7 +2116,7 @@ def handleCreatePreview(*serve.Context c) (
   for i previews.len (
     object existing = previews[i].assert(object)
     if existing.expiresAt.toNum() <= timestamp (
-      previewDocs.deleteOne({_id: existing["_id"]})
+      void previewDocs.deleteOne({_id: existing["_id"]})
     ) else (
       activePreviews += 1
     )
@@ -2125,7 +2125,7 @@ def handleCreatePreview(*serve.Context c) (
     c.badRequest("a project can have at most 20 active previews")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   number hours = 24
   if body.contains("hours") (
     hours = clampNumber(body.hours.toNum(), 1, 168)
@@ -2133,7 +2133,7 @@ def handleCreatePreview(*serve.Context c) (
   string key = randomString(24)
   string previewId = project.id.toStr() ++ ":" ++ key
   object preview = {_id: previewId, projectId: project.id, key: key, owner: c.getString("username"), ownerId: c.getString("userId"), created: timestamp, expiresAt: timestamp + (hours * 3600000)}
-  previewDocs.insertOne(preview)
+  void previewDocs.insertOne(preview)
   c.json(201, {ok: true, key: key, expiresAt: preview.expiresAt})
 )
 
@@ -2167,7 +2167,7 @@ def handleCreateRelease(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string version = body.version.toStr().strip()
   string channel = body.channel.toStr().toLower().strip()
   if version == "" or version.len > 50 (
@@ -2208,7 +2208,7 @@ def handleCreateRelease(*serve.Context c) (
   project = snapshot.project.assert(object)
   string jsonUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
   object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: c.getString("username"), creatorId: c.getString("userId")}
-  releaseDocs.insertOne(release)
+  void releaseDocs.insertOne(release)
   if channel == "stable" (
     project.publicRelease = releaseId
     saveProject(project)
@@ -2220,7 +2220,7 @@ def handleCreateRelease(*serve.Context c) (
 )
 
 def handleGetReleaseProjectJson(*serve.Context c) (
-  object release = releaseDocs.findById(c.param("release"))
+  object release = (releaseDocs.findById(c.param("release")) ?? {})
   if release.len == 0 or release.projectId.toStr() != c.param("id") (
     c.notFound("release not found")
     return
@@ -2233,7 +2233,7 @@ def handleGetReleaseProjectJson(*serve.Context c) (
   string releaseEtag = "\"" ++ release["_id"].toStr() ++ "\""
   c.setHeader("ETag", releaseEtag)
   c.setHeader("Cache-Control", "no-cache")
-  if c.header("If-None-Match").contains(releaseEtag) (
+  if (c.header("If-None-Match") ?? "").contains(releaseEtag) (
     c.status(304)
     return
   )
@@ -2247,7 +2247,7 @@ def handleGetReleaseProjectJson(*serve.Context c) (
     return
   )
   c.setHeader("Content-Type", "application/json")
-  c.text(200, fs.readFile(releasePath))
+  c.text(200, fs.readFile(releasePath).unwrapOr(""))
 )
 
 def handleDeleteRelease(*serve.Context c) (
@@ -2261,14 +2261,14 @@ def handleDeleteRelease(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object release = releaseDocs.findById(c.param("release"))
+  object release = (releaseDocs.findById(c.param("release")) ?? {})
   if release.len == 0 or release.projectId.toStr() != project.id.toStr() (
     c.notFound("release not found")
     return
   )
   string jsonKey = (release.jsonKey ?? "").toStr()
-  releaseDocs.deleteOne({_id: release["_id"]})
-  fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
+  void releaseDocs.deleteOne({_id: release["_id"]})
+  void fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
   if jsonKey != "" (
     removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
   )
@@ -2281,7 +2281,7 @@ def handleDeleteRelease(*serve.Context c) (
 
 def handleCreateContribution(*serve.Context c) (
   auto parentResult = loadProject(c.param("id"))
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   auto remixResult = loadProject(body.remixProjectId.toStr())
   if !parentResult.ok or !remixResult.ok (
     c.notFound("project not found")
@@ -2317,7 +2317,7 @@ def playtimeIdentity(string username) string (
 def beginPlaytimeSession(string projectId, string username, string sessionId) boolean (
   string userId = userIdForUsername(username)
   string identityKey = playtimeIdentity(username)
-  object session = playtimeSessionDocs.findById(sessionId)
+  object session = (playtimeSessionDocs.findById(sessionId) ?? {})
   if session.len == 0 or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
     putDocument(playtimeSessionDocs, sessionId, {
       _id: sessionId,
@@ -2341,7 +2341,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   string playtimeId = projectId ++ ":" ++ identityKey
   string playtimeLock = "playtime:" ++ playtimeId
   sync.lock(playtimeLock)
-  object playtime = playtimeDocs.findById(playtimeId)
+  object playtime = (playtimeDocs.findById(playtimeId) ?? {})
   if playtime.len == 0 (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
   ) else (
@@ -2357,7 +2357,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
 
 def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
   string userId = userIdForUsername(username)
-  object session = playtimeSessionDocs.findById(sessionId)
+  object session = (playtimeSessionDocs.findById(sessionId) ?? {})
   if session.len == 0 or session.projectId.toStr() != projectId (
     return 0
   )
@@ -2367,7 +2367,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     string playtimeId = projectId ++ ":" ++ identityKey
     string playtimeLock = "playtime:" ++ playtimeId
     sync.lock(playtimeLock)
-    object playtime = playtimeDocs.findById(playtimeId)
+    object playtime = (playtimeDocs.findById(playtimeId) ?? {})
     if playtime.len == 0 (
       playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
     )
@@ -2378,7 +2378,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     sync.unlock(playtimeLock)
   )
   if finished (
-    playtimeSessionDocs.deleteOne({_id: sessionId})
+    void playtimeSessionDocs.deleteOne({_id: sessionId})
   ) else (
     session.lastCredit = timestamp
     session.lastSeen = timestamp
@@ -2431,11 +2431,11 @@ def recordProjectDiagnostic(string projectId, boolean authenticated, string user
   object item = {_id: diagnosticId, projectId: projectId, type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
   string diagnosticLock = "project-diagnostics-" ++ projectId
   sync.lock(diagnosticLock)
-  diagnosticDocs.insertOne(item)
+  void diagnosticDocs.insertOne(item)
   array storedDiagnostics = diagnosticDocs.where("projectId", db.equal, projectId).sort("created", db.desc).limit(550).all()
   for i storedDiagnostics.len (
     if i > 500 (
-      diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
+      void diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
     )
   )
   sync.unlock(diagnosticLock)
@@ -2454,7 +2454,7 @@ def handleRecordDiagnostic(*serve.Context c) (
     c.getBool("authenticated"),
     c.getString("username"),
     sessionId,
-    c.bodyJSON()
+    requestJSON(c)
   )
   if !result.ok (
     c.badRequest(result.error.toStr())
@@ -2500,7 +2500,7 @@ def handleCreateProjectFeedback(*serve.Context c) (
     c.badRequest("this project has reached its feedback limit")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string feedbackType = body.type.toStr().toLower().strip()
   if feedbackType != "bug" and feedbackType != "idea" and feedbackType != "confusing" and feedbackType != "other" (
     c.badRequest("invalid feedback type")
@@ -2513,7 +2513,7 @@ def handleCreateProjectFeedback(*serve.Context c) (
   )
   string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
   object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: c.getString("username"), authorId: c.getString("userId"), created: timestamp, edited: timestamp}
-  feedbackDocs.insertOne(feedback)
+  void feedbackDocs.insertOne(feedback)
   addNotification(project.owner.toStr(), c.getString("username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
   c.json(201, {ok: true})
 )
@@ -2534,12 +2534,12 @@ def handleUpdateProjectFeedback(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object feedback = feedbackDocs.findById(c.param("feedback"))
+  object feedback = (feedbackDocs.findById(c.param("feedback")) ?? {})
   if feedback.len == 0 or feedback.projectId.toStr() != c.param("id") (
     c.notFound("feedback not found")
     return
   )
-  string status = c.bodyJSON().status.toStr().toLower()
+  string status = requestJSON(c).status.toStr().toLower()
   if status != "open" and status != "working" and status != "done" and status != "dismissed" (
     c.badRequest("invalid feedback status")
     return
@@ -2616,7 +2616,7 @@ def handleSaveProjectReview(*serve.Context c) (
     c.badRequest("you cannot review your own project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   number rating = body.rating.toInt()
   if rating < 1 or rating > 5 (
     c.badRequest("rating must be between 1 and 5")
@@ -2635,7 +2635,7 @@ def handleSaveProjectReview(*serve.Context c) (
     reviewerId = normalizeUsername(c.getString("username"))
   )
   string reviewId = project.id.toStr() ++ ":" ++ reviewerId
-  object existing = reviewDocs.findById(reviewId)
+  object existing = (reviewDocs.findById(reviewId) ?? {})
   number created = timestamp
   if existing.len > 0 (
     created = existing.created.toNum()
@@ -2660,7 +2660,7 @@ def handleDeleteProjectReview(*serve.Context c) (
     reviewerId = normalizeUsername(c.getString("username"))
   )
   string reviewId = c.param("id") ++ ":" ++ reviewerId
-  reviewDocs.deleteOne({_id: reviewId})
+  void reviewDocs.deleteOne({_id: reviewId})
   c.json(200, {ok: true})
 )
 
@@ -2723,7 +2723,7 @@ def handleListIdeas(*serve.Context c) (
 )
 
 def handleCreateIdea(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string title = body.title.toStr().strip()
   string description = body.description.toStr().strip()
   if title == "" or title.len > 120 or description == "" or description.len > 3000 (
@@ -2748,7 +2748,7 @@ def handleCreateIdea(*serve.Context c) (
     source = "mistwarp"
   )
   object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: c.getString("username"), authorId: c.getString("userId"), source: source, interested: source == "mistwarp", status: "open", pulls: [], likes: [c.getString("username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
-  ideaDocs.insertOne(idea)
+  void ideaDocs.insertOne(idea)
   idea.myVote = "like"
   idea.likesCount = 1
   idea.dislikesCount = 0
@@ -2768,13 +2768,13 @@ def handleVoteIdea(*serve.Context c) (
 )
 
 def handleVoteIdeaLocked(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
   string username = c.getString("username")
-  string vote = c.bodyJSON().vote.toStr().toLower()
+  string vote = requestJSON(c).vote.toStr().toLower()
   if vote != "like" and vote != "dislike" (
     c.badRequest("vote must be like or dislike")
     return
@@ -2820,7 +2820,7 @@ def handleVoteIdeaLocked(*serve.Context c) (
 )
 
 def handleGetIdeaComments(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -2831,12 +2831,12 @@ def handleGetIdeaComments(*serve.Context c) (
 )
 
 def handleCreateIdeaComment(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -2870,7 +2870,7 @@ def handleCreateIdeaComment(*serve.Context c) (
 )
 
 def handleDeleteIdeaComment(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -2894,12 +2894,12 @@ def handleDeleteIdeaComment(*serve.Context c) (
 )
 
 def handleEditIdeaComment(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -2913,7 +2913,7 @@ def handleEditIdeaComment(*serve.Context c) (
 )
 
 def handleReactIdeaComment(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -2922,12 +2922,12 @@ def handleReactIdeaComment(*serve.Context c) (
 )
 
 def handleUpdateIdea(*serve.Context c) (
-  object idea = ideaDocs.findById(c.param("id"))
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if body.contains("status") (
     string status = body.status.toStr().toLower()
     if status == "open" or status == "planned" or status == "building" or status == "shipped" or status == "declined" (

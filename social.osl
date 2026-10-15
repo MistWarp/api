@@ -212,7 +212,7 @@ def userPlaytimeLibrary(string name,*serve.Context c) array (
   array library = []
   for i savedProjects.len (
     string projectId = savedProjects[i].toStr()
-    object project = projectSearchDocs.findById(projectId)
+    object project = (projectSearchDocs.findById(projectId) ?? {})
     boolean libraryPublic = !hiddenProjects.contains(projectId)
     boolean include = libraryPublic and project.len > 0 and projectVisibility(project) == "public"
     if !include and project.len > 0 (
@@ -267,7 +267,7 @@ def handleGetUser(*serve.Context c) (
       )
     )
     if !featuredIncluded (
-      object featured = projectSearchDocs.findById(featuredId)
+      object featured = (projectSearchDocs.findById(featuredId) ?? {})
       if featured.len > 0 and featured.shared == true and featured.ownerKey.toStr() == key and projectsVisibleTo([featured], c).len > 0 (
         projects.append(featured)
       )
@@ -325,7 +325,7 @@ def handleGetUserPlaytimeLibrary(*serve.Context c) (
 )
 
 def handleSearchUsers(*serve.Context c) (
-  string q = normalizeUsername(c.query("q"))
+  string q = normalizeUsername((c.query("q") ?? ""))
   if q == "" (
     c.json(200, {ok: true, users: []})
     return
@@ -358,7 +358,7 @@ def handleSearchUsers(*serve.Context c) (
 def handleUpdateProfile(*serve.Context c) (
   string username = c.getString("username")
   object profile = loadProfile(username)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   boolean changed = false
 
   if body.contains("bio") (
@@ -690,7 +690,7 @@ def handleSetLibraryProjectVisibility(*serve.Context c) (
     c.notFound("project is not in your library")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("public") (
     c.badRequest("public must be true or false")
     return
@@ -711,7 +711,7 @@ def handleSetLibraryProjectVisibility(*serve.Context c) (
 )
 
 def activityProjectVisibility(string projectId) string (
-  object project = projectSearchDocs.findById(projectId)
+  object project = (projectSearchDocs.findById(projectId) ?? {})
   if project.len > 0 and projectIsViewable(project) (
     return projectVisibility(project)
   )
@@ -740,7 +740,7 @@ def publicActivityItems(array items, object privacy, number limit) array (
 )
 
 def handleGetActivity(*serve.Context c) (
-  array users = c.query("users").split(",")
+  array users = (c.query("users") ?? "").split(",")
   array items = []
   object selectedUsers = {}
   number count = 0
@@ -766,7 +766,7 @@ def handleGetActivity(*serve.Context c) (
       string author = normalizeUsername(review.author.toStr())
       string projectId = review.projectId.toStr()
       if selectedUsers.contains(author) and activityProjectVisibility(projectId) == "public" (
-        object project = projectSearchDocs.findById(projectId)
+        object project = (projectSearchDocs.findById(projectId) ?? {})
         items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
         reviewItems += 1
       )

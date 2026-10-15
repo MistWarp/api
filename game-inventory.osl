@@ -221,7 +221,7 @@ def handleGrantProjectItem(*serve.Context c) (
     return
   )
   object project = access.project.assert(object)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string itemId = body.item.toStr().toLower().strip()
   string requestId = body.requestId.toStr().strip()
   if !validGameSaveRequestId(requestId) (

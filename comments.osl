@@ -290,7 +290,7 @@ def commentPage(array allComments,*serve.Context c) object (
       roots.append(comment)
     )
   )
-  if c.query("sort") == "donations" (
+  if (c.query("sort") ?? "") == "donations" (
     for i roots.len (
       object root = roots[i].assert(object)
       if !root.contains("donationAmount") or root.donationAmount == null (
@@ -335,7 +335,7 @@ def commentPage(array allComments,*serve.Context c) object (
   for i selectedRoots.len (
     selected[selectedRoots[i].id.toStr()] = true
   )
-  string anchor = c.query("anchor")
+  string anchor = (c.query("anchor") ?? "")
   if anchor != "" (
     string anchorRoot = ""
     for i comments.len (
@@ -431,7 +431,7 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
     c.badRequest("you cannot donate to your own project")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   number amount = 0
   if body.contains("amount") and body.amount != null (
     amount = (body.amount.toNum() * 100).toInt() / 100
@@ -480,7 +480,7 @@ def handleCreateProjectComment(*serve.Context c) (
     return
   )
 
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -605,7 +605,7 @@ def handleEditProjectComment(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -633,7 +633,7 @@ def handlePinProjectComment(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   boolean pinned = true
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
@@ -686,7 +686,7 @@ def handleCreateProfileComment(*serve.Context c) (
     return
   )
 
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -731,7 +731,7 @@ def handleEditProfileComment(*serve.Context c) (
     c.notFound("this user is not on MistWarp")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !body.contains("content") or body.content == null (
     c.badRequest("comment content is required")
     return
@@ -751,7 +751,7 @@ def handlePinProfileComment(*serve.Context c) (
     c.notFound("this user is not on MistWarp")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   boolean pinned = true
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
@@ -766,7 +766,7 @@ def handlePinProfileComment(*serve.Context c) (
 )
 
 def reactToComment(*serve.Context c, string key, string path) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string reactionType = body.type.toStr()
   if !isValidReaction(reactionType) (
     c.badRequest("invalid reaction")

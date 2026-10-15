@@ -9,7 +9,7 @@ import "std:process"
 import "std:url"
 
 string testDir = "/tmp/mistwarp-snapshot-test-" ++ timestamp.toStr()
-fs.mkdirAll(testDir)
+void fs.mkdirAll(testDir)
 boolean r2Local = false
 
 // Fake R2: serves whatever the current case stages.
@@ -60,7 +60,7 @@ def runAppServer() (
 def waitForServer(string baseUrl) (
   for i 50 (
     auto probe = requests.get(baseUrl ++ "/not-a-route")
-    if probe.success (
+    if probe.isOk() (
       return
     )
     process.sleep(0.1)
@@ -84,17 +84,17 @@ def requestSnapshot(string key, boolean gzip, string etag) object (
 string plain = "{\"targets\":[],\"meta\":{\"name\":\"burger 🍔\"}}"
 stubStatus = 200
 stubGzip = false
-fs.writeFile(stubBodyPath, plain)
+void fs.writeFile(stubBodyPath, plain)
 object response = requestSnapshot("plain.json", false, "")
 testing.assert(response.status == 200 and response.body == plain, "remote JSON is returned verbatim without base64 decoding")
 testing.assert(response.type == "application/json" and response.encoding == "", "plain JSON has the correct headers")
 
 array gzipBytes = [31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 86, 42, 73, 44, 74, 79, 45, 41, 86, 178, 138, 142, 173, 5, 0, 138, 235, 35, 179, 14, 0, 0, 0]
 string gzipPath = testDir ++ "/compressed.json.gz"
-fs.writeFileBytes(gzipPath, gzipBytes)
+void fs.writeFileBytes(gzipPath, gzipBytes)
 string compressed = fs.readFile(gzipPath)
 stubGzip = true
-fs.writeFile(stubBodyPath, compressed)
+void fs.writeFile(stubBodyPath, compressed)
 response = requestSnapshot("compressed.json.gz", true, "")
 testing.assert(response.status == 200 and response.body == compressed, "remote binary gzip bytes are preserved exactly")
 testing.assert(response.encoding == "gzip", "remote compressed snapshots retain Content-Encoding")
@@ -108,7 +108,7 @@ stubGzip = false
 response = requestSnapshot("missing.json", false, "")
 testing.assert(response.status == 404, "missing remote snapshots return 404")
 
-fs.writeFile(localBlobPath("local.json"), plain)
+void fs.writeFile(localBlobPath("local.json"), plain)
 before = fetchCount
 response = requestSnapshot("local.json", false, "")
 testing.assert(response.status == 200 and response.body == plain and fetchCount == before, "local snapshots bypass R2")
@@ -117,4 +117,4 @@ response = requestSnapshot("missing.json", false, "")
 testing.assert(response.status == 404 and fetchCount == before, "local-only missing snapshots return 404 without R2")
 response = requestSnapshot("../unsafe.json", false, "")
 testing.assert(response.status == 404 and fetchCount == before, "unsafe keys cannot reach storage")
-fs.remove(testDir)
+void fs.remove(testDir)

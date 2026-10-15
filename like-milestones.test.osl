@@ -59,7 +59,7 @@ def putDocument(*db.Collection collection, string id, object value) boolean (
   if collection.exists({_id: id}) (
     return collection.replaceOne({_id: id}, value) == 1
   )
-  return collection.insertOne(value) != null
+  return collection.insertOne(value).isOk()
 )
 
 notifyLikeMilestones("alice", "project", "p1", 3, 4, "/project/p1", {})
@@ -105,6 +105,6 @@ observeRemoteMilestone("alice", "followers", "remote", 24, "/users/alice/followe
 observeRemoteMilestone("alice", "followers", "remote", 25, "/users/alice/followers", {})
 testing.assert(sent.len == 12, "follower drops and refollows do not repeat")
 milestoneDb.close()
-fs.remove(path)
-fs.remove(path ++ "-wal")
-fs.remove(path ++ "-shm")
+void fs.remove(path)
+void fs.remove(path ++ "-wal")
+void fs.remove(path ++ "-shm")

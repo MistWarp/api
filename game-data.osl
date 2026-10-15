@@ -29,7 +29,7 @@ def gameSaveUsagePath(string userId) string (
 def calculateGameSaveStorageBytes(string userId) number (
   string filename = gameDataUserKey(userId) ++ ".json"
   number total = 0
-  array projects = fs.readDir(gameSavesDir)
+  array projects = fs.readDir(gameSavesDir).unwrapOr([])
   array namespaces = ["production", "test"]
   for i projects.len (
     string projectId = projects[i].toStr()
@@ -120,7 +120,7 @@ def handleCreateMultiplayerTicket(*serve.Context c) (
     return
   )
   object project = loaded.project.assert(object)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string context = body.context.toStr().toLower().strip()
   string room = body.room.toStr().strip()
   if context == "" (
@@ -166,7 +166,7 @@ def handleCreateGameDataCapability(*serve.Context c) (
     return
   )
   object project = loaded.project.assert(object)
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string context = body.context.toStr().toLower().strip()
   if !validGameDataContext(context) (
     c.badRequest("context must be play or editor")
@@ -199,7 +199,7 @@ def handleCreateGameDataCapability(*serve.Context c) (
 )
 
 def requireGameDataCapability(*serve.Context c, object project) object (
-  string token = c.header("X-MistWarp-Game-Data")
+  string token = (c.header("X-MistWarp-Game-Data") ?? "")
   if token == "" or !gameDataCapabilityCache.has(token) (
     return {ok: false, status: 403, error: "game data capability required"}
   )
@@ -272,7 +272,7 @@ def handlePutMyProjectSave(*serve.Context c) (
   if rejectGameDataCapability(c, access) (
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   object value = body.value.assertElse(object, {})
   if !body.contains("value") or body.value == null (
     c.badRequest("save value must be a JSON object")
@@ -332,7 +332,7 @@ def handlePutMyProjectSave(*serve.Context c) (
     c.internalError("failed to reserve account save storage")
     return
   )
-  fs.mkdirAll(gameSaveProjectDir(projectId, context))
+  void fs.mkdirAll(gameSaveProjectDir(projectId, context))
   if !writeFile(path, current) (
     saveGameSaveUsage(userId, usedBytes)
     sync.unlock(lockName)
@@ -347,7 +347,7 @@ def handleListMyGameSaves(*serve.Context c) (
   string userId = c.getString("userId")
   string filename = gameDataUserKey(userId) ++ ".json"
   array saves = []
-  array projects = fs.readDir(gameSavesDir)
+  array projects = fs.readDir(gameSavesDir).unwrapOr([])
   for i projects.len (
     string projectId = projects[i].toStr()
     if isSafePathPart(projectId) (
@@ -403,7 +403,7 @@ def collectGameDataForUser(string userId) object (
   string filename = gameDataUserKey(userId) ++ ".json"
   array saves = []
   array entitlements = []
-  array projects = fs.readDir(gameSavesDir)
+  array projects = fs.readDir(gameSavesDir).unwrapOr([])
   array namespaces = ["production", "test"]
   for i projects.len (
     string projectId = projects[i].toStr()
@@ -417,7 +417,7 @@ def collectGameDataForUser(string userId) object (
       )
     )
   )
-  array entitlementProjects = fs.readDir(gameEntitlementsDir)
+  array entitlementProjects = fs.readDir(gameEntitlementsDir).unwrapOr([])
   for i entitlementProjects.len (
     string projectId = entitlementProjects[i].toStr()
     if isSafePathPart(projectId) (
@@ -439,47 +439,47 @@ def purgeGameDataForProject(string projectId) (
     string namespace = namespaces[n].toStr()
     string dir = gameSavesDir ++ projectId ++ "/" ++ namespace ++ "/"
     if fs.exists(dir) (
-      array files = fs.readDir(dir)
+      array files = fs.readDir(dir).unwrapOr([])
       for i files.len (
         string file = files[i].toStr()
         if file.endsWith(".json") (
           string userKey = file.replace(".json", "")
-          fs.remove(gameSaveUsageDir ++ userKey ++ ".json")
+          void fs.remove(gameSaveUsageDir ++ userKey ++ ".json")
         )
-        fs.remove(dir ++ file)
+        void fs.remove(dir ++ file)
       )
-      fs.remove(dir)
+      void fs.remove(dir)
     )
   )
-  fs.remove(gameSavesDir ++ projectId ++ "/")
+  void fs.remove(gameSavesDir ++ projectId ++ "/")
   string entDir = gameEntitlementsDir ++ projectId ++ "/"
   if fs.exists(entDir) (
-    array files = fs.readDir(entDir)
+    array files = fs.readDir(entDir).unwrapOr([])
     for i files.len (
-      fs.remove(entDir ++ files[i].toStr())
+      void fs.remove(entDir ++ files[i].toStr())
     )
-    fs.remove(entDir)
+    void fs.remove(entDir)
   )
 )
 
 def purgeGameDataForUser(string userId) (
   string filename = gameDataUserKey(userId) ++ ".json"
-  array projects = fs.readDir(gameSavesDir)
+  array projects = fs.readDir(gameSavesDir).unwrapOr([])
   for i projects.len (
     string projectId = projects[i].toStr()
     if isSafePathPart(projectId) (
-      fs.remove(gameSavesDir ++ projectId ++ "/production/" ++ filename)
-      fs.remove(gameSavesDir ++ projectId ++ "/test/" ++ filename)
+      void fs.remove(gameSavesDir ++ projectId ++ "/production/" ++ filename)
+      void fs.remove(gameSavesDir ++ projectId ++ "/test/" ++ filename)
     )
   )
-  array entitlementProjects = fs.readDir(gameEntitlementsDir)
+  array entitlementProjects = fs.readDir(gameEntitlementsDir).unwrapOr([])
   for i entitlementProjects.len (
     string projectId = entitlementProjects[i].toStr()
     if isSafePathPart(projectId) (
-      fs.remove(gameEntitlementsDir ++ projectId ++ "/" ++ filename)
+      void fs.remove(gameEntitlementsDir ++ projectId ++ "/" ++ filename)
     )
   )
-  fs.remove(legacyAccountGameDataDir ++ gameDataUserKey(userId) ++ ".json")
-  fs.remove(gameInventoryPath(userId))
-  fs.remove(gameSaveUsagePath(userId))
+  void fs.remove(legacyAccountGameDataDir ++ gameDataUserKey(userId) ++ ".json")
+  void fs.remove(gameInventoryPath(userId))
+  void fs.remove(gameSaveUsagePath(userId))
 )

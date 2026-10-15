@@ -351,7 +351,7 @@ def handleAddAdmin(*serve.Context c) (
     c.forbidden("only super admins can manage admins")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = normalizeUsername(body.username.toStr())
   if !isSafePathPart(name) (
     c.badRequest("invalid username")
@@ -372,7 +372,7 @@ def handleRemoveAdmin(*serve.Context c) (
     c.forbidden("only super admins can manage admins")
     return
   )
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = normalizeUsername(body.username.toStr())
   array admins = loadAdmins()
   if !admins.contains(name) (
@@ -384,7 +384,7 @@ def handleRemoveAdmin(*serve.Context c) (
 )
 
 def handleBanUser(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = body.username.toStr()
   string reason = ""
   if body.contains("reason") and body.reason != null (
@@ -406,7 +406,7 @@ def handleBanUser(*serve.Context c) (
 )
 
 def handleUnbanUser(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   if !unbanUser(body.username.toStr()) (
     c.notFound("that user is not banned")
     return
@@ -486,8 +486,8 @@ def handleAdminSyncR2StorageStats(*serve.Context c) (
 
 def handleAdminStats(*serve.Context c) (
   number days = 30
-  if c.query("days") != "" (
-    days = c.query("days").toNum().toInt()
+  if (c.query("days") ?? "") != "" (
+    days = (c.query("days") ?? "").toNum().toInt()
     if days < 7 (
       days = 7
     )
@@ -535,7 +535,7 @@ def handleAdminStats(*serve.Context c) (
     )
     projectUpdatesByDay[editKey] = previousUpdates + 1
   )
-  array userFiles = fs.readDir(usersDir)
+  array userFiles = fs.readDir(usersDir).unwrapOr([])
   number totalUsers = 0
   object usersByDay = {}
   for i userFiles.len (
@@ -552,7 +552,7 @@ def handleAdminStats(*serve.Context c) (
       )
     )
   )
-  array sessionFiles = fs.readDir(sessionsDir)
+  array sessionFiles = fs.readDir(sessionsDir).unwrapOr([])
   object loginsByDay = {}
   number activeSessions = 0
   for i sessionFiles.len (
@@ -703,8 +703,8 @@ def handleAdminStats(*serve.Context c) (
 
 def handlePublicStats(*serve.Context c) (
   number days = 30
-  if c.query("days") != "" (
-    days = c.query("days").toNum().toInt()
+  if (c.query("days") ?? "") != "" (
+    days = (c.query("days") ?? "").toNum().toInt()
     if days < 7 (
       days = 7
     )
@@ -734,7 +734,7 @@ def handlePublicStats(*serve.Context c) (
   )
   number totalUsers = 0
   object usersByDay = {}
-  array userFiles = fs.readDir(usersDir)
+  array userFiles = fs.readDir(usersDir).unwrapOr([])
   for i userFiles.len (
     string filename = userFiles[i].toStr()
     if filename.endsWith(".json") (
@@ -782,7 +782,7 @@ def handlePublicStats(*serve.Context c) (
 )
 
 def handleAdminSearchProjects(*serve.Context c) (
-  string q = c.query("q").toLower().strip()
+  string q = (c.query("q") ?? "").toLower().strip()
   array projects = projectSearchDocs.all()
   array matches = []
   for i projects.len (
@@ -811,7 +811,7 @@ def reportTargetUser(object found) string (
 )
 
 def handleReportAction(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string id = body.id.toStr()
   string action = body.action.toStr()
   boolean validAction = action == "dismiss" or action == "unshare_project" or action == "hide_project" or action == "ban_user" or action == "warn_user"

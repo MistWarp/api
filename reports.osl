@@ -96,7 +96,7 @@ def findReportedComment(string id, string context) object (
   if context.startsWith("project ") (
     keys.append("project-" ++ context.replace("project ", ""))
   )
-  array files = fs.readDir(commentsDir)
+  array files = fs.readDir(commentsDir).unwrapOr([])
   for i files.len (
     keys.append(files[i].toStr().replace(".jsonl", "").replace(".json", ""))
   )
@@ -242,7 +242,7 @@ def closeRoturReport(object report, string outcome) (
 )
 
 def handleCreateReport(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string reportType = body.type.toStr()
   string target = body.target.toStr()
   string reason = body.reason.toStr().strip()
@@ -306,7 +306,7 @@ def handleCreateReport(*serve.Context c) (
 )
 
 def handleCreateSupportRequest(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string requestType = body.type.toStr().toLower().strip()
   string username = body.username.toStr().trim(1, 80)
   string subject = body.subject.toStr().strip()
@@ -356,7 +356,7 @@ def handleGetReports(*serve.Context c) (
 )
 
 def handleResolveReport(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string id = body.id.toStr()
   sync.lock("reports-storage")
   array reports = loadReports()

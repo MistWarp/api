@@ -81,7 +81,7 @@ def updateSafetyList(*serve.Context c, string field, boolean add) (
 
 def removeUserFromSafetyLists(string username) (
   string key = normalizeUsername(username)
-  array files = fs.readDir(safetyDir)
+  array files = fs.readDir(safetyDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") and name != key ++ ".json" (
@@ -98,7 +98,7 @@ def removeUserFromSafetyLists(string username) (
 
 def renameUserSafety(string oldKey, string newKey) boolean (
   renameUserFile(safetyDir, oldKey, newKey)
-  array files = fs.readDir(safetyDir)
+  array files = fs.readDir(safetyDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -138,7 +138,7 @@ def handleUnmuteUser(*serve.Context c) (
 def collectMyComments(string username) array (
   string key = normalizeUsername(username)
   array mine = []
-  array files = fs.readDir(commentsDir)
+  array files = fs.readDir(commentsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     string source = name.replace(".jsonl", "").replace(".json", "")
@@ -195,7 +195,7 @@ def eraseUser(string userId, string username) (
   for i milestones.len (
     string milestoneId = milestones[i].assert(object)["_id"].toStr()
     if userId != "" and milestoneId.endsWith(":" ++ userId) (
-      likeMilestoneDocs.deleteOne({_id: milestoneId})
+      void likeMilestoneDocs.deleteOne({_id: milestoneId})
     )
   )
   if username == "" (
@@ -215,7 +215,7 @@ def eraseUser(string userId, string username) (
     )
   )
   purgeProjects(projectsToPurge)
-  array trashFiles = fs.readDir(trashDir)
+  array trashFiles = fs.readDir(trashDir).unwrapOr([])
   for i trashFiles.len (
     string trashFile = trashFiles[i].toStr()
     if trashFile.endsWith(".json") (
@@ -239,11 +239,11 @@ def eraseUser(string userId, string username) (
   anonymiseReportsBy(username, userId)
   purgeUser(userId, username)
   removeUserFromSafetyLists(username)
-  fs.remove(safetyPath(username))
+  void fs.remove(safetyPath(username))
 )
 
 def handleDeleteMyData(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string username = c.getString("username")
   if !body.contains("username") or normalizeUsername(body.username.toStr()) != normalizeUsername(username) (
     c.badRequest("type your username to confirm")

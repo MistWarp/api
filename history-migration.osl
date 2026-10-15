@@ -21,7 +21,7 @@ def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
   string cachePath = cacheDir ++ project.jsonKey.toStr().hashSHA256() ++ ".json.gz"
   string lockName = "history-migration-json-" ++ project.jsonKey.toStr().hashSHA256()
   sync.lock(lockName)
-  fs.mkdirAll(cacheDir)
+  void fs.mkdirAll(cacheDir)
   boolean ready = fs.exists(cachePath) or copyStoredProjectJsonToPath(project, cachePath)
   boolean copied = ready and zip.copyFile(cachePath, outputPath)
   sync.unlock(lockName)
@@ -33,7 +33,7 @@ def copyHistoryAssetToPath(string name, string outputPath) boolean (
   string cachePath = cacheDir ++ name
   string lockName = "history-migration-asset-" ++ name
   sync.lock(lockName)
-  fs.mkdirAll(cacheDir)
+  void fs.mkdirAll(cacheDir)
   boolean ready = fs.exists(cachePath) or copyStorageKeyToPath(assetObjectKey(name), cachePath)
   boolean copied = ready and zip.copyFile(cachePath, outputPath)
   sync.unlock(lockName)
@@ -47,9 +47,9 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   string jsonPath = tmpDir ++ workId ++ ".json.gz"
   string assetsPath = tmpDir ++ workId ++ ".assets"
   string workspacePath = tmpDir ++ workId ++ ".mwp"
-  fs.mkdirAll(assetsPath)
+  void fs.mkdirAll(assetsPath)
   if !copyHistoryProjectJsonToPath(project, jsonPath) (
-    fs.remove(assetsPath)
+    void fs.remove(assetsPath)
     return {ok: false, error: "could not read project JSON"}
   )
   array assets = if project.contains("assets") then project.assets.assertElse(array, []) else []
@@ -64,8 +64,8 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
     )
   )
   if !assetsReady or (missingAssets > 0 and !allowMissingAssets) (
-    fs.remove(jsonPath)
-    fs.remove(assetsPath)
+    void fs.remove(jsonPath)
+    void fs.remove(assetsPath)
     return {ok: false, error: "could not read project assets"}
   )
   if missingAssets > 0 (
@@ -73,11 +73,11 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   )
 
   string generatedJson = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead, (project.remixParent ?? "").toStr())
-  fs.remove(jsonPath)
-  fs.remove(assetsPath)
+  void fs.remove(jsonPath)
+  void fs.remove(assetsPath)
   auto parsedGeneratedHistory = json.parse(generatedJson, {type: "object"})
   if parsedGeneratedHistory.isErr() or parsedGeneratedHistory.unwrap().assert(object).ok != true or !fs.exists(workspacePath) (
-    fs.remove(workspacePath)
+    void fs.remove(workspacePath)
     return {ok: false, error: "could not generate history archive"}
   )
 
@@ -85,21 +85,21 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   string head = history.head.toStr()
   auto currentResult = loadProject(id)
   if !currentResult.ok (
-    fs.remove(workspacePath)
+    void fs.remove(workspacePath)
     return {ok: false, error: "project disappeared during migration"}
   )
   object current = currentResult.project.assert(object)
   if projectHasWorkspace(current) (
-    fs.remove(workspacePath)
+    void fs.remove(workspacePath)
     return {ok: true, project: current, generated: false}
   )
   if projectHistorySourceVersion(current) != sourceVersion (
-    fs.remove(workspacePath)
+    void fs.remove(workspacePath)
     return {ok: false, error: "project changed during migration; will retry later"}
   )
 
-  byte[] workspace = fs.readFileBytes(workspacePath)
-  fs.remove(workspacePath)
+  byte[] workspace = fs.readFileBytes(workspacePath).unwrapOr("".toBytes())
+  void fs.remove(workspacePath)
   string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
   if !stageR2Blob(workspaceKey, workspace, "application/x-mistwarp-project", "") (
     return {ok: false, error: "could not store generated history"}
@@ -202,12 +202,12 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
     boolean parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
     for attempt 2 (
       if !parentCopied (
-        fs.remove(parentPath)
+        void fs.remove(parentPath)
         parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
       )
     )
     if !parentCopied (
-      fs.remove(parentPath)
+      void fs.remove(parentPath)
       return {ok: false, retryable: true, error: "could not read parent history; retry later"}
     )
   )
@@ -226,13 +226,13 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
     )
   )
   sync.unlock("project-history-" ++ id)
-  fs.remove(parentPath)
+  void fs.remove(parentPath)
   return result
 )
 
 def missingProjectHistoryFiles() array (
   array missing = []
-  array files = fs.readDir(projectsDir)
+  array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -299,8 +299,8 @@ def generateMissingProjectHistories() object (
     thread.new(generateMissingProjectHistoriesWorker, i - 1, workerCount, files, stats, jobs)
   )
   jobs.wait()
-  fs.remove(tmpDir ++ "history-migration-json/")
-  fs.remove(tmpDir ++ "history-migration-assets/")
+  void fs.remove(tmpDir ++ "history-migration-json/")
+  void fs.remove(tmpDir ++ "history-migration-assets/")
   log "MistWarp history migration complete: " ++ stats.generated.toStr() ++ " generated, " ++ stats.skipped.toStr() ++ " skipped, " ++ stats.failed.toStr() ++ " failed out of " ++ stats.total.toStr()
   return stats
 )

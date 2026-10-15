@@ -5,7 +5,7 @@ import "go:mistwarp.local/storagefs"
 import "./archive-security.osl"
 
 string fixtureDir = "/tmp/mistwarp-zip-fixtures-" ++ timestamp.toStr()
-fs.mkdirAll(fixtureDir)
+void fs.mkdirAll(fixtureDir)
 
 def stageParent(string stage, string name) (
   array parts = name.split("/")
@@ -14,22 +14,22 @@ def stageParent(string stage, string name) (
     for i in 1 to (parts.len - 1) (
       parent ++= "/" ++ parts[i]
     )
-    fs.mkdirAll(parent)
+    void fs.mkdirAll(parent)
   )
 )
 
 def stageText(string kind, string name, string content) (
   string stage = fixtureDir ++ "/" ++ kind
-  fs.mkdirAll(stage)
+  void fs.mkdirAll(stage)
   stageParent(stage, name)
-  fs.writeFile(stage ++ "/" ++ name, content)
+  void fs.writeFile(stage ++ "/" ++ name, content)
 )
 
 def stageBytes(string kind, string name, byte[] content) (
   string stage = fixtureDir ++ "/" ++ kind
-  fs.mkdirAll(stage)
+  void fs.mkdirAll(stage)
   stageParent(stage, name)
-  fs.writeFileBytes(stage ++ "/" ++ name, content)
+  void fs.writeFileBytes(stage ++ "/" ++ name, content)
 )
 
 def compressFixture(string kind) byte[] (
@@ -172,4 +172,4 @@ testing.assert(!validateZipArchive(zipFixture("file-parent"), 1048576, 1048576, 
 testing.assert(!validateZipArchive(zipFixture("corrupt"), 1048576, 1048576, 10, true), "rejects corrupt entry data")
 testing.assert(!validateZipArchive(zipFixture("valid"), 1, 1048576, 10, true), "rejects oversized compressed input")
 testing.assert(!validateZipArchive(zipFixture("valid"), 1048576, 1, 10, true), "rejects oversized expanded input")
-fs.remove(fixtureDir)
+void fs.remove(fixtureDir)

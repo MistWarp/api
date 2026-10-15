@@ -31,7 +31,7 @@ def roturTierLookup(string userId) object (
 )
 
 def profileRoturTier(string userId) object (
-  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions())
+  object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if response.success and response.status.toInt() == 404 (
     // No such Rotur account, so no plan.
     return {reached: true, tier: "Free"}

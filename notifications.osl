@@ -316,7 +316,7 @@ def postRoturNotification(string target, string targetId, string actor, string a
     timeout: 5,
     headers: notifyHeaders(),
     body: json.stringify(requestBody)
-  })
+  }).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   return resp.success and resp.status.toInt() == 200
 )
 

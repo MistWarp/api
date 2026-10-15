@@ -18,7 +18,7 @@ def loadAgreement() object (
   )
   // Read text from .md file, fall back to the text field in json
   if fs.exists(agreementTextPath()) (
-    meta.text = fs.readFile(agreementTextPath())
+    meta.text = fs.readFile(agreementTextPath()).unwrapOr("")
   )
   return meta
 )
@@ -93,7 +93,7 @@ def handleAcceptAgreement(*serve.Context c) (
     c.badRequest("invalid username")
     return
   )
-  fs.mkdirAll(agreementAcceptDir)
+  void fs.mkdirAll(agreementAcceptDir)
   if !writeFile(acceptancePath(username), acceptance) (
     c.internalError("failed to save acceptance")
     return
@@ -131,8 +131,8 @@ def handleAdminGetAgreement(*serve.Context c) (
   number acceptedCount = 0
   number totalUsers = 0
 
-  fs.mkdirAll(agreementAcceptDir)
-  array files = fs.readDir(agreementAcceptDir)
+  void fs.mkdirAll(agreementAcceptDir)
+  array files = fs.readDir(agreementAcceptDir).unwrapOr([])
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
@@ -156,7 +156,7 @@ def handleAdminGetAgreement(*serve.Context c) (
 )
 
 def handleAdminUpdateAgreement(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string text = body.text.toStr().strip()
   if text == "" (
     c.badRequest("agreement text cannot be empty")

@@ -1,4 +1,4 @@
-auto communityDb = db.open("data/community.db")
+*db.DB communityDb = db.open("data/community.db")
 *db.Collection projectSearchDocs = communityDb.collection("project_search")
 *db.Collection profileSearchDocs = communityDb.collection("profile_search")
 *db.Collection spaceDocs = communityDb.collection("spaces")
@@ -29,14 +29,14 @@ def putDocument(*db.Collection collection, string id, object value) boolean (
   if collection.exists({_id: id}) (
     return collection.replaceOne({_id: id}, value) == 1
   )
-  return collection.insertOne(value) != null
+  return collection.insertOne(value).isOk()
 )
 
 def deleteDocumentsByField(*db.Collection collection, string field, string value) number (
   array documents = collection.where(field, db.equal, value).all()
   for i documents.len (
     object document = documents[i].assert(object)
-    collection.deleteOne({_id: document["_id"]})
+    void collection.deleteOne({_id: document["_id"]})
   )
   return documents.len
 )
@@ -46,14 +46,14 @@ def cleanupExpiredCommunityRecords() (
   for i previews.len (
     object preview = previews[i].assert(object)
     if preview.expiresAt.toNum() <= timestamp (
-      previewDocs.deleteOne({_id: preview["_id"]})
+      void previewDocs.deleteOne({_id: preview["_id"]})
     )
   )
   array sessions = playtimeSessionDocs.all()
   for i sessions.len (
     object session = sessions[i].assert(object)
     if timestamp - session.lastSeen.toNum() > 86400000 (
-      playtimeSessionDocs.deleteOne({_id: session["_id"]})
+      void playtimeSessionDocs.deleteOne({_id: session["_id"]})
     )
   )
 )
@@ -63,8 +63,8 @@ def deleteProjectCommunityRecords(string projectId) boolean (
   for i releases.len (
     object release = releases[i].assert(object)
     string jsonKey = (release.jsonKey ?? "").toStr()
-    fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
-    releaseDocs.deleteOne({_id: release["_id"]})
+    void fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
+    void releaseDocs.deleteOne({_id: release["_id"]})
     if jsonKey != "" (
       removeProjectStorageKeyIfOrphaned(jsonKey, projectId, false)
     )
@@ -83,7 +83,7 @@ def deleteProjectCommunityRecords(string projectId) boolean (
 def syncSearchProject(object project) boolean (
   object entry = indexEntryFromProject(project)
   if entry.remixRoot.toStr() == "" and entry.remixParent.toStr() != "" (
-    object parent = projectSearchDocs.findById(entry.remixParent.toStr())
+    object parent = (projectSearchDocs.findById(entry.remixParent.toStr()) ?? {})
     if parent.len > 0 (
       entry.remixRoot = parent.id
       if parent.contains("remixRoot") and parent.remixRoot.toStr() != "" (
@@ -111,14 +111,14 @@ def syncSearchProfile(object profile) boolean (
 )
 
 def removeSearchProject(string id) boolean (
-  projectSearchDocs.deleteOne({_id: id})
+  void projectSearchDocs.deleteOne({_id: id})
   sharedProjectsCache.delete("projects")
   return true
 )
 
 def migratePullCommentCounts() boolean (
   string migrationId = "migration:pull-comment-count-v1"
-  if diagnosticDocs.findById(migrationId).len > 0 (
+  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
     return true
   )
   array pulls = pullDocs.all()
@@ -136,7 +136,7 @@ def migratePullCommentCounts() boolean (
 
 def initCommunityDatabase() boolean (
   if projectSearchDocs.count({}) == 0 (
-    array projectFiles = fs.readDir(projectsDir)
+    array projectFiles = fs.readDir(projectsDir).unwrapOr([])
     for i projectFiles.len (
       string file = projectFiles[i].toStr()
       if file.endsWith(".json") (
@@ -145,13 +145,13 @@ def initCommunityDatabase() boolean (
         if loaded.ok (
           object entry = indexEntryFromProject(loaded.project.assert(object))
           entry["_id"] = id
-          projectSearchDocs.insertOne(entry)
+          void projectSearchDocs.insertOne(entry)
         )
       )
     )
   )
   if profileSearchDocs.count({}) == 0 (
-    array names = fs.readDir(usersDir)
+    array names = fs.readDir(usersDir).unwrapOr([])
     for i names.len (
       string file = names[i].toStr()
       if file.endsWith(".json") (
@@ -225,7 +225,7 @@ def validPreviewKey(string projectId, string key) boolean (
   if key == "" (
     return false
   )
-  object preview = previewDocs.findOne({projectId: projectId, key: key})
+  object preview = previewDocs.findOne({projectId: projectId, key: key}) ?? {}
   if preview.len == 0 (
     return false
   )
@@ -240,9 +240,9 @@ def projectPlaytimeRecord(string projectId, string username) object (
   if identityKey == "" (
     identityKey = normalizeUsername(username)
   )
-  object entry = playtimeDocs.findById(projectId ++ ":" ++ identityKey)
+  object entry = (playtimeDocs.findById(projectId ++ ":" ++ identityKey) ?? {})
   if entry.len == 0 and identityKey != normalizeUsername(username) (
-    entry = playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username))
+    entry = (playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username)) ?? {})
   )
   return entry
 )

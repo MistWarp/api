@@ -146,7 +146,7 @@ def moderationReason(object body) string (
 )
 
 def handleShadowBanUser(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = (body.username ?? "").toStr()
   string key = normalizeUsername(name)
   string reason = moderationReason(body)
@@ -177,7 +177,7 @@ def handleShadowBanUser(*serve.Context c) (
 )
 
 def handleLiftShadowBan(*serve.Context c) (
-  object body = c.bodyJSON()
+  object body = requestJSON(c)
   string name = (body.username ?? "").toStr()
   object entry = shadowBanEntryFor(name)
   if entry.len == 0 (
@@ -204,7 +204,7 @@ def handleListShadowBans(*serve.Context c) (
   for i projectIds.len (
     string id = projectIds[i].toStr()
     object entry = projects[id].assertElse(object, {})
-    object indexed = projectSearchDocs.findById(id)
+    object indexed = (projectSearchDocs.findById(id) ?? {})
     projectRows.append({
       id: id,
       title: if indexed.len > 0 then indexed.title else entry.title ?? "",
@@ -232,7 +232,7 @@ def handleShadowBanProject(*serve.Context c) (
   if project.len == 0 (
     return
   )
-  string reason = moderationReason(c.bodyJSON())
+  string reason = moderationReason(requestJSON(c))
   if reason.len > 1000 (
     c.badRequest("reason is too long")
     return
@@ -294,7 +294,7 @@ def handleHideProject(*serve.Context c) (
   if project.len == 0 (
     return
   )
-  string reason = moderationReason(c.bodyJSON())
+  string reason = moderationReason(requestJSON(c))
   if reason == "" (
     c.badRequest("tell the creator why their project is hidden")
     return
