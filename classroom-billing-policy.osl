@@ -1,0 +1,105 @@
+number classroomSeatPackSize = 10
+number classroomBillingGraceMs = 259200000
+number stripeSignatureToleranceSeconds = 300
+
+def stripeSignatureParts(string header) object (
+  number signedAt = 0
+  array signatures = []
+  array pieces = header.split(",")
+  for i pieces.len (
+    string piece = pieces[i].toStr().strip()
+    if piece.startsWith("t=") (
+      signedAt = piece.trim(3, piece.len).toNum()
+    ) else if piece.startsWith("v1=") (
+      signatures.append(piece.trim(4, piece.len))
+    )
+  )
+  return {t: signedAt, v1: signatures}
+)
+
+def stripeSignatureValid(string header, string payload, string secret, number nowSeconds) boolean (
+  if secret == "" or header == "" (
+    return false
+  )
+  object parts = stripeSignatureParts(header)
+  number signedAt = parts.t.toNum()
+  if signedAt <= 0 or nowSeconds - signedAt > stripeSignatureToleranceSeconds or signedAt - nowSeconds > stripeSignatureToleranceSeconds (
+    return false
+  )
+  string expected = crypto.hmacSha256(secret, signedAt.toInt().toStr() ++ "." ++ payload)
+  array signatures = parts.v1.assert(array)
+  for i signatures.len (
+    if crypto.constantTimeCompare(expected, signatures[i].toStr()) (
+      return true
+    )
+  )
+  return false
+)
+
+def formEncode(array pairs) string (
+  array encoded = []
+  for i pairs.len (
+    array pair = pairs[i].assert(array)
+    encoded.append(url.escape(pair[1].toStr()) ++ "=" ++ url.escape(pair[2].toStr()))
+  )
+  return encoded.join("&")
+)
+
+def classroomSubscriptionActive(string status) boolean (
+  return status == "active" or status == "trialing" or status == "past_due"
+)
+
+def subscriptionItems(object subscription) array (
+  object items = (subscription.items ?? {}).assertElse(object, {})
+  return (items.data ?? []).assertElse(array, [])
+)
+
+def subscriptionSeatPacks(object subscription, string seatPackPrice) number (
+  number packs = 0
+  array items = subscriptionItems(subscription)
+  for i items.len (
+    object item = items[i].assertElse(object, {})
+    object price = (item.price ?? {}).assertElse(object, {})
+    if seatPackPrice != "" and (price.id ?? "").toStr() == seatPackPrice (
+      packs += (item.quantity ?? 0).toNum()
+    )
+  )
+  return packs
+)
+
+def subscriptionPeriodEnd(object subscription) number (
+  number periodEnd = (subscription.current_period_end ?? 0).toNum()
+  array items = subscriptionItems(subscription)
+  for i items.len (
+    number itemEnd = (items[i].assertElse(object, {}).current_period_end ?? 0).toNum()
+    if itemEnd > periodEnd (
+      periodEnd = itemEnd
+    )
+  )
+  return periodEnd
+)
+
+def classroomPlanFromSubscription(object subscription, string seatPackPrice) object (
+  string status = (subscription.status ?? "").toStr()
+  if !classroomSubscriptionActive(status) (
+    return {tier: "free", seats: 0, expiresAt: 0, stripeStatus: status}
+  )
+  number periodEnd = subscriptionPeriodEnd(subscription)
+  number expiresAt = 0
+  if periodEnd > 0 (
+    expiresAt = (periodEnd * 1000) + classroomBillingGraceMs
+  )
+  number seats = classroomPlanDefaults("classroom").seats.toNum() + (subscriptionSeatPacks(subscription, seatPackPrice) * classroomSeatPackSize)
+  return {tier: "classroom", seats: seats, expiresAt: expiresAt, stripeStatus: status}
+)
+
+def stripeEventIsNewer(object stored, number eventCreated) boolean (
+  return eventCreated >= (stored.stripeEventAt ?? 0).toNum()
+)
+
+def stripeEventMayChangePlan(object stored, string subscriptionId) boolean (
+  if (stored.source ?? "").toStr() != "admin" (
+    return true
+  )
+  return (stored.stripeSubscriptionId ?? "").toStr() == subscriptionId
+)

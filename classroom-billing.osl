@@ -1,0 +1,169 @@
+def stripeBillingConfigured() boolean (
+  return stripeSecretKey != "" and stripeWebhookSecret != "" and stripeClassroomPrice != ""
+)
+
+def stripeRequest(string path, array fields) object (
+  object resp = requests.post("https://api.stripe.com/v1" ++ path, {
+    timeout: 15,
+    headers: {
+      "Authorization": "Bearer " ++ stripeSecretKey,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: formEncode(fields)
+  })
+  auto parsed = json.parse(resp.body, {type: "object"})
+  number status = resp.status.toInt()
+  if !resp.success or status < 200 or status >= 300 or parsed.isErr() (
+    string message = "Stripe did not respond"
+    if !parsed.isErr() (
+      object failure = parsed.unwrap().assert(object)
+      message = ((failure.error ?? {}).assertElse(object, {}).message ?? message).toStr()
+    )
+    log "stripe " ++ path ++ " failed: " ++ message
+    return {ok: false, error: message}
+  )
+  return {ok: true, data: parsed.unwrap().assert(object)}
+)
+
+def classroomBillingInfo(string userId) object (
+  object stored = classroomPlanDocs.findById(userId)
+  return {
+    available: stripeBillingConfigured(),
+    seatPackSize: classroomSeatPackSize,
+    seatPacksAvailable: stripeSeatPackPrice != "",
+    managedByStripe: (stored.source ?? "").toStr() == "stripe",
+    canManage: (stored.stripeCustomerId ?? "").toStr() != "",
+    status: (stored.stripeStatus ?? "").toStr()
+  }
+)
+
+def handleClassroomCheckout(*serve.Context c) (
+  if !stripeBillingConfigured() (
+    c.json(503, {ok: false, code: "billing_unavailable", error: "Online payment is not set up yet. Contact MistWarp support to buy a plan."})
+    return
+  )
+  string userId = c.getString("userId")
+  object stored = classroomPlanDocs.findById(userId)
+  if classroomSubscriptionActive((stored.stripeStatus ?? "").toStr()) (
+    c.json(409, {ok: false, code: "already_subscribed", error: "You already have a Classroom subscription. Manage it from billing."})
+    return
+  )
+  object body = c.bodyJSON()
+  number seatPacks = clampNumber((body.seatPacks ?? 0).toNum().toInt(), 0, 50)
+  string returnBase = editorOrigin ++ "/classroom"
+  array fields = [
+    ["mode", "subscription"],
+    ["success_url", returnBase ++ "?billing=success"],
+    ["cancel_url", returnBase ++ "?billing=cancelled"],
+    ["client_reference_id", userId],
+    ["allow_promotion_codes", "true"],
+    ["metadata[userId]", userId],
+    ["subscription_data[metadata][userId]", userId],
+    ["line_items[0][price]", stripeClassroomPrice],
+    ["line_items[0][quantity]", "1"]
+  ]
+  if seatPacks > 0 and stripeSeatPackPrice != "" (
+    fields.append(["line_items[1][price]", stripeSeatPackPrice])
+    fields.append(["line_items[1][quantity]", seatPacks.toStr()])
+  )
+  string customerId = (stored.stripeCustomerId ?? "").toStr()
+  if customerId != "" (
+    fields.append(["customer", customerId])
+  )
+  object session = stripeRequest("/checkout/sessions", fields)
+  if session.ok != true (
+    c.json(502, {ok: false, code: "billing_failed", error: "Payment could not be started. Try again in a moment."})
+    return
+  )
+  c.json(200, {ok: true, url: session.data.url})
+)
+
+def handleClassroomBillingPortal(*serve.Context c) (
+  if !stripeBillingConfigured() (
+    c.json(503, {ok: false, code: "billing_unavailable", error: "Online payment is not set up yet. Contact MistWarp support to change your plan."})
+    return
+  )
+  object stored = classroomPlanDocs.findById(c.getString("userId"))
+  string customerId = (stored.stripeCustomerId ?? "").toStr()
+  if customerId == "" (
+    c.json(404, {ok: false, code: "no_billing_account", error: "You have not bought a plan online yet."})
+    return
+  )
+  object portal = stripeRequest("/billing_portal/sessions", [["customer", customerId], ["return_url", editorOrigin ++ "/classroom"]])
+  if portal.ok != true (
+    c.json(502, {ok: false, code: "billing_failed", error: "Billing could not be opened. Try again in a moment."})
+    return
+  )
+  c.json(200, {ok: true, url: portal.data.url})
+)
+
+def storeStripePlan(string userId, object update, number eventCreated) (
+  string lockName = "classroom-plan-" ++ userId
+  sync.lock(lockName)
+  object stored = classroomPlanDocs.findById(userId)
+  if stored.len == 0 (
+    stored = {_id: userId}
+  )
+  if eventCreated <= 0 or stripeEventIsNewer(stored, eventCreated) (
+    object merged = stored ++ update
+    if eventCreated > 0 (
+      merged.stripeEventAt = eventCreated
+    )
+    merged.updatedAt = timestamp
+    putDocument(classroomPlanDocs, userId, merged)
+    classroomPoolCache.delete(userId)
+  )
+  sync.unlock(lockName)
+)
+
+def applyStripeSubscription(object subscription, number eventCreated, boolean deleted) (
+  string userId = ((subscription.metadata ?? {}).assertElse(object, {}).userId ?? "").toStr()
+  if userId == "" (
+    log "stripe subscription " ++ (subscription.id ?? "").toStr() ++ " has no userId metadata"
+    return
+  )
+  string subscriptionId = (subscription.id ?? "").toStr()
+  if !stripeEventMayChangePlan(classroomPlanDocs.findById(userId), subscriptionId) (
+    return
+  )
+  object plan = classroomPlanFromSubscription(subscription, stripeSeatPackPrice)
+  if deleted (
+    plan = {tier: "free", seats: 0, expiresAt: 0, stripeStatus: "canceled"}
+  )
+  storeStripePlan(userId, plan ++ {
+    source: "stripe",
+    stripeSubscriptionId: subscriptionId,
+    stripeCustomerId: (subscription.customer ?? "").toStr(),
+    storageBytes: 0,
+    maxClasses: 0
+  }, eventCreated)
+)
+
+def handleStripeWebhook(*serve.Context c) (
+  string payload = c.body()
+  if !stripeSignatureValid(c.header("Stripe-Signature"), payload, stripeWebhookSecret, (timestamp / 1000).toInt()) (
+    c.json(400, {ok: false, error: "invalid signature"})
+    return
+  )
+  auto parsed = json.parse(payload, {type: "object"})
+  if parsed.isErr() (
+    c.json(400, {ok: false, error: "invalid event"})
+    return
+  )
+  object event = parsed.unwrap().assert(object)
+  string eventType = (event.type ?? "").toStr()
+  number created = (event.created ?? 0).toNum()
+  object dataObject = ((event.data ?? {}).assertElse(object, {}).object ?? {}).assertElse(object, {})
+  if eventType == "checkout.session.completed" (
+    string userId = (dataObject.client_reference_id ?? "").toStr()
+    string customerId = (dataObject.customer ?? "").toStr()
+    if userId != "" and customerId != "" and !isStudentUserId(userId) (
+      storeStripePlan(userId, {stripeCustomerId: customerId}, 0)
+    )
+  ) else if eventType == "customer.subscription.created" or eventType == "customer.subscription.updated" (
+    applyStripeSubscription(dataObject, created, false)
+  ) else if eventType == "customer.subscription.deleted" (
+    applyStripeSubscription(dataObject, created, true)
+  )
+  c.json(200, {ok: true, received: true})
+)

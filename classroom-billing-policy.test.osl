@@ -1,0 +1,52 @@
+import "std:testing"
+import "std:crypto"
+import "std:url"
+import "std:regex"
+import "./classroom-policy.osl"
+import "./classroom-billing-policy.osl"
+
+object parts = stripeSignatureParts("t=1700000000,v1=abc,v0=old,v1=def")
+testing.assert(parts.t == 1700000000, "the signing time is read")
+testing.assert(parts.v1.len == 2 and parts.v1[1] == "abc" and parts.v1[2] == "def", "every v1 signature is kept and v0 is ignored")
+
+string secret = "whsec_test"
+string payload = "{\"id\":\"evt_1\"}"
+string signature = crypto.hmacSha256(secret, "1700000000." ++ payload)
+string header = "t=1700000000,v1=" ++ signature
+testing.assert(stripeSignatureValid(header, payload, secret, 1700000010), "a fresh signature is accepted")
+testing.assert(stripeSignatureValid("t=1700000000,v1=bad," ++ "v1=" ++ signature, payload, secret, 1700000010), "any matching v1 signature is accepted")
+testing.assert(!stripeSignatureValid(header, payload ++ " ", secret, 1700000010), "a changed body is rejected")
+testing.assert(!stripeSignatureValid(header, payload, "whsec_other", 1700000010), "the wrong secret is rejected")
+testing.assert(!stripeSignatureValid(header, payload, secret, 1700000400), "an old signature is rejected")
+testing.assert(!stripeSignatureValid(header, payload, "", 1700000010), "billing without a secret rejects everything")
+testing.assert(!stripeSignatureValid("", payload, secret, 1700000010), "a missing header is rejected")
+
+testing.assert(formEncode([["mode", "subscription"], ["metadata[userId]", "a b"]]) == "mode=subscription&metadata%5BuserId%5D=a+b", "form fields are escaped")
+
+object active = {
+  id: "sub_1",
+  status: "active",
+  items: {data: [
+    {price: {id: "price_class"}, quantity: 1, current_period_end: 1800000000},
+    {price: {id: "price_seats"}, quantity: 2, current_period_end: 1800000000}
+  ]}
+}
+object plan = classroomPlanFromSubscription(active, "price_seats")
+testing.assert(plan.tier == "classroom", "an active subscription grants the classroom plan")
+testing.assert(plan.seats == 55, "each seat pack adds ten seats")
+testing.assert(plan.expiresAt == (1800000000 * 1000) + classroomBillingGraceMs, "the plan lasts the paid period plus a grace period")
+
+object legacy = {status: "trialing", current_period_end: 1700000000, items: {data: []}}
+testing.assert(classroomPlanFromSubscription(legacy, "price_seats").seats == 35, "trials get the default seats")
+testing.assert(classroomPlanFromSubscription(legacy, "price_seats").expiresAt == (1700000000 * 1000) + classroomBillingGraceMs, "older api versions put the period on the subscription")
+
+object cancelled = {status: "canceled", items: {data: []}}
+testing.assert(classroomPlanFromSubscription(cancelled, "price_seats").tier == "free", "a cancelled subscription returns to free")
+testing.assert(classroomPlanFromSubscription({status: "unpaid"}, "").tier == "free", "unpaid subscriptions return to free")
+testing.assert(classroomPlanFromSubscription({status: "past_due", items: {data: []}}, "").tier == "classroom", "a failed payment keeps the plan while Stripe retries")
+
+testing.assert(stripeEventIsNewer({stripeEventAt: 10}, 10), "an event from the same second still applies")
+testing.assert(!stripeEventIsNewer({stripeEventAt: 11}, 10), "an older event cannot undo a newer one")
+testing.assert(stripeEventMayChangePlan({source: "stripe"}, "sub_1"), "stripe manages its own plans")
+testing.assert(!stripeEventMayChangePlan({source: "admin", stripeSubscriptionId: ""}, "sub_1"), "a hand-issued plan is not overwritten")
+testing.assert(stripeEventMayChangePlan({}, "sub_1"), "teachers without a plan can subscribe")
