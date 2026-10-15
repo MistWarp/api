@@ -13,7 +13,31 @@ def shouldIgnoreSiteError(string message) boolean (
   return normalized == "unsandboxed is not defined" or normalized == "referenceerror: unsandboxed is not defined" or normalized == "can't find variable: unsandboxed"
 )
 
+def siteErrorOrigin(string origin, string referer) string (
+  string value = origin.strip().toLower()
+  if value == "" or value == "null" (
+    array parts = referer.strip().toLower().split("/")
+    if parts.len < 3 or parts[2] != "" or parts[3] == "" (
+      return ""
+    )
+    value = parts[1] ++ "//" ++ parts[3]
+  )
+  if value.endsWith("/") (
+    value = value.trim(1, value.len - 1)
+  )
+  return value
+)
+
+def isAllowedErrorOrigin(string origin, array allowed) boolean (
+  return origin != "" and allowed.contains(origin)
+)
+
 def handleRecordSiteError(*serve.Context c) (
+  string origin = siteErrorOrigin(c.header("Origin"), c.header("Referer"))
+  if !isAllowedErrorOrigin(origin, errorReportOrigins) (
+    c.json(200, {ok: true, ignored: true})
+    return
+  )
   object body = c.bodyJSON()
   string message = body.message.toStr().strip()
   if message == "" (
