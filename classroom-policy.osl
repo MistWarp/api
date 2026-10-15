@@ -186,12 +186,37 @@ array studentWriteRoutes = [
   "POST ^/classroom/(login|assignments/[^/]+/(start|turn-in|unsubmit))$"
 ]
 
+array studentReadRoutes = [
+  "^/me$",
+  "^/me/(quota|settings|library|trash|shared-projects)$",
+  "^/notifications$",
+  "^/perks$",
+  "^/health$",
+  "^/connect$",
+  "^/classroom(/.*)?$",
+  "^/projects/[^/]+$",
+  "^/projects/[^/]+/(project\\.json|editor|workspace\\.mwp|card\\.svg|commits|branches|me/save)$",
+  "^/projects/[^/]+/extensions/[^/]+/source$",
+  "^/projects/[^/]+/commits/[^/]+(/(tree|file|co-authors|collaborators))?$"
+]
+
 def studentRouteAllowed(string method, string rawPath) boolean (
   string verb = method.toUpper()
-  if verb == "GET" or verb == "HEAD" or verb == "OPTIONS" (
+  if verb == "OPTIONS" (
     return true
   )
   string path = apiRoutePath(rawPath)
+  if path == "/projects/random" or path == "/projects/featured" (
+    return false
+  )
+  if verb == "GET" or verb == "HEAD" (
+    for i studentReadRoutes.len (
+      if regex.match(studentReadRoutes[i].toStr(), path) (
+        return true
+      )
+    )
+    return false
+  )
   for i studentWriteRoutes.len (
     string rule = studentWriteRoutes[i].toStr()
     array parts = rule.split(" ")
@@ -203,6 +228,18 @@ def studentRouteAllowed(string method, string rawPath) boolean (
 )
 
 array studentProjectFields = ["title", "description", "instructions", "notes", "credits", "compatibility"]
+
+def studentProjectRouteId(string rawPath) string (
+  string path = apiRoutePath(rawPath)
+  if !path.startsWith("/projects/") (
+    return ""
+  )
+  array parts = path.split("/")
+  if parts.len < 3 (
+    return ""
+  )
+  return parts[3].toStr()
+)
 
 def studentProjectUpdateAllowed(array keys) boolean (
   for i keys.len (
