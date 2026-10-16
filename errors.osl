@@ -1,11 +1,28 @@
+number siteErrorRetentionMs = 90 * 86400000
+
+def siteErrorCutoff(number now) number (
+  return now - siteErrorRetentionMs
+)
+
 def pruneSiteErrors() (
+  array expired = errorDocs.where("created", "<", siteErrorCutoff(timestamp)).all()
+  for i expired.len (
+    object entry = expired[i].assert(object)
+    void errorDocs.deleteOne({_id: entry["_id"]})
+  )
   array stored = errorDocs.sort("created", "desc").limit(1100).all()
   for i stored.len (
-    if i >= 1000 (
+    if i > 1000 (
       object entry = stored[i].assert(object)
       void errorDocs.deleteOne({_id: entry["_id"]})
     )
   )
+)
+
+def sweepSiteErrors() (
+  sync.lock("site-errors")
+  pruneSiteErrors()
+  sync.unlock("site-errors")
 )
 
 def shouldIgnoreSiteError(string message) boolean (

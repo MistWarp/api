@@ -44,5 +44,27 @@ for i 250 (
 testing.assert(deleteAllSiteErrors() == 250, "deletes beyond the 200-entry response limit")
 testing.assert(errorDocs.count({}) == 0, "deletes both open and resolved errors")
 testing.assert(deleteAllSiteErrors() == 0, "deleting an empty collection succeeds")
+testing.assert(siteErrorCutoff(100 * 86400000) == 10 * 86400000, "reports are kept for 90 days")
+
+number now = timestamp
+errorDocs.insertOne({_id: "old", resolved: false, created: now - (91 * 86400000)})
+errorDocs.insertOne({_id: "edge", resolved: true, created: now - (89 * 86400000)})
+errorDocs.insertOne({_id: "new", resolved: false, created: now})
+sweepSiteErrors()
+testing.assert((errorDocs.findById("old") ?? {}).len == 0, "the sweep deletes reports older than 90 days")
+testing.assert((errorDocs.findById("edge") ?? {}).len > 0, "the sweep keeps reports younger than 90 days")
+testing.assert((errorDocs.findById("new") ?? {}).len > 0, "the sweep keeps new reports")
+testing.assert(deleteAllSiteErrors() == 2, "only the expired report was swept")
+
+for i 1005 (
+  errorDocs.insertOne({_id: "c" ++ i.toStr(), resolved: false, created: (now - 1005) + i})
+)
+errorDocs.insertOne({_id: "stale", resolved: false, created: now - (200 * 86400000)})
+pruneSiteErrors()
+testing.assert(errorDocs.count({}) == 1000, "pruning keeps the newest 1000 reports")
+testing.assert((errorDocs.findById("stale") ?? {}).len == 0, "pruning drops expired reports too")
+testing.assert((errorDocs.findById("c1") ?? {}).len == 0, "pruning drops the oldest reports beyond the cap")
+testing.assert((errorDocs.findById("c1005") ?? {}).len > 0, "pruning keeps the newest report")
+void deleteAllSiteErrors()
 testDb.close()
 void fs.remove(path)
