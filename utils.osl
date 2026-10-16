@@ -65,3 +65,14 @@ def paginate(array items, number offset, number limit) array (
   )
   return page
 )
+
+def copyFileReplacing(string source, string target) boolean (
+  if !fs.isFile(source) or fs.isDir(target) (
+    return false
+  )
+  if fs.copy(source, target, {overwrite: true}) (
+    return true
+  )
+  void fs.remove(target, {force: true})
+  return false
+)

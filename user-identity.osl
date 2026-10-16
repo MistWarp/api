@@ -424,7 +424,7 @@ def backfillOwnerIdForUserProjects(string userId, string username) (
   if userId == "" or ownerKey == "" (
     return
   )
-  array matches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).all()
+  array matches = projectSearchDocs.where("ownerKey", "==", ownerKey).all()
   for i matches.len (
     object entry = matches[i].assert(object)
     if (entry.ownerId ?? "").toStr() != userId (
@@ -485,7 +485,7 @@ def refreshUsernameForId(string userId) string (
     return identityRefreshCache.get(userId).toStr()
   )
   object resp = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if resp.success and resp.status.toInt() == 200 (
+  if resp.status == 200 (
     auto parsed = json.parse(resp.body, {type: "object"})
     if !parsed.isErr() (
       object profile = parsed.unwrap().assert(object)
@@ -497,7 +497,7 @@ def refreshUsernameForId(string userId) string (
       )
     )
   )
-  if resp.status.toInt() == 404 (
+  if resp.status == 404 (
     identityRefreshCache.set(userId, "")
     return ""
   )
@@ -514,8 +514,8 @@ def discoverUserIdentity(string username) string (
     return ""
   )
   object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !resp.success (
-    if resp.status.toInt() == 404 (
+  if resp.status == 0 (
+    if resp.status == 404 (
       string uid = userIdForUsername(username)
       if uid != "" (
         identityRefreshCache.delete(uid)
@@ -853,7 +853,7 @@ def reconcileDeletedUsers() (
     return
   )
   object resp = requests.post(roturBase ++ "/accounts/deleted_check", {headers: {"Content-Type": "application/json"}, body: json.stringify({ids: ids})}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !resp.success (
+  if resp.status == 0 (
     log "reconcileDeletedUsers: rotur request failed"
     return
   )
@@ -889,7 +889,7 @@ def reconcileLoop() (
     reconcileDeletedUsers()
     syncRoturBans()
     fileUnfiledRoturReports()
-    process.sleep(300)
+    wait 300
   )
 )
 

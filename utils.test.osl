@@ -1,6 +1,7 @@
 import "std:testing"
 import "std:crypto"
 import "std:regex"
+import "std:fs"
 import "go:mistwarp.local/storagefs"
 import "./utils.osl"
 

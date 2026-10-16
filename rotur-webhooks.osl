@@ -20,7 +20,7 @@ number roturWebhookRetention = 604800000
 // Rotur-Signature is v1= and the hex HMAC-SHA256 of "<id>.<timestamp>.<raw
 // body>", keyed with the whole signing secret.
 def roturWebhookSignature(string secret, string id, string sentAt, string body) string (
-  return "v1=" ++ crypto.hmacSha256(secret, id ++ "." ++ sentAt ++ "." ++ body)
+  return "v1=" ++ crypto.hmac("sha256", secret, id ++ "." ++ sentAt ++ "." ++ body)
 )
 
 // A delivery is genuine if it is signed with the secret and was sent within

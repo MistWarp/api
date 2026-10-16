@@ -1,7 +1,7 @@
 def randomFromAlphabet(string alphabet, number length) string (
   string out = ""
   for _ length (
-    out ++= alphabet[crypto.randomInt(1, alphabet.len + 1)]
+    out ++= alphabet[crypto.randomBetween(1, alphabet.len)]
   )
   return out
 )
@@ -9,7 +9,7 @@ def randomFromAlphabet(string alphabet, number length) string (
 def generateClassCode() string (
   for _ 20 (
     string code = randomFromAlphabet(classCodeAlphabet, 8)
-    if classDocs.where("code", db.equal, code).count() == 0 (
+    if classDocs.where("code", "==", code).count() == 0 (
       return code
     )
   )
@@ -19,7 +19,7 @@ def generateClassCode() string (
 def generateClassSlug() string (
   for _ 20 (
     string slug = randomFromAlphabet("abcdefghjkmnpqrstuvwxyz23456789", 5)
-    if classDocs.where("slug", db.equal, slug).count() == 0 (
+    if classDocs.where("slug", "==", slug).count() == 0 (
       return slug
     )
   )
@@ -27,15 +27,15 @@ def generateClassSlug() string (
 )
 
 def generateStudentPassword() string (
-  string first = classroomPasswordWords[crypto.randomInt(1, classroomPasswordWords.len + 1)].toStr()
-  string second = classroomPasswordWords[crypto.randomInt(1, classroomPasswordWords.len + 1)].toStr()
-  return first ++ "-" ++ second ++ "-" ++ crypto.randomInt(10, 100).toStr()
+  string first = classroomPasswordWords[crypto.randomBetween(1, classroomPasswordWords.len)].toStr()
+  string second = classroomPasswordWords[crypto.randomBetween(1, classroomPasswordWords.len)].toStr()
+  return first ++ "-" ++ second ++ "-" ++ crypto.randomBetween(10, 99).toStr()
 )
 
 def generatePictureSequence() array (
   array pictures = []
   for _ classroomPictureLength (
-    pictures.append(classroomPictureNames[crypto.randomInt(1, classroomPictureNames.len + 1)])
+    pictures.append(classroomPictureNames[crypto.randomBetween(1, classroomPictureNames.len)])
   )
   return pictures
 )
@@ -74,7 +74,7 @@ def classForStudentId(string studentId) object (
 )
 
 def classesOwnedBy(string userId) array (
-  return array(classDocs.where("ownerId", db.equal, userId).all())
+  return array(classDocs.where("ownerId", "==", userId).all())
 )
 
 def classesTaughtBy(string userId) array (
@@ -91,7 +91,7 @@ def classesTaughtBy(string userId) array (
 )
 
 def studentsInClass(string classId) array (
-  array students = studentDocs.where("classId", db.equal, classId).all()
+  array students = studentDocs.where("classId", "==", classId).all()
   students.sortBy("displayKey", "ascending")
   return students
 )
@@ -101,7 +101,7 @@ def studentsForPlanOwner(string ownerId) array (
   array classes = classesOwnedBy(ownerId)
   for i classes.len (
     object classDoc = classes[i].assert(object)
-    students ++= studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).all()
+    students ++= studentDocs.where("classId", "==", classDoc["_id"].toStr()).all()
   )
   return students
 )
@@ -156,8 +156,8 @@ def recordClassroomAudit(string classId,*serve.Context c, string action, object 
   void classroomAuditDocs.insertOne({
     _id: id,
     classId: classId,
-    actorId: c.getString("userId"),
-    actor: c.getString("username"),
+    actorId: contextString(c, "userId"),
+    actor: contextString(c, "username"),
     action: action,
     detail: detail,
     at: timestamp
@@ -175,9 +175,9 @@ def classResponse(object classDoc,*serve.Context c) object (
     owner: classDoc.owner,
     coTeachers: classDoc.coTeachers ?? [],
     createdAt: classDoc.createdAt,
-    studentCount: studentDocs.where("classId", db.equal, classId).count(),
-    assignmentCount: assignmentDocs.where("classId", db.equal, classId).count(),
-    isOwner: isClassOwner(classDoc, c.getString("userId"))
+    studentCount: studentDocs.where("classId", "==", classId).count(),
+    assignmentCount: assignmentDocs.where("classId", "==", classId).count(),
+    isOwner: isClassOwner(classDoc, contextString(c, "userId"))
   }
 )
 
@@ -197,12 +197,12 @@ def studentResponse(object student) object (
 )
 
 def requireClassroomTeacher(*serve.Context c) (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     c.json(401, {ok: false, error: "not authenticated"})
     c.abort()
     return
   )
-  if c.getBool("isStudent") (
+  if contextBool(c, "isStudent") (
     c.json(403, {ok: false, code: "student_restricted", error: "Student accounts cannot manage classes."})
     c.abort()
     return
@@ -212,7 +212,7 @@ def requireClassroomTeacher(*serve.Context c) (
 
 def taughtClassOrFail(*serve.Context c) object (
   object classDoc = loadClass(c.param("id"))
-  if classDoc.len == 0 or !isClassTeacher(classDoc, c.getString("userId")) (
+  if classDoc.len == 0 or !isClassTeacher(classDoc, contextString(c, "userId")) (
     c.notFound("class not found")
     return {}
   )
@@ -224,7 +224,7 @@ def ownedClassOrFail(*serve.Context c) object (
   if classDoc.len == 0 (
     return {}
   )
-  if !isClassOwner(classDoc, c.getString("userId")) (
+  if !isClassOwner(classDoc, contextString(c, "userId")) (
     c.forbidden("only the class owner can do this")
     return {}
   )
@@ -241,11 +241,11 @@ def classStudentOrFail(*serve.Context c, object classDoc) object (
 )
 
 def handleGetClassroom(*serve.Context c) (
-  if c.getBool("isStudent") (
+  if contextBool(c, "isStudent") (
     handleGetStudentClassroom(c)
     return
   )
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   array classes = classesTaughtBy(userId)
   array rows = []
   for i classes.len (
@@ -272,7 +272,7 @@ def handleCreateClass(*serve.Context c) (
     c.badRequest("invalid login mode")
     return
   )
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string lockName = "classroom-owner-" ++ userId
   sync.lock(lockName)
   object plan = classroomPlanFor(userId)
@@ -297,7 +297,7 @@ def handleCreateClass(*serve.Context c) (
     loginMode: loginMode,
     archived: false,
     ownerId: userId,
-    owner: c.getString("username"),
+    owner: contextString(c, "username"),
     coTeachers: [],
     createdAt: timestamp
   }
@@ -316,7 +316,7 @@ def handleGetClass(*serve.Context c) (
   for i students.len (
     studentRows.append(studentResponse(students[i].assert(object)))
   )
-  array assignments = assignmentDocs.where("classId", db.equal, classId).all()
+  array assignments = assignmentDocs.where("classId", "==", classId).all()
   assignments.sortBy("createdAt", "descending")
   array assignmentRows = []
   for i assignments.len (
@@ -369,7 +369,7 @@ def handleDeleteClass(*serve.Context c) (
   object classDoc = ownedClassOrFail(c)
   if classDoc.len == 0 return
   string classId = classDoc["_id"].toStr()
-  if studentDocs.where("classId", db.equal, classId).count() > 0 (
+  if studentDocs.where("classId", "==", classId).count() > 0 (
     c.json(409, {ok: false, code: "class_not_empty", error: "Move or delete every student before deleting the class."})
     return
   )
@@ -421,7 +421,7 @@ def handleAddCoTeacher(*serve.Context c) (
   classDoc.coTeachers = coTeachers
   putDocument(classDocs, classDoc["_id"].toStr(), classDoc)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "co_teacher_added", {userId: teacherId, username: username})
-  addNotification(usernameForId(teacherId), c.getString("username"), "classroom_co_teacher", {classId: classDoc["_id"], className: classDoc.name})
+  addNotification(usernameForId(teacherId), contextString(c, "username"), "classroom_co_teacher", {classId: classDoc["_id"], className: classDoc.name})
   c.json(200, {ok: true, class: classResponse(classDoc, c)})
 )
 
@@ -429,7 +429,7 @@ def handleRemoveCoTeacher(*serve.Context c) (
   object classDoc = taughtClassOrFail(c)
   if classDoc.len == 0 return
   string target = c.param("teacher")
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   if !isClassOwner(classDoc, userId) and target != userId (
     c.forbidden("only the class owner can remove other teachers")
     return
@@ -472,7 +472,7 @@ def handleTransferClass(*serve.Context c) (
   sync.lock(lockName)
   object plan = classroomPlanFor(nextOwnerId)
   object usage = classroomUsage(nextOwnerId)
-  number incoming = studentDocs.where("classId", db.equal, classId).count()
+  number incoming = studentDocs.where("classId", "==", classId).count()
   if usage.classes.toNum() >= plan.maxClasses.toNum() or usage.seats.toNum() + incoming > plan.seats.toNum() (
     sync.unlock(lockName)
     c.json(413, {ok: false, code: "seat_limit", error: "The new owner's plan does not have room for this class and its students."})
@@ -487,7 +487,7 @@ def handleTransferClass(*serve.Context c) (
     )
   )
   if body.keepAsCoTeacher == true (
-    kept.append({userId: previousOwnerId, username: c.getString("username")})
+    kept.append({userId: previousOwnerId, username: contextString(c, "username")})
   )
   classDoc.coTeachers = kept
   classDoc.ownerId = nextOwnerId
@@ -497,7 +497,7 @@ def handleTransferClass(*serve.Context c) (
   classroomPoolCache.delete(previousOwnerId)
   classroomPoolCache.delete(nextOwnerId)
   recordClassroomAudit(classId, c, "class_transferred", {from: previousOwnerId, to: nextOwnerId})
-  addNotification(classDoc.owner.toStr(), c.getString("username"), "classroom_transferred", {classId: classId, className: classDoc.name})
+  addNotification(classDoc.owner.toStr(), contextString(c, "username"), "classroom_transferred", {classId: classId, className: classDoc.name})
   c.json(200, {ok: true})
 )
 
@@ -537,12 +537,12 @@ def uniqueStudentUsername(string handle, string slug) string (
 def issueStudentCredentials(object student, string loginMode) object (
   if loginMode == "picture" (
     array pictures = generatePictureSequence()
-    student.pictureHash = crypto.bcryptHash(pictureSecret(pictures), 10)
+    student.pictureHash = crypto.hashPassword(pictureSecret(pictures), {algorithm: "bcrypt", cost: 10}).unwrapOr("")
     student.passwordHash = ""
     return {pictures: pictures}
   )
   string password = generateStudentPassword()
-  student.passwordHash = crypto.bcryptHash(password, 10)
+  student.passwordHash = crypto.hashPassword(password, {algorithm: "bcrypt", cost: 10}).unwrapOr("")
   student.pictureHash = ""
   return {password: password}
 )
@@ -602,7 +602,7 @@ def handleCreateStudents(*serve.Context c) (
       failedLogins: 0,
       lockedUntil: 0,
       createdAt: timestamp,
-      createdBy: c.getString("userId"),
+      createdBy: contextString(c, "userId"),
       lastLoginAt: 0
     }
     object credentials = issueStudentCredentials(student, loginMode)
@@ -626,7 +626,7 @@ def handleGetClassStudent(*serve.Context c) (
     object entry = entries[i].assert(object)
     projects.append({id: entry.id, title: entry.title, edited: entry.edited, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum()})
   )
-  array submissions = submissionDocs.where("studentId", db.equal, student["_id"].toStr()).all()
+  array submissions = submissionDocs.where("studentId", "==", student["_id"].toStr()).all()
   c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions})
 )
 
@@ -681,7 +681,7 @@ def handleMoveClassStudent(*serve.Context c) (
   if student.len == 0 return
   object body = requestJSON(c)
   object target = loadClass((body.classId ?? "").toStr())
-  if target.len == 0 or !isClassTeacher(target, c.getString("userId")) (
+  if target.len == 0 or !isClassTeacher(target, contextString(c, "userId")) (
     c.badRequest("choose one of your classes")
     return
   )
@@ -731,13 +731,13 @@ def handleDeleteClassStudent(*serve.Context c) (
 def handleGetClassAudit(*serve.Context c) (
   object classDoc = taughtClassOrFail(c)
   if classDoc.len == 0 return
-  array events = classroomAuditDocs.where("classId", db.equal, classDoc["_id"].toStr()).sort("at", db.desc).limit(200).all()
+  array events = classroomAuditDocs.where("classId", "==", classDoc["_id"].toStr()).sort("at", "desc").limit(200).all()
   c.json(200, {ok: true, events: events})
 )
 
 def handleClassroomJoinInfo(*serve.Context c) (
   string code = normalizeClassCode(c.param("code"))
-  array matches = classDocs.where("code", db.equal, code).all()
+  array matches = classDocs.where("code", "==", code).all()
   if code == "" or matches.len == 0 (
     c.notFound("class not found")
     return
@@ -767,11 +767,11 @@ def studentCredentialsMatch(object student, object body) boolean (
   string pictureHash = (student.pictureHash ?? "").toStr()
   if pictureHash != "" (
     array pictures = (body.pictures ?? []).assertElse(array, [])
-    return validPictureSequence(pictures) and crypto.bcryptVerify(pictureSecret(pictures), pictureHash)
+    return validPictureSequence(pictures) and crypto.verifyPassword(pictureSecret(pictures), pictureHash)
   )
   string passwordHash = (student.passwordHash ?? "").toStr()
   string password = (body.password ?? "").toStr().toLower().strip()
-  return passwordHash != "" and password != "" and crypto.bcryptVerify(password, passwordHash)
+  return passwordHash != "" and password != "" and crypto.verifyPassword(password, passwordHash)
 )
 
 def handleClassroomLogin(*serve.Context c) (
@@ -824,9 +824,9 @@ def handleClassroomLogin(*serve.Context c) (
 
 def assignmentSummary(object assignment, number studentCount) object (
   string assignmentId = assignment["_id"].toStr()
-  number turnedIn = submissionDocs.where("assignmentId", db.equal, assignmentId).and("state", db.equal, "turned_in").count()
-  number returned = submissionDocs.where("assignmentId", db.equal, assignmentId).and("state", db.equal, "returned").count()
-  number started = submissionDocs.where("assignmentId", db.equal, assignmentId).count()
+  number turnedIn = submissionDocs.where("assignmentId", "==", assignmentId).where("state", "==", "turned_in").count()
+  number returned = submissionDocs.where("assignmentId", "==", assignmentId).where("state", "==", "returned").count()
+  number started = submissionDocs.where("assignmentId", "==", assignmentId).count()
   return {
     id: assignmentId,
     title: assignment.title,
@@ -893,12 +893,12 @@ def handleCreateAssignment(*serve.Context c) (
     starterProjectId: "",
     dueAt: 0,
     createdAt: timestamp,
-    createdBy: c.getString("userId")
+    createdBy: contextString(c, "userId")
   }
   if !readAssignmentFields(c, assignment, body) return
   void assignmentDocs.insertOne(assignment)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_created", {assignmentId: assignment["_id"], title: assignment.title})
-  c.json(201, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
+  c.json(201, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", "==", classDoc["_id"].toStr()).count())})
 )
 
 def classAssignmentOrFail(*serve.Context c, object classDoc) object (
@@ -937,7 +937,7 @@ def handleUpdateAssignment(*serve.Context c) (
   if !readAssignmentFields(c, assignment, requestJSON(c)) return
   putDocument(assignmentDocs, assignment["_id"].toStr(), assignment)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "assignment_updated", {assignmentId: assignment["_id"]})
-  c.json(200, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", db.equal, classDoc["_id"].toStr()).count())})
+  c.json(200, {ok: true, assignment: assignmentSummary(assignment, studentDocs.where("classId", "==", classDoc["_id"].toStr()).count())})
 )
 
 def handleDeleteAssignment(*serve.Context c) (
@@ -981,8 +981,8 @@ def handleReviewSubmission(*serve.Context c) (
   if body["return"] == true (
     submission.state = "returned"
     submission.returnedAt = timestamp
-    submission.returnedBy = c.getString("userId")
-    addNotification(usernameForId(submission.studentId.toStr()), c.getString("username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+    submission.returnedBy = contextString(c, "userId")
+    addNotification(usernameForId(submission.studentId.toStr()), contextString(c, "username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
   )
   putDocument(submissionDocs, submission["_id"].toStr(), submission)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "submission_reviewed", {assignmentId: assignment["_id"], studentId: submission.studentId, returned: body["return"] == true})
@@ -990,7 +990,7 @@ def handleReviewSubmission(*serve.Context c) (
 )
 
 def studentAssignmentRows(object student) array (
-  array assignments = assignmentDocs.where("classId", db.equal, student.classId.toStr()).all()
+  array assignments = assignmentDocs.where("classId", "==", student.classId.toStr()).all()
   assignments.sortBy("createdAt", "descending")
   array rows = []
   for i assignments.len (
@@ -1009,7 +1009,7 @@ def studentAssignmentRows(object student) array (
 )
 
 def handleGetStudentClassroom(*serve.Context c) (
-  object student = loadStudent(c.getString("userId"))
+  object student = loadStudent(contextString(c, "userId"))
   object classDoc = loadClass((student.classId ?? "").toStr())
   if student.len == 0 or classDoc.len == 0 (
     c.notFound("class not found")
@@ -1034,7 +1034,7 @@ def handleGetStudentClassroom(*serve.Context c) (
 )
 
 def studentAssignmentOrFail(*serve.Context c) object (
-  object student = loadStudent(c.getString("userId"))
+  object student = loadStudent(contextString(c, "userId"))
   object assignment = (assignmentDocs.findById(c.param("aid")) ?? {})
   if student.len == 0 or assignment.len == 0 or assignment.classId.toStr() != student.classId.toStr() (
     c.notFound("assignment not found")
@@ -1216,10 +1216,10 @@ def classTeacherRoleForProject(object project, string userId) string (
 )
 
 def canSeeStudentProfile(string username,*serve.Context c) boolean (
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     return true
   )
-  string viewerId = c.getString("userId")
+  string viewerId = contextString(c, "userId")
   if viewerId == "" (
     return false
   )
@@ -1234,7 +1234,7 @@ def canSeeStudentProfile(string username,*serve.Context c) boolean (
 )
 
 def classroomAccessGuard(*serve.Context c) (
-  if c.getBool("isStudent") and !studentRouteAllowed(c.method(), c.path()) (
+  if contextBool(c, "isStudent") and !studentRouteAllowed(c.method(), c.path()) (
     c.json(403, {ok: false, code: "student_restricted", error: "Student accounts cannot do this. Ask your teacher if you need it."})
     c.abort()
     return
@@ -1281,7 +1281,7 @@ def handleAdminSetClassroomPlan(*serve.Context c) (
     maxClasses: (body.maxClasses ?? 0).toNum(),
     expiresAt: (body.expiresAt ?? 0).toNum(),
     source: "admin",
-    updatedBy: c.getString("username"),
+    updatedBy: contextString(c, "username"),
     updatedAt: timestamp
   }
   putDocument(classroomPlanDocs, userId, stored)

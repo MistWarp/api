@@ -79,18 +79,18 @@ def pullResponse(object pull) object (
 )
 
 def isPullSourceOwner(object pull,*serve.Context c) boolean (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
   auto sourceResult = loadProject(pull.sourceProjectId.toStr())
-  if sourceResult.ok and projectRole(sourceResult.project.assert(object), c.getString("username")) == "owner" (
+  if sourceResult.ok and projectRole(sourceResult.project.assert(object), contextString(c, "username")) == "owner" (
     return true
   )
   return identityMatches(
     (pull.sourceOwnerId ?? "").toStr(),
     pull.sourceOwner.toStr(),
-    c.getString("userId"),
-    c.getString("username")
+    contextString(c, "userId"),
+    contextString(c, "username")
   )
 )
 
@@ -109,7 +109,7 @@ def canInspectPull(object pull, object target,*serve.Context c) boolean (
   if canSeeInsideProject(target, c) (
     return true
   )
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
   return canEditProject(target, c) or isPullSourceOwner(pull, c)
@@ -119,7 +119,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
   if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
     return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
   )
-  if projectRole(source, c.getString("username")) != "owner" (
+  if projectRole(source, contextString(c, "username")) != "owner" (
     return {ok: false, status: 403, error: "use a remix you own"}
   )
   if source.remixParent.toStr() != target.id.toStr() (
@@ -141,7 +141,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
   )
   string sequenceLock = "native-pull-sequence:" ++ target.id.toStr()
   sync.lock(sequenceLock)
-  array latestPulls = pullDocs.where("targetProjectId", db.equal, target.id.toStr()).sort("index", db.desc).limit(1).all()
+  array latestPulls = pullDocs.where("targetProjectId", "==", target.id.toStr()).sort("index", "desc").limit(1).all()
   sequence = nextPullSequence(sequence, latestPulls)
 
   string id = target.id.toStr() ++ ":" ++ sequence.toStr()
@@ -159,8 +159,8 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     title: title,
     body: description.trim(1, 5000),
     state: "open",
-    author: c.getString("username"),
-    authorId: c.getString("userId"),
+    author: contextString(c, "username"),
+    authorId: contextString(c, "userId"),
     sourceOwner: source.owner,
     sourceOwnerId: source.ownerId,
     sourceProjectId: source.id,
@@ -182,7 +182,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     return {ok: false, status: 409, error: "another pull request was created at the same time, try again"}
   )
   sync.unlock(sequenceLock)
-  addNotification(target.owner.toStr(), c.getString("username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
+  addNotification(target.owner.toStr(), contextString(c, "username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
   return {ok: true, pull: pullResponse(pull)}
 )
 
@@ -416,7 +416,7 @@ def handleListPulls(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  array stored = pullDocs.where("targetProjectId", db.equal, c.param("id")).sort("created", db.desc).limit(200).all()
+  array stored = pullDocs.where("targetProjectId", "==", c.param("id")).sort("created", "desc").limit(200).all()
   array pulls = []
   for i stored.len (
     pulls.append(pullResponse(stored[i].assert(object)))
@@ -485,7 +485,7 @@ def handleGetPullTimeline(*serve.Context c) (
   object source = sourceResult.project.assert(object)
   array comments = loadComments(pullCommentKey(pull))
   for i comments.len (
-    comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+    comments[i] = commentResponse(comments[i].assert(object), contextString(c, "username"))
   )
   array targetHistory = projectVersionHistory(target).commits.assert(array)
   array sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
@@ -511,7 +511,7 @@ def handleCreatePullComment(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+  if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this pull request")
     return
   )
@@ -520,7 +520,7 @@ def handleCreatePullComment(*serve.Context c) (
     c.badRequest("comment content is required")
     return
   )
-  object created = createComment(pullCommentKey(pull), c.getString("username"), c.getString("userId"), body.content.toStr(), "", "comment", 0, "")
+  object created = createComment(pullCommentKey(pull), contextString(c, "username"), contextString(c, "userId"), body.content.toStr(), "", "comment", 0, "")
   if !created.ok (
     c.badRequest(created.error.toStr())
     return
@@ -537,7 +537,7 @@ def handleCreatePullComment(*serve.Context c) (
     putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
   )
   sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
-  string commenter = c.getString("username")
+  string commenter = contextString(c, "username")
   object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id, preview: created.comment.content.toStr()}
   if normalizeUsername(pull.author.toStr()) != normalizeUsername(commenter) (
     addNotification(pull.author.toStr(), commenter, "comment", notificationData)
@@ -562,7 +562,7 @@ def handleDeletePullComment(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin"))
+  object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"))
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -593,12 +593,12 @@ def handleEditPullComment(*serve.Context c) (
     c.badRequest("comment content is required")
     return
   )
-  object edited = editComment(pullCommentKey(pull), c.param("cid"), c.getString("username"), body.content.toStr())
+  object edited = editComment(pullCommentKey(pull), c.param("cid"), contextString(c, "username"), body.content.toStr())
   if !edited.ok (
     c.json(edited.status.toInt(), {ok: false, error: edited.error})
     return
   )
-  edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+  edited.comment = commentResponse(edited.comment.assert(object), contextString(c, "username"))
   c.json(200, edited)
 )
 
@@ -611,7 +611,7 @@ def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) bo
   if targetPull.len > 0 (
     matches.append(targetPull)
   )
-  array sourcePulls = pullDocs.where("sourceProjectId", db.equal, project.id.toStr()).and("index", db.equal, pullIndex.toNum()).limit(20).all()
+  array sourcePulls = pullDocs.where("sourceProjectId", "==", project.id.toStr()).where("index", "==", pullIndex.toNum()).limit(20).all()
   for i sourcePulls.len (
     object sourcePull = sourcePulls[i].assert(object)
     if targetPull.len == 0 or sourcePull["_id"].toStr() != targetPull["_id"].toStr() (
@@ -775,7 +775,7 @@ def handleMergePull(*serve.Context c) (
     string targetRemixParent = if target.contains("remixParent") and target.remixParent != null then target.remixParent.toStr() else ""
     string targetBaseCommit = if target.contains("remixBaseCommit") and target.remixBaseCommit != null then target.remixBaseCommit.toStr() else ""
     string targetId = target.id.toStr()
-    string mergeAuthor = normalizeUsername(c.getString("username"))
+    string mergeAuthor = normalizeUsername(contextString(c, "username"))
     string mergeMessage = "Merge pull request #" ++ pull.index.toStr()
     number mergeTimestamp = timestamp
     string mergeArchiveJson = gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, mergeTimestamp / 1000)
@@ -848,7 +848,7 @@ def handleMergePull(*serve.Context c) (
       return
     )
     upsertIndexEntry(target)
-    if !completeNativePull(target, pull.index.toStr(), currentTargetHead, c.getString("username")) (
+    if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
       sync.unlock("project-history-" ++ target.id.toStr())
       c.internalError("the project merged, but the pull request could not be closed")
       return

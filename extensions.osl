@@ -140,40 +140,65 @@ def extensionStatus(object policy, string hash, string sourceUrl) string (
   return "untrusted"
 )
 
-def inspectProjectExtensionUrls(string jsonPath) object (
-  *json.Stream stream = json.open(jsonPath, maxProjectJsonBytes)
-  if !stream.ok() (
-    return {ok: false, error: "invalid extension URLs"}
-  )
+def readProjectExtensionUrls(*json.Stream stream) object (
   object unique = {}
   number found = 0
-  while stream.more() (
-    object event = stream.next()
-    if event.type.toStr() == "key" and event.value.toStr() == "extensionURLs" (
-      auto result = stream.readStringMap(maxProjectExtensions - found)
-      if result.isErr() (
-        stream.close()
+  string state = ""
+  number limit = 0
+  number count = 0
+  object entries = {}
+  string entryKey = ""
+  for event in stream.events() (
+    if state == "start" (
+      if event.type != "object-start" (
         return {ok: false, error: "invalid extension URLs"}
       )
-      object entries = result.unwrap().assert(object)
-      array ids = entries.getKeys()
-      found += ids.len
-      for i ids.len (
-        string extensionUrl = entries[ids[i].toStr()].toStr()
-        unique[extensionUrl] = true
+      state = "key"
+    ) else if state == "key" (
+      if event.type == "object-end" (
+        array ids = entries.getKeys()
+        found += ids.len
+        for i ids.len (
+          string extensionUrl = entries[ids[i].toStr()].toStr()
+          unique[extensionUrl] = true
+        )
+        state = ""
+      ) else (
+        count += 1
+        if event.type != "key" or count > limit (
+          return {ok: false, error: "invalid extension URLs"}
+        )
+        entryKey = event.value.toStr()
+        state = "value"
       )
+    ) else if state == "value" (
+      if event.type != "string" (
+        return {ok: false, error: "invalid extension URLs"}
+      )
+      entries[entryKey] = event.value
+      state = "key"
+    ) else if event.type == "key" and event.value.toStr() == "extensionURLs" (
+      limit = maxProjectExtensions - found
+      count = 0
+      entries = {}
+      state = "start"
     )
-  )
-  boolean valid = stream.ok()
-  stream.close()
-  if !valid (
-    return {ok: false, error: "invalid extension URLs"}
   )
   array urls = unique.getKeys()
   if urls.len > maxProjectExtensions (
     return {ok: false, error: "too many custom extensions"}
   )
   return {ok: true, urls: urls}
+)
+
+def inspectProjectExtensionUrls(string jsonPath) object (
+  *json.Stream stream = json.open(jsonPath, maxProjectJsonBytes)
+  object inspected = readProjectExtensionUrls(stream) catch (err) (
+    stream.close()
+    return {ok: false, error: "invalid extension URLs"}
+  )
+  stream.close()
+  return inspected
 )
 
 def parseExtensionSources(string rawSources) object (

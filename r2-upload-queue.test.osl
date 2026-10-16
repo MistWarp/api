@@ -6,7 +6,7 @@ import "go:mistwarp.local/storagefs"
 import "./storage-addressing.osl"
 
 string testDir = "/tmp/mistwarp-r2-queue-test-" ++ timestamp.toStr() ++ "/"
-void fs.mkdirAll(testDir)
+void fs.mkdir(testDir, {recursive: true})
 string projectsDir = testDir ++ "projects/"
 string trashDir = testDir ++ "trash/"
 string r2UploadQueueFile = testDir ++ "queue.json"
@@ -68,8 +68,8 @@ def r2PutEncoded(string key, byte[] body, string contentType, string contentEnco
 
 import "./r2-upload-queue.osl"
 
-void fs.mkdirAll(projectsDir)
-void fs.mkdirAll(trashDir)
+void fs.mkdir(projectsDir, {recursive: true})
+void fs.mkdir(trashDir, {recursive: true})
 number now = timestamp
 number old = now - uploadDebounceMs - 10000
 object item = {key: "shared", queuedAt: 100}

@@ -185,8 +185,8 @@ def handleGetNews(*serve.Context c) (
   for i items.len (
     object item = items[i].assert(object)
     boolean archived = item.contains("archived") and item.archived == true
-    if !archived or c.getBool("isAdmin") (
-      visible.append(newsResponse(item, c.getString("username"), c.getBool("isAdmin")))
+    if !archived or contextBool(c, "isAdmin") (
+      visible.append(newsResponse(item, contextString(c, "username"), contextBool(c, "isAdmin")))
     )
   )
   c.json(200, {ok: true, news: visible})
@@ -198,11 +198,11 @@ def handleGetNewsItem(*serve.Context c) (
   for i items.len (
     object item = items[i].assert(object)
     if item.id.toStr() == id (
-      if item.contains("archived") and item.archived == true and !c.getBool("isAdmin") (
+      if item.contains("archived") and item.archived == true and !contextBool(c, "isAdmin") (
         c.notFound("news post not found")
         return
       )
-      c.json(200, {ok: true, item: newsResponse(item, c.getString("username"), c.getBool("isAdmin"))})
+      c.json(200, {ok: true, item: newsResponse(item, contextString(c, "username"), contextBool(c, "isAdmin"))})
       return
     )
   )
@@ -265,7 +265,7 @@ def handleCreateNews(*serve.Context c) (
     body: content,
     format: "markdown",
     category: category,
-    author: c.getString("username"),
+    author: contextString(c, "username"),
     created: timestamp,
     views: 0,
     viewHistory: {},
@@ -290,7 +290,7 @@ def handleCreateNews(*serve.Context c) (
       addNotification(f.replace(".json", ""), item.author.toStr(), "news", {newsId: item.id, title: item.title})
     )
   )
-  c.json(201, {ok: true, item: newsResponse(item, c.getString("username"), c.getBool("isAdmin"))})
+  c.json(201, {ok: true, item: newsResponse(item, contextString(c, "username"), contextBool(c, "isAdmin"))})
 )
 
 def handleUpdateNews(*serve.Context c) (
@@ -378,7 +378,7 @@ def handleUpdateNews(*serve.Context c) (
         c.internalError("could not save news post")
         return
       )
-      c.json(200, {ok: true, item: newsResponse(item, c.getString("username"), true)})
+      c.json(200, {ok: true, item: newsResponse(item, contextString(c, "username"), true)})
       return
     )
   )
@@ -466,7 +466,7 @@ def handleReactNewsLocked(*serve.Context c) (
     return
   )
   string id = c.param("id")
-  string username = normalizeUsername(c.getString("username"))
+  string username = normalizeUsername(contextString(c, "username"))
   array items = loadNews()
   boolean found = false
   number previousLikes = 0
@@ -502,7 +502,7 @@ def handleReactNewsLocked(*serve.Context c) (
 def handleVoteNewsPoll(*serve.Context c) (
   string id = c.param("id")
   string optionId = requestJSON(c).option.toStr()
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   array items = loadNews()
   boolean found = false
   boolean validOption = false

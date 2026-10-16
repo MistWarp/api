@@ -73,7 +73,7 @@ def queueR2UploadLocked(string key, string contentType, string contentEncoding) 
   )
   array items = queueResult.items.assert(array)
   string path = localBlobPath(key)
-  number size = if fs.exists(path) then fs.getSize(path) else 0
+  number size = if fs.exists(path) then fs.size(path).unwrapOr(0) else 0
   object item = {key: key, type: r2ObjectType(key), size: size, contentType: contentType, contentEncoding: contentEncoding, queuedAt: timestamp, firstQueuedAt: timestamp}
   boolean found = false
   for i items.len (
@@ -98,7 +98,7 @@ def stageR2Blob(string key, BlobBody body, string contentType, string contentEnc
   string path = localBlobPath(key)
   boolean saved = true
   if !fs.exists(path) (
-    void fs.mkdirAll(parentDirOf(path))
+    void fs.mkdir(parentDirOf(path), {recursive: true})
     saved = fs.writeFileBytes(path, body)
   )
   if saved and !r2Local (

@@ -1,7 +1,7 @@
 def storedKeyBytes(string key, object inventory) number (
   string path = localBlobPath(key)
   if fs.exists(path) (
-    return fs.getSize(path)
+    return fs.size(path).unwrapOr(0)
   )
   if inventory.contains(key) (
     return inventory[key].assertElse(object, {}).size.toNum()

@@ -37,7 +37,7 @@ def calculateGameSaveStorageBytes(string userId) number (
       for n namespaces.len (
         string path = gameSavesDir ++ projectId ++ "/" ++ namespaces[n].toStr() ++ "/" ++ filename
         if fs.exists(path) (
-          total += fs.getSize(path)
+          total += fs.size(path).unwrapOr(0)
         )
       )
     )
@@ -147,8 +147,8 @@ def handleCreateMultiplayerTicket(*serve.Context c) (
     projectVersion: gameDataProjectVersion(project),
     room: room,
     context: gameSaveNamespace(context),
-    userId: c.getString("userId"),
-    username: c.getString("username"),
+    userId: contextString(c, "userId"),
+    username: contextString(c, "username"),
     expiresAt: timestamp + multiplayerTicketTtlMs
   }
   multiplayerTicketCache.set(ticket, identity)
@@ -185,7 +185,7 @@ def handleCreateGameDataCapability(*serve.Context c) (
   object capability = {
     projectId: project.id.toStr(),
     projectVersion: gameDataProjectVersion(project),
-    userId: c.getString("userId"),
+    userId: contextString(c, "userId"),
     context: context,
     expiresAt: timestamp + gameDataCapabilityTtlMs
   }
@@ -208,7 +208,7 @@ def requireGameDataCapability(*serve.Context c, object project) object (
     gameDataCapabilityCache.delete(token)
     return {ok: false, status: 403, error: "game data capability expired"}
   )
-  if capability.projectId.toStr() != project.id.toStr() or capability.userId.toStr() != c.getString("userId") (
+  if capability.projectId.toStr() != project.id.toStr() or capability.userId.toStr() != contextString(c, "userId") (
     return {ok: false, status: 403, error: "game data capability does not match"}
   )
   if capability.projectVersion.toStr() != gameDataProjectVersion(project) (
@@ -245,7 +245,7 @@ def handleGetMyProjectSave(*serve.Context c) (
     return
   )
   object capability = access.capability.assert(object)
-  object save = loadGameSave(c.param("id"), c.getString("userId"), capability.context.toStr())
+  object save = loadGameSave(c.param("id"), contextString(c, "userId"), capability.context.toStr())
   c.json(200, {ok: true, save: gameSaveResponse(save)})
 )
 
@@ -295,7 +295,7 @@ def handlePutMyProjectSave(*serve.Context c) (
 
   object capability = access.capability.assert(object)
   string projectId = c.param("id")
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string context = capability.context.toStr()
   string lockName = "game-save-storage-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
@@ -317,12 +317,12 @@ def handlePutMyProjectSave(*serve.Context c) (
   current.updatedAt = timestamp
   current.lastRequestId = requestId
   string path = gameSavePath(projectId, userId, context)
-  number previousBytes = if fs.exists(path) then fs.getSize(path) else 0
+  number previousBytes = if fs.exists(path) then fs.size(path).unwrapOr(0) else 0
   number nextBytes = json.stringify(current).len
   number usedBytes = storedGameSaveBytes(userId)
   number projectedBytes = (usedBytes - previousBytes) + nextBytes
   number storageLimit = mistwarpBenefitsForUserId(userId).gameSaveStorageBytes.toNum()
-  if projectedBytes > storageLimit and !c.getBool("isAdmin") (
+  if projectedBytes > storageLimit and !contextBool(c, "isAdmin") (
     sync.unlock(lockName)
     c.json(413, {ok: false, error: "account save storage limit reached", used: usedBytes, limit: storageLimit})
     return
@@ -332,7 +332,7 @@ def handlePutMyProjectSave(*serve.Context c) (
     c.internalError("failed to reserve account save storage")
     return
   )
-  void fs.mkdirAll(gameSaveProjectDir(projectId, context))
+  void fs.mkdir(gameSaveProjectDir(projectId, context), {recursive: true})
   if !writeFile(path, current) (
     saveGameSaveUsage(userId, usedBytes)
     sync.unlock(lockName)
@@ -344,7 +344,7 @@ def handlePutMyProjectSave(*serve.Context c) (
 )
 
 def handleListMyGameSaves(*serve.Context c) (
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string filename = gameDataUserKey(userId) ++ ".json"
   array saves = []
   array projects = fs.readDir(gameSavesDir).unwrapOr([])
@@ -375,7 +375,7 @@ def handleDeleteMyGameSave(*serve.Context c) (
     c.badRequest("invalid project id")
     return
   )
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string lockName = "game-save-storage-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
   string playPath = gameSavePath(projectId, userId, "play")
@@ -383,11 +383,11 @@ def handleDeleteMyGameSave(*serve.Context c) (
   number removedBytes = 0
   boolean deleted = false
   if fs.exists(playPath) (
-    removedBytes += fs.getSize(playPath)
+    removedBytes += fs.size(playPath).unwrapOr(0)
     deleted = fs.remove(playPath) or deleted
   )
   if fs.exists(testPath) (
-    removedBytes += fs.getSize(testPath)
+    removedBytes += fs.size(testPath).unwrapOr(0)
     deleted = fs.remove(testPath) or deleted
   )
   if removedBytes > 0 (

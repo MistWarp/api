@@ -34,7 +34,7 @@ def usersAreBlocked(string first, string second) boolean (
 )
 
 def updateSafetyList(*serve.Context c, string field, boolean add) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   string target = normalizeUsername(c.param("name"))
   if !isSafePathPart(target) or target == normalizeUsername(username) (
     c.badRequest("choose another MistWarp user")
@@ -115,7 +115,7 @@ def renameUserSafety(string oldKey, string newKey) boolean (
 )
 
 def handleGetMySafety(*serve.Context c) (
-  object safety = loadSafety(c.getString("username"))
+  object safety = loadSafety(contextString(c, "username"))
   c.json(200, {ok: true, blocked: safety.blocked, muted: safety.muted})
 )
 
@@ -154,7 +154,7 @@ def collectMyComments(string username) array (
 )
 
 def handleExportMyData(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   object profile = loadProfile(username)
   auto storedSettings = readFile(settingsPath(username))
   object settings = {}
@@ -169,7 +169,7 @@ def handleExportMyData(*serve.Context c) (
   c.json(200, {
     ok: true,
     exportedAt: timestamp,
-    account: {username: username, roturUserId: c.getString("userId")},
+    account: {username: username, roturUserId: contextString(c, "userId")},
     profile: profile,
     projects: ownerIndexEntries(username, true),
     comments: collectMyComments(username),
@@ -177,8 +177,8 @@ def handleExportMyData(*serve.Context c) (
     activity: loadActivity(username),
     settings: settings,
     safety: loadSafety(username),
-    gameData: collectGameDataForUser(c.getString("userId")),
-    backpack: collectBackpackForUser(c.getString("userId")),
+    gameData: collectGameDataForUser(contextString(c, "userId")),
+    backpack: collectBackpackForUser(contextString(c, "userId")),
     agreement: agreement
   })
 )
@@ -244,12 +244,12 @@ def eraseUser(string userId, string username) (
 
 def handleDeleteMyData(*serve.Context c) (
   object body = requestJSON(c)
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   if !body.contains("username") or normalizeUsername(body.username.toStr()) != normalizeUsername(username) (
     c.badRequest("type your username to confirm")
     return
   )
-  eraseUser(c.getString("userId"), username)
+  eraseUser(contextString(c, "userId"), username)
   clearAuthCookie(c)
   c.json(200, {ok: true})
 )

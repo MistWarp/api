@@ -14,7 +14,7 @@ def createComment(string key, string author, string authorId, string content, st
   string lockName = "comments:" ++ key
   sync.lock(lockName)
   string commentsPath = commentsDir ++ key ++ ".jsonl"
-  if fs.exists(commentsPath) and fs.getSize(commentsPath) + json.stringify({author: author, content: trimmed}).len > 8388608 (
+  if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).len > 8388608 (
     sync.unlock(lockName)
     return {ok: false, error: "this comment thread is full"}
   )
@@ -281,7 +281,7 @@ def commentResponse(object comment, string username) object (
 def commentPage(array allComments,*serve.Context c) object (
   array comments = commentsVisibleTo(allComments, c)
   for i comments.len (
-    comments[i] = commentResponse(comments[i].assert(object), c.getString("username"))
+    comments[i] = commentResponse(comments[i].assert(object), contextString(c, "username"))
   )
   array roots = []
   for i comments.len (
@@ -410,7 +410,7 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+  if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this project")
     return
   )
@@ -426,7 +426,7 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
     c.json(403, {ok: false, error: "comments are disabled on this project"})
     return
   )
-  string donor = normalizeUsername(c.getString("username"))
+  string donor = normalizeUsername(contextString(c, "username"))
   if donor == normalizeUsername(project.owner.toStr()) (
     c.badRequest("you cannot donate to your own project")
     return
@@ -463,7 +463,7 @@ def handleCreateProjectComment(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if usersAreBlocked(c.getString("username"), project.owner.toStr()) (
+  if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this project")
     return
   )
@@ -521,7 +521,7 @@ def handleCreateProjectComment(*serve.Context c) (
     for i existingComments.len (
       object existingComment = existingComments[i].assert(object)
       if existingComment.contains("donationPaymentId") and existingComment.donationPaymentId.toStr() == donationPaymentId (
-        c.json(200, {ok: true, comment: commentResponse(existingComment, c.getString("username")), duplicate: true})
+        c.json(200, {ok: true, comment: commentResponse(existingComment, contextString(c, "username")), duplicate: true})
         return
       )
     )
@@ -530,14 +530,14 @@ def handleCreateProjectComment(*serve.Context c) (
       c.json(402, {ok: false, pending: true, error: "donation not received yet, try again in a moment"})
       return
     )
-    if pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(c.getString("username")) (
+    if pendingDonation.projectId.toStr() != project.id.toStr() or normalizeUsername(pendingDonation.buyer.toStr()) != normalizeUsername(contextString(c, "username")) (
       c.badRequest("this donation key does not match")
       return
     )
     donationAmount = pendingDonation.amount.toNum()
   )
 
-  object created = createComment("project-" ++ project.id.toStr(), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
+  object created = createComment("project-" ++ project.id.toStr(), contextString(c, "username"), contextString(c, "userId"), body.content.toStr(), parentId, kind, donationAmount, donationPaymentId)
   if !created.ok (
     c.badRequest(created.error.toStr())
     return
@@ -546,11 +546,11 @@ def handleCreateProjectComment(*serve.Context c) (
     forgetPurchase(donationKey)
   )
   if created.contains("duplicate") and created.duplicate == true (
-    created.comment = commentResponse(created.comment.assert(object), c.getString("username"))
+    created.comment = commentResponse(created.comment.assert(object), contextString(c, "username"))
     c.json(200, created)
     return
   )
-  string commenter = c.getString("username")
+  string commenter = contextString(c, "username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
   string preview = created.comment.content.toStr()
@@ -584,8 +584,8 @@ def handleDeleteProjectComment(*serve.Context c) (
   )
   object project = result.project.assert(object)
 
-  boolean requesterIsAdmin = c.getBool("isAdmin")
-  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), requesterIsAdmin)
+  boolean requesterIsAdmin = contextBool(c, "isAdmin")
+  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -594,7 +594,7 @@ def handleDeleteProjectComment(*serve.Context c) (
     type: "comment_deleted",
     projectId: project.id,
     commentId: c.param("cid"),
-    actor: c.getString("username")
+    actor: contextString(c, "username")
   })
   c.json(200, {ok: true})
 )
@@ -610,18 +610,18 @@ def handleEditProjectComment(*serve.Context c) (
     c.badRequest("comment content is required")
     return
   )
-  object edited = editComment("project-" ++ c.param("id"), c.param("cid"), c.getString("username"), body.content.toStr())
+  object edited = editComment("project-" ++ c.param("id"), c.param("cid"), contextString(c, "username"), body.content.toStr())
   if !edited.ok (
     c.json(edited.status.toInt(), {ok: false, error: edited.error})
     return
   )
-  edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+  edited.comment = commentResponse(edited.comment.assert(object), contextString(c, "username"))
   edited.comment.playtimeMs = authorPublicPlaytime(c.param("id"), edited.comment.author.toStr())
   siteBroadcastProject(c.param("id"), {
     type: "comment_edited",
     projectId: c.param("id"),
     comment: edited.comment,
-    actor: c.getString("username")
+    actor: contextString(c, "username")
   })
   c.json(200, edited)
 )
@@ -638,18 +638,18 @@ def handlePinProjectComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), c.getString("username"), project.owner.toStr(), c.getBool("isAdmin"), pinned)
+  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return
   )
-  updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
+  updated.comment = commentResponse(updated.comment.assert(object), contextString(c, "username"))
   updated.comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), updated.comment.author.toStr())
   siteBroadcastProject(project.id.toStr(), {
     type: "comment_edited",
     projectId: project.id,
     comment: updated.comment,
-    actor: c.getString("username")
+    actor: contextString(c, "username")
   })
   c.json(200, updated)
 )
@@ -677,7 +677,7 @@ def handleCreateProfileComment(*serve.Context c) (
     c.notFound("this user is not on MistWarp")
     return
   )
-  if usersAreBlocked(c.getString("username"), name) (
+  if usersAreBlocked(contextString(c, "username"), name) (
     c.forbidden("you cannot comment on this profile")
     return
   )
@@ -696,12 +696,12 @@ def handleCreateProfileComment(*serve.Context c) (
     parentId = body.parent.toStr()
   )
 
-  object created = createComment(profileCommentKey(name), c.getString("username"), c.getString("userId"), body.content.toStr(), parentId, "comment", 0, "")
+  object created = createComment(profileCommentKey(name), contextString(c, "username"), contextString(c, "userId"), body.content.toStr(), parentId, "comment", 0, "")
   if !created.ok (
     c.badRequest(created.error.toStr())
     return
   )
-  string commenter = c.getString("username")
+  string commenter = contextString(c, "username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
   string preview = created.comment.content.toStr()
@@ -716,8 +716,8 @@ def handleCreateProfileComment(*serve.Context c) (
 )
 
 def handleDeleteProfileComment(*serve.Context c) (
-  boolean requesterIsAdmin = c.getBool("isAdmin")
-  object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), c.getString("username"), c.param("name"), requesterIsAdmin)
+  boolean requesterIsAdmin = contextBool(c, "isAdmin")
+  object deleted = deleteComment(profileCommentKey(c.param("name")), c.param("cid"), contextString(c, "username"), c.param("name"), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -736,12 +736,12 @@ def handleEditProfileComment(*serve.Context c) (
     c.badRequest("comment content is required")
     return
   )
-  object edited = editComment(profileCommentKey(name), c.param("cid"), c.getString("username"), body.content.toStr())
+  object edited = editComment(profileCommentKey(name), c.param("cid"), contextString(c, "username"), body.content.toStr())
   if !edited.ok (
     c.json(edited.status.toInt(), {ok: false, error: edited.error})
     return
   )
-  edited.comment = commentResponse(edited.comment.assert(object), c.getString("username"))
+  edited.comment = commentResponse(edited.comment.assert(object), contextString(c, "username"))
   c.json(200, edited)
 )
 
@@ -756,12 +756,12 @@ def handlePinProfileComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin(profileCommentKey(name), c.param("cid"), c.getString("username"), name, c.getBool("isAdmin"), pinned)
+  object updated = setCommentPin(profileCommentKey(name), c.param("cid"), contextString(c, "username"), name, contextBool(c, "isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return
   )
-  updated.comment = commentResponse(updated.comment.assert(object), c.getString("username"))
+  updated.comment = commentResponse(updated.comment.assert(object), contextString(c, "username"))
   c.json(200, updated)
 )
 
@@ -772,7 +772,7 @@ def reactToComment(*serve.Context c, string key, string path) (
     c.badRequest("invalid reaction")
     return
   )
-  string username = normalizeUsername(c.getString("username"))
+  string username = normalizeUsername(contextString(c, "username"))
   string cid = c.param("cid")
   string lockName = "comments:" ++ key
   sync.lock(lockName)
@@ -816,7 +816,7 @@ def reactToComment(*serve.Context c, string key, string path) (
       projectId: c.param("id"),
       commentId: cid,
       reactionCounts: summary.counts,
-      actor: c.getString("username"),
+      actor: contextString(c, "username"),
       reaction: summary.myReaction
     })
   )
@@ -847,7 +847,7 @@ def handleReactProfileComment(*serve.Context c) (
     c.notFound("this user is not on MistWarp")
     return
   )
-  if usersAreBlocked(c.getString("username"), name) (
+  if usersAreBlocked(contextString(c, "username"), name) (
     c.forbidden("you cannot react to comments on this profile")
     return
   )

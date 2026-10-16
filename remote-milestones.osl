@@ -5,8 +5,8 @@ def remoteMilestoneData(string path) object (
 )
 
 def milestoneDataFromUrl(string endpoint) object (
-  object response = requests.get(endpoint, {timeout: 5, max_bytes: 2097152}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !response.success or response.status.toInt() != 200 (
+  object response = requests.get(endpoint, {timeoutMs: 5000, maxBytes: 2097152}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+  if response.status != 200 (
     return {}
   )
   auto parsed = json.parse(response.body, {type: "object"})

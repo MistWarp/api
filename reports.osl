@@ -39,8 +39,8 @@ def saveReports(array reports) boolean (
 )
 
 def reportSourceKey(*serve.Context c) string (
-  if c.getBool("authenticated") (
-    return "user:" ++ c.getString("userId")
+  if contextBool(c, "authenticated") (
+    return "user:" ++ contextString(c, "userId")
   )
   return "ip:" ++ c.ip().hashSHA256()
 )
@@ -262,7 +262,7 @@ def handleCreateReport(*serve.Context c) (
 
   object report = {
     id: "r" ++ randomString(12),
-    reporter: c.getString("username"),
+    reporter: contextString(c, "username"),
     sourceKey: reportSourceKey(c),
     type: reportType,
     target: target,
@@ -311,8 +311,8 @@ def handleCreateSupportRequest(*serve.Context c) (
   string username = body.username.toStr().trim(1, 80)
   string subject = body.subject.toStr().strip()
   string message = body.message.toStr().strip()
-  if c.getBool("authenticated") (
-    username = c.getString("username")
+  if contextBool(c, "authenticated") (
+    username = contextString(c, "username")
   )
   if requestType != "account" and requestType != "safety" and requestType != "legal" and requestType != "appeal" (
     c.badRequest("choose a support topic")

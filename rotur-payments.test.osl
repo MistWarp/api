@@ -6,10 +6,10 @@ import "std:cache"
 import "std:url"
 
 string dir = "/tmp/mistwarp-rotur-payments-" ++ timestamp.toStr() ++ "/"
-void fs.mkdirAll(dir)
+void fs.mkdir(dir, {recursive: true})
 string purchaseKeysFile = dir ++ "purchase-keys.json"
 string mistwarpRoturUser = ""
-auto roturAppOwnerCache = cache.create(4, 3600)
+auto roturAppOwnerCache = cache.new({capacity: 4, ttl: 3600000})
 
 def readFile(string path) object (
   if !fs.exists(path) (

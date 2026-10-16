@@ -46,7 +46,7 @@ def gameProductResponse(object project, object product,*serve.Context c) object 
     price: product.price,
     grantsItem: grantsItem,
     icon: product.icon.toStr(),
-    owned: c.getBool("authenticated") and ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr())
+    owned: contextBool(c, "authenticated") and ownsGameProduct(project.id.toStr(), contextString(c, "userId"), product.id.toStr())
   }
 )
 
@@ -71,7 +71,7 @@ def saveGameProductEntitlement(string projectId, string userId, string productId
   products[productId] = {purchasedAt: timestamp, paymentId: paymentId}
   entitlements.products = products
   entitlements.updatedAt = timestamp
-  void fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+  void fs.mkdir(gameEntitlementsDir ++ projectId ++ "/", {recursive: true})
   boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
   sync.unlock(lockName)
   return saved
@@ -88,7 +88,7 @@ def removeGameProductEntitlement(string projectId, string userId, string product
   products.delete(productId)
   entitlements.products = products
   entitlements.updatedAt = timestamp
-  void fs.mkdirAll(gameEntitlementsDir ++ projectId ++ "/")
+  void fs.mkdir(gameEntitlementsDir ++ projectId ++ "/", {recursive: true})
   boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
   sync.unlock(lockName)
   return saved
@@ -120,7 +120,7 @@ def handleOwnsGameProduct(*serve.Context c) (
     c.notFound("game product not found")
     return
   )
-  c.json(200, {ok: true, owned: ownsGameProduct(c.param("id"), c.getString("userId"), c.param("product"))})
+  c.json(200, {ok: true, owned: ownsGameProduct(c.param("id"), contextString(c, "userId"), c.param("product"))})
 )
 
 def handleGameProductIntent(*serve.Context c) (
@@ -140,29 +140,29 @@ def handleGameProductIntent(*serve.Context c) (
   )
   object product = found.product.assert(object)
   if product.price.toNum() <= 0 (
-    if !saveGameProductEntitlement(project.id.toStr(), c.getString("userId"), product.id.toStr(), "free-claim") (
+    if !saveGameProductEntitlement(project.id.toStr(), contextString(c, "userId"), product.id.toStr(), "free-claim") (
       c.internalError("failed to grant game product")
       return
     )
-    if !grantGameProductItem(project, product, c.getString("userId"), "free-claim") (
+    if !grantGameProductItem(project, product, contextString(c, "userId"), "free-claim") (
       c.internalError("failed to grant the product's portable item")
       return
     )
     c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
     return
   )
-  if ownsGameProduct(project.id.toStr(), c.getString("userId"), product.id.toStr()) (
-    object entitlements = loadGameEntitlements(project.id.toStr(), c.getString("userId"))
+  if ownsGameProduct(project.id.toStr(), contextString(c, "userId"), product.id.toStr()) (
+    object entitlements = loadGameEntitlements(project.id.toStr(), contextString(c, "userId"))
     object products = entitlements.products.assertElse(object, {})
     object ownedProduct = products[product.id.toStr()].assertElse(object, {})
-    if !grantGameProductItem(project, product, c.getString("userId"), ownedProduct.paymentId.toStr()) (
+    if !grantGameProductItem(project, product, contextString(c, "userId"), ownedProduct.paymentId.toStr()) (
       c.internalError("failed to grant the product's portable item")
       return
     )
     c.json(200, {ok: true, already: true, product: gameProductResponse(project, product, c)})
     return
   )
-  string refusal = roturPurchaseRefusal(c.getString("username"), product.price.toNum(), (product.name ?? product.id).toStr())
+  string refusal = roturPurchaseRefusal(contextString(c, "username"), product.price.toNum(), (product.name ?? product.id).toStr())
   if refusal != "" (
     c.json(403, {ok: false, error: refusal})
     return
@@ -173,8 +173,8 @@ def handleGameProductIntent(*serve.Context c) (
     c.json(503, {ok: false, error: "MistWarp can't take payments right now. Try again in a few minutes."})
     return
   )
-  object entry = {type: "game_product", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(c.getString("username")), userId: c.getString("userId"), price: product.price}
-  object started = startPurchase("mwgame_", entry, c.getString("username"), project.owner.toStr(), splits, product.price.toNum(), (product.name ?? product.id).toStr() ++ " in " ++ project.title.toStr(), (requestJSON(c).returnUrl ?? "").toStr())
+  object entry = {type: "game_product", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(contextString(c, "username")), userId: contextString(c, "userId"), price: product.price}
+  object started = startPurchase("mwgame_", entry, contextString(c, "username"), project.owner.toStr(), splits, product.price.toNum(), (product.name ?? product.id).toStr() ++ " in " ++ project.title.toStr(), (requestJSON(c).returnUrl ?? "").toStr())
   if !started.ok (
     c.json(503, started)
     return
@@ -221,12 +221,12 @@ def completeGameProductPurchase(string key) object (
 def handleGameProductConfirm(*serve.Context c) (
   string key = (requestJSON(c).key ?? "").toStr().strip()
   object pending = loadPurchaseKeys().keys[key] ?? {}
-  boolean mine = key.startsWith("mwgame_") and (pending.userId ?? "").toStr() == c.getString("userId") and (pending.productId ?? "").toStr() == c.param("product")
+  boolean mine = key.startsWith("mwgame_") and (pending.userId ?? "").toStr() == contextString(c, "userId") and (pending.productId ?? "").toStr() == c.param("product")
   object completed = {ok: false}
   if mine (
     completed = completeGameProductPurchase(key)
   )
-  if !completed.ok and ownsGameProduct(c.param("id"), c.getString("userId"), c.param("product")) (
+  if !completed.ok and ownsGameProduct(c.param("id"), contextString(c, "userId"), c.param("product")) (
     // Rotur's webhook got here first.
     auto loaded = loadProject(c.param("id"))
     object found = findGameProduct(loaded.project.assertElse(object, {}), c.param("product"))
@@ -283,8 +283,8 @@ def handleGameProductRefundIntent(*serve.Context c) (
     c.badRequest("there's no payment from them to refund, revoke without a refund")
     return
   )
-  object entry = {type: "game_refund", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(c.getString("username")), refundTo: buyerId, amount: paid}
-  object started = startPurchase("mwrefund_", entry, c.getString("username"), buyer, [], paid, "Refund for " ++ (product.name ?? product.id).toStr(), (body.returnUrl ?? "").toStr())
+  object entry = {type: "game_refund", projectId: project.id.toStr(), productId: product.id.toStr(), buyer: normalizeUsername(contextString(c, "username")), refundTo: buyerId, amount: paid}
+  object started = startPurchase("mwrefund_", entry, contextString(c, "username"), buyer, [], paid, "Refund for " ++ (product.name ?? product.id).toStr(), (body.returnUrl ?? "").toStr())
   if !started.ok (
     c.json(503, started)
     return

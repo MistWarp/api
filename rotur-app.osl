@@ -28,7 +28,7 @@ def roturApp(string method, string path, object body) object (
     return {ok: false, status: 0, data: {}}
   )
   object options = {timeout: 10, headers: {
-    "Authorization": "Basic " ++ crypto.base64Encode(roturClientId ++ ":" ++ roturClientSecret),
+    "Authorization": "Basic " ++ btoa(roturClientId ++ ":" ++ roturClientSecret),
     "Content-Type": "application/json"
   }}
   if method == "POST" or method == "PUT" or method == "PATCH" (

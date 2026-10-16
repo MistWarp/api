@@ -33,7 +33,7 @@ def putDocument(*db.Collection collection, string id, object value) boolean (
 )
 
 def deleteDocumentsByField(*db.Collection collection, string field, string value) number (
-  array documents = collection.where(field, db.equal, value).all()
+  array documents = collection.where(field, "==", value).all()
   for i documents.len (
     object document = documents[i].assert(object)
     void collection.deleteOne({_id: document["_id"]})
@@ -59,7 +59,7 @@ def cleanupExpiredCommunityRecords() (
 )
 
 def deleteProjectCommunityRecords(string projectId) boolean (
-  array releases = releaseDocs.where("projectId", db.equal, projectId).all()
+  array releases = releaseDocs.where("projectId", "==", projectId).all()
   for i releases.len (
     object release = releases[i].assert(object)
     string jsonKey = (release.jsonKey ?? "").toStr()
@@ -259,7 +259,7 @@ def projectLastPlayed(string projectId, string username) number (
 
 def projectTotalPlaytime(string projectId) number (
   number total = 0
-  array records = playtimeDocs.where("projectId", db.equal, projectId).all()
+  array records = playtimeDocs.where("projectId", "==", projectId).all()
   for i records.len (
     object record = records[i].assert(object)
     total += record.duration.toNum()

@@ -38,18 +38,18 @@ def readFile(string path) object (
 import "./rotur-badges.osl"
 
 // Days in a row count up; a missed day starts again; the same day counts once.
-timestamp = 86400000 * 100 + 5000
+timestamp = (86400000 * 100) + 5000
 recordCreatingDay("sam")
 recordCreatingDay("sam")
-timestamp = 86400000 * 101 + 5000
+timestamp = (86400000 * 101) + 5000
 recordCreatingDay("sam")
-timestamp = 86400000 * 103 + 5000
+timestamp = (86400000 * 103) + 5000
 recordCreatingDay("sam")
 recordCreatingDay("class~student")
 roturBadgeEvent("sam", "comment_posted", 0)
 roturBadgeEvent("sam", "love_received", 0)
 roturBadgeEvent("sam", "remixed", 0)
-process.sleep(0.5)
+wait 0.5
 testing.assert(profiles.sam.creatingStreak.count == 1 and profiles.sam.creatingStreak.day == 103, "a missed day starts the streak again")
 testing.assert(sent.contains("PUT /badges/streak/users/id-sam {\"progress\":1}"), "the first day sets progress 1: " ++ json.stringify(sent))
 testing.assert(sent.contains("PUT /badges/streak/users/id-sam {\"progress\":2}"), "the next day sets progress 2")
