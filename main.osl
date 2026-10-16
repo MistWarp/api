@@ -225,6 +225,7 @@ import "./challenge-ranking.osl"
 import "./community-tools.osl"
 import "./classroom-policy.osl"
 import "./release-access-policy.osl"
+import "./editor-session-policy.osl"
 import "./privacy-policy.osl"
 import "./classrooms.osl"
 import "./classroom-switch-policy.osl"
@@ -277,6 +278,7 @@ def stagedFlushLoop() (
     flushR2UploadQueue()
     cleanupExpiredCommunityRecords()
     void sweepSiteErrors()
+    cleanupExpiredSessions()
   )
 )
 
@@ -313,6 +315,7 @@ if r2Local (
 )
 
 app.use(authMiddleware)
+app.use(editorSessionGuard)
 app.use(classroomSwitchGuard)
 app.use(classroomAccessGuard)
 setupGameRealtime()
@@ -337,6 +340,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/perks/refresh", requireAuth, handleRefreshPerks)
   api.POST("/perks/seen", requireAuth, handlePerksSeen)
   api.POST("/auth", handleRoturAuth)
+  api.POST("/auth/editor-session", serve.limitRequests(600, {window: 3600000}), requireAuth, handleCreateEditorSession)
   api.GET("/me", handleGetMe)
   api.POST("/logout", handleLogout)
 

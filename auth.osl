@@ -19,6 +19,22 @@ def createSession(string username, string userId, boolean minor) string (
   return sessionId
 )
 
+def createScopedSession(string parentToken, object parent, string scope, number expiresAt) string (
+  string sessionId = randomString(32)
+  object session = {
+    username: parent.username,
+    userId: parent.userId,
+    minor: parent.minor == true,
+    createdAt: timestamp,
+    scope: scope,
+    expiresAt: expiresAt,
+    parent: parentToken
+  }
+  writeFile(sessionsDir ++ sessionId ++ ".json", session)
+  sessionCache.set(sessionId, session)
+  return sessionId
+)
+
 def getSession(string token) object (
   if !isSafePathPart(token) (
     return {ok: false, error: "invalid token"}
@@ -40,13 +56,22 @@ def getSession(string token) object (
     sessionCache.delete(token)
     return {ok: false, error: "session expired"}
   )
+  string scope = (session.scope ?? "").toStr()
+  if scope != "" (
+    string parentToken = (session.parent ?? "").toStr()
+    if timestamp > (session.expiresAt ?? 0).toNum() or parentToken == "" or parentToken == token or !getSession(parentToken).ok (
+      void fs.remove(path)
+      sessionCache.delete(token)
+      return {ok: false, error: "session expired"}
+    )
+  )
   string username = session.username.toStr()
   string userId = session.userId.toStr()
   string mapped = refreshUsernameForId(userId)
   if mapped != "" (
     username = mapped
   )
-  return {ok: true, username: username, userId: userId, minor: session.minor == true}
+  return {ok: true, username: username, userId: userId, minor: session.minor == true, scope: scope}
 )
 
 def deleteSession(string token) boolean (
@@ -64,7 +89,8 @@ def cleanupExpiredSessions() (
     auto res = readFile(path)
     if res.ok (
       object session = res.data.assert(object)
-      if timestamp - session.createdAt.toNum() > 604800000 (
+      boolean scopedExpired = (session.scope ?? "").toStr() != "" and (timestamp > (session.expiresAt ?? 0).toNum() or !fs.exists(sessionsDir ++ (session.parent ?? "").toStr() ++ ".json"))
+      if timestamp - session.createdAt.toNum() > 604800000 or scopedExpired (
         void fs.remove(path)
       )
     )
@@ -75,6 +101,10 @@ def requestToken(*serve.Context c) string (
   string token = (c.bearer() ?? "")
   if token != "" (
     return token
+  )
+  string verb = c.method().toUpper()
+  if verb != "GET" and verb != "HEAD" (
+    return ""
   )
   return (c.cookie("auth_token") ?? "")
 )
@@ -191,6 +221,43 @@ def handleLogout(*serve.Context c) (
   )
   clearAuthCookie(c)
   c.json(200, {ok: true})
+)
+
+object editorSessionMints = {}
+
+def editorSessionMintAllowed(string userId) boolean (
+  sync.lock("editor-session-mints")
+  object entry = (editorSessionMints[userId] ?? {}).assertElse(object, {})
+  if timestamp - (entry.since ?? 0).toNum() > 3600000 (
+    entry = {since: timestamp, count: 0}
+  )
+  boolean allowed = entry.count.toNum() < editorSessionMintsPerHour
+  if allowed (
+    entry.count = entry.count.toNum() + 1
+  )
+  editorSessionMints[userId] = entry
+  sync.unlock("editor-session-mints")
+  return allowed
+)
+
+def handleCreateEditorSession(*serve.Context c) (
+  if contextString(c, "sessionScope") != "" (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if !editorSessionMintAllowed(contextString(c, "userId")) (
+    c.json(429, {ok: false, code: "rate_limited", error: "Too many editor sign-ins. Try again later."})
+    return
+  )
+  string token = requestToken(c)
+  object parent = getSession(token)
+  if !parent.ok (
+    c.json(401, {ok: false, error: "not authenticated"})
+    return
+  )
+  number expiresAt = timestamp + editorSessionTtlMs
+  string editorToken = createScopedSession(token, parent, "editor", expiresAt)
+  c.json(200, {ok: true, token: editorToken, expiresAt: expiresAt})
 )
 
 def handleGetMe(*serve.Context c) (

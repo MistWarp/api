@@ -5,6 +5,7 @@ def authMiddleware(*serve.Context c) (
   boolean isAdmin = false
   boolean isStudent = false
   boolean isMinor = false
+  string sessionScope = ""
 
   string token = requestToken(c)
   if token != "" (
@@ -14,6 +15,7 @@ def authMiddleware(*serve.Context c) (
       username = session.username.toStr()
       userId = session.userId.toStr()
       isMinor = session.minor == true
+      sessionScope = (session.scope ?? "").toStr()
       if isStudentUserId(userId) (
         object student = loadStudent(userId)
         isStudent = true
@@ -23,7 +25,7 @@ def authMiddleware(*serve.Context c) (
           userId = ""
         )
       ) else (
-        isAdmin = isAdminUser(username)
+        isAdmin = sessionScope == "" and isAdminUser(username)
       )
     )
   )
@@ -34,6 +36,7 @@ def authMiddleware(*serve.Context c) (
   c.set("isAdmin", isAdmin)
   c.set("isStudent", isStudent and authenticated)
   c.set("isMinor", (isMinor or isStudent) and authenticated)
+  c.set("sessionScope", if authenticated then sessionScope else "")
 
   c.next()
 )
@@ -55,6 +58,16 @@ def requireAdmin(*serve.Context c) (
   )
   if !contextBool(c, "isAdmin") (
     c.json(403, {ok: false, error: "admin access required"})
+    c.abort()
+    return
+  )
+  c.next()
+)
+
+def editorSessionGuard(*serve.Context c) (
+  string scope = contextString(c, "sessionScope")
+  if scope != "" and !scopedRequestAllowed(scope, c.method(), escapedRequestPath(c.fullURL(), c.scheme() ++ "://" ++ c.host()), c.path()) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
     c.abort()
     return
   )

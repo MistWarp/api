@@ -39,10 +39,25 @@ def handlePutMySettings(*serve.Context c) (
     settings.settings = {}
   )
   object inner = settings.settings
+  boolean editorScope = contextString(c, "sessionScope") == "editor"
+  if editorScope (
+    auto storedResult = readFile(settingsPath(username))
+    object stored = if storedResult.ok then storedResult.data.assertElse(object, {}) else {}
+    object storedInner = (stored.settings ?? {}).assertElse(object, {})
+    if storedInner.contains("rotur") (
+      inner.rotur = storedInner.rotur
+    ) else (
+      inner.delete("rotur")
+    )
+  )
   inner.updatedAt = timestamp
   if !writeFile(settingsPath(username), settings) (
     c.internalError("failed to save settings")
     return
   )
-  c.json(200, {ok: true, updatedAt: inner.updatedAt})
+  object reply = {ok: true, updatedAt: inner.updatedAt}
+  if editorScope (
+    reply.rotur = inner.rotur
+  )
+  c.json(200, reply)
 )
