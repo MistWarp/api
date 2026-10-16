@@ -19,3 +19,8 @@ def classroomJoinCodeFromPath(string method, string rawPath) string (
 def isClassroomLoginRoute(string method, string rawPath) boolean (
   return method.toUpper() == "POST" and apiRoutePath(rawPath) == "/classroom/login"
 )
+
+def classroomBodySizeAllowed(string contentLength, number limit) boolean (
+  string value = contentLength.strip()
+  return regex.match("^[0-9]{1,12}$", value) and value.toNum() <= limit
+)

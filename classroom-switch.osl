@@ -11,9 +11,23 @@ def classroomTestClass(object classDoc) boolean (
   return owner != "" and isAdminUser(owner)
 )
 
+def classroomStudentActive(object student) boolean (
+  return student.len > 0 and student.disabled != true
+)
+
 def classroomTestStudent(string studentId) boolean (
   object student = loadStudent(studentId)
-  return student.len > 0 and classroomTestClass(loadClass((student.classId ?? "").toStr()))
+  return classroomStudentActive(student) and classroomTestClass(loadClass((student.classId ?? "").toStr()))
+)
+
+def classroomSessionAllowed(string userId) boolean (
+  if !isStudentUserId(userId) (
+    return true
+  )
+  if classroomEnabled (
+    return classroomStudentActive(loadStudent(userId))
+  )
+  return classroomTestStudent(userId)
 )
 
 def classroomTestRequest(*serve.Context c) boolean (
@@ -26,6 +40,9 @@ def classroomTestRequest(*serve.Context c) boolean (
     return matches.len > 0 and classroomTestClass(matches[1].assertElse(object, {}))
   )
   if isClassroomLoginRoute(c.method(), c.path()) (
+    if !classroomBodySizeAllowed((c.header("Content-Length") ?? ""), maxStandardRequestBytes) (
+      return false
+    )
     object body = requestJSON(c)
     return classroomTestStudent((body.studentId ?? "").toStr())
   )
@@ -37,7 +54,7 @@ def classroomSwitchGuard(*serve.Context c) (
     c.next()
     return
   )
-  if contextBool(c, "isStudent") and !classroomTestStudent(contextString(c, "userId")) (
+  if contextBool(c, "isStudent") and !classroomSessionAllowed(contextString(c, "userId")) (
     c.set("authenticated", false)
     c.set("username", "")
     c.set("userId", "")

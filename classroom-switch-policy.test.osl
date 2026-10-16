@@ -26,3 +26,10 @@ testing.assert(isClassroomLoginRoute("POST", "/v1/classroom/login"), "student si
 testing.assert(isClassroomLoginRoute("post", "/api/classroom/login"), "legacy student sign-in is the login route")
 testing.assert(!isClassroomLoginRoute("GET", "/v1/classroom/login"), "only posts sign in")
 testing.assert(!isClassroomLoginRoute("POST", "/v1/auth"), "Rotur sign-in is not the student login route")
+
+testing.assert(classroomBodySizeAllowed("120", 262144), "small login bodies are read")
+testing.assert(classroomBodySizeAllowed(" 262144 ", 262144), "a body at the limit is read")
+testing.assert(!classroomBodySizeAllowed("262145", 262144), "larger bodies are not read")
+testing.assert(!classroomBodySizeAllowed("", 262144), "bodies without a length are not read")
+testing.assert(!classroomBodySizeAllowed("12abc", 262144), "malformed lengths are not read")
+testing.assert(!classroomBodySizeAllowed("-1", 262144), "negative lengths are not read")
