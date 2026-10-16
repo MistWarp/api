@@ -91,6 +91,7 @@ def projectEntriesListed(array entries, object banned, object shadowed, string v
     boolean ownerBanned = entryOwnerBanned(banned, entry)
     boolean projectShadowed = entryProjectShadowBanned(shadowed, entry)
     boolean ownerShadowed = entryOwnerBanned(shadowed, entry)
+    boolean playerContactMissing = (entry.playerContactMissing ?? false) == true
     if isAdmin (
       if ownerBanned or projectShadowed or ownerShadowed (
         object marked = entry.clone()
@@ -108,7 +109,7 @@ def projectEntriesListed(array entries, object banned, object shadowed, string v
         visible.append(entry)
       )
     ) else if !ownerBanned (
-      boolean shadowedEntry = projectShadowed or ownerShadowed
+      boolean shadowedEntry = projectShadowed or ownerShadowed or playerContactMissing
       if !shadowedEntry or viewerIsAuthor((entry.owner ?? "").toStr(), (entry.ownerId ?? "").toStr(), viewerKey, viewerId) (
         visible.append(entry)
       )

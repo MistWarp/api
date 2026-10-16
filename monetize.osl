@@ -400,6 +400,10 @@ def handleSetVisibility(*serve.Context c) (
       c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
       return
     )
+    if !playerContactShareAllowed(projectConnectsPlayers(project), projectPlayerContactDeclaration(project), target) (
+      playerContactRequiredResponse(c)
+      return
+    )
     boolean everUploaded = project.lastUploadAt.toNum() > 0
     everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
     if !everUploaded (

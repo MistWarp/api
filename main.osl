@@ -187,6 +187,8 @@ import "./game-data-access.osl"
 import "./game-data.osl"
 import "./game-realtime.osl"
 import "./extensions.osl"
+import "./player-contact-policy.osl"
+import "./player-contact.osl"
 import "./monetize.osl"
 import "./game-inventory.osl"
 import "./backpack-policy.osl"
@@ -289,6 +291,7 @@ thread.new(processRoturWebhooks)
 thread.new(stagedFlushLoop)
 thread.new(generateMissingProjectHistories)
 thread.new(backfillProjectHistoryBytes)
+thread.new(migratePlayerContactIndex)
 thread.new(developmentFeedLoop)
 thread.new(vanityLapseLoop)
 
@@ -481,6 +484,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
   api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
   api.POST("/projects/:id/visibility", requireAuth, requireGoodStanding, handleSetVisibility)
+  api.PUT("/projects/:id/player-contact", requireAuth, requireGoodStanding, handleSetPlayerContact)
   api.POST("/projects/:id/purchase/intent", requireAuth, handlePurchaseIntent)
   api.POST("/projects/:id/purchase/confirm", requireAuth, handlePurchaseConfirm)
   api.POST("/projects/:id/view", handleViewProject)
@@ -615,6 +619,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/admin/extensions/:hash/source", requireAdmin, handleAdminGetExtensionSource)
   api.POST("/admin/extensions/policy", requireAdmin, handleAdminSetExtensionPolicy)
   api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
+  api.POST("/admin/extensions/connects-players", requireAdmin, handleAdminSetExtensionConnectsPlayers)
   api.GET("/admin/classroom/plans", requireAdmin, handleAdminGetClassroomPlan)
   api.POST("/admin/classroom/plans", requireAdmin, handleAdminSetClassroomPlan)
 )

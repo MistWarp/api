@@ -97,3 +97,12 @@ testing.assert(adminThread[2].authorShadowBanned == true, "admins see the author
 
 testing.assert(authoredItemListed(shadowed, "alice", "", "", "", false), "other authors are listed")
 testing.assert(!authoredItemListed(shadowed, "Sneaky", "", "bob", "", false), "shadow banned authors are not listed for others")
+
+array chatEntries = [
+  {id: "a", owner: "Alice", ownerId: "u-alice"},
+  {id: "c", owner: "chatty", ownerId: "u-chat", playerContactMissing: true},
+  {id: "d", owner: "chatty", ownerId: "u-chat", playerContactMissing: false}
+]
+testing.assert(ids(projectEntriesListed(chatEntries, noBans, noBans, "", "", false)) == "ad", "lists leave out projects that connect players without chat details")
+testing.assert(ids(projectEntriesListed(chatEntries, noBans, noBans, "chatty", "u-chat", false)) == "acd", "their creator still sees them")
+testing.assert(ids(projectEntriesListed(chatEntries, noBans, noBans, "", "", true)) == "acd", "admins still see them")

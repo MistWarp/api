@@ -92,6 +92,9 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
   if projectHiddenFrom(project, c) (
     return bannedKeyMatches(project, (c.query("k") ?? ""))
   )
+  if studentBlockedFromPlayerContact(project, c) (
+    return false
+  )
   if canSaveLiveProject(project, c) return true
   if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
     return true
@@ -382,6 +385,10 @@ def projectResponse(object project,*serve.Context c) object (
   )
   if ownerBanned (
     response.ownerBanned = true
+  )
+  response.playerContact = projectPlayerContactResponse(project, c)
+  if (response.playerContact.studentBlocked ?? false) == true (
+    response.projectJsonUrl = ""
   )
   if isOwner and projectHiddenByModerator(project) (
     response.moderationHidden = moderationHoldResponse(project, c)
@@ -1927,6 +1934,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
 
   array projectExtensions = extensionResult.extensions.assert(array)
+  boolean connectedBefore = projectConnectsPlayers(project)
   if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
     void fs.remove(zipPath)
     void fs.remove(extractDir)
@@ -2005,6 +2013,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
+  if !connectedBefore (
+    notifyPlayerContactNeeded(project)
+  )
   releasePendingUploads(uploader, project.assets.assertElse(array, []))
   string replacedJsonKey = if previousJsonKey != project.jsonKey.toStr() then previousJsonKey else ""
   array replacedWorkspaceKeys = []
@@ -2311,6 +2322,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
   )
 
   object body = requestJSON(c)
+  boolean ownerDeclarationCleared = false
   if isStudentUserId((project.ownerId ?? "").toStr()) and !contextBool(c, "isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
     c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
     return
@@ -2336,6 +2348,10 @@ def handleUpdateProjectLocked(*serve.Context c) (
     if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner) and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
       c.badRequest("the new owner has reached their project limit")
       return
+    )
+    if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner) and project.contains("playerContact") (
+      project.delete("playerContact")
+      ownerDeclarationCleared = true
     )
     project.owner = nextOwner
     project.ownerId = nextOwnerId
@@ -2747,6 +2763,9 @@ def handleUpdateProjectLocked(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
+  if ownerDeclarationCleared (
+    notifyPlayerContactNeeded(project)
+  )
   if body.contains("collaborators") (
     array nextTeam = project.collaborators.assert(array)
     for i nextTeam.len (
@@ -3039,6 +3058,10 @@ def handlePublishProject(*serve.Context c) (
   string blockedExtension = projectBlockedExtension(project)
   if blockedExtension != "" (
     c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
+    return
+  )
+  if !playerContactShareAllowed(projectConnectsPlayers(project), projectPlayerContactDeclaration(project), "public") (
+    playerContactRequiredResponse(c)
     return
   )
 

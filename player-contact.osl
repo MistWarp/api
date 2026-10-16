@@ -1,0 +1,259 @@
+def projectPlayerContactDeclaration(object project) object (
+  return (project.playerContact ?? {}).assertElse(object, {})
+)
+
+def playerContactService(object policy, object extension) object (
+  string extensionUrl = (extension.url ?? "").toStr()
+  string galleryName = playerContactGalleryName(extensionUrl)
+  if galleryName != "" (
+    return {name: galleryName, url: extensionUrl, gallery: true}
+  )
+  string hash = (extension.hash ?? "").toStr()
+  if !isExtensionHash(hash) (
+    return {}
+  )
+  object record = extensionRecord(policy, hash)
+  if (record.connectsPlayers ?? false) != true (
+    return {}
+  )
+  object metadata = extensionMetadata(hash)
+  return {name: (metadata.name ?? "").toStr().strip(), url: extensionReviewUrl(extensionUrl), gallery: false}
+)
+
+def projectPlayerContactServices(object project) array (
+  array services = []
+  array extensions = storedProjectExtensions(project)
+  if extensions.len == 0 (
+    return services
+  )
+  object policy = loadExtensionPolicy()
+  object seen = {}
+  for i extensions.len (
+    object service = playerContactService(policy, extensions[i].assertElse(object, {}))
+    if service.len > 0 (
+      string key = service.name.toStr() ++ "|" ++ service.url.toStr()
+      if !seen.contains(key) (
+        seen[key] = true
+        services.append(service)
+      )
+    )
+  )
+  return services
+)
+
+def projectConnectsPlayers(object project) boolean (
+  return projectPlayerContactServices(project).len > 0
+)
+
+def projectPlayerContactMissing(object project) boolean (
+  return playerContactMissing(projectConnectsPlayers(project), projectPlayerContactDeclaration(project))
+)
+
+def projectLetsPlayersTalk(object project) boolean (
+  return projectConnectsPlayers(project) or playerContactDeclared(projectPlayerContactDeclaration(project))
+)
+
+def studentBlockedFromPlayerContact(object project,*serve.Context c) boolean (
+  return contextBool(c, "isStudent") and !canEditProject(project, c) and projectLetsPlayersTalk(project)
+)
+
+def projectPlayerContactResponse(object project,*serve.Context c) object (
+  array services = projectPlayerContactServices(project)
+  object declaration = projectPlayerContactDeclaration(project)
+  boolean declared = playerContactDeclared(declaration)
+  object response = {
+    connects: services.len > 0 or declared,
+    services: services,
+    declared: declared,
+    contact: if declared then (declaration.contact ?? "").toStr() else "",
+    required: services.len > 0,
+    missing: playerContactMissing(services.len > 0, declaration),
+    termsVersion: playerContactTermsVersion
+  }
+  if canEditProject(project, c) and declared (
+    response.declaredBy = (declaration.declaredBy ?? "").toStr()
+    response.declaredAt = (declaration.declaredAt ?? 0).toNum()
+    response.termsCurrent = playerContactTermsCurrent(declaration)
+  )
+  if studentBlockedFromPlayerContact(project, c) (
+    response.studentBlocked = true
+  )
+  return response
+)
+
+def playerContactRequiredResponse(*serve.Context c) (
+  c.json(400, {
+    ok: false,
+    code: "player_contact_required",
+    error: "This project lets players talk to each other. Add a contact for chat and accept the chat rules in its publishing settings before you share it."
+  })
+)
+
+def notifyPlayerContactNeeded(object project) (
+  if projectVisibility(project) == "private" or !projectPlayerContactMissing(project) (
+    return
+  )
+  array names = []
+  array services = projectPlayerContactServices(project)
+  for i services.len (
+    string name = services[i].assertElse(object, {}).name.toStr()
+    if name != "" and !names.contains(name) (
+      names.append(name)
+    )
+  )
+  addNotification(project.owner.toStr(), "MistWarp", "player_contact_needed", {projectId: project.id, projectTitle: project.title, services: names})
+)
+
+def handleSetPlayerContact(*serve.Context c) (
+  string lockName = "project-upload:" ++ c.param("id")
+  sync.lock(lockName)
+  handleSetPlayerContactLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleSetPlayerContactLocked(*serve.Context c) (
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = loaded.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if contextBool(c, "isStudent") (
+    c.forbidden("Class accounts can't run projects that let players talk to each other.")
+    return
+  )
+  object body = requestJSON(c)
+  if (body.declared ?? false) == true (
+    string contact = (body.contact ?? "").toStr().strip()
+    if !playerContactContactValid(contact) (
+      c.badRequest("Add a contact for chat between 3 and 200 characters, on one line.")
+      return
+    )
+    if (body.termsVersion ?? 0).toNum() != playerContactTermsVersion (
+      c.json(400, {ok: false, code: "player_contact_terms", error: "Accept the current chat rules to continue."})
+      return
+    )
+    project.playerContact = {
+      declared: true,
+      contact: contact,
+      termsVersion: playerContactTermsVersion,
+      declaredAt: timestamp,
+      declaredBy: contextString(c, "username")
+    }
+  ) else (
+    if !playerContactCanWithdraw(projectConnectsPlayers(project), projectVisibility(project)) (
+      c.json(400, {
+        ok: false,
+        code: "player_contact_required",
+        error: "This project still uses an extension that connects players. Remove it or make the project private first."
+      })
+      return
+    )
+    project.delete("playerContact")
+  )
+  if !saveProject(project) (
+    c.internalError("could not save the chat details")
+    return
+  )
+  upsertIndexEntry(project)
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def reindexPlayerContactProjects(string hash, boolean notify) number (
+  number affected = 0
+  array files = fs.readDir(projectsDir).unwrapOr([])
+  for i files.len (
+    auto result = readFile(projectsDir ++ files[i].toStr())
+    if result.ok (
+      object project = result.data.assert(object)
+      if projectContainsExtensionHash(project, hash) (
+        upsertIndexEntry(project)
+        if notify and projectVisibility(project) != "private" and projectPlayerContactMissing(project) (
+          notifyPlayerContactNeeded(project)
+          affected += 1
+        )
+      )
+    )
+  )
+  return affected
+)
+
+def handleAdminSetExtensionConnectsPlayers(*serve.Context c) (
+  object body = requestJSON(c)
+  string hash = (body.hash ?? "").toStr()
+  if !isExtensionHash(hash) or !body.contains("connectsPlayers") (
+    c.badRequest("hash and connectsPlayers are required")
+    return
+  )
+  boolean connects = body.connectsPlayers == true
+  string lockName = "extension-" ++ hash
+  sync.lock(lockName)
+  object record = readExtensionRecord(hash)
+  if record.getKeys().len == 0 (
+    sync.unlock(lockName)
+    c.notFound("extension not found")
+    return
+  )
+  if connects (
+    record.connectsPlayers = true
+  ) else (
+    record.delete("connectsPlayers")
+  )
+  if !writeFile(extensionRecordPath(hash), record) (
+    sync.unlock(lockName)
+    c.internalError("could not save extension policy")
+    return
+  )
+  sync.unlock(lockName)
+  number affected = reindexPlayerContactProjects(hash, connects)
+  c.json(200, {ok: true, affected: affected})
+)
+
+def migratePlayerContactIndex() (
+  string migrationId = "migration:player-contact-index-v1"
+  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
+    return
+  )
+  array files = fs.readDir(projectsDir).unwrapOr([])
+  number notified = 0
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") (
+      auto loaded = loadProject(file.replace(".json", ""))
+      if loaded.ok (
+        object project = loaded.project.assert(object)
+        if projectConnectsPlayers(project) (
+          upsertIndexEntry(project)
+          if projectVisibility(project) != "private" and projectPlayerContactMissing(project) (
+            notifyPlayerContactNeeded(project)
+            notified += 1
+          )
+        )
+      )
+    )
+  )
+  putDocument(diagnosticDocs, migrationId, {_id: migrationId, completedAt: timestamp, notified: notified})
+  log "Player contact index migration complete, " ++ notified.toStr() ++ " owners asked to add chat details"
+)
+
+def notifyPlayerChatReport(object report) (
+  auto loaded = loadProject(report.target.toStr())
+  if !loaded.ok (
+    return
+  )
+  object project = loaded.project.assert(object)
+  if normalizeUsername((report.reporter ?? "").toStr()) == normalizeUsername(project.owner.toStr()) (
+    return
+  )
+  addNotification(project.owner.toStr(), "MistWarp", "player_chat_report", {
+    projectId: project.id,
+    projectTitle: project.title,
+    category: report.category.toStr(),
+    player: (report.player ?? "").toStr(),
+    preview: report.reason.toStr().trim(1, 300)
+  })
+)

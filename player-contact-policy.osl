@@ -1,0 +1,78 @@
+number playerContactTermsVersion = 1
+number playerContactMaxContact = 200
+
+object playerContactTurboWarpNames = {
+  "cloudlink.js": "CloudLink V4",
+  "godslayerakp/ws.js": "WebSocket"
+}
+
+object playerContactMistiumNames = {
+  "WebsocketPlus.js": "WebsocketPlus",
+  "OriginChats.js": "OriginChats",
+  "Rotur.js": "Rotur",
+  "roturVoice.js": "roturVoice",
+  "roturVoice Advanced.js": "roturVoice Advanced",
+  "Cloudlink4_Improved.js": "Cloudlink4_Improved"
+}
+
+array playerChatOwnerCategories = ["spam", "harassment", "hate", "scam", "other"]
+
+def playerContactUrlPath(string extensionUrl, string origin) string (
+  if !extensionUrl.startsWith(origin) (
+    return ""
+  )
+  string rest = extensionUrl.replace(origin, "")
+  string path = rest.split("?")[1].split("#")[1]
+  return path.replace("%20", " ")
+)
+
+def playerContactGalleryName(string extensionUrl) string (
+  string turboWarpPath = playerContactUrlPath(extensionUrl, "https://extensions.turbowarp.org/")
+  if turboWarpPath != "" and playerContactTurboWarpNames.contains(turboWarpPath) (
+    return playerContactTurboWarpNames[turboWarpPath].toStr()
+  )
+  string mistiumPath = playerContactUrlPath(extensionUrl, "https://extensions.mistium.com/")
+  if mistiumPath != "" (
+    array parts = mistiumPath.split("/")
+    string fileName = parts[parts.len].toStr()
+    if playerContactMistiumNames.contains(fileName) (
+      return playerContactMistiumNames[fileName].toStr()
+    )
+  )
+  return ""
+)
+
+def playerContactContactValid(string contact) boolean (
+  string trimmed = contact.strip()
+  return trimmed.len >= 3 and trimmed.len <= playerContactMaxContact and !trimmed.contains("\n") and !trimmed.contains("\r")
+)
+
+def playerContactDeclared(object declaration) boolean (
+  if declaration.len == 0 or (declaration.declared ?? false) != true (
+    return false
+  )
+  return playerContactContactValid((declaration.contact ?? "").toStr()) and (declaration.termsVersion ?? 0).toNum() >= 1
+)
+
+def playerContactTermsCurrent(object declaration) boolean (
+  return playerContactDeclared(declaration) and (declaration.termsVersion ?? 0).toNum() == playerContactTermsVersion
+)
+
+def playerContactMissing(boolean connects, object declaration) boolean (
+  return connects and !playerContactDeclared(declaration)
+)
+
+def playerContactShareAllowed(boolean connects, object declaration, string target) boolean (
+  if target == "private" (
+    return true
+  )
+  return !playerContactMissing(connects, declaration)
+)
+
+def playerContactCanWithdraw(boolean connects, string visibility) boolean (
+  return !connects or visibility == "private"
+)
+
+def playerChatReportNotifiesOwner(string category) boolean (
+  return playerChatOwnerCategories.contains(category)
+)

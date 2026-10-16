@@ -1,0 +1,57 @@
+import "std:testing"
+import "./player-contact-policy.osl"
+
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/cloudlink.js") == "CloudLink V4", "CloudLink from the TurboWarp gallery connects players")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/godslayerakp/ws.js") == "WebSocket", "the TurboWarp WebSocket extension connects players")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/cloudlink.js?v=2#x") == "CloudLink V4", "query strings and fragments are ignored")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/godslayerakp/http.js") == "", "plain HTTP extensions are left to the declaration")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/clouddata-ping.js") == "", "pinging a cloud server does not connect players")
+testing.assert(playerContactGalleryName("https://extensions.mistium.com/featured/OriginChats.js") == "OriginChats", "OriginChats connects players")
+testing.assert(playerContactGalleryName("https://extensions.mistium.com/featured/Rotur.js") == "Rotur", "Rotur messaging connects players")
+testing.assert(playerContactGalleryName("https://extensions.mistium.com/files/roturVoice%20Advanced.js") == "roturVoice Advanced", "encoded spaces match the gallery file name")
+testing.assert(playerContactGalleryName("https://extensions.mistium.com/files/roturVoice Advanced.js") == "roturVoice Advanced", "raw spaces match the gallery file name")
+testing.assert(playerContactGalleryName("https://extensions.mistium.com/featured/Shaders.js") == "", "other gallery extensions do not connect players")
+testing.assert(playerContactGalleryName("https://evil.example/extensions.turbowarp.org/cloudlink.js") == "", "only the gallery origins count")
+testing.assert(playerContactGalleryName("data:application/javascript,cloudlink.js") == "", "data URLs are never gallery extensions")
+
+testing.assert(playerContactContactValid("me@example.com"), "an email address is a contact")
+testing.assert(playerContactContactValid("  https://discord.gg/abc  "), "surrounding spaces are trimmed")
+testing.assert(!playerContactContactValid("ab"), "a contact needs at least three characters")
+testing.assert(!playerContactContactValid("line one\nline two"), "a contact stays on one line")
+string longContact = ""
+for i 201 (
+  longContact ++= "a"
+)
+testing.assert(!playerContactContactValid(longContact), "a contact is at most 200 characters")
+
+object current = {declared: true, contact: "me@example.com", termsVersion: playerContactTermsVersion}
+object older = {declared: true, contact: "me@example.com", termsVersion: 0}
+object withdrawn = {declared: false, contact: "me@example.com", termsVersion: playerContactTermsVersion}
+object noContact = {declared: true, contact: "", termsVersion: playerContactTermsVersion}
+testing.assert(playerContactDeclared(current), "a current declaration counts")
+testing.assert(playerContactTermsCurrent(current), "a declaration on the current rules is current")
+testing.assert(!playerContactDeclared(older), "a declaration needs accepted rules")
+testing.assert(!playerContactDeclared(withdrawn), "a withdrawn declaration does not count")
+testing.assert(!playerContactDeclared(noContact), "a declaration needs a contact")
+testing.assert(!playerContactDeclared({}), "no declaration does not count")
+
+testing.assert(playerContactMissing(true, {}), "a connecting project without a declaration is missing one")
+testing.assert(!playerContactMissing(true, current), "a declared connecting project is not missing one")
+testing.assert(!playerContactMissing(false, {}), "a project that does not connect players needs no declaration")
+
+testing.assert(playerContactShareAllowed(true, {}, "private"), "making a project private is always allowed")
+testing.assert(!playerContactShareAllowed(true, {}, "public"), "an undeclared connecting project cannot be shared")
+testing.assert(!playerContactShareAllowed(true, {}, "unlisted"), "an undeclared connecting project cannot be unlisted either")
+testing.assert(playerContactShareAllowed(true, current, "public"), "a declared connecting project can be shared")
+testing.assert(playerContactShareAllowed(false, {}, "public"), "other projects share as before")
+
+testing.assert(playerContactCanWithdraw(false, "public"), "a declaration can be withdrawn when nothing connects players")
+testing.assert(playerContactCanWithdraw(true, "private"), "a private project can drop its declaration")
+testing.assert(!playerContactCanWithdraw(true, "unlisted"), "a shared connecting project keeps its declaration")
+
+testing.assert(playerChatReportNotifiesOwner("harassment"), "creators hear about harassment in their chat")
+testing.assert(playerChatReportNotifiesOwner("spam"), "creators hear about spam in their chat")
+testing.assert(!playerChatReportNotifiesOwner("sexual"), "sexual content reports stay with moderators")
+testing.assert(!playerChatReportNotifiesOwner("csea"), "child safety reports stay with moderators")
+testing.assert(!playerChatReportNotifiesOwner("threat_to_life"), "urgent reports stay with moderators")
+testing.assert(!playerChatReportNotifiesOwner("violence"), "violence reports stay with moderators")

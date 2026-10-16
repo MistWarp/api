@@ -330,6 +330,8 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
     if !projects.contains(projectId) (
       projects.append(projectId)
     )
+    record.urls = recordUrls
+    record.projects = projects
     if !writeFile(extensionRecordPath(hash), record) (
       sync.unlock(lockName)
       return false
@@ -626,6 +628,12 @@ def handleAdminGetExtensions(*serve.Context c) (
         if gallery (
           status = "trusted"
         )
+        boolean connectsPlayersBuiltIn = false
+        for j urls.len (
+          if playerContactGalleryName(urls[j].toStr()) != "" (
+            connectsPlayersBuiltIn = true
+          )
+        )
         extensions.append({
           hash: hash,
           status: status,
@@ -635,7 +643,9 @@ def handleAdminGetExtensions(*serve.Context c) (
           firstSeen: firstSeen,
           sourceAvailable: fs.exists(extensionSourcePath(hash)),
           metadata: extensionMetadata(hash),
-          gallery: gallery
+          gallery: gallery,
+          connectsPlayers: connectsPlayersBuiltIn or (record.connectsPlayers ?? false) == true,
+          connectsPlayersBuiltIn: connectsPlayersBuiltIn
         })
       )
     )
@@ -724,6 +734,7 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
   array blockedUrls = policy.blockedUrls.assert(array)
   if blocked and !blockedUrls.contains(extensionUrl) (
     blockedUrls.append(extensionUrl)
+    policy.blockedUrls = blockedUrls
   )
   if !blocked (
     policy.blockedUrls = removeString(blockedUrls, extensionUrl)

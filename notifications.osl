@@ -212,6 +212,14 @@ def notificationBody(string actor, string notifType, object extra) string (
   if notifType == "report_update" (
     return "Your report was reviewed"
   )
+  if notifType == "player_contact_needed" (
+    string chatTitle = if projectTitle != "" then projectTitle else "Your project"
+    return chatTitle ++ " lets players talk to each other, so it's hidden from lists until you add chat details in its publishing settings: " ++ projectLink
+  )
+  if notifType == "player_chat_report" (
+    string reportedTitle = if projectTitle != "" then projectTitle else "your project"
+    return "Someone reported chat in " ++ reportedTitle ++ quotedPreview(extra) ++ ": " ++ projectLink
+  )
   if notifType == "space_project" (
     return actor ++ " added a project to " ++ extra.spaceTitle.toStr()
   )

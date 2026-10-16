@@ -129,6 +129,28 @@ def reportedContent(object report) object (
       return {user: project.owner.toStr(), snapshot: "Project: " ++ (project.title ?? "").toStr() ++ "\nDescription: " ++ (project.description ?? "").toStr() ++ "\nInstructions: " ++ (project.instructions ?? "").toStr() ++ "\nNotes: " ++ (project.notes ?? "").toStr()}
     )
   )
+  if type == "chat" (
+    auto loadedChat = loadProject(target)
+    if loadedChat.ok (
+      object chatProject = loadedChat.project.assert(object)
+      string player = (report.player ?? "").toStr()
+      string chatUser = ""
+      if player != "" and normalizeUsername(player) != normalizeUsername((report.reporter ?? "").toStr()) and userIdForUsername(player) != "" (
+        chatUser = player
+      )
+      array names = []
+      array services = projectPlayerContactServices(chatProject)
+      for i services.len (
+        string name = services[i].assertElse(object, {}).name.toStr()
+        if name != "" (
+          names.append(name)
+        )
+      )
+      string named = if player != "" then "@" ++ player ++ " (named by the reporter, not checked)" else "nobody"
+      string through = if names.len > 0 then names.join(", ") else "a service the project does not name"
+      return {user: chatUser, snapshot: "Chat in project: " ++ (chatProject.title ?? "").toStr() ++ " (" ++ target ++ ")\nCreator: @" ++ chatProject.owner.toStr() ++ "\nChat contact: " ++ (projectPlayerContactDeclaration(chatProject).contact ?? "none").toStr() ++ "\nRuns through: " ++ through ++ "\nPlayer: " ++ named}
+    )
+  )
   if type == "comment" (
     object comment = findReportedComment(target, (report.context ?? "").toStr())
     if comment.len > 0 (
@@ -250,7 +272,7 @@ def handleCreateReport(*serve.Context c) (
   string target = body.target.toStr()
   string reason = body.reason.toStr().strip()
 
-  if reportType != "project" and reportType != "user" and reportType != "comment" and reportType != "bounty" (
+  if reportType != "project" and reportType != "user" and reportType != "comment" and reportType != "bounty" and reportType != "chat" (
     c.badRequest("invalid report type")
     return
   )
@@ -258,9 +280,17 @@ def handleCreateReport(*serve.Context c) (
     c.badRequest("invalid report")
     return
   )
-  if reportType == "project" and !loadProject(target).ok (
+  if (reportType == "project" or reportType == "chat") and !loadProject(target).ok (
     c.badRequest("project not found")
     return
+  )
+  string reportedPlayer = ""
+  if reportType == "chat" and body.contains("player") and body.player != null (
+    reportedPlayer = body.player.toStr().strip().replace("@", "")
+    if reportedPlayer != "" and !regex.match("^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$", reportedPlayer) (
+      c.badRequest("enter the player's username, or leave it empty")
+      return
+    )
   )
 
   object report = {
@@ -276,6 +306,9 @@ def handleCreateReport(*serve.Context c) (
   }
   if body.contains("context") and body.context != null (
     report.context = body.context.toStr().trim(1, 5000)
+  )
+  if reportedPlayer != "" (
+    report.player = reportedPlayer
   )
   // Who it's about comes from the content, never from the reporter.
   object reported = reportedContent(report)
@@ -301,8 +334,11 @@ def handleCreateReport(*serve.Context c) (
     c.internalError("could not save report")
     return
   )
-  if reportType == "project" (
+  if reportType == "project" or reportType == "chat" (
     snapshotProjectEvidence(target)
+  )
+  if reportType == "chat" and playerChatReportNotifiesOwner(report.category.toStr()) (
+    notifyPlayerChatReport(report)
   )
   thread.new(fileRoturReport, report)
   c.json(201, {ok: true})
