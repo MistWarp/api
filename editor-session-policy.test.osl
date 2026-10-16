@@ -1,0 +1,26 @@
+import "std:testing"
+import "std:regex"
+import "./classroom-policy.osl"
+import "./editor-session-policy.osl"
+
+testing.assert(editorRouteAllowed("POST", "/v1/projects/p1/upload"), "editor tokens can save their project")
+testing.assert(editorRouteAllowed("GET", "/v1/projects/p1/commits?k=abc"), "query strings don't affect matching")
+testing.assert(editorRouteAllowed("HEAD", "/v1/projects/p1/project.json"), "HEAD follows the GET rules")
+testing.assert(editorRouteAllowed("POST", "/v1/projects/p1/upload-parts/t1/chunk"), "chunked uploads are allowed")
+testing.assert(editorRouteAllowed("GET", "/v1/projects/p1/extensions/abc/source"), "extension sources are allowed")
+testing.assert(!editorRouteAllowed("POST", "/v1/projects/p1/publish"), "sharing needs the full session")
+testing.assert(!editorRouteAllowed("POST", "/v1/logout"), "signing out goes through MistWarp")
+testing.assert(!editorRouteAllowed("POST", "/v1/auth/editor-session"), "editor tokens can't mint more tokens")
+testing.assert(!editorRouteAllowed("GET", "/v1/admin/reports"), "admin routes need the full session")
+testing.assert(!editorRouteAllowed("DELETE", "/v1/me/data"), "account deletion needs the full session")
+testing.assert(!editorRouteAllowed("PUT", "/v1/me/profile"), "profile edits need the full session")
+testing.assert(!editorRouteAllowed("POST", "/v1/projects/p1/comments"), "commenting needs the full session")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/p1/upload/../../admin/reports"), "path tricks don't match")
+testing.assert(!editorRouteAllowed("POST", "/v1/projects/p1/releases"), "releases need the full session")
+testing.assert(editorProjectUpdateAllowed(["title", "gameItems"]), "the editor can rename and set game data")
+testing.assert(!editorProjectUpdateAllowed(["title", "shared"]), "sharing changes need the full session")
+testing.assert(!editorProjectUpdateAllowed(["visibility"]), "visibility changes need the full session")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/.."), "dot segments are refused")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/p1%2F..%2Fadmin"), "encoded slashes are refused")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/%2E%2E"), "encoded dots are refused")
+testing.assert(editorRouteAllowed("GET", "/v1/users/A%20name/projects"), "encoded spaces in names still match")

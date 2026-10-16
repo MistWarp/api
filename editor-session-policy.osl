@@ -1,0 +1,62 @@
+number editorSessionTtlMs = 7200000
+
+array editorSessionRoutes = [
+  "GET ^/me$",
+  "GET ^/me/settings$",
+  "PUT ^/me/settings$",
+  "GET ^/me/quota$",
+  "GET ^/notifications$",
+  "GET ^/perks$",
+  "POST ^/perks/(refresh|seen)$",
+  "GET ^/agreement$",
+  "POST ^/agreement/accept$",
+  "POST ^/errors$",
+  "GET ^/users/[^/]+/projects$",
+  "POST ^/projects$",
+  "GET ^/projects/[^/]+$",
+  "PUT ^/projects/[^/]+$",
+  "DELETE ^/projects/[^/]+$",
+  "GET ^/projects/[^/]+/(editor|commits|workspace\\.mwp|project\\.json|trusted-extensions|game-inventory-config|products)$",
+  "GET ^/projects/[^/]+/extensions/[^/]+/source$",
+  "GET ^/projects/[^/]+/releases/[^/]+/project\\.json$",
+  "POST ^/projects/[^/]+/(assets/check|upload|upload-parts|thumbnail|remix|live|data-capability)$",
+  "POST ^/projects/[^/]+/upload-parts/[^/]+/(chunk|complete)$",
+  "GET ^/projects/[^/]+/me/(save|inventory)$",
+  "PUT ^/projects/[^/]+/me/save$",
+  "POST ^/projects/[^/]+/me/inventory/grant$",
+  "GET ^/projects/[^/]+/products/[^/]+/owns$",
+  "POST ^/projects/[^/]+/products/[^/]+/(purchase/intent|purchase/confirm|grant|revoke|refund/intent)$"
+]
+
+array editorProjectFields = ["title", "gameItems", "gameProducts", "inventoryPolicy"]
+
+def editorRouteAllowed(string method, string rawPath) boolean (
+  string verb = method.toUpper()
+  if verb == "OPTIONS" (
+    return true
+  )
+  if verb == "HEAD" (
+    verb = "GET"
+  )
+  string path = apiRoutePath(rawPath.split("?")[1])
+  string lowered = path.toLower()
+  if path.contains("..") or path.contains("//") or lowered.contains("%2e") or lowered.contains("%2f") or lowered.contains("%5c") or path.contains("\\") (
+    return false
+  )
+  for i editorSessionRoutes.len (
+    array parts = editorSessionRoutes[i].toStr().split(" ")
+    if parts[1].toStr() == verb and regex.match(parts[2].toStr(), path) (
+      return true
+    )
+  )
+  return false
+)
+
+def editorProjectUpdateAllowed(array keys) boolean (
+  for i keys.len (
+    if !editorProjectFields.contains(keys[i].toStr()) (
+      return false
+    )
+  )
+  return true
+)

@@ -2343,6 +2343,10 @@ def handleUpdateProjectLocked(*serve.Context c) (
   )
 
   object body = requestJSON(c)
+  if contextString(c, "sessionScope") == "editor" and !editorProjectUpdateAllowed(body.getKeys()) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
   if isStudentUserId((project.ownerId ?? "").toStr()) and !contextBool(c, "isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
     c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
     return
@@ -2913,6 +2917,10 @@ def handleDeleteProject(*serve.Context c) (
   object project = result.project.assert(object)
   if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
+    return
+  )
+  if contextString(c, "sessionScope") == "editor" and projectHasStoredContent(project) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
     return
   )
   if project.shared == true and !contextBool(c, "isAdmin") (

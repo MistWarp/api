@@ -19,6 +19,22 @@ def createSession(string username, string userId, boolean minor) string (
   return sessionId
 )
 
+def createScopedSession(string parentToken, object parent, string scope, number ttlMs) string (
+  string sessionId = randomString(32)
+  object session = {
+    username: parent.username,
+    userId: parent.userId,
+    minor: parent.minor == true,
+    createdAt: timestamp,
+    scope: scope,
+    expiresAt: timestamp + ttlMs,
+    parent: parentToken
+  }
+  writeFile(sessionsDir ++ sessionId ++ ".json", session)
+  sessionCache.set(sessionId, session)
+  return sessionId
+)
+
 def getSession(string token) object (
   if !isSafePathPart(token) (
     return {ok: false, error: "invalid token"}
@@ -40,13 +56,22 @@ def getSession(string token) object (
     sessionCache.delete(token)
     return {ok: false, error: "session expired"}
   )
+  string scope = (session.scope ?? "").toStr()
+  if scope != "" (
+    string parentToken = (session.parent ?? "").toStr()
+    if timestamp > (session.expiresAt ?? 0).toNum() or parentToken == "" or parentToken == token or !getSession(parentToken).ok (
+      void fs.remove(path)
+      sessionCache.delete(token)
+      return {ok: false, error: "session expired"}
+    )
+  )
   string username = session.username.toStr()
   string userId = session.userId.toStr()
   string mapped = refreshUsernameForId(userId)
   if mapped != "" (
     username = mapped
   )
-  return {ok: true, username: username, userId: userId, minor: session.minor == true}
+  return {ok: true, username: username, userId: userId, minor: session.minor == true, scope: scope}
 )
 
 def deleteSession(string token) boolean (
@@ -191,6 +216,21 @@ def handleLogout(*serve.Context c) (
   )
   clearAuthCookie(c)
   c.json(200, {ok: true})
+)
+
+def handleCreateEditorSession(*serve.Context c) (
+  if contextString(c, "sessionScope") != "" (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  string token = requestToken(c)
+  object parent = getSession(token)
+  if !parent.ok (
+    c.json(401, {ok: false, error: "not authenticated"})
+    return
+  )
+  string editorToken = createScopedSession(token, parent, "editor", editorSessionTtlMs)
+  c.json(200, {ok: true, token: editorToken, expiresAt: timestamp + editorSessionTtlMs})
 )
 
 def handleGetMe(*serve.Context c) (
