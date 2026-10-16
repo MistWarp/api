@@ -2956,7 +2956,7 @@ def handleGetMyTrash(*serve.Context c) (
             deletedAt: project.deletedAt,
             purgeAt: project.purgeAt,
             recoveryDays: project.recoveryDays,
-            thumbUrl: thumbUrlFor(project)
+            thumbUrl: ownerThumbUrlFor(project)
           })
         )
       )
