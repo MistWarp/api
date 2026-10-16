@@ -3738,7 +3738,7 @@ def materializeWorktreeAssets(object project, byte[] body, string extractDir, bo
   object result = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
   array missing = (result.missing ?? []).assertElse(array, [])
   if !result.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
-    void fs.mkdirAll(fetchDir)
+    void fs.mkdir(fetchDir, {recursive: true})
     for i missing.len (
       string name = missing[i].toStr()
       if isValidMd5Ext(name) (
