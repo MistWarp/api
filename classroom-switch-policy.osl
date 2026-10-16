@@ -1,0 +1,21 @@
+def classroomFlagOn(string value) boolean (
+  string flag = value.toLower().strip()
+  return flag == "1" or flag == "true" or flag == "yes" or flag == "on"
+)
+
+def isClassroomRoute(string rawPath) boolean (
+  string path = apiRoutePath(rawPath)
+  return path == "/classroom" or path.startsWith("/classroom/")
+)
+
+def classroomJoinCodeFromPath(string method, string rawPath) string (
+  string path = apiRoutePath(rawPath)
+  if method.toUpper() != "GET" or !regex.match("^/classroom/join/[^/]+$", path) (
+    return ""
+  )
+  return path.split("/")[4]
+)
+
+def isClassroomLoginRoute(string method, string rawPath) boolean (
+  return method.toUpper() == "POST" and apiRoutePath(rawPath) == "/classroom/login"
+)

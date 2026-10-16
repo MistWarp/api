@@ -226,6 +226,8 @@ import "./community-tools.osl"
 import "./classroom-policy.osl"
 import "./privacy-policy.osl"
 import "./classrooms.osl"
+import "./classroom-switch-policy.osl"
+import "./classroom-switch.osl"
 import "./site-realtime.osl"
 import "./history-migration.osl"
 
@@ -308,6 +310,7 @@ if r2Local (
 )
 
 app.use(authMiddleware)
+app.use(classroomSwitchGuard)
 app.use(classroomAccessGuard)
 setupGameRealtime()
 setupSiteRealtime()

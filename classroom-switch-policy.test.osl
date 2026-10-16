@@ -1,0 +1,28 @@
+import "std:testing"
+import "std:regex"
+import "./classroom-policy.osl"
+import "./classroom-switch-policy.osl"
+
+testing.assert(!classroomFlagOn(""), "Classroom is off when the flag is not set")
+testing.assert(!classroomFlagOn("false") and !classroomFlagOn("0") and !classroomFlagOn("off"), "Classroom stays off for false values")
+testing.assert(!classroomFlagOn("enabled please"), "Classroom stays off for values it does not recognise")
+testing.assert(classroomFlagOn("true") and classroomFlagOn(" TRUE ") and classroomFlagOn("1") and classroomFlagOn("yes") and classroomFlagOn("on"), "Classroom turns on for true values")
+
+testing.assert(isClassroomRoute("/v1/classroom"), "the classroom overview is a classroom route")
+testing.assert(isClassroomRoute("/v1/classroom/classes/cls1/students"), "class management is a classroom route")
+testing.assert(isClassroomRoute("/api/classroom/login"), "legacy classroom paths are classroom routes")
+testing.assert(isClassroomRoute("/v1/classroom/billing/webhook"), "routes added under classroom later are covered")
+testing.assert(!isClassroomRoute("/v1/classrooms"), "similar names are not classroom routes")
+testing.assert(!isClassroomRoute("/v1/admin/classroom/plans"), "admin plan tools are not classroom routes")
+testing.assert(!isClassroomRoute("/v1/projects/classroom"), "other routes are not classroom routes")
+
+testing.assert(classroomJoinCodeFromPath("GET", "/v1/classroom/join/ABCD2345") == "ABCD2345", "the join code is read from the path")
+testing.assert(classroomJoinCodeFromPath("get", "/api/classroom/join/abcd-2345") == "abcd-2345", "legacy join paths give their code")
+testing.assert(classroomJoinCodeFromPath("POST", "/v1/classroom/join/ABCD2345") == "", "only join lookups give a code")
+testing.assert(classroomJoinCodeFromPath("GET", "/v1/classroom/join/ABCD2345/extra") == "", "longer paths give no code")
+testing.assert(classroomJoinCodeFromPath("GET", "/v1/classroom/classes/cls1") == "", "other classroom routes give no code")
+
+testing.assert(isClassroomLoginRoute("POST", "/v1/classroom/login"), "student sign-in is the login route")
+testing.assert(isClassroomLoginRoute("post", "/api/classroom/login"), "legacy student sign-in is the login route")
+testing.assert(!isClassroomLoginRoute("GET", "/v1/classroom/login"), "only posts sign in")
+testing.assert(!isClassroomLoginRoute("POST", "/v1/auth"), "Rotur sign-in is not the student login route")
