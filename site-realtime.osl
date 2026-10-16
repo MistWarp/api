@@ -150,7 +150,7 @@ def siteAuthenticate(*ws.Connection conn, object message) (
     return
   )
   object session = getSession(token)
-  if !session.ok or isBannedUser(session.username.toStr()) (
+  if !session.ok or isBannedUser(session.username.toStr()) or !classroomSessionAllowed(session.userId.toStr()) (
     siteError(conn, "not authenticated")
     return
   )

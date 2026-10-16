@@ -35,6 +35,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | EDITOR_ORIGIN | https://mistwarp.org | Public editor base URL used in links |
 | ERROR_REPORT_ORIGINS | (empty) | Comma-separated origins, besides EDITOR_ORIGIN, whose error reports `POST /errors` accepts. Reports from any other origin are ignored |
 | ADMIN_USERS | mist | Comma separated admin usernames |
+| CLASSROOM_ENABLED | (off) | Set to `true` to open MistWarp Classroom. While it is off, every `/classroom/*` route answers 404 and student accounts cannot sign in, except for MistWarp admins and the students of classes an admin owns, so Classroom can still be tested |
 | GITHUB_ORG | MistWarp | GitHub org whose pull requests appear on the roadmap's Changes tab |
 | GITHUB_TOKEN | | Optional GitHub token; only raises the search rate limit, the feed works without one |
 | REALTIME_URL | wss://api.mistwarp.org/v1/connect | Public multiplayer WebSocket endpoint |

@@ -1,0 +1,70 @@
+boolean classroomEnabled = classroomFlagOn(configValue("CLASSROOM_ENABLED", ""))
+
+def classroomTestClass(object classDoc) boolean (
+  if classDoc.len == 0 (
+    return false
+  )
+  string owner = usernameForId((classDoc.ownerId ?? "").toStr())
+  if owner == "" (
+    owner = (classDoc.owner ?? "").toStr()
+  )
+  return owner != "" and isAdminUser(owner)
+)
+
+def classroomStudentActive(object student) boolean (
+  return student.len > 0 and student.disabled != true
+)
+
+def classroomTestStudent(string studentId) boolean (
+  object student = loadStudent(studentId)
+  return classroomStudentActive(student) and classroomTestClass(loadClass((student.classId ?? "").toStr()))
+)
+
+def classroomSessionAllowed(string userId) boolean (
+  if !isStudentUserId(userId) (
+    return true
+  )
+  if classroomEnabled (
+    return classroomStudentActive(loadStudent(userId))
+  )
+  return classroomTestStudent(userId)
+)
+
+def classroomTestRequest(*serve.Context c) boolean (
+  if contextBool(c, "isAdmin") or contextBool(c, "isStudent") (
+    return true
+  )
+  string code = normalizeClassCode(url.unescape(classroomJoinCodeFromPath(c.method(), c.path())))
+  if code != "" (
+    array matches = classDocs.where("code", "==", code).all()
+    return matches.len > 0 and classroomTestClass(matches[1].assertElse(object, {}))
+  )
+  if isClassroomLoginRoute(c.method(), c.path()) (
+    if !classroomBodySizeAllowed((c.header("Content-Length") ?? ""), maxStandardRequestBytes) (
+      return false
+    )
+    object body = requestJSON(c)
+    return classroomTestStudent((body.studentId ?? "").toStr())
+  )
+  return false
+)
+
+def classroomSwitchGuard(*serve.Context c) (
+  if classroomEnabled (
+    c.next()
+    return
+  )
+  if contextBool(c, "isStudent") and !classroomSessionAllowed(contextString(c, "userId")) (
+    c.set("authenticated", false)
+    c.set("username", "")
+    c.set("userId", "")
+    c.set("isStudent", false)
+    c.set("isMinor", false)
+  )
+  if isClassroomRoute(c.path()) and !classroomTestRequest(c) (
+    c.json(404, {ok: false, code: "classroom_unavailable", error: "MistWarp Classroom is not available yet."})
+    c.abort()
+    return
+  )
+  c.next()
+)
