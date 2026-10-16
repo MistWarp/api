@@ -223,9 +223,30 @@ def handleLogout(*serve.Context c) (
   c.json(200, {ok: true})
 )
 
+object editorSessionMints = {}
+
+def editorSessionMintAllowed(string userId) boolean (
+  sync.lock("editor-session-mints")
+  object entry = (editorSessionMints[userId] ?? {}).assertElse(object, {})
+  if timestamp - (entry.since ?? 0).toNum() > 3600000 (
+    entry = {since: timestamp, count: 0}
+  )
+  boolean allowed = entry.count.toNum() < editorSessionMintsPerHour
+  if allowed (
+    entry.count = entry.count.toNum() + 1
+  )
+  editorSessionMints[userId] = entry
+  sync.unlock("editor-session-mints")
+  return allowed
+)
+
 def handleCreateEditorSession(*serve.Context c) (
   if contextString(c, "sessionScope") != "" (
     c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if !editorSessionMintAllowed(contextString(c, "userId")) (
+    c.json(429, {ok: false, code: "rate_limited", error: "Too many editor sign-ins. Try again later."})
     return
   )
   string token = requestToken(c)

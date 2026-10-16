@@ -340,7 +340,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/perks/refresh", requireAuth, handleRefreshPerks)
   api.POST("/perks/seen", requireAuth, handlePerksSeen)
   api.POST("/auth", handleRoturAuth)
-  api.POST("/auth/editor-session", serve.limitRequests(30, {window: 3600000}), requireAuth, handleCreateEditorSession)
+  api.POST("/auth/editor-session", serve.limitRequests(600, {window: 3600000}), requireAuth, handleCreateEditorSession)
   api.GET("/me", handleGetMe)
   api.POST("/logout", handleLogout)
 

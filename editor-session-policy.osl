@@ -1,4 +1,5 @@
 number editorSessionTtlMs = 7200000
+number editorSessionMintsPerHour = 60
 
 array editorSessionRoutes = [
   "GET ^/me$",
