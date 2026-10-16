@@ -2138,6 +2138,8 @@ def handleCreatePreview(*serve.Context c) (
 )
 
 def handleListReleases(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
   auto result = loadProject(c.param("id"))
   if !result.ok or !canViewProject(result.project.assert(object), c) (
     c.notFound("project not found")
@@ -2145,6 +2147,7 @@ def handleListReleases(*serve.Context c) (
   )
   object project = result.project.assert(object)
   boolean canEdit = canEditProject(project, c)
+  ensureViewKey(project)
   object jsonAccess = projectJsonAccess(project, c)
   array stored = releaseDocs.where("projectId", "==", c.param("id")).sort("created", "desc").limit(100).all()
   array releases = []
@@ -2217,7 +2220,7 @@ def handleCreateRelease(*serve.Context c) (
   if channel != "checkpoint" (
     addActivity(contextString(c, "username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
   )
-  c.json(201, {ok: true, release: release})
+  c.json(201, {ok: true, release: publicReleaseRecord(release, projectJsonAccess(project, c))})
 )
 
 def handleGetReleaseProjectJson(*serve.Context c) (
