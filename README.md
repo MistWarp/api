@@ -68,6 +68,12 @@ Buying a project or a game product, donating with a comment and refunding a game
 
 Donations are delivered when their comment is posted, and refunds when the product is revoked. Paid keys waiting for that are kept for 30 days, and unpaid ones for an hour (Rotur's requests expire after 15 minutes).
 
+## Error reports
+
+The editor and community site send uncaught errors to `POST /v1/errors`, from `EDITOR_ORIGIN` or an origin in `ERROR_REPORT_ORIGINS`. A report holds the error message and stack, the page URL, the project ID, the viewport, the app version, the browser's user agent and the username of whoever was signed in. Admins read them through `GET /v1/admin/errors`.
+
+Reports are kept for 90 days, and only the newest 1,000 are kept at all. Older ones are deleted when a new report comes in, when the server starts and every five minutes.
+
 ## Rotur webhooks
 
 Set the MistWarp Rotur App's webhook to `https://api.mistwarp.org/v1/rotur/webhook` on rotur.dev/me/developer, with privacy requests on, and put its signing secret in `ROTUR_WEBHOOK_SECRET`.
