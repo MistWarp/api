@@ -40,6 +40,7 @@ type gitCommit struct {
 
 type archive struct {
 	objects map[string]*zip.File
+	trusted map[string]bool
 }
 
 func failure(message string) string {
@@ -107,6 +108,33 @@ func (a archive) readObject(oid string) (string, []byte, bool) {
 		return "", nil, false
 	}
 	return kind, body, true
+}
+
+func (a archive) objectKind(oid string) string {
+	if len(oid) != 40 {
+		return ""
+	}
+	item := a.objects[".git/objects/"+oid[:2]+"/"+oid[2:]]
+	if item == nil {
+		return ""
+	}
+	source, err := item.Open()
+	if err != nil {
+		return ""
+	}
+	defer source.Close()
+	inflater, err := zlib.NewReader(source)
+	if err != nil {
+		return ""
+	}
+	defer inflater.Close()
+	header := make([]byte, 32)
+	n, _ := io.ReadFull(inflater, header)
+	kind, _, found := bytes.Cut(header[:n], []byte(" "))
+	if !found {
+		return ""
+	}
+	return string(kind)
 }
 
 func (a archive) parseCommit(oid string) (gitCommit, bool) {

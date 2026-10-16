@@ -1346,6 +1346,18 @@ def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean wor
   )
 )
 
+def cleanupReplacedProjectStorage(string id, string jsonKey, array workspaceKeys) (
+  string lockName = "project-history-" ++ id
+  sync.lock(lockName)
+  if jsonKey != "" (
+    removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+  )
+  for i workspaceKeys.len (
+    removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), "", true)
+  )
+  sync.unlock(lockName)
+)
+
 def ensureProjectJsonSnapshot(object project) object (
   if project.jsonKey.toStr().startsWith("project-json/") and (!project.contains("pendingJson") or project.pendingJson != true) (
     return {ok: true, project: project}
@@ -1657,20 +1669,19 @@ def handleUploadProjectLocked(*serve.Context c) (
     if incomingHead != "" (
       byte[] incomingWorkspaceBody = workspaceFile.data.assertElse(byte[], [])
       number incomingWorkspaceSize = workspaceFile.size.toNum()
-      if incomingWorkspaceSize > maxWorkspaceBytes or !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+      if incomingWorkspaceSize > maxWorkspaceBytes or !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
         void fs.remove(zipPath)
         void fs.remove(extractDir)
         c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
         return
       )
-      string compareBasePath = tmpDir ++ workId ++ ".compare-base.mwp"
+      string compareBasePath = cachedProjectWorkspacePath(project)
       string compareIncomingPath = tmpDir ++ workId ++ ".compare-incoming.mwp"
-      boolean compareReady = copyProjectWorkspaceToPath(project, compareBasePath) and fs.writeFileBytes(compareIncomingPath, incomingWorkspaceBody)
+      boolean compareReady = compareBasePath != "" and fs.writeFileBytes(compareIncomingPath, incomingWorkspaceBody)
       string comparisonJson = ""
       if compareReady (
         comparisonJson = gitinspection.CommitTreesDiffer(compareBasePath, currentHead, compareIncomingPath, incomingHead)
       )
-      void fs.remove(compareBasePath)
       void fs.remove(compareIncomingPath)
       auto parsedComparison = json.parse(comparisonJson, {type: "object"})
       if !compareReady or parsedComparison.isErr() or parsedComparison.unwrap().assert(object).ok != true (
@@ -1840,7 +1851,7 @@ def handleUploadProjectLocked(*serve.Context c) (
       c.json(413, {ok: false, error: "one history update exceeds the 512 MB safety limit", code: "workspace_update_too_large"})
       return
     )
-    if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+    if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
       void fs.remove(zipPath)
       void fs.remove(extractDir)
       c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
@@ -1971,17 +1982,19 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
   upsertIndexEntry(project)
   releasePendingUploads(uploader, project.assets.assertElse(array, []))
-  if previousJsonKey != project.jsonKey.toStr() (
-    removeProjectStorageKeyIfOrphaned(previousJsonKey, project.id.toStr(), false)
-  )
+  string replacedJsonKey = if previousJsonKey != project.jsonKey.toStr() then previousJsonKey else ""
+  array replacedWorkspaceKeys = []
   if project.contains("workspaceLayers") and project.workspaceLayers != null (
     array keptWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
     for i previousWorkspaceKeys.len (
       string oldWorkspaceKey = previousWorkspaceKeys[i].toStr()
       if !keptWorkspaceKeys.contains(oldWorkspaceKey) (
-        removeProjectStorageKeyIfOrphaned(oldWorkspaceKey, project.id.toStr(), true)
+        replacedWorkspaceKeys.append(oldWorkspaceKey)
       )
     )
+  )
+  if replacedJsonKey != "" or replacedWorkspaceKeys.len > 0 (
+    thread.new(cleanupReplacedProjectStorage, project.id.toStr(), replacedJsonKey, replacedWorkspaceKeys)
   )
   void fs.remove(zipPath)
   void fs.remove(extractDir)
