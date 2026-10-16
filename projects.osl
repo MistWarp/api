@@ -251,6 +251,34 @@ def projectCommentDonationAnalytics(object project) object (
   }
 )
 
+def projectJsonAccess(object project,*serve.Context c) object (
+  string key = ""
+  if project.shared != true and projectViewKey(project) != "" (
+    key = projectViewKey(project)
+    if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+      key = (c.query("k") ?? "")
+    )
+  )
+  boolean allowed = true
+  boolean locked = false
+  if projectPrice(project) > 0 (
+    if canEditProject(project, c) or hasBought(project, normalizeUsername(contextString(c, "username"))) or canViewForkProject(project, c) (
+      key = projectViewKey(project)
+    ) else (
+      allowed = false
+      locked = true
+    )
+  )
+  if projectOwnerBanned(project) (
+    if allowed and contextBool(c, "isAdmin") (
+      key = bannedViewKey(project)
+    ) else (
+      allowed = false
+    )
+  )
+  return {allowed: allowed, locked: locked, key: key}
+)
+
 def projectResponse(object project,*serve.Context c) object (
   array loves = project.loves.assert(array)
   array broken = []
@@ -296,28 +324,10 @@ def projectResponse(object project,*serve.Context c) object (
   hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
   object activeVanity = vanityState(project)
   string jsonBase = projectJsonBaseUrl(project)
-  string jsonUrl = jsonBase
-  if project.shared != true and projectViewKey(project) != "" (
-    string accessKey = projectViewKey(project)
-    if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
-      accessKey = (c.query("k") ?? "")
-    )
-    jsonUrl = jsonBase ++ "?k=" ++ accessKey
-  )
-  boolean locked = false
-  if price > 0 (
-    if isOwner or bought or canViewForkProject(project, c) (
-      jsonUrl = jsonBase ++ "?k=" ++ projectViewKey(project)
-    ) else (
-      jsonUrl = ""
-      locked = true
-    )
-  )
-  // The key that plays a banned owner's project is only for admins.
+  object jsonAccess = projectJsonAccess(project, c)
+  string jsonUrl = keyedJsonUrl(jsonBase, jsonAccess)
+  boolean locked = jsonAccess.locked == true
   boolean ownerBanned = projectOwnerBanned(project)
-  if ownerBanned (
-    jsonUrl = if contextBool(c, "isAdmin") and jsonUrl != "" then jsonBase ++ "?k=" ++ bannedViewKey(project) else ""
-  )
   if !hasContent (
     jsonUrl = ""
   )
@@ -2131,15 +2141,11 @@ def handleGetProject(*serve.Context c) (
   ensureViewKey(project)
   maybeFlushProject(project)
   object response = projectResponse(project, c)
-  // Admins reviewing a banned owner's project play the saved JSON, which
-  // takes the key; the release route doesn't.
-  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and response.locked != true (
+  object jsonAccess = projectJsonAccess(project, c)
+  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and jsonAccess.allowed == true (
     object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
     if release.len > 0 and release.contains("jsonUrl") (
-      response.projectJsonUrl = release.jsonUrl
-      if projectPrice(project) > 0 (
-        response.projectJsonUrl = release.jsonUrl.toStr() ++ "?k=" ++ projectViewKey(project)
-      )
+      response.projectJsonUrl = keyedJsonUrl(release.jsonUrl.toStr(), jsonAccess)
       response.releaseVersion = release.version
       response.releaseChannel = release.channel
     )

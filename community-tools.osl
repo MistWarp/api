@@ -2145,12 +2145,13 @@ def handleListReleases(*serve.Context c) (
   )
   object project = result.project.assert(object)
   boolean canEdit = canEditProject(project, c)
+  object jsonAccess = projectJsonAccess(project, c)
   array stored = releaseDocs.where("projectId", "==", c.param("id")).sort("created", "desc").limit(100).all()
   array releases = []
   for i stored.len (
     object release = stored[i].assert(object)
     if release.channel.toStr() != "checkpoint" or canEdit (
-      releases.append(release)
+      releases.append(publicReleaseRecord(release, jsonAccess))
     )
   )
   c.json(200, {ok: true, releases: releases})
