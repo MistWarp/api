@@ -2275,6 +2275,7 @@ def handleGetEditorProject(*serve.Context c) (
 
 def handleGetProjectTrustedExtensions(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
   auto result = loadProject(c.param("id"))
   if !result.ok (
     c.notFound("project not found")
