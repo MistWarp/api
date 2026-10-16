@@ -906,7 +906,7 @@ def spaceListResponse(object space,*serve.Context c) object (
     boolean hidden = projectHiddenFrom(project, c)
     if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
       projectCount += 1
-      if thumbnailURL == "" and project.contains("thumbUrl") (
+      if thumbnailURL == "" and project.contains("thumbUrl") and thumbnailIsPublic(projectVisibility(project), false) (
         thumbnailURL = project.thumbUrl.toStr()
       )
     )

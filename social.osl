@@ -507,7 +507,7 @@ def handleGetUserProjects(*serve.Context c) (
     })
     return
   )
-  c.json(200, {ok: true, projects: if includeUnshared then viewerThumbEntries(projects) else projects, total: projects.len})
+  c.json(200, {ok: true, projects: projects, total: projects.len})
 )
 
 def userLibrary(string userLower) array (

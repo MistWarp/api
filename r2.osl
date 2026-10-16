@@ -31,13 +31,14 @@ def handleGetThumbnail(*serve.Context c) (
   )
   boolean isPublic = id.startsWith("space-")
   if !isPublic (
-    object access = thumbnailAccess(id)
+    string given = (c.query("k") ?? "")
+    object access = thumbnailAccess(id, given != "")
     if !access.found or access.ownerBanned (
       thumbnailNotFound(c)
       return
     )
     isPublic = access.isPublic
-    if !isPublic and !thumbnailKeyMatches(thumbnailSecret, id, access.viewKey.toStr(), (c.query("k") ?? "")) (
+    if !isPublic and !thumbnailKeyMatches(thumbnailSecret, id, access.viewKey.toStr(), given) (
       thumbnailNotFound(c)
       return
     )
@@ -48,13 +49,16 @@ def handleGetThumbnail(*serve.Context c) (
   c.file(thumbnailsDir ++ file)
 )
 
-def thumbnailAccess(string id) object (
+def thumbnailAccess(string id, boolean hasKey) object (
   object entry = (projectSearchDocs.findById(id) ?? {})
   if entry.len > 0 and projectOwnerBanned(entry) (
     return {found: true, ownerBanned: true, isPublic: false, viewKey: ""}
   )
   if entry.len > 0 and thumbnailIsPublic(projectVisibility(entry), false) (
     return {found: true, ownerBanned: false, isPublic: true, viewKey: ""}
+  )
+  if entry.len > 0 and !hasKey (
+    return {found: true, ownerBanned: false, isPublic: false, viewKey: ""}
   )
   auto loaded = loadProject(id)
   if loaded.ok (
