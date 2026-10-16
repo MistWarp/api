@@ -158,7 +158,7 @@ def siteAuthenticate(*ws.Connection conn, object message) (
   conn.Set("authToken", token)
   conn.Set("username", session.username.toStr())
   conn.Set("userId", session.userId.toStr())
-  conn.Set("isAdmin", isAdminUser(session.username.toStr()))
+  conn.Set("isAdmin", (session.scope ?? "").toStr() == "" and isAdminUser(session.username.toStr()))
   siteSend(conn, {type: "authenticated", username: session.username})
 )
 

@@ -167,6 +167,7 @@ def apiRoutePath(string path) string (
 
 array studentWriteRoutes = [
   "POST ^/logout$",
+  "POST ^/auth/editor-session$",
   "POST ^/projects$",
   "POST ^/projects/[^/]+/(live|assets/check|upload|upload-parts|thumbnail|view|remix|restore|diagnostics|history/bootstrap|branches|branches/merge)$",
   "POST ^/projects/[^/]+/upload-parts/[^/]+/(chunk|complete)$",

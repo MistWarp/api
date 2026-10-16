@@ -278,6 +278,7 @@ def stagedFlushLoop() (
     flushR2UploadQueue()
     cleanupExpiredCommunityRecords()
     void sweepSiteErrors()
+    cleanupExpiredSessions()
   )
 )
 

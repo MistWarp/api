@@ -359,6 +359,10 @@ def handleRevokeGameProduct(*serve.Context c) (
     return
   )
   boolean refunded = false
+  if product.price.toNum() > 0 and body.noRefund == true and contextString(c, "sessionScope") == "editor" (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to remove a paid item without a refund."})
+    return
+  )
   if product.price.toNum() > 0 and body.noRefund != true (
     string refundKey = (body.refundKey ?? "").toStr()
     object refund = paidPurchase(refundKey)

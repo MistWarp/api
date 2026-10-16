@@ -19,7 +19,7 @@ def createSession(string username, string userId, boolean minor) string (
   return sessionId
 )
 
-def createScopedSession(string parentToken, object parent, string scope, number ttlMs) string (
+def createScopedSession(string parentToken, object parent, string scope, number expiresAt) string (
   string sessionId = randomString(32)
   object session = {
     username: parent.username,
@@ -27,7 +27,7 @@ def createScopedSession(string parentToken, object parent, string scope, number 
     minor: parent.minor == true,
     createdAt: timestamp,
     scope: scope,
-    expiresAt: timestamp + ttlMs,
+    expiresAt: expiresAt,
     parent: parentToken
   }
   writeFile(sessionsDir ++ sessionId ++ ".json", session)
@@ -89,7 +89,8 @@ def cleanupExpiredSessions() (
     auto res = readFile(path)
     if res.ok (
       object session = res.data.assert(object)
-      if timestamp - session.createdAt.toNum() > 604800000 (
+      boolean scopedExpired = (session.scope ?? "").toStr() != "" and (timestamp > (session.expiresAt ?? 0).toNum() or !fs.exists(sessionsDir ++ (session.parent ?? "").toStr() ++ ".json"))
+      if timestamp - session.createdAt.toNum() > 604800000 or scopedExpired (
         void fs.remove(path)
       )
     )
@@ -100,6 +101,10 @@ def requestToken(*serve.Context c) string (
   string token = (c.bearer() ?? "")
   if token != "" (
     return token
+  )
+  string verb = c.method().toUpper()
+  if verb != "GET" and verb != "HEAD" (
+    return ""
   )
   return (c.cookie("auth_token") ?? "")
 )
@@ -229,8 +234,9 @@ def handleCreateEditorSession(*serve.Context c) (
     c.json(401, {ok: false, error: "not authenticated"})
     return
   )
-  string editorToken = createScopedSession(token, parent, "editor", editorSessionTtlMs)
-  c.json(200, {ok: true, token: editorToken, expiresAt: timestamp + editorSessionTtlMs})
+  number expiresAt = timestamp + editorSessionTtlMs
+  string editorToken = createScopedSession(token, parent, "editor", expiresAt)
+  c.json(200, {ok: true, token: editorToken, expiresAt: expiresAt})
 )
 
 def handleGetMe(*serve.Context c) (

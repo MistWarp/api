@@ -25,7 +25,7 @@ def authMiddleware(*serve.Context c) (
           userId = ""
         )
       ) else (
-        isAdmin = isAdminUser(username)
+        isAdmin = sessionScope == "" and isAdminUser(username)
       )
     )
   )
@@ -65,7 +65,7 @@ def requireAdmin(*serve.Context c) (
 )
 
 def editorSessionGuard(*serve.Context c) (
-  if contextString(c, "sessionScope") == "editor" and !editorRouteAllowed(c.method(), c.path()) (
+  if contextString(c, "sessionScope") == "editor" and !editorRouteAllowed(c.method(), escapedRequestPath(c.fullURL()), c.path()) (
     c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
     c.abort()
     return

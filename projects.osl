@@ -1530,6 +1530,10 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
 
   boolean replaceHistory = (c.formValue("replaceHistory") ?? "") == "true"
+  if replaceHistory and contextString(c, "sessionScope") == "editor" and projectHasStoredContent(project) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to replace this project's saved history."})
+    return
+  )
   string expectedHead = (c.formValue("expectedHead") ?? "").strip()
   string restoreCommit = (c.formValue("restoreCommit") ?? "").strip()
   string restoreMessage = (c.formValue("restoreMessage") ?? "").strip()
@@ -2919,7 +2923,7 @@ def handleDeleteProject(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  if contextString(c, "sessionScope") == "editor" and projectHasStoredContent(project) (
+  if contextString(c, "sessionScope") == "editor" and !editorCanDeleteProject(project) (
     c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
     return
   )
