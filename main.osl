@@ -456,6 +456,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/projects/:id/related", handleRelatedProjects)
   api.GET("/sitemap.xml", handleSitemap)
   api.GET("/projects/:id/project.json", handleGetProjectJson)
+  api.GET("/projects/:id/trusted-extensions", handleGetProjectTrustedExtensions)
   api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
   api.GET("/projects/:id/extensions/:hash/source", handleGetProjectExtensionSource)
   api.GET("/projects/:id/editor", handleGetEditorProject)
