@@ -2273,6 +2273,28 @@ def handleGetEditorProject(*serve.Context c) (
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
+def handleGetProjectTrustedExtensions(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  auto result = loadProject(c.param("id"))
+  if !result.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = result.project.assert(object)
+  if !canViewProjectJson(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  array jsonUrls = [projectJsonBaseUrl(project)]
+  if project.shared == true and (project.publicRelease ?? "").toStr() != "" (
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    if (release.jsonUrl ?? "").toStr() != "" (
+      jsonUrls.append(release.jsonUrl.toStr())
+    )
+  )
+  c.json(200, {ok: true, trustedExtensions: projectTrustedExtensions(project), jsonUrls: jsonUrls})
+)
+
 def handleGetProjectJson(*serve.Context c) (
   auto result = loadProject(c.param("id"))
   if !result.ok (
