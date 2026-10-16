@@ -230,15 +230,11 @@ def parentDirOf(string path) string (
 def r2PutEncoded(string key, BlobBody body, string contentType, string contentEncoding) boolean (
   if r2Local (
     string path = localBlobPath(key)
-    void fs.mkdirAll(parentDirOf(path))
+    void fs.mkdir(parentDirOf(path), {recursive: true})
     return fs.writeFileBytes(path, body)
   )
-  object input = {"key": key, "body": body, "content_type": contentType}
-  if contentEncoding != "" (
-    input.content_encoding = contentEncoding
-  )
-  auto result = r2Client.put(input)
-  boolean stored = result.ok == true
+  string uploadType = if contentType == "" then "application/octet-stream" else contentType
+  boolean stored = key != "" and r2Client.upload(key, body, {contentType: uploadType, contentEncoding: contentEncoding})
   if stored (
     recordR2Stored({key: key, type: r2ObjectType(key), size: body.len})
   )
@@ -353,8 +349,8 @@ def r2Remove(string key) boolean (
   sync.lock("r2-upload-queue")
   boolean removed = readR2UploadQueue().ok.assert(boolean)
   if removed and !r2Local (
-    auto result = r2Client.remove({"key": key})
-    removed = result.ok == true or result.status.toNum() == 404
+    auto deleted = r2Client.delete(key)
+    removed = deleted.isOk() or deleted.unwrapErr().kind == "NotFoundError"
     if removed (
       recordR2Removed(key)
     )
@@ -372,17 +368,17 @@ def r2Remove(string key) boolean (
 
 def copyStorageKeyToPath(string key, string outputPath) boolean (
   string localPath = localBlobPath(key)
-  if fs.exists(localPath) and zip.copyFile(localPath, outputPath) (
+  if fs.exists(localPath) and copyFileReplacing(localPath, outputPath) (
     return true
   )
-  if r2Local (
+  if r2Local or key == "" (
     return false
   )
-  auto existing = r2Client.get({key: key})
-  if !existing.ok or existing.status.toInt() != 200 (
+  auto existing = r2Client.download(key)
+  if existing.isErr() (
     return false
   )
-  return fs.writeFileBytes(outputPath, existing.body)
+  return fs.writeFileBytes(outputPath, existing.unwrap())
 )
 
 def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
@@ -409,7 +405,7 @@ def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
       currentPath = mergedPath
     )
   )
-  boolean copied = zip.copyFile(currentPath, outputPath)
+  boolean copied = copyFileReplacing(currentPath, outputPath)
   void fs.remove(currentPath)
   return copied
 )
@@ -422,26 +418,23 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   string localPath = localProjectJsonPathFor(project, 0)
   if localPath != "" (
     if projectJsonIsGzip(project) (
-      if fs.getSize(localPath) > maxStoredProjectJsonBytes (
+      if fs.size(localPath).unwrapOr(0) > maxStoredProjectJsonBytes (
         return false
       )
-      return zip.copyFile(localPath, outputPath)
+      return copyFileReplacing(localPath, outputPath)
     )
-    return zip.gzipLimited(localPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+    return zip.gzip(localPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes})
   )
-  if r2Local (
+  if r2Local or project.jsonKey.toStr() == "" (
     return false
   )
-  auto signed = r2Client.presign({key: project.jsonKey.toStr(), expires: 60})
-  if !signed.ok (
-    return false
-  )
-  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !fetched.success or fetched.status.toInt() != 200 (
+  string signedUrl = r2Client.presignURL(project.jsonKey.toStr(), {expires: 60000})
+  auto fetched = requests.get(signedUrl, {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+  if fetched.status != 200 (
     return false
   )
   if projectJsonIsGzip(project) (
-    if fetched.body.toStr().len > maxStoredProjectJsonBytes (
+    if fetched.body.len > maxStoredProjectJsonBytes (
       return false
     )
     return fs.writeFileBytes(outputPath, fetched.body)
@@ -450,7 +443,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   if !fs.writeFileBytes(plainPath, fetched.body) (
     return false
   )
-  boolean compressed = zip.gzipLimited(plainPath, outputPath, maxProjectJsonBytes, maxStoredProjectJsonBytes)
+  boolean compressed = zip.gzip(plainPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes})
   void fs.remove(plainPath)
   return compressed
 )
@@ -496,15 +489,14 @@ def serveBlobKey(*serve.Context c, string key) (
     return
   )
 
-  auto fetched = r2Client.get({key: key})
-  if !fetched.ok or fetched.status.toInt() != 200 (
+  auto fetched = r2Client.download(key)
+  if fetched.isErr() (
     c.notFound("blob not found")
     return
   )
 
-  string body = fetched.body.toStr()
   c.setHeader("Cache-Control", blobCacheHeader(key))
-  c.data(200, contentTypeForKey(key), storagefs.Bytes(body))
+  c.send(200, contentTypeForKey(key), fetched.unwrap())
 )
 
 def serveProjectJson(*serve.Context c, object project) (

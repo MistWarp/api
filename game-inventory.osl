@@ -190,7 +190,7 @@ def grantInventoryItem(string userId, object project, object item, number amount
 )
 
 def handleGetMyGameInventory(*serve.Context c) (
-  c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), {})})
+  c.json(200, {ok: true, inventory: gameInventoryResponse(contextString(c, "userId"), {})})
 )
 
 def handleGetGameInventoryConfig(*serve.Context c) (
@@ -212,7 +212,7 @@ def handleGetProjectInventory(*serve.Context c) (
   if rejectGameDataCapability(c, access) (
     return
   )
-  c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), access.project.assert(object))})
+  c.json(200, {ok: true, inventory: gameInventoryResponse(contextString(c, "userId"), access.project.assert(object))})
 )
 
 def handleGrantProjectItem(*serve.Context c) (
@@ -238,10 +238,10 @@ def handleGrantProjectItem(*serve.Context c) (
     c.forbidden("this portable item cannot be awarded by game code")
     return
   )
-  object granted = grantInventoryItem(c.getString("userId"), project, item, 1, "game", "game:" ++ requestId)
+  object granted = grantInventoryItem(contextString(c, "userId"), project, item, 1, "game", "game:" ++ requestId)
   if !granted.ok (
     c.internalError(granted.error.toStr())
     return
   )
-  c.json(200, {ok: true, inventory: gameInventoryResponse(c.getString("userId"), project), granted: granted.globalId})
+  c.json(200, {ok: true, inventory: gameInventoryResponse(contextString(c, "userId"), project), granted: granted.globalId})
 )

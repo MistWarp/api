@@ -3,7 +3,7 @@ def settingsPath(string username) string (
 )
 
 def handleGetMySettings(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   string key = normalizeUsername(username)
   if !isSafePathPart(key) (
     c.badRequest("invalid username")
@@ -18,7 +18,7 @@ def handleGetMySettings(*serve.Context c) (
 )
 
 def handlePutMySettings(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   string key = normalizeUsername(username)
   if !isSafePathPart(key) (
     c.badRequest("invalid username")

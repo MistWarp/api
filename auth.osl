@@ -1,5 +1,5 @@
 def setAuthCookie(*serve.Context c, string sessionId) (
-  c.setCookie("auth_token", sessionId, 604800, "/", "", appURL.startsWith("https://"), true)
+  c.setCookie("auth_token", sessionId, {maxAge: 604800000, path: "/", domain: "", secure: appURL.startsWith("https://"), httpOnly: true})
 )
 
 def clearAuthCookie(*serve.Context c) (
@@ -194,13 +194,13 @@ def handleLogout(*serve.Context c) (
 )
 
 def handleGetMe(*serve.Context c) (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     c.json(401, {ok: false, error: "not authenticated"})
     return
   )
-  string username = c.getString("username")
-  if c.getBool("isStudent") (
-    object student = loadStudent(c.getString("userId"))
+  string username = contextString(c, "username")
+  if contextBool(c, "isStudent") (
+    object student = loadStudent(contextString(c, "userId"))
     c.json(200, {
       ok: true,
       username: username,
@@ -225,8 +225,8 @@ def handleGetMe(*serve.Context c) (
     created: created,
     bio: profile.bio,
     featuredProject: profile.featuredProject,
-    isAdmin: c.getBool("isAdmin"),
-    minor: c.getBool("isMinor") or profileIsMinor(profile),
+    isAdmin: contextBool(c, "isAdmin"),
+    minor: contextBool(c, "isMinor") or profileIsMinor(profile),
     standing: standingLevel(username)
   })
 )
@@ -239,7 +239,7 @@ def externalDependency(string url) object (
   number started = timestamp
   object resp = requests.get(url).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   string status = "unavailable"
-  if resp.success (
+  if resp.status != 0 (
     status = "operational"
   )
   return {

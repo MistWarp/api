@@ -7,7 +7,7 @@ import "std:thread"
 import "go:mistwarp.local/gitinspection"
 
 string tmpDir = "/tmp/mistwarp-history-test-" ++ timestamp.toStr() ++ "/"
-void fs.mkdirAll(tmpDir)
+void fs.mkdir(tmpDir, {recursive: true})
 string projectsDir = tmpDir ++ "projects/"
 number historyMigrationWorkers = 1
 object records = {}
@@ -47,7 +47,7 @@ def projectGitHead(object project) string (
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   string plain = outputPath ++ ".json"
   void fs.writeFile(plain, "{\"targets\":[]}")
-  boolean ok = zip.gzipLimited(plain, outputPath, 1024, 1024)
+  boolean ok = zip.gzip(plain, outputPath, {maxInputBytes: 1024, maxBytes: 1024})
   void fs.remove(plain)
   return ok
 )
@@ -64,11 +64,22 @@ def copyStorageKeyToPath(string name, string path) boolean (
   return false
 )
 
+def copyFileReplacing(string source, string target) boolean (
+  if !fs.isFile(source) or fs.isDir(target) (
+    return false
+  )
+  if fs.copy(source, target, {overwrite: true}) (
+    return true
+  )
+  void fs.remove(target, {force: true})
+  return false
+)
+
 def copyProjectWorkspaceToPath(object project, string path) boolean (
   if failCopy (
     return false
   )
-  return zip.copyFile(tmpDir ++ project.workspaceKey.toStr(), path)
+  return copyFileReplacing(tmpDir ++ project.workspaceKey.toStr(), path)
 )
 
 def contentHash(byte[] data) string (

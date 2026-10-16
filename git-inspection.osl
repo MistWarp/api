@@ -36,7 +36,7 @@ def cachedProjectWorkspacePath(object project) string (
     )
   )
   string cacheDir = tmpDir ++ "git-inspection/"
-  void fs.mkdirAll(cacheDir)
+  void fs.mkdir(cacheDir, {recursive: true})
   string cacheName = projectWorkspaceFingerprint(project) ++ ".mwp"
   pruneGitInspectionCache(cacheDir, cacheName)
   string cachedPath = cacheDir ++ cacheName
@@ -153,11 +153,11 @@ def validGitFilePath(string path) boolean (
 
 def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, string sha, string operation, string requestedPath, string allowedHeads) string (
   string cacheDir = tmpDir ++ "git-inspection/"
-  void fs.mkdirAll(cacheDir)
+  void fs.mkdir(cacheDir, {recursive: true})
   string cacheName = gitInspectionCacheVersion() ++ "." ++ projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256() ++ ".json"
   pruneGitInspectionCache(cacheDir, cacheName)
   string cachePath = cacheDir ++ cacheName
-  if fs.exists(cachePath) and fs.getSize(cachePath) <= 33554432 (
+  if fs.exists(cachePath) and fs.size(cachePath).unwrapOr(0) <= 33554432 (
     return fs.readFile(cachePath).unwrapOr("")
   )
   string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)

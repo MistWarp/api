@@ -60,7 +60,7 @@ def handleGetMyBackpack(*serve.Context c) (
     c.badRequest("unknown backpack item type")
     return
   )
-  array items = loadBackpackItems(c.getString("userId"))
+  array items = loadBackpackItems(contextString(c, "userId"))
   array filtered = backpackFilterType(items, itemType)
   number offset = (c.query("offset") ?? "").toNum().toInt()
   if offset < 0 (
@@ -75,8 +75,8 @@ def handleGetMyBackpack(*serve.Context c) (
 )
 
 def handleCreateBackpackItem(*serve.Context c) (
-  string username = c.getString("username")
-  string userId = c.getString("userId")
+  string username = contextString(c, "username")
+  string userId = contextString(c, "userId")
   string itemType = (c.formValue("type") ?? "").strip()
   string mime = (c.formValue("mime") ?? "").strip()
   string bodyExt = backpackBodyExt(itemType, mime)
@@ -125,7 +125,7 @@ def handleCreateBackpackItem(*serve.Context c) (
     return
   )
   object details = storageDetails(username)
-  if !c.getBool("isAdmin") and details.used.toNum() + details.pending.toNum() + itemBytes > details.limit.toNum() (
+  if !contextBool(c, "isAdmin") and details.used.toNum() + details.pending.toNum() + itemBytes > details.limit.toNum() (
     sync.unlock(backpackLockName(userId))
     sync.unlock(quotaLock)
     storageFullResponse(c, details, itemBytes)
@@ -179,7 +179,7 @@ def handleCreateBackpackItem(*serve.Context c) (
 def handleUpdateBackpackItem(*serve.Context c) (
   object body = requestJSON(c)
   string id = c.param("id")
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   if !body.contains("name") (
     c.badRequest("nothing to update")
     return
@@ -232,7 +232,7 @@ def deleteBackpackItems(string userId, array ids) object (
 )
 
 def handleDeleteBackpackItem(*serve.Context c) (
-  object result = deleteBackpackItems(c.getString("userId"), [c.param("id")])
+  object result = deleteBackpackItems(contextString(c, "userId"), [c.param("id")])
   if result.ok != true (
     c.internalError("failed to save backpack")
     return
@@ -255,7 +255,7 @@ def handleDeleteBackpackItems(*serve.Context c) (
   for i raw.len (
     ids.append(raw[i].toStr())
   )
-  object result = deleteBackpackItems(c.getString("userId"), ids)
+  object result = deleteBackpackItems(contextString(c, "userId"), ids)
   if result.ok != true (
     c.internalError("failed to save backpack")
     return

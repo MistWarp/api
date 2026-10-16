@@ -23,14 +23,10 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
     c.notFound("project snapshot not found")
     return
   )
-  auto signed = r2Client.presign({key: key, expires: 60})
-  if !signed.ok (
-    c.notFound("project snapshot not found")
-    return
-  )
+  string signedUrl = r2Client.presignURL(key, {expires: 60000})
   // An explicit encoding prevents the HTTP client from decompressing R2's body.
-  auto fetched = requests.get(signed.url.toStr(), {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !fetched.success or fetched.status.toInt() != 200 (
+  auto fetched = requests.get(signedUrl, {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+  if fetched.status != 200 (
     c.notFound("project snapshot not found")
     return
   )
@@ -38,6 +34,6 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
     c.setHeader("Content-Encoding", "gzip")
   )
   // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
-  string snapshotBody = fetched.body.toStr()
-  c.data(200, "application/json", storagefs.Bytes(snapshotBody))
+  string snapshotBody = fetched.body
+  c.send(200, "application/json", storagefs.Bytes(snapshotBody))
 )

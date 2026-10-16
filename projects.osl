@@ -34,21 +34,21 @@ def projectRole(object project, string username) string (
 )
 
 def canEditProject(object project,*serve.Context c) boolean (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     return true
   )
   if canManageGroupContent(project, c) (
     return true
   )
-  string role = projectRole(project, c.getString("username"))
+  string role = projectRole(project, contextString(c, "username"))
   return role == "owner" or role == "maintainer"
 )
 
 def canViewForkProject(object project,*serve.Context c) boolean (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
   if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
@@ -79,7 +79,7 @@ def canViewProject(object project,*serve.Context c) boolean (
   if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
     return true
   )
-  if projectRole(project, c.getString("username")) != "" (
+  if projectRole(project, contextString(c, "username")) != "" (
     return true
   )
   if canViewForkProject(project, c) (
@@ -257,7 +257,7 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("brokenhearts") (
     broken = project.brokenhearts.assert(array)
   )
-  string viewer = normalizeUsername(c.getString("username"))
+  string viewer = normalizeUsername(contextString(c, "username"))
   string myReaction = ""
   if loves.contains(viewer) (
     myReaction = "heart"
@@ -316,16 +316,16 @@ def projectResponse(object project,*serve.Context c) object (
   // The key that plays a banned owner's project is only for admins.
   boolean ownerBanned = projectOwnerBanned(project)
   if ownerBanned (
-    jsonUrl = if c.getBool("isAdmin") and jsonUrl != "" then jsonBase ++ "?k=" ++ bannedViewKey(project) else ""
+    jsonUrl = if contextBool(c, "isAdmin") and jsonUrl != "" then jsonBase ++ "?k=" ++ bannedViewKey(project) else ""
   )
   if !hasContent (
     jsonUrl = ""
   )
   number myPlaytimeMs = 0
   number myLastPlayed = 0
-  if c.getBool("authenticated") (
-    myPlaytimeMs = projectPlaytime(project.id.toStr(), c.getString("username"))
-    myLastPlayed = projectLastPlayed(project.id.toStr(), c.getString("username"))
+  if contextBool(c, "authenticated") (
+    myPlaytimeMs = projectPlaytime(project.id.toStr(), contextString(c, "username"))
+    myLastPlayed = projectLastPlayed(project.id.toStr(), contextString(c, "username"))
   )
   object response = {
     id: project.id,
@@ -386,7 +386,7 @@ def projectResponse(object project,*serve.Context c) object (
   if isOwner and projectHiddenByModerator(project) (
     response.moderationHidden = moderationHoldResponse(project, c)
   )
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     object shadowed = shadowBannedSet()
     object projectShadow = projectShadowBanEntry(project.id.toStr())
     response.shadowBan = {
@@ -463,7 +463,7 @@ def projectResponse(object project,*serve.Context c) object (
 )
 
 def handleGetMyQuota(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   object details = storageDetails(username)
   array projects = []
   array entries = ownerIndexEntries(username, true)
@@ -471,7 +471,7 @@ def handleGetMyQuota(*serve.Context c) (
     object entry = entries[i].assert(object)
     projects.append({id: entry.id, title: entry.title, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum(), trashed: false})
   )
-  array trashed = trashedProjectsOwnedBy(c.getString("userId"), username)
+  array trashed = trashedProjectsOwnedBy(contextString(c, "userId"), username)
   for i trashed.len (
     object project = trashed[i].assert(object)
     projects.append({id: project.id, title: project.title, bytes: projectStorageBytes(project), trashed: true})
@@ -483,16 +483,16 @@ def handleGetMyQuota(*serve.Context c) (
     pending: details.pending,
     limit: details.limit,
     remaining: details.remaining,
-    backpack: backpackStoredBytes(c.getString("userId")),
+    backpack: backpackStoredBytes(contextString(c, "userId")),
     largest: paginate(projects, 0, 5)
   })
 )
 
 def handleCreateProject(*serve.Context c) (
   object body = requestJSON(c)
-  string username = c.getString("username")
-  number projectLimit = mistwarpBenefitsForUserId(c.getString("userId")).maxProjects.toNum()
-  if !c.getBool("isAdmin") and ownedProjectSlotCount(c.getString("userId"), username) >= projectLimit (
+  string username = contextString(c, "username")
+  number projectLimit = mistwarpBenefitsForUserId(contextString(c, "userId")).maxProjects.toNum()
+  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(contextString(c, "userId"), username) >= projectLimit (
     c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
     return
   )
@@ -545,7 +545,7 @@ def handleCreateProject(*serve.Context c) (
   object project = {
     id: id,
     owner: username,
-    ownerId: c.getString("userId"),
+    ownerId: contextString(c, "userId"),
     groupTag: groupTag,
     branding: {},
     vanitySlug: "",
@@ -805,7 +805,7 @@ def handleUploadProjectAsset(*serve.Context c) (
     return
   )
   object file = fileResult.unwrap()
-  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
   number assetLimit = benefits.maxProjectAssetBytes.toNum()
   if assetLimit > maxWorkspaceBytes (
     assetLimit = maxWorkspaceBytes
@@ -829,14 +829,14 @@ def handleUploadProjectAsset(*serve.Context c) (
     c.json(200, {ok: true, uploaded: false, name: name})
     return
   )
-  object reservation = reservePendingUpload(c.getString("username"), name, file.size.toNum(), benefits.storageBytes.toNum(),!c.getBool("isAdmin"))
+  object reservation = reservePendingUpload(contextString(c, "username"), name, file.size.toNum(), benefits.storageBytes.toNum(),!contextBool(c, "isAdmin"))
   if !reservation.ok (
     sync.unlock(assetLock)
-    storageFullResponse(c, storageDetails(c.getString("username")), file.size.toNum())
+    storageFullResponse(c, storageDetails(contextString(c, "username")), file.size.toNum())
     return
   )
-  if !stageR2Blob(assetObjectKey(name), file.data.assertElse(byte[], []), contentTypeForExt(extPartOf(name)), "") (
-    releasePendingUploads(c.getString("username"), [name])
+  if !stageR2Blob(assetObjectKey(name), file.data, contentTypeForExt(extPartOf(name)), "") (
+    releasePendingUploads(contextString(c, "username"), [name])
     sync.unlock(assetLock)
     c.internalError("asset upload failed")
     return
@@ -878,10 +878,10 @@ def handleStageProjectUploadPart(*serve.Context c) (
     c.json(413, {ok: false, error: "upload part exceeds the 90 MB limit", code: "upload_part_too_large"})
     return
   )
-  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
   number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
   boolean readContents = kind == "workspace"
-  if !validateZipArchive(file.data.assertElse(byte[], []), maxWorkspaceBytes, expandedLimit, maxWorkspaceFiles, readContents) (
+  if !validateZipArchive(file.data, maxWorkspaceBytes, expandedLimit, maxWorkspaceFiles, readContents) (
     c.badRequest("invalid or unsafe upload part")
     return
   )
@@ -889,7 +889,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
   if !fs.writeFileBytes(stagedUploadPartDataPath(token), file.data) or !writeFile(stagedUploadPartMetaPath(token), {
     projectId: project.id,
     kind: kind,
-    userId: c.getString("userId"),
+    userId: contextString(c, "userId"),
     size: file.size,
     expires: timestamp + stagedUploadPartTtlMs
   }) (
@@ -943,7 +943,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     c.badRequest("invalid upload size")
     return
   )
-  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
   if kind == "asset" (
     if !isValidMd5Ext(name) or size > benefits.maxProjectAssetBytes.toNum() (
       c.badRequest("invalid or oversized asset")
@@ -956,9 +956,9 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     )
   )
   if kind == "asset" (
-    object reservation = reservePendingUpload(c.getString("username"), name, size, benefits.storageBytes.toNum(),!c.getBool("isAdmin"))
+    object reservation = reservePendingUpload(contextString(c, "username"), name, size, benefits.storageBytes.toNum(),!contextBool(c, "isAdmin"))
     if !reservation.ok (
-      storageFullResponse(c, storageDetails(c.getString("username")), size)
+      storageFullResponse(c, storageDetails(contextString(c, "username")), size)
       return
     )
   )
@@ -967,7 +967,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     projectId: project.id,
     kind: kind,
     name: name,
-    userId: c.getString("userId"),
+    userId: contextString(c, "userId"),
     size: size,
     chunks: chunks,
     nextChunk: 0,
@@ -977,7 +977,7 @@ def handleCreateProjectUploadPart(*serve.Context c) (
   }
   if !writeFile(stagedUploadPartMetaPath(token), metadata) (
     if kind == "asset" (
-      releasePendingUploads(c.getString("username"), [name])
+      releasePendingUploads(contextString(c, "username"), [name])
     )
     c.internalError("could not start upload")
     return
@@ -995,7 +995,7 @@ def loadOwnedUploadPart(*serve.Context c) object (
     return {ok: false, error: "upload expired; start it again"}
   )
   object metadata = loaded.data.assert(object)
-  if metadata.projectId.toStr() != c.param("id") or metadata.userId.toStr() != c.getString("userId") (
+  if metadata.projectId.toStr() != c.param("id") or metadata.userId.toStr() != contextString(c, "userId") (
     return {ok: false, error: "upload token does not match this project"}
   )
   if metadata.expires.toNum() < timestamp (
@@ -1095,7 +1095,7 @@ def handleCompleteProjectUploadPart(*serve.Context c) (
     c.json(201, {ok: true, complete: true, kind: kind, name: name})
     return
   )
-  object benefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
   number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
   boolean readContents = kind == "workspace"
   if !validateZipArchive(data, metadata.size.toNum(), expandedLimit, maxWorkspaceFiles, readContents) (
@@ -1113,41 +1113,47 @@ def handleCompleteProjectUploadPart(*serve.Context c) (
   c.json(201, {ok: true, complete: true, token: token, kind: kind})
 )
 
-def inspectProjectJson(string path) object (
-  *json.Stream stream = json.open(path, maxProjectJsonBytes)
-  if !stream.ok() or !stream.more() (
-    stream.close()
-    return {ok: false}
-  )
-  object root = stream.next()
-  if root.type.toStr() != "object-start" (
-    stream.close()
-    return {ok: false}
-  )
+def scanProjectJsonEvents(*json.Stream stream) object (
+  boolean started = false
+  boolean readingMd5ext = false
   number targets = 0
   array md5ext = []
-  while stream.more() (
-    object event = stream.next()
-    if event.type.toStr() == "key" (
+  for event in stream.events() (
+    if !started (
+      started = true
+      if event.type != "object-start" (
+        return {ok: false}
+      )
+    ) else if readingMd5ext (
+      readingMd5ext = false
+      if event.type == "string" (
+        md5ext.append(event.value)
+        if md5ext.len > maxAssetCount * 50 (
+          return {ok: false}
+        )
+      )
+    ) else if event.type == "key" (
       string key = event.value.toStr()
       if key == "targets" (
         targets += 1
       )
-      if key == "md5ext" and stream.more() (
-        object value = stream.next()
-        if value.type.toStr() == "string" (
-          md5ext.append(value.value)
-          if md5ext.len > maxAssetCount * 50 (
-            stream.close()
-            return {ok: false}
-          )
-        )
-      )
+      readingMd5ext = key == "md5ext"
     )
   )
-  boolean valid = stream.ok()
+  if !started (
+    return {ok: false}
+  )
+  return {ok: true, targets: targets, md5ext: md5ext}
+)
+
+def inspectProjectJson(string path) object (
+  *json.Stream stream = json.open(path, maxProjectJsonBytes)
+  object inspected = scanProjectJsonEvents(stream) catch (err) (
+    stream.close()
+    return {ok: false}
+  )
   stream.close()
-  return {ok: valid, targets: targets, md5ext: md5ext}
+  return inspected
 )
 
 def uploadProjectFiles(object project, string extractDir, object benefits, number storageAllowanceBytes) object (
@@ -1156,7 +1162,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
   if !fs.exists(jsonPath) (
     return {ok: false, error: "sb3 has no project.json", status: 400}
   )
-  number projectJsonBytes = fs.getSize(jsonPath)
+  number projectJsonBytes = fs.size(jsonPath).unwrapOr(0)
   if projectJsonBytes > maxProjectJsonBytes (
     return {ok: false, error: "project.json exceeds the 256 MB expanded limit", code: "project_too_large", status: 413}
   )
@@ -1168,7 +1174,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
     return {ok: false, error: "invalid project.json", status: 400}
   )
   string gzipPath = jsonPath ++ ".gz"
-  if !zip.gzipLimited(jsonPath, gzipPath, maxProjectJsonBytes, maxStoredProjectJsonBytes) (
+  if !zip.gzip(jsonPath, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
     return {ok: false, error: "compressed project data exceeds the 20 MB limit", code: "project_too_large", status: 413}
   )
 
@@ -1189,7 +1195,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
         )
         string assetPath = extractDir ++ "/" ++ name
         number assetLimit = benefits.maxProjectAssetBytes.toNum()
-        if fs.getSize(assetPath) > assetLimit (
+        if fs.size(assetPath).unwrapOr(0) > assetLimit (
           number assetLimitMb = (assetLimit / 1048576).toInt()
           return {ok: false, error: "an asset exceeds your " ++ assetLimitMb.toStr() ++ " MB limit: " ++ name, code: "project_too_large", status: 413}
         )
@@ -1253,7 +1259,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
     number projectAssetLimitMb = (projectAssetLimit / 1048576).toInt()
     return {ok: false, error: "project assets exceed your " ++ projectAssetLimitMb.toStr() ++ " MB limit", code: "project_too_large", status: 413}
   )
-  number projectBytes = assetBytes + fs.getSize(gzipPath) + projectHistoryBytes(project)
+  number projectBytes = assetBytes + fs.size(gzipPath).unwrapOr(0) + projectHistoryBytes(project)
   if storageAllowanceBytes >= 0 and projectBytes > storageAllowanceBytes (
     return {ok: false, error: "storage full", code: "storage_full", status: 413, overBytes: projectBytes - storageAllowanceBytes}
   )
@@ -1274,7 +1280,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
     saveAssetsIndex(assetsIndex)
   )
 
-  return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.getSize(gzipPath), assetBytes: assetBytes}
+  return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.size(gzipPath).unwrapOr(0), assetBytes: assetBytes}
 )
 
 def pushProjectJsonToR2(object project, string gzipPath) boolean (
@@ -1288,7 +1294,7 @@ def pushProjectJsonToR2(object project, string gzipPath) boolean (
 def stageProjectJson(object project, string gzipPath) boolean (
   string path = stagingJsonPath(project.id.toStr())
   string tmpPath = path ++ ".tmp." ++ randomString(8)
-  if !zip.copyFile(gzipPath, tmpPath) (
+  if !copyFileReplacing(gzipPath, tmpPath) (
     return false
   )
   if !fs.rename(tmpPath, path) (
@@ -1326,7 +1332,7 @@ def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean
       )
     )
   )
-  if !workspace and releaseDocs.where("jsonKey", db.equal, key).limit(1).all().len > 0 (
+  if !workspace and releaseDocs.where("jsonKey", "==", key).limit(1).all().len > 0 (
     return true
   )
   if !workspace (
@@ -1427,7 +1433,7 @@ def flushProjectLocked(object project) (
         string gzipPath = path
         if !projectJsonIsGzip(project) (
           gzipPath = path ++ ".gz"
-          if !zip.gzipLimited(path, gzipPath, maxProjectJsonBytes, maxStoredProjectJsonBytes) (
+          if !zip.gzip(path, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
             return
           )
         )
@@ -1573,9 +1579,9 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
   object file = fileResult.unwrap()
-  object projectBenefits = mistwarpBenefitsForUserId(c.getString("userId"))
+  object projectBenefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
 
-  string uploader = normalizeUsername(c.getString("username"))
+  string uploader = normalizeUsername(contextString(c, "username"))
   auto workspaceResult = c.formFile("workspace")
   auto mergeTreeResult = c.formFile("mergeTree")
   boolean hasWorkspace = !workspaceResult.isErr()
@@ -1585,7 +1591,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   if hasWorkspace (
     workspaceFile = workspaceResult.unwrap()
   ) else if (c.formValue("workspaceToken") ?? "") != "" (
-    object stagedWorkspace = consumeStagedUploadPart((c.formValue("workspaceToken") ?? ""), project.id.toStr(), "workspace", c.getString("userId"))
+    object stagedWorkspace = consumeStagedUploadPart((c.formValue("workspaceToken") ?? ""), project.id.toStr(), "workspace", contextString(c, "userId"))
     if !stagedWorkspace.ok (
       c.badRequest(stagedWorkspace.error.toStr())
       return
@@ -1596,7 +1602,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   if hasMergeTree (
     mergeTreeFile = mergeTreeResult.unwrap()
   ) else if (c.formValue("mergeTreeToken") ?? "") != "" (
-    object stagedMergeTree = consumeStagedUploadPart((c.formValue("mergeTreeToken") ?? ""), project.id.toStr(), "mergeTree", c.getString("userId"))
+    object stagedMergeTree = consumeStagedUploadPart((c.formValue("mergeTreeToken") ?? ""), project.id.toStr(), "mergeTree", contextString(c, "userId"))
     if !stagedMergeTree.ok (
       c.badRequest(stagedMergeTree.error.toStr())
       return
@@ -1604,7 +1610,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     mergeTreeFile = stagedMergeTree.file.assert(object)
     hasMergeTree = true
   )
-  number storageAllowanceBytes = if c.getBool("isAdmin") then -1 else projectStorageAllowance(project)
+  number storageAllowanceBytes = if contextBool(c, "isAdmin") then -1 else projectStorageAllowance(project)
 
   string id = project.id.toStr()
   string workId = id ++ "." ++ randomString(8)
@@ -1616,12 +1622,12 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
 
   number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
-  if !validateZipArchive(file.data.assertElse(byte[], []), maxProjectUploadRequestBytes, extractedLimit, maxAssetCount + 1, false) (
+  if !validateZipArchive(file.data, maxProjectUploadRequestBytes, extractedLimit, maxAssetCount + 1, false) (
     void fs.remove(zipPath)
     c.badRequest("invalid or unsafe sb3 file")
     return
   )
-  if !zip.decompressLimited(zipPath, extractDir, extractedLimit, maxAssetCount + 1) (
+  if !zip.decompress(zipPath, extractDir, {maxBytes: extractedLimit, maxFiles: maxAssetCount + 1}) (
     void fs.remove(zipPath)
     void fs.remove(extractDir)
     c.badRequest("invalid sb3 file")
@@ -1976,7 +1982,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     void fs.remove(extractDir)
     return
   )
-  recordCreatingDay(c.getString("username"))
+  recordCreatingDay(contextString(c, "username"))
 
   // The wrapper holds the publication lock from the initial version read.
   boolean savedProject = saveProject(project)
@@ -2027,7 +2033,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   )
 
   if pullId != "" (
-    if !completeNativePull(project, pullId, expectedHead, c.getString("username")) (
+    if !completeNativePull(project, pullId, expectedHead, contextString(c, "username")) (
       c.json(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})
       return
     )
@@ -2159,10 +2165,10 @@ def activeVanitySlug(object project) string (
 // Projects holding a vanity URL, including lapsed ones. Entries indexed before
 // vanityClaim existed only have vanitySlug.
 def vanityClaimEntries(string slug) array (
-  return vanityEntriesWhere(db.equal, slug)
+  return vanityEntriesWhere("==", slug)
 )
 
-def vanityEntriesWhere(any op, string value) array (
+def vanityEntriesWhere(string op, string value) array (
   array found = projectSearchDocs.where("vanityClaim", op, value).all()
   object seen = {}
   for i found.len (
@@ -2208,8 +2214,8 @@ def applyVanityLapseLocked(string id, string slug, string eligibility) string (
 // Notices lapsed vanity URLs and releases them on time, even if nobody visits.
 def vanityLapseLoop() (
   while true (
-    process.sleep(900)
-    array entries = vanityEntriesWhere(db.greater, "")
+    wait 900
+    array entries = vanityEntriesWhere(">", "")
     for i entries.len (
       object entry = entries[i].assert(object)
       string slug = (entry.vanityClaim ?? entry.vanitySlug ?? "").toStr()
@@ -2305,12 +2311,12 @@ def handleUpdateProjectLocked(*serve.Context c) (
   )
 
   object body = requestJSON(c)
-  if isStudentUserId((project.ownerId ?? "").toStr()) and !c.getBool("isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
+  if isStudentUserId((project.ownerId ?? "").toStr()) and !contextBool(c, "isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
     c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
     return
   )
   if body.contains("owner") (
-    boolean canTransfer = c.getBool("isAdmin") or projectRole(project, c.getString("username")) == "owner" or canManageGroupContent(project, c)
+    boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or canManageGroupContent(project, c)
     if !canTransfer (
       c.forbidden("you cannot transfer this project")
       return
@@ -2502,7 +2508,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
     )
   )
   if body.contains("remixShare") (
-    if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
+    if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
       c.forbidden("only the owner can change the remix share")
       return
     )
@@ -2690,7 +2696,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
     }
   )
   if body.contains("collaborators") (
-    if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
+    if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
       c.forbidden("only the owner can manage the project team")
       return
     )
@@ -2753,7 +2759,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
         )
       )
       if newlyShared (
-        addNotification(member.username.toStr(), c.getString("username"), "project_shared", {
+        addNotification(member.username.toStr(), contextString(c, "username"), "project_shared", {
           projectId: project.id, projectTitle: project.title, role: member.role
         })
       )
@@ -2873,11 +2879,11 @@ def handleDeleteProject(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if projectRole(project, c.getString("username")) != "owner" and !c.getBool("isAdmin") (
+  if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
   )
-  if project.shared == true and !c.getBool("isAdmin") (
+  if project.shared == true and !contextBool(c, "isAdmin") (
     c.badRequest("unshare the project before deleting it")
     return
   )
@@ -2933,8 +2939,8 @@ def purgeExpiredTrash() (
 def handleGetMyTrash(*serve.Context c) (
   purgeExpiredTrash()
   array projects = []
-  string userId = c.getString("userId")
-  string username = c.getString("username")
+  string userId = contextString(c, "userId")
+  string username = contextString(c, "username")
   array files = fs.readDir(trashDir).unwrapOr([])
   for i files.len (
     string file = files[i].toStr()
@@ -2967,7 +2973,7 @@ def handleRestoreProject(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), c.getString("userId"), c.getString("username")) and !c.getBool("isAdmin") (
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
   )
@@ -2999,7 +3005,7 @@ def handlePurgeTrashedProject(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), c.getString("userId"), c.getString("username")) and !c.getBool("isAdmin") (
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
   )
@@ -3099,7 +3105,7 @@ def handleViewProject(*serve.Context c) (
     c.json(200, {ok: true})
     return
   )
-  string viewer = normalizeUsername(c.getString("username"))
+  string viewer = normalizeUsername(contextString(c, "username"))
   string dedupKey = project.id.toStr() ++ "|" ++ viewer
   if viewer == "" (
     dedupKey = project.id.toStr() ++ "|ip:" ++ c.ip()
@@ -3168,7 +3174,7 @@ def handleReactProjectLocked(*serve.Context c) (
     return
   )
 
-  string viewer = normalizeUsername(c.getString("username"))
+  string viewer = normalizeUsername(contextString(c, "username"))
   array loves = project.loves.assert(array)
   array broken = []
   if project.contains("brokenhearts") (
@@ -3223,7 +3229,7 @@ def handleReactProjectLocked(*serve.Context c) (
   if broken.contains(viewer) (
     myReaction = "brokenheart"
   )
-  siteBroadcastStats(project.id.toStr(), c.getString("username"), {reaction: myReaction})
+  siteBroadcastStats(project.id.toStr(), contextString(c, "username"), {reaction: myReaction})
   c.json(200, {
     ok: true,
     hearts: loves.len,
@@ -3290,7 +3296,7 @@ def handleExplore(*serve.Context c) (
     entries = filtered
   )
 
-  string sort = c.queryDefault("sort", "recent")
+  string sort = if (c.query("sort") ?? "") == "" then "recent" else (c.query("sort") ?? "")
   if q != "" and sort == "relevance" (
     array ranked = []
     for i entries.len (
@@ -3420,7 +3426,7 @@ def handleLeaderboard(*serve.Context c) (
   for i keys.len (
     rows.append(totals[keys[i].toStr()])
   )
-  string by = c.queryDefault("by", "loves")
+  string by = if (c.query("by") ?? "") == "" then "loves" else (c.query("by") ?? "")
   if by != "views" (
     by = "loves"
   )
@@ -3448,7 +3454,7 @@ def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
   if entry.shared == true and projectVisibility(entry) == "public" (
     return true
   )
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
   auto result = loadProject(entry.id.toStr())
@@ -3456,12 +3462,12 @@ def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
     return false
   )
   object project = result.project.assert(object)
-  return projectRole(project, c.getString("username")) != "" or canEditProject(project, c)
+  return projectRole(project, contextString(c, "username")) != "" or canEditProject(project, c)
 )
 
 def handleGetRemixes(*serve.Context c) (
   string id = c.param("id")
-  array entries = projectSearchDocs.where("remixParent", db.equal, id).sort("sharedAt", db.desc).all()
+  array entries = projectSearchDocs.where("remixParent", "==", id).sort("sharedAt", "desc").all()
   array remixes = []
   for i entries.len (
     object entry = entries[i]
@@ -3522,7 +3528,7 @@ def handleGetRemixTree(*serve.Context c) (
       seen[ancestorId] = true
     )
   )
-  array treeEntries = projectSearchDocs.where("remixRoot", db.equal, rootId).limit(499).all()
+  array treeEntries = projectSearchDocs.where("remixRoot", "==", rootId).limit(499).all()
   for i treeEntries.len (
     object entry = treeEntries[i].assert(object)
     string entryId = entry.id.toStr()
@@ -3535,7 +3541,7 @@ def handleGetRemixTree(*serve.Context c) (
   while scan <= nodes.len and nodes.len < 500 (
     object parentNode = nodes[scan].assert(object)
     string parentId = parentNode.id.toStr()
-    array directChildren = projectSearchDocs.where("remixParent", db.equal, parentId).limit(500 - nodes.len).all()
+    array directChildren = projectSearchDocs.where("remixParent", "==", parentId).limit(500 - nodes.len).all()
     for i directChildren.len (
       object child = directChildren[i].assert(object)
       string childId = child.id.toStr()
@@ -3584,7 +3590,7 @@ def handleRemixProjectLocked(*serve.Context c) (
   if body.contains("branch") and body.branch != null (
     forkBranch = body.branch.toStr().strip()
   )
-  object forked = forkProjectFor(parent, c.getString("username"), c.getString("userId"), forkTitle, forkBranch, !c.getBool("isAdmin"))
+  object forked = forkProjectFor(parent, contextString(c, "username"), contextString(c, "userId"), forkTitle, forkBranch, !contextBool(c, "isAdmin"))
   if forked.ok != true (
     forkFailureResponse(c, forked)
     return

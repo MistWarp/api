@@ -1,11 +1,11 @@
 import "./live-collaboration-policy.osl"
 
 // Temporary approvals are leases; explicitly shared Editor access persists.
-auto liveEditorSessions = cache.create(10000, 90)
-auto projectEditorPresence = cache.create(10000, 90)
+auto liveEditorSessions = cache.new({capacity: 10000, ttl: 90000})
+auto projectEditorPresence = cache.new({capacity: 10000, ttl: 90000})
 
 def handleGetSharedProjects(*serve.Context c) (
-  string username = normalizeUsername(c.getString("username"))
+  string username = normalizeUsername(contextString(c, "username"))
   array projects = []
   array entries = projectSearchDocs.all()
   for i entries.len (
@@ -46,8 +46,8 @@ def liveSession(object project, string branch) object (
 
 def canSaveLiveProject(object project,*serve.Context c) boolean (
   if canEditProject(project, c) return true
-  if !c.getBool("authenticated") return false
-  string username = normalizeUsername(c.getString("username"))
+  if !contextBool(c, "authenticated") return false
+  string username = normalizeUsername(contextString(c, "username"))
   string role = projectRole(project, username)
   if role == "editor" return true
   if role == "" or role == "tester" return false
@@ -70,7 +70,7 @@ def handleLiveCollaboration(*serve.Context c) (
     return
   )
   object project = result.project.assert(object)
-  string username = normalizeUsername(c.getString("username"))
+  string username = normalizeUsername(contextString(c, "username"))
   string role = projectRole(project, username)
   if role == "" (
     c.forbidden("only project team members can discover editing sessions")

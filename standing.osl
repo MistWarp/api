@@ -139,7 +139,7 @@ def setStanding(string username, string level, string reason, string actor) bool
 )
 
 def requireGoodStanding(*serve.Context c) (
-  string level = standingLevel(c.getString("username"))
+  string level = standingLevel(contextString(c, "username"))
   if standingRank(level) >= 2 (
     c.json(403, {ok: false, error: "Your account is " ++ level ++ " and cannot do this right now.", standing: level})
     c.abort()
@@ -164,7 +164,7 @@ def handleSetStanding(*serve.Context c) (
     c.badRequest("cannot moderate an admin")
     return
   )
-  if !setStanding(name, level, reason, c.getString("username")) (
+  if !setStanding(name, level, reason, contextString(c, "username")) (
     c.badRequest("invalid standing level")
     return
   )
@@ -179,7 +179,7 @@ def handleMessageUser(*serve.Context c) (
     c.badRequest("username and message are required")
     return
   )
-  addNotification(name, c.getString("username"), "moderation", {message: message})
+  addNotification(name, contextString(c, "username"), "moderation", {message: message})
   c.json(200, {ok: true})
 )
 

@@ -1,5 +1,5 @@
 def pruneSiteErrors() (
-  array stored = errorDocs.sort("created", db.desc).limit(1100).all()
+  array stored = errorDocs.sort("created", "desc").limit(1100).all()
   for i stored.len (
     if i >= 1000 (
       object entry = stored[i].assert(object)
@@ -89,7 +89,7 @@ def handleRecordSiteError(*serve.Context c) (
     componentStack = body.componentStack.toStr().trim(1, 10000)
   )
   string userAgent = (c.header("User-Agent") ?? "").strip().trim(1, 500)
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   object entry = {
     _id: "e" ++ randomString(16),
     message: message,
@@ -114,7 +114,7 @@ def handleRecordSiteError(*serve.Context c) (
 
 def handleAdminGetErrors(*serve.Context c) (
   string show = (c.query("show") ?? "").toLower().strip()
-  array items = errorDocs.sort("created", db.desc).limit(200).all()
+  array items = errorDocs.sort("created", "desc").limit(200).all()
   if show != "all" and show != "resolved" (
     array open = []
     for i items.len (
@@ -134,7 +134,7 @@ def handleAdminGetErrors(*serve.Context c) (
     )
     items = resolved
   )
-  number openCount = errorDocs.where("resolved", db.equal, false).count()
+  number openCount = errorDocs.where("resolved", "==", false).count()
   c.json(200, {ok: true, errors: items, openCount: openCount})
 )
 
@@ -155,7 +155,7 @@ def handleAdminResolveSiteError(*serve.Context c) (
     return
   )
   entry.resolved = resolved
-  entry.resolvedBy = c.getString("username")
+  entry.resolvedBy = contextString(c, "username")
   entry.resolvedAt = timestamp
   if putDocument(errorDocs, id, entry) (
     c.json(200, {ok: true})

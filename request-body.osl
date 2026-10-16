@@ -7,3 +7,13 @@ def requestJSON(*serve.Context c) object (
   )
   return body
 )
+
+def contextString(*serve.Context c, string key) string (
+  string value = c.get(key) ?? ""
+  return value
+)
+
+def contextBool(*serve.Context c, string key) boolean (
+  boolean value = c.get(key) ?? false
+  return value
+)

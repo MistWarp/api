@@ -80,7 +80,7 @@ def projectShadowBanEntry(string projectId) object (
 )
 
 def viewerSeesShadowBanned(string author, string authorId,*serve.Context c) boolean (
-  return authoredItemListed(shadowBannedSet(), author, authorId, normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
+  return authoredItemListed(shadowBannedSet(), author, authorId, normalizeUsername(contextString(c, "username")), contextString(c, "userId"), contextBool(c, "isAdmin"))
 )
 
 def reviewsVisibleTo(array reviews,*serve.Context c) array (
@@ -95,7 +95,7 @@ def reviewsVisibleTo(array reviews,*serve.Context c) array (
 )
 
 def commentsVisibleTo(array comments,*serve.Context c) array (
-  return commentsListed(comments, shadowBannedSet(), normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
+  return commentsListed(comments, shadowBannedSet(), normalizeUsername(contextString(c, "username")), contextString(c, "userId"), contextBool(c, "isAdmin"))
 )
 
 def renameShadowBannedUser(string oldKey, string newKey) (
@@ -165,7 +165,7 @@ def handleShadowBanUser(*serve.Context c) (
   sync.lock("shadowbans")
   object data = loadShadowBans()
   object users = data.users.assertElse(object, {})
-  users[key] = {username: key, userId: userIdForUsername(name), reason: reason, by: c.getString("username"), created: timestamp}
+  users[key] = {username: key, userId: userIdForUsername(name), reason: reason, by: contextString(c, "username"), created: timestamp}
   data.users = users
   boolean saved = saveShadowBans(data)
   sync.unlock("shadowbans")
@@ -241,7 +241,7 @@ def handleShadowBanProject(*serve.Context c) (
   sync.lock("shadowbans")
   object data = loadShadowBans()
   object projects = data.projects.assertElse(object, {})
-  projects[id] = {reason: reason, by: c.getString("username"), created: timestamp, title: project.title, owner: project.owner}
+  projects[id] = {reason: reason, by: contextString(c, "username"), created: timestamp, title: project.title, owner: project.owner}
   data.projects = projects
   boolean saved = saveShadowBans(data)
   sync.unlock("shadowbans")
@@ -283,7 +283,7 @@ def refuseIfHiddenByModerator(object project,*serve.Context c) boolean (
 def moderationHoldResponse(object project,*serve.Context c) object (
   object hold = projectModerationHold(project)
   object response = {reason: (hold.reason ?? "").toStr(), created: hold.created ?? 0}
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     response.by = (hold.by ?? "").toStr()
   )
   return response
@@ -303,7 +303,7 @@ def handleHideProject(*serve.Context c) (
     c.badRequest("reason is too long")
     return
   )
-  hideProjectForModeration(project, reason, c.getString("username"))
+  hideProjectForModeration(project, reason, contextString(c, "username"))
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
@@ -356,6 +356,6 @@ def handleRestoreHiddenProject(*serve.Context c) (
   )
   saveProject(project)
   upsertIndexEntry(project)
-  addNotification(project.owner.toStr(), c.getString("username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
+  addNotification(project.owner.toStr(), contextString(c, "username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )

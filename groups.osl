@@ -8,8 +8,8 @@ def normalizeGroupTag(string value) string (
 
 def roturPublicGroupSnapshot(string tag) object (
   object publicResponse = requests.get(roturBase ++ "/groups/" ++ url.escape(tag)).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !publicResponse.success or publicResponse.status.toInt() != 200 (
-    return {ok: false, error: if publicResponse.status.toInt() == 404 then "group not found" else "could not load group"}
+  if publicResponse.status != 200 (
+    return {ok: false, error: if publicResponse.status == 404 then "group not found" else "could not load group"}
   )
   auto publicParsed = json.parse(publicResponse.body, {type: "object"})
   if publicParsed.isErr() (
@@ -35,7 +35,7 @@ def roturGroupSnapshot(string rawTag) object (
     roturBase ++ "/groups/" ++ url.escape(tag) ++ "/integrations/mistwarp",
     {headers: {"X-Commerce-Key": commerceServiceKey}}
   ).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if !response.success or response.status.toInt() != 200 (
+  if response.status != 200 (
     return roturPublicGroupSnapshot(tag)
   )
   auto parsed = json.parse(response.body, {type: "object"})
@@ -98,10 +98,10 @@ def groupMemberCanManage(object snapshot, string userId, string username) boolea
 )
 
 def canManageGroupTag(string tag,*serve.Context c) boolean (
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     return true
   )
-  return groupMemberCanManage(roturGroupSnapshot(tag), c.getString("userId"), c.getString("username"))
+  return groupMemberCanManage(roturGroupSnapshot(tag), contextString(c, "userId"), contextString(c, "username"))
 )
 
 def groupTagOf(object value) string (
@@ -123,9 +123,9 @@ def handleGetMistWarpGroup(*serve.Context c) (
     c.notFound("group not found")
     return
   )
-  boolean canManage = c.getBool("authenticated") and groupMemberCanManage(snapshot, c.getString("userId"), c.getString("username"))
+  boolean canManage = contextBool(c, "authenticated") and groupMemberCanManage(snapshot, contextString(c, "userId"), contextString(c, "username"))
   array projects = []
-  array projectEntries = projectSearchDocs.where("groupTag", db.equal, tag).sort("edited", db.desc).all()
+  array projectEntries = projectSearchDocs.where("groupTag", "==", tag).sort("edited", "desc").all()
   for i projectEntries.len (
     object project = projectEntries[i].assert(object)
     if project.shared == true or project.visibility.toStr() == "unlisted" or canManage (
@@ -134,7 +134,7 @@ def handleGetMistWarpGroup(*serve.Context c) (
   )
   projects = projectsVisibleTo(projects, c)
   array spaces = []
-  array spaceEntries = spaceDocs.where("groupTag", db.equal, tag).sort("edited", db.desc).all()
+  array spaceEntries = spaceDocs.where("groupTag", "==", tag).sort("edited", "desc").all()
   for i spaceEntries.len (
     object space = spaceEntries[i].assert(object)
     if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" or canManage (
@@ -148,7 +148,7 @@ def handleGetMistWarpGroup(*serve.Context c) (
     projects: projects,
     spaces: spaces,
     canManage: canManage,
-    isMember: c.getBool("authenticated") and groupHasMember(snapshot, c.getString("userId"), c.getString("username")),
+    isMember: contextBool(c, "authenticated") and groupHasMember(snapshot, contextString(c, "userId"), contextString(c, "username")),
     membershipLive:!snapshot.contains("degraded") or snapshot.degraded != true
   })
 )

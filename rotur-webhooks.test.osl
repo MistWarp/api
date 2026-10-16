@@ -8,7 +8,7 @@ import "std:crypto"
 import "std:regex"
 
 string dir = "/tmp/mistwarp-rotur-webhooks-" ++ timestamp.toStr() ++ "/"
-void fs.mkdirAll(dir)
+void fs.mkdir(dir, {recursive: true})
 
 def configValue(string name, string fallback) string (
   if name == "ROTUR_WEBHOOK_SECRET" (
@@ -61,7 +61,7 @@ roturWebhooksFile = dir ++ "rotur-webhooks.json"
 // Signatures are checked the way Rotur makes them.
 string body = "{\"id\":\"evt_1\",\"type\":\"user.left\",\"data\":{\"user_id\":\"u-sam\"}}"
 // Made the way Rotur makes it (internal/core/app_webhooks.go, WebhookSignature).
-string signature = "v1=" ++ crypto.hmacSha256("whsec_test", "evt_1.1790000000." ++ body)
+string signature = "v1=" ++ crypto.hmac("sha256", "whsec_test", "evt_1.1790000000." ++ body)
 testing.assert(signature == roturWebhookSignature("whsec_test", "evt_1", "1790000000", body), "signs like Rotur")
 testing.assert(signature.len == 67, "a hex SHA-256 HMAC")
 testing.assert(roturWebhookValid("whsec_test", "evt_1", "1790000000", body, signature, 1790000060), "accepts a signed delivery")

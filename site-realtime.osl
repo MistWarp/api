@@ -79,7 +79,7 @@ def siteBroadcastProject(string projectId, object message) (
   )
   object project = result.project.assert(object)
   string encoded = json.stringify(message)
-  for conn in siteRealtimeSocket.GetConnections() (
+  for conn in siteRealtimeSocket.Connections() (
     if !siteSubscribed(conn, projectId) continue
     string accessKey = siteProjectKey(conn, projectId)
     if siteCanView(project, conn, accessKey) (
@@ -109,7 +109,7 @@ def siteBroadcastStats(string projectId, string actor, object viewerState) (
   object project = result.project.assert(object)
   string actorMessage = json.stringify(message)
   string actorKey = normalizeUsername(actor)
-  for conn in siteRealtimeSocket.GetConnections() (
+  for conn in siteRealtimeSocket.Connections() (
     if !siteSubscribed(conn, projectId) continue
     if !siteCanView(project, conn, siteProjectKey(conn, projectId)) continue
     if conn.Get("authenticated") == true and normalizeUsername(conn.Get("username").toStr()) == actorKey (
@@ -234,7 +234,7 @@ def siteDiagnostic(*ws.Connection conn, object message) (
 )
 
 def siteOnConnect(*ws.Connection conn) (
-  string sessionId = conn.GetHeader("Sec-WebSocket-Key")
+  string sessionId = conn.Header("Sec-WebSocket-Key") ?? ""
   if sessionId == "" (
     sessionId = randomString(24)
   )
@@ -259,7 +259,7 @@ def siteOnMessage(*ws.Connection conn, string raw) (
     siteError(conn, "sending messages too quickly")
     return
   )
-  auto parsed = json.parseObject(raw)
+  auto parsed = json.parse(raw, {type: "object"})
   if !parsed.isOk() (
     siteError(conn, "invalid message")
     return
@@ -303,7 +303,7 @@ def handleSiteRealtimeHTTP(*serve.Context c) (
 def siteHeartbeat() (
   while true (
     wait 30
-    for conn in siteRealtimeSocket.GetConnections() (
+    for conn in siteRealtimeSocket.Connections() (
       siteSend(conn, {type: "ping"})
     )
   )
@@ -311,9 +311,9 @@ def siteHeartbeat() (
 
 def setupSiteRealtime() (
   siteRealtimeSocket.AllowAllOrigins()
-  siteRealtimeSocket.OnConnect(siteOnConnect)
-  siteRealtimeSocket.OnMessage(siteOnMessage)
-  siteRealtimeSocket.OnDisconnect(siteOnDisconnect)
+  siteRealtimeSocket.On("connect", siteOnConnect)
+  siteRealtimeSocket.On("message", siteOnMessage)
+  siteRealtimeSocket.On("disconnect", siteOnDisconnect)
   app.WS("/v1/ws", siteRealtimeSocket)
   app.GET("/v1/ws", handleSiteRealtimeHTTP)
   thread.new(siteHeartbeat)

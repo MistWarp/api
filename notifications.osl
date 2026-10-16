@@ -313,11 +313,11 @@ def postRoturNotification(string target, string targetId, string actor, string a
     requestBody.actor_id = actorId
   )
   object resp = requests.post(roturBase ++ "/v2/notifications", {
-    timeout: 5,
+    timeoutMs: 5000,
     headers: notifyHeaders(),
     body: json.stringify(requestBody)
   }).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  return resp.success and resp.status.toInt() == 200
+  return resp.status == 200
 )
 
 def addNotification(string target, string actor, string notifType, object extra) (
@@ -392,7 +392,7 @@ def addNotification(string target, string actor, string notifType, object extra)
 )
 
 def handleGetNotifications(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   syncFollowerMilestones(username)
   sync.lock("notifications:" ++ normalizeUsername(username))
   array local = loadNotifications(username)
@@ -419,7 +419,7 @@ def handleGetNotifications(*serve.Context c) (
 )
 
 def handleReadNotifications(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   sync.lock("notifications:" ++ normalizeUsername(username))
   array items = loadNotifications(username)
   for i items.len (

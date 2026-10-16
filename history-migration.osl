@@ -21,9 +21,9 @@ def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
   string cachePath = cacheDir ++ project.jsonKey.toStr().hashSHA256() ++ ".json.gz"
   string lockName = "history-migration-json-" ++ project.jsonKey.toStr().hashSHA256()
   sync.lock(lockName)
-  void fs.mkdirAll(cacheDir)
+  void fs.mkdir(cacheDir, {recursive: true})
   boolean ready = fs.exists(cachePath) or copyStoredProjectJsonToPath(project, cachePath)
-  boolean copied = ready and zip.copyFile(cachePath, outputPath)
+  boolean copied = ready and copyFileReplacing(cachePath, outputPath)
   sync.unlock(lockName)
   return copied
 )
@@ -33,9 +33,9 @@ def copyHistoryAssetToPath(string name, string outputPath) boolean (
   string cachePath = cacheDir ++ name
   string lockName = "history-migration-asset-" ++ name
   sync.lock(lockName)
-  void fs.mkdirAll(cacheDir)
+  void fs.mkdir(cacheDir, {recursive: true})
   boolean ready = fs.exists(cachePath) or copyStorageKeyToPath(assetObjectKey(name), cachePath)
-  boolean copied = ready and zip.copyFile(cachePath, outputPath)
+  boolean copied = ready and copyFileReplacing(cachePath, outputPath)
   sync.unlock(lockName)
   return copied
 )
@@ -47,7 +47,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   string jsonPath = tmpDir ++ workId ++ ".json.gz"
   string assetsPath = tmpDir ++ workId ++ ".assets"
   string workspacePath = tmpDir ++ workId ++ ".mwp"
-  void fs.mkdirAll(assetsPath)
+  void fs.mkdir(assetsPath, {recursive: true})
   if !copyHistoryProjectJsonToPath(project, jsonPath) (
     void fs.remove(assetsPath)
     return {ok: false, error: "could not read project JSON"}

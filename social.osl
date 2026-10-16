@@ -27,7 +27,7 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
   object seen = {}
   array stored = []
   if ownerId != "" (
-    array idMatches = projectSearchDocs.where("ownerId", db.equal, ownerId).sort("edited", db.desc).all()
+    array idMatches = projectSearchDocs.where("ownerId", "==", ownerId).sort("edited", "desc").all()
     for i idMatches.len (
       object entry = idMatches[i].assert(object)
       string pid = entry.id.toStr()
@@ -38,7 +38,7 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
     )
   )
   if ownerKey != "" (
-    array keyMatches = projectSearchDocs.where("ownerKey", db.equal, ownerKey).sort("edited", db.desc).all()
+    array keyMatches = projectSearchDocs.where("ownerKey", "==", ownerKey).sort("edited", "desc").all()
     for i keyMatches.len (
       object entry = keyMatches[i].assert(object)
       string pid = entry.id.toStr()
@@ -92,10 +92,10 @@ def authorPublicPlaytime(string projectId, string author) number (
 )
 
 def isViewerOwner(*serve.Context c, string name) boolean (
-  if !c.getBool("authenticated") (
+  if !contextBool(c, "authenticated") (
     return false
   )
-  if c.getBool("isAdmin") (
+  if contextBool(c, "isAdmin") (
     return true
   )
   object profile = loadProfile(name)
@@ -103,7 +103,7 @@ def isViewerOwner(*serve.Context c, string name) boolean (
   if profile.contains("userId") and profile.userId != null (
     profileId = profile.userId.toStr()
   )
-  return identityMatches(profileId, name, c.getString("userId"), c.getString("username"))
+  return identityMatches(profileId, name, contextString(c, "userId"), contextString(c, "username"))
 )
 
 def userPlaytimeRecords(string name) array (
@@ -111,7 +111,7 @@ def userPlaytimeRecords(string name) array (
   array records = []
   object seen = {}
   if userId != "" (
-    array idRecords = playtimeDocs.where("userId", db.equal, userId).all()
+    array idRecords = playtimeDocs.where("userId", "==", userId).all()
     for i idRecords.len (
       object record = idRecords[i].assert(object)
       string recordId = record["_id"].toStr()
@@ -120,7 +120,7 @@ def userPlaytimeRecords(string name) array (
         records.append(record)
       )
     )
-    array legacyIdRecords = playtimeDocs.where("_id", db.contains, ":" ++ userId).all()
+    array legacyIdRecords = playtimeDocs.where("_id", "contains", ":" ++ userId).all()
     for i legacyIdRecords.len (
       object record = legacyIdRecords[i].assert(object)
       string recordId = record["_id"].toStr()
@@ -133,7 +133,7 @@ def userPlaytimeRecords(string name) array (
       )
     )
   )
-  array nameRecords = playtimeDocs.where("username", db.equal, name).all()
+  array nameRecords = playtimeDocs.where("username", "==", name).all()
   for i nameRecords.len (
     object record = nameRecords[i].assert(object)
     string recordId = record["_id"].toStr()
@@ -144,7 +144,7 @@ def userPlaytimeRecords(string name) array (
   )
   string normalized = normalizeUsername(name)
   if normalized != name (
-    array normalizedRecords = playtimeDocs.where("username", db.equal, normalized).all()
+    array normalizedRecords = playtimeDocs.where("username", "==", normalized).all()
     for i normalizedRecords.len (
       object record = normalizedRecords[i].assert(object)
       string recordId = record["_id"].toStr()
@@ -154,7 +154,7 @@ def userPlaytimeRecords(string name) array (
       )
     )
   )
-  array legacyNameRecords = playtimeDocs.where("_id", db.contains, ":" ++ normalized).all()
+  array legacyNameRecords = playtimeDocs.where("_id", "contains", ":" ++ normalized).all()
   for i legacyNameRecords.len (
     object record = legacyNameRecords[i].assert(object)
     string recordId = record["_id"].toStr()
@@ -249,9 +249,9 @@ def handleGetUser(*serve.Context c) (
   object profile = loadProfile(name)
   array followers = profile.followers.assert(array)
   array following = profile.following.assert(array)
-  string viewer = normalizeUsername(c.getString("username"))
+  string viewer = normalizeUsername(contextString(c, "username"))
   object viewerSafety = {blocked: [], muted: []}
-  if c.getBool("authenticated") and viewer != "" (
+  if contextBool(c, "authenticated") and viewer != "" (
     viewerSafety = loadSafety(viewer)
   )
   number projectLimit = 24
@@ -331,8 +331,8 @@ def handleSearchUsers(*serve.Context c) (
     return
   )
   number limit = clampNumber(c.queryInt("limit", 8), 1, 50)
-  number total = profileSearchDocs.where("usernameKey", db.contains, q).count()
-  array found = profileSearchDocs.where("usernameKey", db.contains, q).limit(200).all()
+  number total = profileSearchDocs.where("usernameKey", "contains", q).count()
+  array found = profileSearchDocs.where("usernameKey", "contains", q).limit(200).all()
   array ranked = []
   for i found.len (
     object profile = found[i].assert(object)
@@ -349,14 +349,14 @@ def handleSearchUsers(*serve.Context c) (
   for i page.len (
     object row = page[i].assert(object)
     object profile = row.profile.assert(object)
-    number projectCount = projectSearchDocs.where("ownerKey", db.equal, profile.usernameKey).and("shared", db.equal, true).count()
+    number projectCount = projectSearchDocs.where("ownerKey", "==", profile.usernameKey).where("shared", "==", true).count()
     matches.append({username: profile.username, followers: profile.followers, projects: projectCount})
   )
   c.json(200, {ok: true, users: matches, total: total})
 )
 
 def handleUpdateProfile(*serve.Context c) (
-  string username = c.getString("username")
+  string username = contextString(c, "username")
   object profile = loadProfile(username)
   object body = requestJSON(c)
   boolean changed = false
@@ -420,7 +420,7 @@ def handleUpdateProfile(*serve.Context c) (
 )
 
 def handleFollowUser(*serve.Context c) (
-  string actor = c.getString("username")
+  string actor = contextString(c, "username")
   string target = c.param("name")
   string actorKey = normalizeUsername(actor)
   string targetKey = normalizeUsername(target)
@@ -462,7 +462,7 @@ def handleFollowUser(*serve.Context c) (
 )
 
 def handleUnfollowUser(*serve.Context c) (
-  string actor = c.getString("username")
+  string actor = contextString(c, "username")
   string target = c.param("name")
   string actorKey = normalizeUsername(actor)
   string targetKey = normalizeUsername(target)
@@ -572,18 +572,18 @@ def handleSaveProject(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  boolean added = addToLibrary(normalizeUsername(c.getString("username")), project.id.toStr())
+  boolean added = addToLibrary(normalizeUsername(contextString(c, "username")), project.id.toStr())
   number saves = projectSaves(project)
   if added (
     saves = bumpProjectSaves(project.id.toStr(), 1)
-    addActivity(c.getString("username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+    addActivity(contextString(c, "username"), "favorite", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
   )
-  siteBroadcastStats(project.id.toStr(), c.getString("username"), {saved: true})
+  siteBroadcastStats(project.id.toStr(), contextString(c, "username"), {saved: true})
   c.json(200, {ok: true, saved: true, saves: saves})
 )
 
 def handleUnsaveProject(*serve.Context c) (
-  string me = normalizeUsername(c.getString("username"))
+  string me = normalizeUsername(contextString(c, "username"))
   object profile = loadProfile(me)
   array lib = []
   if profile.contains("library") and profile.library != null (
@@ -604,7 +604,7 @@ def handleUnsaveProject(*serve.Context c) (
     saveProfile(profile)
     saves = bumpProjectSaves(pid,-1)
   )
-  siteBroadcastStats(pid, c.getString("username"), {saved: false})
+  siteBroadcastStats(pid, contextString(c, "username"), {saved: false})
   c.json(200, {ok: true, saved: false, saves: saves})
 )
 
@@ -625,7 +625,7 @@ def addPurchaseRecord(string userLower, object entry) (
 )
 
 def handleGetMyPurchases(*serve.Context c) (
-  object profile = loadProfile(normalizeUsername(c.getString("username")))
+  object profile = loadProfile(normalizeUsername(contextString(c, "username")))
   array list = []
   if profile.contains("purchases") and profile.purchases != null (
     list = profile.purchases.assert(array)
@@ -634,7 +634,7 @@ def handleGetMyPurchases(*serve.Context c) (
 )
 
 def handleGetMyLibrary(*serve.Context c) (
-  object profile = loadProfile(normalizeUsername(c.getString("username")))
+  object profile = loadProfile(normalizeUsername(contextString(c, "username")))
   string username = profile.username.toStr()
   array ids = []
   if profile.contains("library") and profile.library != null (
@@ -679,7 +679,7 @@ def handleGetMyLibrary(*serve.Context c) (
 )
 
 def handleSetLibraryProjectVisibility(*serve.Context c) (
-  string username = normalizeUsername(c.getString("username"))
+  string username = normalizeUsername(contextString(c, "username"))
   object profile = loadProfile(username)
   string projectId = c.param("project")
   array library = []
@@ -758,7 +758,7 @@ def handleGetActivity(*serve.Context c) (
       )
     )
   )
-  array recentReviews = reviewDocs.sort("edited", db.desc).limit(500).all()
+  array recentReviews = reviewDocs.sort("edited", "desc").limit(500).all()
   number reviewItems = 0
   for i recentReviews.len (
     if reviewItems < 40 (

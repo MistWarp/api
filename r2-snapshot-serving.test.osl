@@ -9,7 +9,7 @@ import "std:process"
 import "std:url"
 
 string testDir = "/tmp/mistwarp-snapshot-test-" ++ timestamp.toStr()
-void fs.mkdirAll(testDir)
+void fs.mkdir(testDir, {recursive: true})
 boolean r2Local = false
 
 // Fake R2: serves whatever the current case stages.
@@ -23,14 +23,14 @@ def handleStubFetch(*serve.Context c) (
   if stubGzip (
     c.setHeader("Content-Encoding", "gzip")
   )
-  c.data(stubStatus.toInt(), "application/octet-stream", fs.readFileBytes(stubBodyPath))
+  c.send(stubStatus.toInt(), "application/octet-stream", fs.readFileBytes(stubBodyPath))
 )
 
 *serve.Router stubApp = serve.new()
 stubApp.GET("/test/{key...}", handleStubFetch)
 
 def runStubServer() (
-  stubApp.serve(":18331")
+  stubApp.run(":18331")
 )
 
 auto r2Client = s3.new({endpoint: "http://127.0.0.1:18331", bucket: "test", access_key_id: "test", secret_access_key: "test"})
@@ -54,7 +54,7 @@ def handleTestSnapshot(*serve.Context c) (
 app.GET("/snap/:key", handleTestSnapshot)
 
 def runAppServer() (
-  app.serve(":18332")
+  app.run(":18332")
 )
 
 def waitForServer(string baseUrl) (
@@ -63,7 +63,7 @@ def waitForServer(string baseUrl) (
     if probe.isOk() (
       return
     )
-    process.sleep(0.1)
+    wait 0.1
   )
 )
 
@@ -77,8 +77,8 @@ def requestSnapshot(string key, boolean gzip, string etag) object (
   if gzip (
     gzipParam = "1"
   )
-  auto res = requests.get("http://127.0.0.1:18332/snap/" ++ url.escape(key), {params: {gzip: gzipParam}, headers: {"If-None-Match": etag, "Accept-Encoding": "identity"}})
-  return {status: res.status.toInt(), body: res.body.toStr(), encoding: (res.headers["Content-Encoding"] ?? "").toStr(), type: (res.headers["Content-Type"] ?? "").toStr(), etag: (res.headers["Etag"] ?? "").toStr()}
+  auto res = requests.get("http://127.0.0.1:18332/snap/" ++ url.escape(key), {query: {gzip: gzipParam}, headers: {"If-None-Match": etag, "Accept-Encoding": "identity"}})
+  return {status: res.status, body: res.body, encoding: res.headers["Content-Encoding"] ?? "", type: res.headers["Content-Type"] ?? "", etag: res.headers["Etag"] ?? ""}
 )
 
 string plain = "{\"targets\":[],\"meta\":{\"name\":\"burger 🍔\"}}"

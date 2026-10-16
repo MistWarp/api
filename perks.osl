@@ -32,11 +32,11 @@ def roturTierLookup(string userId) object (
 
 def profileRoturTier(string userId) object (
   object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if response.success and response.status.toInt() == 404 (
+  if response.status == 404 (
     // No such Rotur account, so no plan.
     return {reached: true, tier: "Free"}
   )
-  if !response.success or response.status.toInt() != 200 (
+  if response.status != 200 (
     return {reached: false, tier: "Free"}
   )
   auto parsed = json.parse(response.body, {type: "object"})
@@ -255,8 +255,8 @@ def perkPlan(string tier) object (
 
 def currentPerks(*serve.Context c) object (
   string tier = "Free"
-  if c.getBool("authenticated") (
-    tier = roturTierForUser(c.getString("userId"))
+  if contextBool(c, "authenticated") (
+    tier = roturTierForUser(contextString(c, "userId"))
   )
   return {tier: tier, mistwarp: mistwarpBenefitsForTier(tier), rotur: roturBenefitsForTier(tier)}
 )
@@ -310,7 +310,7 @@ def seenTierForProfile(object profile) string (
 )
 
 def handleRefreshPerks(*serve.Context c) (
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string key = "perks:" ++ userId
   if !remoteMilestoneChecks.has(key) (
     remoteMilestoneChecks.set(key, true)
@@ -318,7 +318,7 @@ def handleRefreshPerks(*serve.Context c) (
   )
   object current = currentPerks(c)
   boolean verified = paidPerksCache.has(userId)
-  object profile = loadProfile(c.getString("username"))
+  object profile = loadProfile(contextString(c, "username"))
   string seenTier = seenTierForProfile(profile)
   string upgradedFrom = pendingUpgradeFrom(seenTier, current.tier.toStr(), verified)
   if verified and upgradedFrom == "" and seenTier != current.tier.toStr() (
@@ -329,10 +329,10 @@ def handleRefreshPerks(*serve.Context c) (
 )
 
 def handlePerksSeen(*serve.Context c) (
-  string userId = c.getString("userId")
+  string userId = contextString(c, "userId")
   string tier = roturTierForUser(userId)
   if paidPerksCache.has(userId) (
-    object profile = loadProfile(c.getString("username"))
+    object profile = loadProfile(contextString(c, "username"))
     if seenTierForProfile(profile) != tier or !profile.contains("seenTier") (
       profile.seenTier = tier
       saveProfile(profile)

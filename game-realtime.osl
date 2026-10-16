@@ -13,7 +13,7 @@ def realtimePublicPlayer(*ws.Connection conn) object (
 
 def realtimeRoster(string roomKey) array (
   array players = []
-  for conn in gameRealtimeSocket.GetConnections() (
+  for conn in gameRealtimeSocket.Connections() (
     if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey (
       players.append(realtimePublicPlayer(conn))
     )
@@ -23,7 +23,7 @@ def realtimeRoster(string roomKey) array (
 
 def realtimeBroadcast(string roomKey, object message,*ws.Connection? except) (
   string encoded = json.stringify(message)
-  for conn in gameRealtimeSocket.GetConnections() (
+  for conn in gameRealtimeSocket.Connections() (
     if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey and (except == null or conn !== except) (
       conn.Send(encoded)
     )
@@ -31,7 +31,7 @@ def realtimeBroadcast(string roomKey, object message,*ws.Connection? except) (
 )
 
 def realtimeSendTo(string roomKey, string playerId, object message) boolean (
-  for conn in gameRealtimeSocket.GetConnections() (
+  for conn in gameRealtimeSocket.Connections() (
     if conn.Get("ready") == true and conn.Get("roomKey").toStr() == roomKey and conn.Get("playerId").toStr() == playerId (
       conn.Send(json.stringify(message))
       return true
@@ -118,7 +118,7 @@ def realtimeAuthenticate(*ws.Connection conn, string ticket) (
 def realtimeOnConnect(*ws.Connection conn) (
   conn.Set("ready", false)
   conn.Set("messageTimes", [])
-  string handshakeKey = conn.GetHeader("Sec-WebSocket-Key")
+  string handshakeKey = conn.Header("Sec-WebSocket-Key") ?? ""
   conn.Set("playerId", handshakeKey)
   if handshakeKey != "" and realtimeHandshakeCache.has(handshakeKey) (
     object identity = realtimeHandshakeCache.get(handshakeKey).assertElse(object, {})
@@ -132,7 +132,7 @@ def realtimeOnMessage(*ws.Connection conn, string raw) (
     realtimeError(conn, "message is too large")
     return
   )
-  auto parsed = json.parseObject(raw)
+  auto parsed = json.parse(raw, {type: "object"})
   if !parsed.isOk() (
     realtimeError(conn, "invalid message")
     return
@@ -258,9 +258,9 @@ def handleRealtimeHTTP(*serve.Context c) (
 
 def setupGameRealtime() (
   gameRealtimeSocket.AllowAllOrigins()
-  gameRealtimeSocket.OnConnect(realtimeOnConnect)
-  gameRealtimeSocket.OnMessage(realtimeOnMessage)
-  gameRealtimeSocket.OnDisconnect(realtimeOnDisconnect)
+  gameRealtimeSocket.On("connect", realtimeOnConnect)
+  gameRealtimeSocket.On("message", realtimeOnMessage)
+  gameRealtimeSocket.On("disconnect", realtimeOnDisconnect)
   app.WS("/v1/connect", gameRealtimeSocket)
   app.GET("/v1/connect", handleRealtimeHTTP)
 )

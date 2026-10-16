@@ -79,11 +79,11 @@ def projectOwnerBanned(object project) boolean (
 )
 
 def projectHiddenFrom(object project,*serve.Context c) boolean (
-  return bannedProjectHidden(bannedOwners(), project, c.getBool("isAdmin"))
+  return bannedProjectHidden(bannedOwners(), project, contextBool(c, "isAdmin"))
 )
 
 def projectsVisibleTo(array entries,*serve.Context c) array (
-  return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), normalizeUsername(c.getString("username")), c.getString("userId"), c.getBool("isAdmin"))
+  return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), normalizeUsername(contextString(c, "username")), contextString(c, "userId"), contextBool(c, "isAdmin"))
 )
 
 // For lists that are cached publicly, so never differ for admins.
@@ -347,7 +347,7 @@ def handleListAdmins(*serve.Context c) (
 )
 
 def handleAddAdmin(*serve.Context c) (
-  if !isSuperAdmin(c.getString("username")) (
+  if !isSuperAdmin(contextString(c, "username")) (
     c.forbidden("only super admins can manage admins")
     return
   )
@@ -368,7 +368,7 @@ def handleAddAdmin(*serve.Context c) (
 )
 
 def handleRemoveAdmin(*serve.Context c) (
-  if !isSuperAdmin(c.getString("username")) (
+  if !isSuperAdmin(contextString(c, "username")) (
     c.forbidden("only super admins can manage admins")
     return
   )
@@ -398,7 +398,7 @@ def handleBanUser(*serve.Context c) (
     c.badRequest("cannot ban an admin")
     return
   )
-  if !banUser(name, reason, c.getString("username")) (
+  if !banUser(name, reason, contextString(c, "username")) (
     c.badRequest("could not ban that user")
     return
   )
@@ -571,7 +571,7 @@ def handleAdminStats(*serve.Context c) (
       )
     )
   )
-  array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+  array diagnostics = diagnosticDocs.where("created", ">=", since).all()
   object loadsByDay = {}
   object startsByDay = {}
   object crashesByDay = {}
@@ -658,7 +658,7 @@ def handleAdminStats(*serve.Context c) (
       openReports += 1
     )
   )
-  number openErrors = errorDocs.where("resolved", db.equal, false).count()
+  number openErrors = errorDocs.where("resolved", "==", false).count()
   object banData = loadBans()
   object bans = banData.bans
   number bannedUsers = bans.getKeys().len
@@ -750,7 +750,7 @@ def handlePublicStats(*serve.Context c) (
   object startsByDay = {}
   number totalLoads = 0
   number totalStarts = 0
-  array diagnostics = diagnosticDocs.where("created", db.greaterEqual, since).all()
+  array diagnostics = diagnosticDocs.where("created", ">=", since).all()
   for i diagnostics.len (
     object diagnostic = diagnostics[i].assert(object)
     string day = (diagnostic.created.toNum() / 86400000).toInt().toStr()
@@ -846,7 +846,7 @@ def handleReportAction(*serve.Context c) (
       c.notFound("project not found")
       return
     )
-    hideProjectForModeration(hideResult.project.assert(object), hideReason, c.getString("username"))
+    hideProjectForModeration(hideResult.project.assert(object), hideReason, contextString(c, "username"))
   )
   if action == "unshare_project" (
     auto result = loadProject(found.target.toStr())
@@ -881,7 +881,7 @@ def handleReportAction(*serve.Context c) (
     if body.contains("reason") and body.reason != null (
       banReason = body.reason.toStr().strip()
     )
-    banUser(name, banReason, c.getString("username"))
+    banUser(name, banReason, contextString(c, "username"))
   )
   if action == "warn_user" (
     string name = reportTargetUser(found)
@@ -900,7 +900,7 @@ def handleReportAction(*serve.Context c) (
     if reason == "" (
       reason = "report " ++ id
     )
-    setStanding(name, "warning", reason, c.getString("username"))
+    setStanding(name, "warning", reason, contextString(c, "username"))
     if found.type.toStr() == "project" (
       auto pr = loadProject(found.target.toStr())
       if pr.ok (
@@ -923,7 +923,7 @@ def handleReportAction(*serve.Context c) (
     object currentReport = currentReports[i].assert(object)
     if currentReport.id.toStr() == id (
       currentReport.resolved = true
-      currentReport.resolvedBy = c.getString("username")
+      currentReport.resolvedBy = contextString(c, "username")
       currentReport.action = action
       currentReport.resolvedAt = timestamp
     )
@@ -938,6 +938,6 @@ def handleReportAction(*serve.Context c) (
     maybeClearProjectEvidence(found.target.toStr())
   )
   closeRoturReport(found, if action == "dismiss" then "dismissed" else "resolved")
-  addNotification(found.reporter.toStr(), c.getString("username"), "report_update", {action: action, reportType: found.type})
+  addNotification(found.reporter.toStr(), contextString(c, "username"), "report_update", {action: action, reportType: found.type})
   c.json(200, {ok: true})
 )
