@@ -22,8 +22,6 @@ def thumbnailPath(string id) string (
   return thumbnailsDir ++ id ++ ".png"
 )
 
-// A banned user's project thumbnails 404 like the project does, and a private
-// project's only open with its thumbnail key. Space thumbnails stay public.
 def handleGetThumbnail(*serve.Context c) (
   string file = c.param("file")
   string id = file.replace(".png", "")
@@ -33,13 +31,13 @@ def handleGetThumbnail(*serve.Context c) (
   )
   boolean isPublic = id.startsWith("space-")
   if !isPublic (
-    object entry = (projectSearchDocs.findById(id) ?? {})
-    if entry.len > 0 and projectOwnerBanned(entry) (
+    object access = thumbnailAccess(id)
+    if !access.found or access.ownerBanned (
       thumbnailNotFound(c)
       return
     )
-    isPublic = entry.len > 0 and thumbnailIsPublic(projectVisibility(entry), false)
-    if !isPublic and !thumbnailKeyMatches(thumbnailSecret, id, (c.query("k") ?? "")) (
+    isPublic = access.isPublic
+    if !isPublic and !thumbnailKeyMatches(thumbnailSecret, id, access.viewKey.toStr(), (c.query("k") ?? "")) (
       thumbnailNotFound(c)
       return
     )
@@ -50,6 +48,26 @@ def handleGetThumbnail(*serve.Context c) (
   c.file(thumbnailsDir ++ file)
 )
 
+def thumbnailAccess(string id) object (
+  object entry = (projectSearchDocs.findById(id) ?? {})
+  if entry.len > 0 and projectOwnerBanned(entry) (
+    return {found: true, ownerBanned: true, isPublic: false, viewKey: ""}
+  )
+  if entry.len > 0 and thumbnailIsPublic(projectVisibility(entry), false) (
+    return {found: true, ownerBanned: false, isPublic: true, viewKey: ""}
+  )
+  auto loaded = loadProject(id)
+  if loaded.ok (
+    object project = loaded.project.assert(object)
+    return {found: true, ownerBanned: projectOwnerBanned(project), isPublic: thumbnailIsPublic(projectVisibility(project), false), viewKey: projectViewKey(project)}
+  )
+  auto trashed = readFile(trashDir ++ id ++ ".json")
+  if trashed.ok (
+    return {found: true, ownerBanned: false, isPublic: false, viewKey: projectViewKey(trashed.data.assert(object))}
+  )
+  return {found: false, ownerBanned: false, isPublic: false, viewKey: ""}
+)
+
 def thumbnailNotFound(*serve.Context c) (
   c.setHeader("Cache-Control", "no-store")
   c.setHeader("CDN-Cache-Control", "no-store")
@@ -57,21 +75,47 @@ def thumbnailNotFound(*serve.Context c) (
 )
 
 def thumbUrlFor(object project) string (
-  return thumbUrlForChain(project, 0, !thumbnailIsPublic(projectVisibility(project), false))
+  return thumbUrlForChain(project, 0)
 )
 
-def ownerThumbUrlFor(object project) string (
-  return thumbUrlForChain(project, 0, true)
+def viewerThumbUrlFor(object project) string (
+  if thumbnailIsPublic(projectVisibility(project), false) (
+    return thumbUrlFor(project)
+  )
+  return keyedThumbUrlFor(project)
 )
 
-def thumbUrlForChain(object project, number hops, boolean keyed) string (
+def keyedThumbUrlFor(object project) string (
+  string id = project.id.toStr()
+  if !fs.exists(thumbnailPath(id)) (
+    return thumbUrlFor(project)
+  )
+  return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr() ++ "&k=" ++ thumbnailKey(thumbnailSecret, id, projectViewKey(project))
+)
+
+def viewerThumbEntries(array entries) array (
+  array out = []
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    auto loaded = {ok: false}
+    if !thumbnailIsPublic(projectVisibility(entry), false) (
+      loaded = loadProject(entry.id.toStr())
+    )
+    if loaded.ok (
+      object keyed = entry.clone()
+      keyed.thumbUrl = viewerThumbUrlFor(loaded.project.assert(object))
+      out.append(keyed)
+    ) else (
+      out.append(entry)
+    )
+  )
+  return out
+)
+
+def thumbUrlForChain(object project, number hops) string (
   string id = project.id.toStr()
   if fs.exists(thumbnailPath(id)) (
-    string url = appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
-    if keyed (
-      url ++= "&k=" ++ thumbnailKey(thumbnailSecret, id)
-    )
-    return url
+    return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
   )
 
   if hops >= 100 or !project.contains("remixParent") or project.remixParent.toStr() == "" (
@@ -90,7 +134,7 @@ def thumbUrlForChain(object project, number hops, boolean keyed) string (
   if projectPrice(parentProject) > 0 or !thumbnailIsPublic(projectVisibility(parentProject), projectOwnerBanned(parentProject)) (
     return ""
   )
-  return thumbUrlForChain(parentProject, hops + 1, false)
+  return thumbUrlForChain(parentProject, hops + 1)
 )
 
 def isUntouchedRemix(object project) boolean (

@@ -10,12 +10,12 @@ def loadThumbnailSecret(string path) string (
   return secret
 )
 
-def thumbnailKey(string secret, string id) string (
-  return crypto.hmac("sha256", secret, "thumbnail:" ++ id).trim(1, 24)
+def thumbnailKey(string secret, string id, string viewKey) string (
+  return crypto.hmac("sha256", secret, "thumbnail:" ++ id ++ ":" ++ viewKey).trim(1, 24)
 )
 
-def thumbnailKeyMatches(string secret, string id, string given) boolean (
-  return secret != "" and given != "" and crypto.constantTimeCompare(given, thumbnailKey(secret, id))
+def thumbnailKeyMatches(string secret, string id, string viewKey, string given) boolean (
+  return secret != "" and given != "" and crypto.constantTimeCompare(given, thumbnailKey(secret, id, viewKey))
 )
 
 def thumbnailIsPublic(string visibility, boolean ownerBanned) boolean (
