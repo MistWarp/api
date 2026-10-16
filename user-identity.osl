@@ -889,6 +889,7 @@ def reconcileLoop() (
     reconcileDeletedUsers()
     syncRoturBans()
     fileUnfiledRoturReports()
+    syncEscalatedRoturReports()
     wait 300
   )
 )
