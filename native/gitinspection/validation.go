@@ -2,6 +2,8 @@ package gitinspection
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,6 +100,7 @@ func repositoryHistory(a archive, refs map[string]string, branch string) ([]any,
 	sort.Strings(branches[1:])
 	seen := map[string]map[string]any{}
 	trees := map[string]bool{}
+	checked := map[string]verifiedTree{}
 	for _, b := range branches {
 		queue := []string{refs[b]}
 		visited := map[string]bool{}
@@ -117,7 +120,7 @@ func repositoryHistory(a archive, refs map[string]string, branch string) ([]any,
 				return nil, nil, fmt.Errorf("missing or invalid commit %s", oid)
 			}
 			if !trees[c.Tree] {
-				if _, ok := a.walkTree(c.Tree); !ok {
+				if !a.verifyTree(c.Tree, checked) {
 					return nil, nil, fmt.Errorf("missing or invalid tree/blob for %s", oid)
 				}
 				trees[c.Tree] = true
@@ -141,6 +144,93 @@ func repositoryHistory(a archive, refs map[string]string, branch string) ([]any,
 		logs = append(logs, map[string]any{"branch": b, "oids": oids})
 	}
 	return commits, map[string]any{"branches": branches, "branchLogs": logs, "nodes": nodes}, nil
+}
+
+type verifiedTree struct {
+	files  int
+	height int
+}
+
+func (a archive) verifyTree(rootOID string, checked map[string]verifiedTree) bool {
+	active := map[string]bool{}
+	var walk func(string, int) (verifiedTree, bool)
+	walk = func(treeOID string, depth int) (verifiedTree, bool) {
+		if known, ok := checked[treeOID]; ok {
+			return known, depth+known.height <= maxTreeDepth
+		}
+		if depth > maxTreeDepth || active[treeOID] {
+			return verifiedTree{}, false
+		}
+		active[treeOID] = true
+		defer delete(active, treeOID)
+		kind, body, ok := a.readObject(treeOID)
+		if !ok || kind != "tree" {
+			return verifiedTree{}, false
+		}
+		result := verifiedTree{}
+		position := 0
+		for position < len(body) {
+			space := bytes.IndexByte(body[position:], ' ')
+			if space < 1 {
+				return verifiedTree{}, false
+			}
+			space += position
+			nul := bytes.IndexByte(body[space+1:], 0)
+			if nul < 1 {
+				return verifiedTree{}, false
+			}
+			nul += space + 1
+			if nul+21 > len(body) {
+				return verifiedTree{}, false
+			}
+			mode := string(body[position:space])
+			name := string(body[space+1 : nul])
+			if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+				return verifiedTree{}, false
+			}
+			childOID := hex.EncodeToString(body[nul+1 : nul+21])
+			position = nul + 21
+			if mode == "40000" || mode == "040000" {
+				child, ok := walk(childOID, depth+1)
+				if !ok {
+					return verifiedTree{}, false
+				}
+				result.files += child.files
+				result.height = max(result.height, child.height+1)
+			} else {
+				if !a.isBlob(childOID, checked) {
+					return verifiedTree{}, false
+				}
+				result.files++
+			}
+			if result.files > maxTreeFiles {
+				return verifiedTree{}, false
+			}
+		}
+		if position != len(body) {
+			return verifiedTree{}, false
+		}
+		checked[treeOID] = result
+		return result, true
+	}
+	_, ok := walk(rootOID, 0)
+	return ok
+}
+
+func (a archive) isBlob(oid string, checked map[string]verifiedTree) bool {
+	key := "blob:" + oid
+	if _, ok := checked[key]; ok {
+		return true
+	}
+	if a.trusted[oid] {
+		if a.objectKind(oid) != "blob" {
+			return false
+		}
+	} else if kind, _, ok := a.readObject(oid); !ok || kind != "blob" {
+		return false
+	}
+	checked[key] = verifiedTree{}
+	return true
 }
 
 // Full archives must be independently complete. Deltas are validated against
@@ -173,10 +263,12 @@ func ValidateHistoryArchive(basePath, incomingPath, outputPath, currentHead, for
 		defer br.Close()
 		oldRefs = brefs
 		if delta {
+			a.trusted = map[string]bool{}
 			for n, f := range bf {
 				if strings.HasPrefix(n, ".git/objects/") && files[n] == nil {
 					files[n] = f
 					a.objects[n] = f
+					a.trusted[strings.ReplaceAll(strings.TrimPrefix(n, ".git/objects/"), "/", "")] = true
 				}
 			}
 			for b, h := range brefs {
@@ -253,15 +345,14 @@ func writeValidatedArchive(path string, files map[string]*zip.File, m map[string
 		if n == "mwp.json" || n == ".git/shallow" || n == ".git/HEAD" {
 			continue
 		}
-		s, e := f.Open()
+		s, e := f.OpenRaw()
 		if e != nil {
 			return e
 		}
-		d, e := w.CreateHeader(&f.FileHeader)
+		d, e := w.CreateRaw(&f.FileHeader)
 		if e == nil {
 			_, e = io.Copy(d, s)
 		}
-		s.Close()
 		if e != nil {
 			return e
 		}

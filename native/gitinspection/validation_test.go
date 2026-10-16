@@ -353,3 +353,20 @@ func TestFullHistoryReplacementDropsOldBranches(t *testing.T) {
 		}
 	}
 }
+func TestDeltaRejectsBaseTreeUsedAsBlob(t *testing.T) {
+	r := newTestRepository()
+	blob := r.object("blob", []byte("old"))
+	tree := r.tree("main.fractch", blob)
+	base := r.commit(tree, "", "base")
+	stored := historyFixture(t, r, map[string]string{"main": base}, "main", "", "")
+	delta := newTestRepository()
+	for _, target := range []string{blob, tree} {
+		next := delta.tree("main.fractch", target)
+		head := delta.commit(next, base, "save")
+		incoming := historyFixture(t, delta, map[string]string{"main": head}, "main", base, "")
+		result := ValidateHistoryArchive(stored, incoming, filepath.Join(t.TempDir(), "out.mwp"), base, base, "")
+		if result.OK != (target == blob) {
+			t.Fatalf("base object %s accepted=%v", target[:8], result.OK)
+		}
+	}
+}
