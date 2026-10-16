@@ -288,7 +288,7 @@ def handleCreateReport(*serve.Context c) (
   if reportType == "chat" and body.contains("player") and body.player != null (
     reportedPlayer = body.player.toStr().strip().replace("@", "")
     if reportedPlayer != "" and !regex.match("^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$", reportedPlayer) (
-      c.badRequest("enter the player's username, or leave it empty")
+      c.badRequest("Enter the player's username, or leave it empty.")
       return
     )
   )
