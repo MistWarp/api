@@ -2133,10 +2133,13 @@ def handleGetProject(*serve.Context c) (
   object response = projectResponse(project, c)
   // Admins reviewing a banned owner's project play the saved JSON, which
   // takes the key; the release route doesn't.
-  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true (
+  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and response.locked != true (
     object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
     if release.len > 0 and release.contains("jsonUrl") (
       response.projectJsonUrl = release.jsonUrl
+      if projectPrice(project) > 0 (
+        response.projectJsonUrl = release.jsonUrl.toStr() ++ "?k=" ++ projectViewKey(project)
+      )
       response.releaseVersion = release.version
       response.releaseChannel = release.channel
     )

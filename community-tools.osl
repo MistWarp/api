@@ -2226,7 +2226,7 @@ def handleGetReleaseProjectJson(*serve.Context c) (
     return
   )
   auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  if !result.ok or !canViewProjectJson(result.project.assert(object), c) (
     c.notFound("release not found")
     return
   )
