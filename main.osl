@@ -575,6 +575,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/admin/reports/evidence/:id", requireAdmin, handleGetReportEvidence)
   api.POST("/admin/reports/resolve", requireAdmin, handleResolveReport)
   api.POST("/admin/reports/action", requireAdmin, handleReportAction)
+  api.POST("/admin/reports/escalate", requireAdmin, handleEscalateReport)
   api.GET("/admin/admins", requireAdmin, handleListAdmins)
   api.POST("/admin/admins", requireAdmin, handleAddAdmin)
   api.POST("/admin/admins/remove", requireAdmin, handleRemoveAdmin)
