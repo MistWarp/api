@@ -198,6 +198,9 @@ def handleSetPlayerContactLocked(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
+  if playerContactDeclared(projectPlayerContactDeclaration(project)) (
+    void playerContactNoticeDocs.deleteOne({_id: "player-contact-notified:" ++ project.id.toStr() ++ ":" ++ normalizeUsername(project.owner.toStr())})
+  )
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
 
