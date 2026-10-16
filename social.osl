@@ -713,6 +713,9 @@ def handleSetLibraryProjectVisibility(*serve.Context c) (
 def activityProjectVisibility(string projectId) string (
   object project = (projectSearchDocs.findById(projectId) ?? {})
   if project.len > 0 and projectIsViewable(project) (
+    if (project.playerContactMissing ?? false) == true (
+      return "unlisted"
+    )
     return projectVisibility(project)
   )
   return "private"

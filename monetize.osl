@@ -102,6 +102,9 @@ def canSeeInsideProject(object project,*serve.Context c) boolean (
   if contextBool(c, "authenticated") and contextBool(c, "isAdmin") (
     return true
   )
+  if studentBlockedFromPlayerContact(project, c) (
+    return false
+  )
   if projectOwnerBanned(project) (
     return false
   )
@@ -130,7 +133,7 @@ def canSeeInsideProject(object project,*serve.Context c) boolean (
 )
 
 def canRemixProject(object project,*serve.Context c) boolean (
-  if !sourcePolicyAllowsViewer(project, c) (
+  if !sourcePolicyAllowsViewer(project, c) or studentBlockedFromPlayerContact(project, c) (
     return false
   )
   if !projectRemixable(project) (

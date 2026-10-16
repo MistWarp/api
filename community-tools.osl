@@ -901,14 +901,20 @@ def spaceListResponse(object space,*serve.Context c) object (
   string thumbnailURL = spaceThumbnailUrl(space)
   number projectCount = 0
   boolean canManage = canManageSpace(space, c)
+  array candidates = []
   for i ids.len (
     object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
     boolean hidden = projectHiddenFrom(project, c)
     if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
-      projectCount += 1
-      if thumbnailURL == "" and project.contains("thumbUrl") (
-        thumbnailURL = project.thumbUrl.toStr()
-      )
+      candidates.append(project)
+    )
+  )
+  array listed = if canManage then candidates else projectsVisibleTo(candidates, c)
+  for i listed.len (
+    object project = listed[i].assertElse(object, {})
+    projectCount += 1
+    if thumbnailURL == "" and project.contains("thumbUrl") (
+      thumbnailURL = project.thumbUrl.toStr()
     )
   )
   object response = {

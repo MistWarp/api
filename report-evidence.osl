@@ -42,7 +42,7 @@ def projectHasOpenReports(string projectId) boolean (
   array reports = loadReports()
   for i reports.len (
     object r = reports[i]
-    if r.type.toStr() == "project" and r.target.toStr() == projectId and r.resolved != true (
+    if (r.type.toStr() == "project" or r.type.toStr() == "chat") and r.target.toStr() == projectId and r.resolved != true (
       return true
     )
   )

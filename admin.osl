@@ -934,7 +934,7 @@ def handleReportAction(*serve.Context c) (
     c.internalError("could not update report")
     return
   )
-  if found.type.toStr() == "project" (
+  if found.type.toStr() == "project" or found.type.toStr() == "chat" (
     maybeClearProjectEvidence(found.target.toStr())
   )
   closeRoturReport(found, if action == "dismiss" then "dismissed" else "resolved")

@@ -284,6 +284,13 @@ def handleCreateReport(*serve.Context c) (
     c.badRequest("project not found")
     return
   )
+  if reportType == "chat" (
+    auto chatProject = loadProject(target)
+    if !chatProject.ok or !playerChatReportAllowed(chatProject.project.assert(object), c) (
+      c.badRequest("This project doesn't let players talk to each other. Report the project instead.")
+      return
+    )
+  )
   string reportedPlayer = ""
   if reportType == "chat" and body.contains("player") and body.player != null (
     reportedPlayer = body.player.toStr().strip().replace("@", "")
@@ -512,7 +519,7 @@ def handleResolveReport(*serve.Context c) (
       report.resolved = true
       found = true
       resolved = report
-      if report.type.toStr() == "project" (
+      if report.type.toStr() == "project" or report.type.toStr() == "chat" (
         projectTarget = report.target.toStr()
       )
     )

@@ -835,6 +835,7 @@ def handleMergePull(*serve.Context c) (
     if source.contains("assetBytes") (
       target.assetBytes = source.assetBytes
     )
+    boolean connectedBefore = projectConnectsPlayers(target)
     if source.contains("extensions") (
       target.extensions = source.extensions
     ) else (
@@ -848,6 +849,9 @@ def handleMergePull(*serve.Context c) (
       return
     )
     upsertIndexEntry(target)
+    if !connectedBefore (
+      notifyPlayerContactNeeded(target)
+    )
     if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
       sync.unlock("project-history-" ++ target.id.toStr())
       c.internalError("the project merged, but the pull request could not be closed")

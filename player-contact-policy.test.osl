@@ -1,4 +1,5 @@
 import "std:testing"
+import "std:url"
 import "./player-contact-policy.osl"
 
 testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/cloudlink.js") == "CloudLink V4", "CloudLink from the TurboWarp gallery connects players")
@@ -13,6 +14,22 @@ testing.assert(playerContactGalleryName("https://extensions.mistium.com/files/ro
 testing.assert(playerContactGalleryName("https://extensions.mistium.com/featured/Shaders.js") == "", "other gallery extensions do not connect players")
 testing.assert(playerContactGalleryName("https://evil.example/extensions.turbowarp.org/cloudlink.js") == "", "only the gallery origins count")
 testing.assert(playerContactGalleryName("data:application/javascript,cloudlink.js") == "", "data URLs are never gallery extensions")
+testing.assert(playerContactGalleryName("https://EXTENSIONS.turbowarp.org/cloudlink.js") == "CloudLink V4", "the host is matched without case")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/./cloudlink.js") == "CloudLink V4", "dot segments are removed")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org//cloudlink.js") == "CloudLink V4", "repeated slashes are collapsed")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/%63loudlink.js") == "CloudLink V4", "escaped letters are decoded")
+testing.assert(playerContactGalleryName("http://extensions.turbowarp.org/cloudlink.js") == "", "only https gallery URLs count")
+
+testing.assert(playerContactIdName("cloudlink") == "CloudLink", "the CloudLink extension ID connects players wherever it is hosted")
+testing.assert(playerContactIdName("mistiumoriginchats") == "OriginChats", "the OriginChats ID connects players")
+testing.assert(playerContactIdName("pen") == "", "other IDs do not")
+testing.assert(playerContactIdName("") == "", "no ID does not")
+testing.assert(playerContactFileName("https://extensions.turbowarp.org/godslayerakp/http.js") == "http", "a flagged gallery extension is named after its file")
+for i playerContactGalleryUrls.len (
+  testing.assert(playerContactGalleryName(playerContactGalleryUrls[i].toStr()) != "", "every known gallery URL is recognised")
+)
+testing.assert(playerContactBuiltInHash("https://extensions.turbowarp.org/cloudlink.js".hashSHA256()), "gallery records are recognised by their URL hash")
+testing.assert(!playerContactBuiltInHash("https://extensions.turbowarp.org/pen.js".hashSHA256()), "other gallery records are not")
 
 testing.assert(playerContactContactValid("me@example.com"), "an email address is a contact")
 testing.assert(playerContactContactValid("  https://discord.gg/abc  "), "surrounding spaces are trimmed")

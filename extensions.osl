@@ -142,6 +142,7 @@ def extensionStatus(object policy, string hash, string sourceUrl) string (
 
 def readProjectExtensionUrls(*json.Stream stream) object (
   object unique = {}
+  object idsByUrl = {}
   number found = 0
   string state = ""
   number limit = 0
@@ -161,6 +162,7 @@ def readProjectExtensionUrls(*json.Stream stream) object (
         for i ids.len (
           string extensionUrl = entries[ids[i].toStr()].toStr()
           unique[extensionUrl] = true
+          idsByUrl[extensionUrl] = ids[i].toStr()
         )
         state = ""
       ) else (
@@ -188,7 +190,7 @@ def readProjectExtensionUrls(*json.Stream stream) object (
   if urls.len > maxProjectExtensions (
     return {ok: false, error: "too many custom extensions"}
   )
-  return {ok: true, urls: urls}
+  return {ok: true, urls: urls, ids: idsByUrl}
 )
 
 def inspectProjectExtensionUrls(string jsonPath) object (
@@ -222,6 +224,7 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     return parsed
   )
   array urls = inspected.urls.assert(array)
+  object idsByUrl = (inspected.ids ?? {}).assertElse(object, {})
   object sources = parsed.sources.assert(object)
   object policy = loadExtensionPolicy()
   array extensions = []
@@ -231,8 +234,9 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     if !extensionUrl.startsWith("https://") and !extensionUrl.startsWith("http://") and !extensionUrl.startsWith("data:") (
       return {ok: false, error: "custom extension URL cannot be saved: " ++ extensionUrl}
     )
+    string extensionId = (idsByUrl[extensionUrl] ?? "").toStr()
     if isGalleryExtensionUrl(extensionUrl) (
-      extensions.append({url: extensionUrl, hash: extensionUrl.hashSHA256(), gallery: true})
+      extensions.append({url: extensionUrl, hash: extensionUrl.hashSHA256(), gallery: true, id: extensionId})
       continue
     )
     if !sources.contains(extensionUrl) (
@@ -254,7 +258,7 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     if status == "blocked" (
       return {ok: false, error: "this project uses a blocked extension: " ++ extensionUrl, code: "blocked_extension"}
     )
-    extensions.append({url: extensionUrl, hash: hash})
+    extensions.append({url: extensionUrl, hash: hash, id: extensionId})
   )
   return {ok: true, extensions: extensions, sources: sources}
 )
@@ -628,7 +632,7 @@ def handleAdminGetExtensions(*serve.Context c) (
         if gallery (
           status = "trusted"
         )
-        boolean connectsPlayersBuiltIn = false
+        boolean connectsPlayersBuiltIn = playerContactBuiltInHash(hash)
         for j urls.len (
           if playerContactGalleryName(urls[j].toStr()) != "" (
             connectsPlayersBuiltIn = true
@@ -797,12 +801,17 @@ def handleAdminIndexProjectExtensions(*serve.Context c) (
     c.internalError("could not store extension sources")
     return
   )
+  boolean connectedBefore = projectConnectsPlayers(project)
   project.extensions = extensions
   project.extensionsIndexed = true
   project.delete("pendingExtensionUrls")
   if !saveProject(project) (
     c.internalError("could not save project extension index")
     return
+  )
+  upsertIndexEntry(project)
+  if !connectedBefore (
+    notifyPlayerContactNeeded(project)
   )
   c.json(200, {ok: true})
 )

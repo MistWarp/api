@@ -15,23 +15,55 @@ object playerContactMistiumNames = {
   "Cloudlink4_Improved.js": "Cloudlink4_Improved"
 }
 
+object playerContactIdNames = {
+  "cloudlink": "CloudLink",
+  "gsaWebsocket": "WebSocket",
+  "webSocketPlus": "WebsocketPlus",
+  "mistiumoriginchats": "OriginChats",
+  "roturEXT": "Rotur",
+  "roturCall": "roturVoice"
+}
+
+array playerContactGalleryUrls = [
+  "https://extensions.turbowarp.org/cloudlink.js",
+  "https://extensions.turbowarp.org/godslayerakp/ws.js",
+  "https://extensions.mistium.com/featured/WebsocketPlus.js",
+  "https://extensions.mistium.com/featured/OriginChats.js",
+  "https://extensions.mistium.com/featured/Rotur.js",
+  "https://extensions.mistium.com/featured/roturVoice.js",
+  "https://extensions.mistium.com/files/roturVoice%20Advanced.js",
+  "https://extensions.mistium.com/files/Cloudlink4_Improved.js"
+]
+
 array playerChatOwnerCategories = ["spam", "harassment", "hate", "scam", "other"]
 
-def playerContactUrlPath(string extensionUrl, string origin) string (
-  if !extensionUrl.startsWith(origin) (
+def playerContactUrlPath(string extensionUrl, string host) string (
+  if !url.isValid(extensionUrl) (
     return ""
   )
-  string rest = extensionUrl.replace(origin, "")
-  string path = rest.split("?")[1].split("#")[1]
-  return path.replace("%20", " ")
+  object parts = url.parse(extensionUrl)
+  if (parts.scheme ?? "").toLower() != "https" or (parts.hostname ?? "").toLower() != host (
+    return ""
+  )
+  string path = (parts.path ?? "")
+  while path.contains("/./") (
+    path = path.replace("/./", "/")
+  )
+  while path.contains("//") (
+    path = path.replace("//", "/")
+  )
+  if path.startsWith("/") (
+    path = path.trim(2, path.len)
+  )
+  return path
 )
 
 def playerContactGalleryName(string extensionUrl) string (
-  string turboWarpPath = playerContactUrlPath(extensionUrl, "https://extensions.turbowarp.org/")
+  string turboWarpPath = playerContactUrlPath(extensionUrl, "extensions.turbowarp.org")
   if turboWarpPath != "" and playerContactTurboWarpNames.contains(turboWarpPath) (
     return playerContactTurboWarpNames[turboWarpPath].toStr()
   )
-  string mistiumPath = playerContactUrlPath(extensionUrl, "https://extensions.mistium.com/")
+  string mistiumPath = playerContactUrlPath(extensionUrl, "extensions.mistium.com")
   if mistiumPath != "" (
     array parts = mistiumPath.split("/")
     string fileName = parts[parts.len].toStr()
@@ -40,6 +72,34 @@ def playerContactGalleryName(string extensionUrl) string (
     )
   )
   return ""
+)
+
+def playerContactIdName(string extensionId) string (
+  if extensionId != "" and playerContactIdNames.contains(extensionId) (
+    return playerContactIdNames[extensionId].toStr()
+  )
+  return ""
+)
+
+def playerContactFileName(string extensionUrl) string (
+  if !url.isValid(extensionUrl) (
+    return ""
+  )
+  array parts = (url.parse(extensionUrl).path ?? "").split("/")
+  string fileName = parts[parts.len].toStr()
+  if fileName.endsWith(".js") (
+    fileName = fileName.trim(1, fileName.len - 3)
+  )
+  return fileName
+)
+
+def playerContactBuiltInHash(string hash) boolean (
+  for i playerContactGalleryUrls.len (
+    if playerContactGalleryUrls[i].toStr().hashSHA256() == hash (
+      return true
+    )
+  )
+  return false
 )
 
 def playerContactContactValid(string contact) boolean (

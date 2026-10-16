@@ -357,5 +357,6 @@ def handleRestoreHiddenProject(*serve.Context c) (
   saveProject(project)
   upsertIndexEntry(project)
   addNotification(project.owner.toStr(), contextString(c, "username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
+  notifyPlayerContactNeeded(project)
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )
