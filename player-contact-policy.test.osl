@@ -19,6 +19,12 @@ testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/./clou
 testing.assert(playerContactGalleryName("https://extensions.turbowarp.org//cloudlink.js") == "CloudLink V4", "repeated slashes are collapsed")
 testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/%63loudlink.js") == "CloudLink V4", "escaped letters are decoded")
 testing.assert(playerContactGalleryName("http://extensions.turbowarp.org/cloudlink.js") == "", "only https gallery URLs count")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/a/../cloudlink.js") == "CloudLink V4", "parent segments are resolved")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/a/%2e%2e/cloudlink.js") == "CloudLink V4", "escaped parent segments are resolved")
+testing.assert(playerContactGalleryName("https://extensions.turbowarp.org/../../cloudlink.js") == "CloudLink V4", "parent segments stop at the root")
+testing.assert(playerContactContactIsLink("https://example.com/chat"), "an https link is a link")
+testing.assert(!playerContactContactIsLink("me@example.com"), "an email address is not a link")
+testing.assert(!playerContactContactIsLink("http://example.com"), "only https links count")
 
 testing.assert(playerContactIdName("cloudlink") == "CloudLink", "the CloudLink extension ID connects players wherever it is hosted")
 testing.assert(playerContactIdName("mistiumoriginchats") == "OriginChats", "the OriginChats ID connects players")

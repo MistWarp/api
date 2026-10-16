@@ -52,10 +52,18 @@ def playerContactUrlPath(string extensionUrl, string host) string (
   while path.contains("//") (
     path = path.replace("//", "/")
   )
-  if path.startsWith("/") (
-    path = path.trim(2, path.len)
+  array kept = []
+  for segment in path.split("/") (
+    string part = segment
+    if part == ".." (
+      if kept.len > 0 (
+        kept.pop()
+      )
+    ) else if part != "" and part != "." (
+      kept.append(part)
+    )
   )
-  return path
+  return kept.join("/")
 )
 
 def playerContactGalleryName(string extensionUrl) string (
@@ -100,6 +108,11 @@ def playerContactBuiltInHash(string hash) boolean (
     )
   )
   return false
+)
+
+def playerContactContactIsLink(string contact) boolean (
+  string trimmed = contact.strip()
+  return trimmed.toLower().startsWith("https://") and !trimmed.contains(" ")
 )
 
 def playerContactContactValid(string contact) boolean (

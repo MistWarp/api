@@ -120,10 +120,10 @@ def notifyPlayerContactNeeded(object project) (
     return
   )
   string notifiedId = "player-contact-notified:" ++ project.id.toStr() ++ ":" ++ normalizeUsername(project.owner.toStr())
-  if (diagnosticDocs.findById(notifiedId) ?? {}).len > 0 (
+  if (playerContactNoticeDocs.findById(notifiedId) ?? {}).len > 0 (
     return
   )
-  putDocument(diagnosticDocs, notifiedId, {_id: notifiedId, projectId: project.id.toStr(), notifiedAt: timestamp})
+  putDocument(playerContactNoticeDocs, notifiedId, {_id: notifiedId, projectId: project.id.toStr(), notifiedAt: timestamp})
   array names = []
   array services = projectPlayerContactServices(project)
   for i services.len (
@@ -137,8 +137,11 @@ def notifyPlayerContactNeeded(object project) (
 
 def handleSetPlayerContact(*serve.Context c) (
   string lockName = "project-upload:" ++ c.param("id")
+  string historyLock = "project-history-" ++ c.param("id")
   sync.lock(lockName)
+  sync.lock(historyLock)
   handleSetPlayerContactLocked(c)
+  sync.unlock(historyLock)
   sync.unlock(lockName)
 )
 
@@ -149,8 +152,8 @@ def handleSetPlayerContactLocked(*serve.Context c) (
     return
   )
   object project = loaded.project.assert(object)
-  if !canEditProject(project, c) (
-    c.forbidden("not your project")
+  if projectRole(project, contextString(c, "username")) != "owner" (
+    c.forbidden("Only the project's owner can take responsibility for its chat.")
     return
   )
   if contextBool(c, "isStudent") (
@@ -162,6 +165,10 @@ def handleSetPlayerContactLocked(*serve.Context c) (
     string contact = (body.contact ?? "").toStr().strip()
     if !playerContactContactValid(contact) (
       c.badRequest("Add a contact for chat between 3 and 200 characters, on one line.")
+      return
+    )
+    if contextBool(c, "isMinor") and !playerContactContactIsLink(contact) (
+      c.badRequest("Use a website link for your chat contact, not an email address or a username.")
       return
     )
     if (body.termsVersion ?? 0).toNum() != playerContactTermsVersion (
@@ -196,14 +203,18 @@ def handleSetPlayerContactLocked(*serve.Context c) (
 
 def reindexPlayerContactProject(string projectId, boolean notify) boolean (
   string lockName = "project-upload:" ++ projectId
+  string historyLock = "project-history-" ++ projectId
   sync.lock(lockName)
+  sync.lock(historyLock)
   auto loaded = loadProject(projectId)
   if !loaded.ok (
+    sync.unlock(historyLock)
     sync.unlock(lockName)
     return false
   )
   object project = loaded.project.assert(object)
   upsertIndexEntry(project)
+  sync.unlock(historyLock)
   sync.unlock(lockName)
   boolean needed = projectVisibility(project) != "private" and projectPlayerContactMissing(project)
   if notify and needed (

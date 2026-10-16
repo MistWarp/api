@@ -871,6 +871,10 @@ def readAssignmentFields(*serve.Context c, object assignment, object body) boole
         c.badRequest("choose a starter project that you can edit")
         return false
       )
+      if projectLetsPlayersTalk(loaded.project.assert(object)) (
+        c.badRequest("Choose a starter project that doesn't let players talk to each other.")
+        return false
+      )
     )
     assignment.starterProjectId = starterId
   )
@@ -1115,6 +1119,11 @@ def handleStartAssignment(*serve.Context c) (
       return
     )
     object starterProject = starter.project.assert(object)
+    if projectLetsPlayersTalk(starterProject) (
+      sync.unlock(lockName)
+      c.json(409, {ok: false, code: "starter_connects_players", error: "The starter project for this assignment lets players talk to each other, so it can't be used in class. Ask your teacher."})
+      return
+    )
     if projectHasWorkspace(starterProject) (
       created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), title, "", true)
     ) else (

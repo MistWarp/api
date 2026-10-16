@@ -6,6 +6,7 @@
 *db.Collection releaseDocs = communityDb.collection("releases")
 *db.Collection previewDocs = communityDb.collection("previews")
 *db.Collection diagnosticDocs = communityDb.collection("diagnostics")
+*db.Collection playerContactNoticeDocs = communityDb.collection("player_contact_notices")
 *db.Collection errorDocs = communityDb.collection("site_errors")
 *db.Collection feedbackDocs = communityDb.collection("project_feedback")
 *db.Collection ideaDocs = communityDb.collection("roadmap_ideas")

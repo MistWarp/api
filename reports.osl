@@ -317,7 +317,8 @@ def handleCreateReport(*serve.Context c) (
   if reportedPlayer != "" (
     report.player = reportedPlayer
   )
-  // Who it's about comes from the content, never from the reporter.
+  // Who it's about comes from the content, never from the reporter, except
+  // the player a chat report names, which moderators see is unchecked.
   object reported = reportedContent(report)
   report.snapshot = reported.snapshot.toStr().trim(1, 4000)
   if reported.user.toStr() != "" (
