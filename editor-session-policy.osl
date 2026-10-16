@@ -70,6 +70,16 @@ def editorRouteAllowed(string method, string escapedPath, string decodedPath) bo
   return false
 )
 
+def scopedRequestAllowed(string scope, string method, string escapedPath, string decodedPath) boolean (
+  if scope == "" (
+    return true
+  )
+  if scope != "editor" (
+    return false
+  )
+  return editorRouteAllowed(method, escapedPath, decodedPath)
+)
+
 def editorProjectUpdateAllowed(array keys) boolean (
   for i keys.len (
     if !editorProjectFields.contains(keys[i].toStr()) (
