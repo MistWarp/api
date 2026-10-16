@@ -9,7 +9,7 @@ def projectHasStoredContent(object project) boolean (
 
 def editorRouteAllowedTest(string method, string url) boolean (
   string full = "https://api.mistwarp.org" ++ url
-  return editorRouteAllowed(method, escapedRequestPath(full), url.split("?")[1])
+  return editorRouteAllowed(method, escapedRequestPath(full, "https://api.mistwarp.org"), url.split("?")[1])
 )
 
 testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/upload"), "editor tokens can save their project")
@@ -33,8 +33,11 @@ testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/.."), "dot segments 
 testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/p1%2F..%2Fadmin"), "encoded slashes are refused")
 testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/%2E%2E"), "encoded dots are refused")
 testing.assert(editorRouteAllowedTest("GET", "/v1/users/A%20name/projects"), "encoded spaces in names still match")
-testing.assert(escapedRequestPath("https://api.mistwarp.org/v1/projects/a%2Fb/commits?k=1") == "/v1/projects/a%2Fb/commits", "the escaped path keeps encoded slashes")
-testing.assert(escapedRequestPath("http://localhost:5770/") == "/", "the root path is kept")
+testing.assert(escapedRequestPath("https://api.mistwarp.org/v1/projects/a%2Fb/commits?k=1", "https://api.mistwarp.org") == "/v1/projects/a%2Fb/commits", "the escaped path keeps encoded slashes")
+testing.assert(escapedRequestPath("http://localhost:5770/", "http://localhost:5770") == "/", "the root path is kept")
+testing.assert(escapedRequestPath("x://h/v1/me://api.mistwarp.org/v1/me/export", "x://h/v1/me://api.mistwarp.org") == "/v1/me/export", "a forged scheme can't replace the path")
+testing.assert(!editorRouteAllowed("GET", escapedRequestPath("x://h/v1/me://api.mistwarp.org/v1/me/export", "x://h/v1/me://api.mistwarp.org"), "/v1/me/export"), "a forged scheme can't reach other routes")
+testing.assert(escapedRequestPath("https://other/v1/me", "https://api.mistwarp.org") == "", "an unexpected prefix is refused")
 testing.assert(!editorRouteAllowed("GET", "/v1/projects/a%2Fextensions/commits/source", "/v1/projects/a/extensions/commits/source"), "an encoded slash can't pose as an extension source")
 testing.assert(!editorRouteAllowed("GET", "/v1/projects/p1%3Fx", "/v1/projects/p1?x"), "a decoded question mark is refused")
 testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/history/bootstrap"), "history bootstrap is allowed")

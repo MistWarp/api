@@ -30,19 +30,15 @@ array editorSessionRoutes = [
 
 array editorProjectFields = ["title", "gameItems", "gameProducts", "inventoryPolicy"]
 
-def escapedRequestPath(string fullUrl) string (
-  string target = fullUrl.split("?")[1]
-  if !target.contains("://") (
-    return target
+def escapedRequestPath(string fullUrl, string prefix) string (
+  if prefix == "" or !fullUrl.startsWith(prefix) or fullUrl.len <= prefix.len (
+    return ""
   )
-  array parts = target.split("://")[2].split("/")
-  string path = ""
-  for i parts.len (
-    if i > 1 (
-      path ++= "/" ++ parts[i].toStr()
-    )
+  string target = fullUrl.trim(prefix.len + 1, fullUrl.len)
+  if !target.startsWith("/") (
+    return ""
   )
-  return if path == "" then "/" else path
+  return target.split("?")[1]
 )
 
 def editorRouteAllowed(string method, string escapedPath, string decodedPath) boolean (
@@ -54,6 +50,9 @@ def editorRouteAllowed(string method, string escapedPath, string decodedPath) bo
     verb = "GET"
   )
   if decodedPath.contains("?") or decodedPath.contains("..") (
+    return false
+  )
+  if escapedPath == "" (
     return false
   )
   string path = apiRoutePath(escapedPath)
