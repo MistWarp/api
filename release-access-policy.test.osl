@@ -1,0 +1,17 @@
+import "std:testing"
+import "./release-access-policy.osl"
+
+string url = "https://api.mistwarp.org/v1/projects/p1/releases/r1/project.json"
+testing.assert(keyedJsonUrl(url, {allowed: true, key: ""}) == url, "free shared releases stay unkeyed")
+testing.assert(keyedJsonUrl(url, {allowed: true, key: "view"}) == url ++ "?k=view", "buyers and owners get the view key")
+testing.assert(keyedJsonUrl(url, {allowed: false, locked: true, key: ""}) == "", "locked paid releases get no URL")
+testing.assert(keyedJsonUrl(url ++ "?a=1", {allowed: true, key: "view"}) == url ++ "?a=1&k=view", "existing queries keep their parameters")
+testing.assert(keyedJsonUrl("", {allowed: true, key: "view"}) == "", "missing URLs stay missing")
+
+object release = {_id: "p1:r1", jsonKey: "project-json/abc.json.gz", jsonGzip: true, jsonUrl: url, version: "1.0"}
+object locked = publicReleaseRecord(release, {allowed: false, locked: true, key: ""})
+testing.assert(!locked.contains("jsonKey") and !locked.contains("jsonGzip"), "storage keys are never listed")
+testing.assert(!locked.contains("jsonUrl") and locked.version == "1.0", "locked viewers see the release without a download URL")
+object bought = publicReleaseRecord(release, {allowed: true, key: "view"})
+testing.assert(bought.jsonUrl == url ++ "?k=view" and !bought.contains("jsonKey"), "entitled viewers get a keyed URL")
+testing.assert(release.contains("jsonKey"), "the stored release is not modified")
