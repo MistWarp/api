@@ -1,11 +1,30 @@
+number siteErrorRetentionMs = 90 * 86400000
+
+def siteErrorCutoff(number now) number (
+  return now - siteErrorRetentionMs
+)
+
 def pruneSiteErrors() (
+  array expired = errorDocs.where("created", "<", siteErrorCutoff(timestamp)).all()
+  for i expired.len (
+    object entry = expired[i].assert(object)
+    void errorDocs.deleteOne({_id: entry["_id"]})
+  )
   array stored = errorDocs.sort("created", "desc").limit(1100).all()
   for i stored.len (
-    if i >= 1000 (
+    if i > 1000 (
       object entry = stored[i].assert(object)
       void errorDocs.deleteOne({_id: entry["_id"]})
     )
   )
+)
+
+def sweepSiteErrors() boolean (
+  sync.withLock("site-errors", pruneSiteErrors) catch (err) (
+    log "Could not prune error reports: " ++ err.toStr()
+    return false
+  )
+  return true
 )
 
 def shouldIgnoreSiteError(string message) boolean (
@@ -107,8 +126,8 @@ def handleRecordSiteError(*serve.Context c) (
   }
   sync.lock("site-errors")
   void errorDocs.insertOne(entry)
-  pruneSiteErrors()
   sync.unlock("site-errors")
+  void sweepSiteErrors()
   c.json(201, {ok: true})
 )
 
@@ -149,15 +168,19 @@ def handleAdminResolveSiteError(*serve.Context c) (
   if body.contains("resolved") (
     resolved = body.resolved == true
   )
+  sync.lock("site-errors")
   object entry = (errorDocs.findById(id) ?? {})
   if entry.len == 0 (
+    sync.unlock("site-errors")
     c.notFound("error not found")
     return
   )
   entry.resolved = resolved
   entry.resolvedBy = contextString(c, "username")
   entry.resolvedAt = timestamp
-  if putDocument(errorDocs, id, entry) (
+  boolean saved = putDocument(errorDocs, id, entry)
+  sync.unlock("site-errors")
+  if saved (
     c.json(200, {ok: true})
     return
   )
