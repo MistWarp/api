@@ -22,25 +22,98 @@ def thumbnailPath(string id) string (
   return thumbnailsDir ++ id ++ ".png"
 )
 
-// Served like a static file, except a banned user's project thumbnails 404
-// like the project does.
 def handleGetThumbnail(*serve.Context c) (
   string file = c.param("file")
   string id = file.replace(".png", "")
   if !file.endsWith(".png") or !isSafePathPart(id) or !fs.exists(thumbnailsDir ++ file) (
-    c.notFound("thumbnail not found")
+    thumbnailNotFound(c)
     return
   )
+  boolean isPublic = id.startsWith("space-")
+  if !isPublic (
+    string given = (c.query("k") ?? "")
+    object access = thumbnailAccess(id, given != "")
+    if !access.found or access.ownerBanned (
+      thumbnailNotFound(c)
+      return
+    )
+    isPublic = access.isPublic
+    if !isPublic and !thumbnailKeyMatches(thumbnailSecret, id, access.viewKey.toStr(), given) (
+      thumbnailNotFound(c)
+      return
+    )
+  )
+  object headers = thumbnailCacheHeaders(isPublic)
+  c.setHeader("Cache-Control", headers.cache.toStr())
+  c.setHeader("CDN-Cache-Control", headers.cdn.toStr())
+  c.file(thumbnailsDir ++ file)
+)
+
+def thumbnailAccess(string id, boolean hasKey) object (
   object entry = (projectSearchDocs.findById(id) ?? {})
   if entry.len > 0 and projectOwnerBanned(entry) (
-    c.notFound("thumbnail not found")
-    return
+    return {found: true, ownerBanned: true, isPublic: false, viewKey: ""}
   )
-  c.file(thumbnailsDir ++ file)
+  if entry.len > 0 and thumbnailIsPublic(projectVisibility(entry), false) (
+    return {found: true, ownerBanned: false, isPublic: true, viewKey: ""}
+  )
+  if entry.len > 0 and !hasKey (
+    return {found: true, ownerBanned: false, isPublic: false, viewKey: ""}
+  )
+  auto loaded = loadProject(id)
+  if loaded.ok (
+    object project = loaded.project.assert(object)
+    return {found: true, ownerBanned: projectOwnerBanned(project), isPublic: thumbnailIsPublic(projectVisibility(project), false), viewKey: projectViewKey(project)}
+  )
+  auto trashed = readFile(trashDir ++ id ++ ".json")
+  if trashed.ok (
+    return {found: true, ownerBanned: false, isPublic: false, viewKey: projectViewKey(trashed.data.assert(object))}
+  )
+  return {found: false, ownerBanned: false, isPublic: false, viewKey: ""}
+)
+
+def thumbnailNotFound(*serve.Context c) (
+  c.setHeader("Cache-Control", "no-store")
+  c.setHeader("CDN-Cache-Control", "no-store")
+  c.notFound("thumbnail not found")
 )
 
 def thumbUrlFor(object project) string (
   return thumbUrlForChain(project, 0)
+)
+
+def viewerThumbUrlFor(object project) string (
+  if thumbnailIsPublic(projectVisibility(project), false) (
+    return thumbUrlFor(project)
+  )
+  return keyedThumbUrlFor(project)
+)
+
+def keyedThumbUrlFor(object project) string (
+  string id = project.id.toStr()
+  if !fs.exists(thumbnailPath(id)) (
+    return thumbUrlFor(project)
+  )
+  return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr() ++ "&k=" ++ thumbnailKey(thumbnailSecret, id, projectViewKey(project))
+)
+
+def viewerThumbEntries(array entries) array (
+  array out = []
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    auto loaded = {ok: false}
+    if !thumbnailIsPublic(projectVisibility(entry), false) (
+      loaded = loadProject(entry.id.toStr())
+    )
+    if loaded.ok (
+      object keyed = entry.clone()
+      keyed.thumbUrl = viewerThumbUrlFor(loaded.project.assert(object))
+      out.append(keyed)
+    ) else (
+      out.append(entry)
+    )
+  )
+  return out
 )
 
 def thumbUrlForChain(object project, number hops) string (
@@ -62,7 +135,7 @@ def thumbUrlForChain(object project, number hops) string (
     return ""
   )
   object parentProject = parentResult.project.assert(object)
-  if projectPrice(parentProject) > 0 (
+  if projectPrice(parentProject) > 0 or !thumbnailIsPublic(projectVisibility(parentProject), projectOwnerBanned(parentProject)) (
     return ""
   )
   return thumbUrlForChain(parentProject, hops + 1)

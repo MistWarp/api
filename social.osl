@@ -498,9 +498,10 @@ def handleGetUserProjects(*serve.Context c) (
     number total = projects.len
     number offset = clampNumber(c.queryInt("offset", 0), 0, total)
     number limit = clampNumber(requestedLimit, 1, 100)
+    array page = paginate(projects, offset, limit)
     c.json(200, {
       ok: true,
-      projects: paginate(projects, offset, limit),
+      projects: if includeUnshared then viewerThumbEntries(page) else page,
       total: total,
       nextOffset: clampNumber(offset + limit, 0, total)
     })
@@ -655,6 +656,7 @@ def handleGetMyLibrary(*serve.Context c) (
         seen[id] = true
         validIds.append(id)
         object entry = indexEntryFromProject(loaded.project.assert(object))
+        entry.thumbUrl = viewerThumbUrlFor(loaded.project.assert(object))
         entry.libraryPublic = !hiddenIds.contains(id)
         entry.duration = projectPlaytime(id, username)
         entry.lastPlayed = projectLastPlayed(id, username)

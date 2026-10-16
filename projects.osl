@@ -343,7 +343,7 @@ def projectResponse(object project,*serve.Context c) object (
     repo: project.repo,
     projectJsonUrl: jsonUrl,
     assetsBase: assetsBaseUrl(),
-    thumbUrl: thumbUrlFor(project),
+    thumbUrl: viewerThumbUrlFor(project),
     cardUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/card.svg",
     created: project.created,
     edited: project.edited,
@@ -2051,7 +2051,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     uploaded: uploadResult.uploaded,
     skipped: uploadResult.skipped,
     projectJsonUrl: projectJsonUrlFor(project),
-    thumbUrl: thumbUrlFor(project)
+    thumbUrl: viewerThumbUrlFor(project)
   })
 )
 
@@ -2112,7 +2112,7 @@ def handleSetThumbnail(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
-  c.json(200, {ok: true, thumbUrl: thumbUrlFor(project)})
+  c.json(200, {ok: true, thumbUrl: viewerThumbUrlFor(project)})
 )
 
 def handleGetProject(*serve.Context c) (
@@ -2956,7 +2956,7 @@ def handleGetMyTrash(*serve.Context c) (
             deletedAt: project.deletedAt,
             purgeAt: project.purgeAt,
             recoveryDays: project.recoveryDays,
-            thumbUrl: thumbUrlFor(project)
+            thumbUrl: keyedThumbUrlFor(project)
           })
         )
       )
