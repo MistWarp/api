@@ -401,6 +401,7 @@ def projectResponse(object project,*serve.Context c) object (
     response.workspaceUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
   )
   response.gitHead = projectGitHead(project)
+  response.uploadFeatures = ["worktreeAssets"]
   response.gitBranch = "main"
   if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
     response.gitBranch = project.gitBranch
@@ -1640,6 +1641,23 @@ def handleUploadProjectLocked(*serve.Context c) (
       void fs.remove(extractDir)
       c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
       return
+    )
+    object materialized = materializeWorktreeAssets(project, workspaceFile.data.assertElse(byte[], []), extractDir, replaceHistory)
+    if !materialized.ok (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, code: "worktree_assets_unavailable", error: "some project files could not be found on the server; save again to upload them"})
+      return
+    )
+    if materialized.refs.toNum() > 0 (
+      if materialized.size.toNum() > maxWorkspaceBytes or !validateZipArchive(materialized.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
+        return
+      )
+      workspaceFile.data = materialized.data
+      workspaceFile.size = materialized.size
     )
     object checked = validateUploadedHistoryMode(project, workspaceFile.data.assertElse(byte[], []), gitMetadata, currentHead, replaceHistory)
     if !checked.ok (
@@ -3701,6 +3719,48 @@ def forkProjectFor(object source, string username, string userId, string forkTit
   )
   upsertIndexEntry(project)
   return {ok: true, project: project}
+)
+
+def materializeWorktreeAssets(object project, byte[] body, string extractDir, boolean replaceHistory) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".refs.mwp"
+  string outputPath = workId ++ ".materialized.mwp"
+  string fetchDir = workId ++ ".assets"
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false}
+  )
+  string basePath = ""
+  if !replaceHistory and projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+  )
+  string assetDirs = extractDir ++ "\n" ++ localBlobsDir ++ "assets"
+  auto parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs), {type: "object"})
+  object result = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  array missing = (result.missing ?? []).assertElse(array, [])
+  if !result.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
+    void fs.mkdir(fetchDir, {recursive: true})
+    for i missing.len (
+      string name = missing[i].toStr()
+      if isValidMd5Ext(name) (
+        void copyStorageKeyToPath(assetObjectKey(name), fetchDir ++ "/" ++ name)
+      )
+    )
+    parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs ++ "\n" ++ fetchDir), {type: "object"})
+    result = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  )
+  void fs.remove(incomingPath)
+  void fs.remove(fetchDir)
+  if result.ok != true (
+    void fs.remove(outputPath)
+    return {ok: false}
+  )
+  number refs = (result.refs ?? 0).toNum()
+  if refs == 0 (
+    return {ok: true, refs: 0}
+  )
+  byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+  void fs.remove(outputPath)
+  return {ok: data.len > 0, refs: refs, data: data, size: data.len}
 )
 
 def validateUploadedHistory(object project, byte[] body, string metadata, string currentHead) object (
