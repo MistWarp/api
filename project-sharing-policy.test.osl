@@ -1,20 +1,10 @@
 import "std:testing"
 import "./project-sharing-policy.osl"
 
-testing.assert(remixIsContributionOnly({}, 10), "paid project remixes are contribution-only")
-testing.assert(remixIsContributionOnly({contributionOnly: true}, 0), "the restriction follows later remixes")
-testing.assert(!remixIsContributionOnly({}, 0), "free project remixes can still be shared")
-
-array projects = [{}, {seeInside: true}, {seeInside: false}]
-array prices = [0, 10]
+array projects = [{}, {seeInside: true}, {seeInside: false}, {seeInside: true, price: 10}, {seeInside: false, price: 10}]
 for i projects.len (
-  for j prices.len (
-    object project = projects[i].assert(object)
-    number price = prices[j].toNum()
-    testing.assert(projectSourcePolicyAllows(project, price, true, false), "owners retain source access")
-    boolean openSource = !(project.contains("seeInside") and project.seeInside == false)
-    testing.assert(projectSourcePolicyAllows(project, price, false, true) == openSource, "buyers can inspect open source but cannot bypass See inside")
-    boolean expected = price == 0 and !(project.contains("seeInside") and project.seeInside == false)
-    testing.assert(projectSourcePolicyAllows(project, price, false, false) == expected, "nonbuyers need free and open source")
-  )
+  object project = projects[i].assert(object)
+  testing.assert(projectSourcePolicyAllows(project, true), "owners retain source access")
+  boolean expected = !(project.contains("seeInside") and project.seeInside == false)
+  testing.assert(projectSourcePolicyAllows(project, false) == expected, "everyone else follows See inside, whatever the old price")
 )

@@ -183,7 +183,6 @@ import "./storage-usage.osl"
 import "./live-collaboration.osl"
 import "./history-delta.osl"
 import "./commit-management.osl"
-import "./game-data-access.osl"
 import "./game-data.osl"
 import "./game-realtime.osl"
 import "./extensions.osl"
@@ -487,8 +486,8 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/projects/:id/publish", requireAuth, requireGoodStanding, handlePublishProject)
   api.POST("/projects/:id/unpublish", requireAuth, handleUnpublishProject)
   api.POST("/projects/:id/visibility", requireAuth, requireGoodStanding, handleSetVisibility)
-  api.POST("/projects/:id/purchase/intent", requireAuth, handlePurchaseIntent)
-  api.POST("/projects/:id/purchase/confirm", requireAuth, handlePurchaseConfirm)
+  api.POST("/projects/:id/purchase/intent", handleProjectSalesEnded)
+  api.POST("/projects/:id/purchase/confirm", handleProjectSalesEnded)
   api.POST("/projects/:id/view", handleViewProject)
   api.POST("/projects/:id/save", requireAuth, handleSaveProject)
   api.DELETE("/projects/:id/save", requireAuth, handleUnsaveProject)

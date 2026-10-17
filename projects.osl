@@ -99,13 +99,6 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
   if canViewForkProject(project, c) (
     return true
   )
-  if projectPrice(project) > 0 (
-    if canAccessPaidJson(project, c) (
-      return true
-    )
-    string pk = projectViewKey(project)
-    return pk != "" and (c.query("k") ?? "") == pk
-  )
   if project.shared == true or projectVisibility(project) == "unlisted" (
     return true
   )
@@ -117,7 +110,7 @@ def canViewProjectJson(object project,*serve.Context c) boolean (
 )
 
 def ensureViewKey(object project) (
-  if (project.shared != true or projectPrice(project) > 0) and projectViewKey(project) == "" (
+  if project.shared != true and projectViewKey(project) == "" (
     project.viewKey = randomString(16)
     saveProject(project)
   )
@@ -144,17 +137,7 @@ def bannedKeyMatches(object project, string key) boolean (
 )
 
 def projectMustStayPrivate(object project) boolean (
-  if projectContributionOnlyFlag(project) or isStudentUserId((project.ownerId ?? "").toStr()) (
-    return true
-  )
-  if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
-    auto parentResult = loadProject(project.remixParent.toStr())
-    if parentResult.ok (
-      object parent = parentResult.project.assert(object)
-      return remixIsContributionOnly(parent, projectPrice(parent))
-    )
-  )
-  return false
+  return isStudentUserId((project.ownerId ?? "").toStr())
 )
 
 def projectVersionHistory(object project) object (
@@ -260,15 +243,6 @@ def projectJsonAccess(object project,*serve.Context c) object (
     )
   )
   boolean allowed = true
-  boolean locked = false
-  if projectPrice(project) > 0 (
-    if canEditProject(project, c) or hasBought(project, normalizeUsername(contextString(c, "username"))) or canViewForkProject(project, c) (
-      key = projectViewKey(project)
-    ) else (
-      allowed = false
-      locked = true
-    )
-  )
   if projectOwnerBanned(project) (
     if allowed and contextBool(c, "isAdmin") (
       key = bannedViewKey(project)
@@ -276,7 +250,7 @@ def projectJsonAccess(object project,*serve.Context c) object (
       allowed = false
     )
   )
-  return {allowed: allowed, locked: locked, key: key}
+  return {allowed: allowed, key: key}
 )
 
 def projectResponse(object project,*serve.Context c) object (
@@ -318,15 +292,12 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("collaborators") and project.collaborators != null (
     collaborators = project.collaborators.assert(array)
   )
-  number price = projectPrice(project)
-  boolean bought = hasBought(project, viewer)
   boolean hasContent = project.lastUploadAt.toNum() > 0
   hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
   object activeVanity = vanityState(project)
   string jsonBase = projectJsonBaseUrl(project)
   object jsonAccess = projectJsonAccess(project, c)
   string jsonUrl = keyedJsonUrl(jsonBase, jsonAccess)
-  boolean locked = jsonAccess.locked == true
   boolean ownerBanned = projectOwnerBanned(project)
   if !hasContent (
     jsonUrl = ""
@@ -360,10 +331,7 @@ def projectResponse(object project,*serve.Context c) object (
     sharedAt: project.sharedAt,
     shared: project.shared,
     visibility: projectVisibility(project),
-    price: price,
     remixShare: if project.contains("remixShare") then project.remixShare else 0,
-    locked: locked,
-    bought: bought,
     saved: isInLibrary(viewer, project.id.toStr()),
     saveCount: projectSaves(project),
     myPlaytimeMs: myPlaytimeMs,
@@ -442,7 +410,7 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("assetBytes") (
     response.assetBytes = project.assetBytes
   )
-  if !locked and hasContent (
+  if hasContent (
     array trustedExtensions = projectTrustedExtensions(project)
     if trustedExtensions.len > 0 (
       response.trustedExtensions = trustedExtensions
@@ -530,7 +498,6 @@ def handleCreateProject(*serve.Context c) (
   )
 
   string remixParent = ""
-  boolean contributionOnly = false
   if body.contains("remixParent") and body.remixParent != null (
     remixParent = body.remixParent.toStr()
     auto parentResult = loadProject(remixParent)
@@ -542,8 +509,6 @@ def handleCreateProject(*serve.Context c) (
       c.forbidden("this project cannot be remixed")
       return
     )
-    object remixParentProject = parentResult.project.assert(object)
-    contributionOnly = remixIsContributionOnly(remixParentProject, projectPrice(remixParentProject))
   )
 
   string scratchOrigin = ""
@@ -576,7 +541,6 @@ def handleCreateProject(*serve.Context c) (
     shared: false,
     lastUploadAt: 0,
     remixParent: remixParent,
-    contributionOnly: contributionOnly,
     remixShare: if remixParent == "" then 0 else 10,
     remixNotified: false,
     scratchOrigin: scratchOrigin,
@@ -2530,22 +2494,9 @@ def handleUpdateProjectLocked(*serve.Context c) (
   if body.contains("seeInside") (
     project.seeInside = body.seeInside != false
   )
-  if body.contains("price") (
-    number price = body.price.toNum()
-    if price < 0 (
-      c.badRequest("invalid price")
-      return
-    )
-    number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
-    if price > priceLimit (
-      c.badRequest("your Rotur plan allows project prices up to " ++ priceLimit.toStr() ++ " credits")
-      return
-    )
-    number oldPrice = projectPrice(project)
-    project.price = price
-    if price > 0 and oldPrice <= 0 (
-      project.viewKey = randomString(16)
-    )
+  if body.contains("price") and (body.price ?? 0).toNum() != 0 (
+    c.json(400, {ok: false, code: "project_sales_ended", error: "Projects can no longer be sold on MistWarp."})
+    return
   )
   if body.contains("remixShare") (
     if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
@@ -3069,7 +3020,7 @@ def handlePublishProject(*serve.Context c) (
     return
   )
   if projectMustStayPrivate(project) (
-    c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
+    c.forbidden("classroom projects stay private")
     return
   )
   if refuseIfHiddenByModerator(project, c) (
@@ -3211,10 +3162,6 @@ def handleReactProjectLocked(*serve.Context c) (
   object project = result.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
-    return
-  )
-  if !canInteractProject(project, c) (
-    c.forbidden("buy this project to react to it")
     return
   )
 
@@ -3731,7 +3678,6 @@ def forkProjectFor(object source, string username, string userId, string forkTit
     inheritedJson: true,
     storedJsonBytes: parent.storedJsonBytes ?? 0,
     remixParent: parent.id,
-    contributionOnly: remixIsContributionOnly(parent, projectPrice(parent)),
     remixRoot: parent.id,
     remixShare: 10,
     remixNotified: false,

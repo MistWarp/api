@@ -96,8 +96,7 @@ def mistwarpBenefitsForTier(string rawTier) object (
     historyCheckpoints: false,
     customProjectBranding: false,
     vanityProjectUrls: false,
-    salesFeeBasisPoints: 1000,
-    maxProjectPrice: 100
+    salesFeeBasisPoints: 1000
   }
   if tier == "Lite" (
     benefits.storageBytes = 2147483648
@@ -128,7 +127,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.historyCheckpoints = true
     benefits.customProjectBranding = true
     benefits.salesFeeBasisPoints = 700
-    benefits.maxProjectPrice = 250
   ) else if tier == "Pro" (
     benefits.storageBytes = 53687091200
     benefits.maxProjectAssetBytes = 104857600
@@ -147,7 +145,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.customProjectBranding = true
     benefits.vanityProjectUrls = true
     benefits.salesFeeBasisPoints = 500
-    benefits.maxProjectPrice = 500
   )
   return benefits
 )

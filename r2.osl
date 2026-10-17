@@ -61,11 +61,7 @@ def thumbUrlForChain(object project, number hops) string (
   if !parentResult.ok (
     return ""
   )
-  object parentProject = parentResult.project.assert(object)
-  if projectPrice(parentProject) > 0 (
-    return ""
-  )
-  return thumbUrlForChain(parentProject, hops + 1)
+  return thumbUrlForChain(parentResult.project.assert(object), hops + 1)
 )
 
 def isUntouchedRemix(object project) boolean (
@@ -105,11 +101,7 @@ def localProjectJsonPathFor(object project, number hops) string (
   if !parentResult.ok (
     return ""
   )
-  object parentProject = parentResult.project.assert(object)
-  if projectPrice(parentProject) > 0 (
-    return ""
-  )
-  return localProjectJsonPathFor(parentProject, hops + 1)
+  return localProjectJsonPathFor(parentResult.project.assert(object), hops + 1)
 )
 
 def projectViewKey(object project) string (
@@ -553,12 +545,6 @@ def handleGetProjectBlob(*serve.Context c) (
   object project = projectResult.project.assert(object)
   if projectOwnerBanned(project) (
     if !bannedKeyMatches(project, (c.query("k") ?? "")) (
-      c.notFound("blob not found")
-      return
-    )
-  ) else if projectPrice(project) > 0 (
-    string pk = projectViewKey(project)
-    if pk == "" or (c.query("k") ?? "") != pk (
       c.notFound("blob not found")
       return
     )

@@ -101,12 +101,7 @@ def validMultiplayerRoom(string room) boolean (
 )
 
 def canPlayProjectWithAccountData(object project,*serve.Context c) boolean (
-  number price = projectPrice(project)
-  return gameDataPlayAccessAllowed(
-    canViewProject(project, c),
-    price,
-    price <= 0 or canAccessPaidJson(project, c)
-  )
+  return canViewProject(project, c)
 )
 
 def handleCreateMultiplayerTicket(*serve.Context c) (

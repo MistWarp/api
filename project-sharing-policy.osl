@@ -1,15 +1,6 @@
-def projectContributionOnlyFlag(object project) boolean (
-  return project.contains("contributionOnly") and project.contributionOnly == true
-)
-
-def remixIsContributionOnly(object parent, number parentPrice) boolean (
-  return parentPrice > 0 or projectContributionOnlyFlag(parent)
-)
-
-// Buyers can inspect source when the creator enables See inside.
-def projectSourcePolicyAllows(object project, number price, boolean isOwner, boolean hasPurchased) boolean (
+def projectSourcePolicyAllows(object project, boolean isOwner) boolean (
   if isOwner (
     return true
   )
-  return (price <= 0 or hasPurchased) and !(project.contains("seeInside") and project.seeInside == false)
+  return !(project.contains("seeInside") and project.seeInside == false)
 )
