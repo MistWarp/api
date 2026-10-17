@@ -23,7 +23,7 @@ The server loads `.env` automatically. Real environment variables override `.env
 | COMMERCE_SERVICE_KEY | | Key registered for `mistwarp` in Rotur's `COMMERCE_SERVICE_KEYS`. Only bounty awards and the groups integration still use it |
 | ROTUR_CLIENT_ID | | The MistWarp Rotur App's client ID (`app_1938b6a87799f862`). With the secret, mistwarp-api calls the apps API as MistWarp |
 | ROTUR_CLIENT_SECRET | | One of the MistWarp Rotur App's secrets, made with **New secret** on rotur.dev/me/developer |
-| MISTWARP_ROTUR_USER | | Rotur account that gets MistWarp's share of sales. Without it, the MistWarp Rotur App's owner gets it |
+| MISTWARP_ROTUR_USER | | Rotur account that gets MistWarp's share of game product sales. Without it, the MistWarp Rotur App's owner gets it |
 | ROTUR_WEBHOOK_SECRET | | Signing secret (`whsec_…`) of the MistWarp Rotur App's webhook. Without it `POST /v1/rotur/webhook` answers 503 |
 | R2_ENDPOINT | | https://accountid.r2.cloudflarestorage.com |
 | R2_BUCKET | mistwarp | R2 bucket name |
@@ -61,13 +61,28 @@ Rotur only answers about people who have used MistWarp through Sign in with Rotu
 
 ## Payments
 
-Buying a project or a game product, donating with a comment and refunding a game product are Rotur payment requests (`POST /v2/apps/<app>/payment-requests`). mistwarp-api never holds a permission to spend anyone's credits.
+Buying a game product, donating with a comment and refunding a game product are Rotur payment requests (`POST /v2/apps/<app>/payment-requests`). mistwarp-api never holds a permission to spend anyone's credits.
 
 1. The editor asks for an intent. mistwarp-api asks Rotur for the payment, with a purchase key (`mwbuy_`, `mwgame_`, `mwdonate_` or `mwrefund_`) as its `reference`, and answers with the key and Rotur's `approveUrl`.
 2. The person approves it on rotur.dev with their password. Rotur moves the credits, shared between everyone the sale pays: the creator, collaborators, the remixed project's creator and MistWarp's fee.
-3. Rotur's `payment.completed` webhook marks the key paid and delivers projects and game products. The editor's confirm call does the same if it gets there first, asking Rotur whether the request was paid. Whichever comes second finds it done.
+3. Rotur's `payment.completed` webhook marks the key paid and delivers game products. The editor's confirm call does the same if it gets there first, asking Rotur whether the request was paid. Whichever comes second finds it done.
 
 Donations are delivered when their comment is posted, and refunds when the product is revoked. Paid keys waiting for that are kept for 30 days, and unpaid ones for an hour (Rotur's requests expire after 15 minutes).
+
+### Project sales have ended
+
+Projects can no longer be sold. `POST /v1/projects/:id/purchase/intent` and `/purchase/confirm` answer 410 with the code `project_sales_ended`, and a `PUT /v1/projects/:id` that sets a price above 0 answers 400 with the same code. A project that had a price plays, and can be remixed and seen inside, the same as a free one with the same settings. Remixes of paid projects are no longer kept private. The webhook still records a `mwbuy_` payment that was started before sales ended, so it can be refunded.
+
+What was sold stays readable: buyers keep their records in `GET /v1/me/purchases`, and creators keep the buyers, revenue and sales history in their project analytics and `GET /v1/me/stats`.
+
+`scripts/refund_project_sales.py` pays every buyer back the full price of every project they bought, from one Rotur account, with one transfer per buyer (`POST /v2/me/transfers`). It sends nothing without `--apply`. Each transfer is written to `data/project-sale-refunds.json` before it is sent and marked when Rotur answers, so running it again never pays a purchase twice. It stops if a project purchase can still be paid on Rotur, if the token doesn't belong to `--payer`, if the payer doesn't have enough credits, or if an earlier transfer's outcome is unknown (check the payer's Rotur transactions, then `--resolve <id>=sent` or `=failed`).
+
+```sh
+python3 scripts/refund_project_sales.py
+ROTUR_REFUND_TOKEN=<token of the paying account> python3 scripts/refund_project_sales.py --apply --payer <that account>
+```
+
+Tests: `python3 -m unittest scripts/test_refund_project_sales.py`, and with a compiled binary `MWAPI_BIN=<path> python3 -m unittest scripts/test_project_sales_api.py`.
 
 ## Error reports
 
@@ -181,7 +196,7 @@ The read-only commit endpoints inspect the stored `.mwp` on the server. Clients 
 - `GET /v1/projects/:id/commits/:sha/co-authors` returns the Rotur users credited on that commit. The older `/collaborators` path remains an alias.
 - `PATCH /v1/projects/:id/commits/:sha` accepts `{coAuthors: string[]}` with at most 25 existing Rotur usernames. `{collaborators: string[]}` remains an input alias. It replaces the commit's co-author metadata without rewriting Git objects or changing any SHA. Responses expose canonical `coAuthors` records as `{username, userId}` and a compatibility `collaborators` alias. Only the project owner, a maintainer, or an administrator may patch commit credits.
 
-These routes use the same see-inside policy as workspace downloads. The server caches materialized workspace layers and computed JSON by the ordered content-addressed layer keys. Public, free projects may be cached by the CDN for one hour; private, unlisted, and paid responses use `private, no-store`. Stable ETags let browsers revalidate without reparsing Git objects. The local inspection cache keeps at most 256 files or 2 GiB and removes entries older than 24 hours.
+These routes use the same see-inside policy as workspace downloads. The server caches materialized workspace layers and computed JSON by the ordered content-addressed layer keys. Public projects may be cached by the CDN for one hour; private and unlisted responses use `private, no-store`. Stable ETags let browsers revalidate without reparsing Git objects. The local inspection cache keeps at most 256 files or 2 GiB and removes entries older than 24 hours.
 
 Before extraction, the API rejects archives with unsafe paths, duplicate entries, symlinks, unsupported compression methods, or more entries and expanded bytes than the endpoint allows. MistWarp history archives are capped at 128 MiB compressed and 20,000 entries. Their expanded-byte ceiling matches the account's maximum project size, including its tier-specific asset allowance. The API reads each history entry through that ceiling before storing it, so forged ZIP metadata cannot bypass the limit.
 
@@ -232,6 +247,6 @@ Project and community reactions check milestones when saved. Profile-post, theme
 
 ## Project source access
 
-Paid projects and projects with See inside disabled expose commits, branches, files, and workspace archives only to their owner. Buying a project grants playback, not source-history access. Pull-request inspection follows the same restriction for both projects. The project response exposes `canViewSource` for clients.
+Projects with See inside disabled expose commits, branches, files, and workspace archives only to their owner. Pull-request inspection follows the same restriction. The project response exposes `canViewSource` for clients.
 
 Deploy the API and client changes together. Purge previously cached project history and workspace responses from the CDN when deploying this policy; new responses use `private, no-store`. This policy controls MistWarp's inspection endpoints. Playback still sends the data required to run a Scratch project to the browser.

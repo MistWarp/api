@@ -134,7 +134,6 @@ def classroomUsage(string ownerId) object (
 def classroomStudentBenefits(string studentId) object (
   object benefits = mistwarpBenefitsForTier("Free")
   benefits.maxSpaces = 0
-  benefits.maxProjectPrice = 0
   benefits.gameSaveStorageBytes = 1000000
   object student = loadStudent(studentId)
   if student.len == 0 (

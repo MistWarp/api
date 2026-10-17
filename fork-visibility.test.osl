@@ -50,17 +50,6 @@ def projectIsViewable(object project) boolean (
   return projectVisibility(project) != "private"
 )
 
-def projectPrice(object project) number (
-  if project.contains("price") and project.price != null (
-    return project.price.toNum()
-  )
-  return 0
-)
-
-def canAccessPaidJson(object project, object ctx) boolean (
-  return ctx.authenticated == true and ctx.contains("bought") and ctx.bought == true
-)
-
 def projectViewKey(object project) string (
   if project.contains("viewKey") and project.viewKey != null (
     return project.viewKey.toStr()
@@ -171,13 +160,6 @@ def canViewProjectJsonTest(object project, object ctx) boolean (
   if canViewForkProjectTest(project, ctx) (
     return true
   )
-  if projectPrice(project) > 0 (
-    if canAccessPaidJson(project, ctx) (
-      return true
-    )
-    string pk = projectViewKey(project)
-    return pk != "" and (ctx.key ?? "").toStr() == pk
-  )
   if project.shared == true or projectVisibility(project) == "unlisted" (
     return true
   )
@@ -192,7 +174,7 @@ def canSeeInsideProjectTest(object project, object ctx) boolean (
   if ctx.authenticated == true and ctx.isAdmin == true (
     return true
   )
-  if !projectSourcePolicyAllows(project, projectPrice(project), ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner", ctx.authenticated == true and canAccessPaidJson(project, ctx)) (
+  if !projectSourcePolicyAllows(project, ctx.authenticated == true and projectRole(project, ctx.username.toStr()) == "owner") (
     return false
   )
   if canEditProjectTest(project, ctx) (
@@ -204,13 +186,7 @@ def canSeeInsideProjectTest(object project, object ctx) boolean (
   if !projectSeeInside(project) (
     return false
   )
-  if !projectIsViewable(project) (
-    return false
-  )
-  if projectPrice(project) > 0 (
-    return canAccessPaidJson(project, ctx)
-  )
-  return true
+  return projectIsViewable(project)
 )
 
 // Setup projects
@@ -283,14 +259,13 @@ testing.assert(canViewProjectTest(projectC, aliceCtx), "Alice (creator of root p
 testing.assert(canViewProjectTest(projectC, bobCtx), "Bob (creator of direct parent fork) can view chained fork")
 testing.assert(!canViewProjectTest(projectC, strangerCtx), "Stranger cannot view chained fork")
 
-// A purchase grants source access only while See inside is enabled.
-object paidProject = {id: "paid", owner: "alice", ownerId: "u_alice", shared: true, price: 10, seeInside: true}
-object buyerCtx = {authenticated: true, username: "bob", bought: true}
-object nonbuyerCtx = {authenticated: true, username: "bob", bought: false}
-testing.assert(canSeeInsideProjectTest(paidProject, buyerCtx), "buyers can see inside paid projects")
-testing.assert(!canSeeInsideProjectTest(paidProject, nonbuyerCtx), "nonbuyers cannot inspect paid source")
+object paidProject = {id: "paid", owner: "alice", ownerId: "u_alice", shared: true, visibility: "public", price: 10, seeInside: true, viewKey: "secret"}
+testing.assert(canViewProjectJsonTest(paidProject, strangerCtx), "a project that used to have a price plays for everyone")
+testing.assert(canViewProjectJsonTest(paidProject, anonCtx), "a project that used to have a price plays signed out")
+testing.assert(canSeeInsideProjectTest(paidProject, strangerCtx), "a project that used to have a price follows See inside")
 paidProject.seeInside = false
-testing.assert(!canSeeInsideProjectTest(paidProject, buyerCtx), "a purchase does not bypass disabled See inside")
+testing.assert(!canSeeInsideProjectTest(paidProject, strangerCtx), "See inside still hides the source of a project that used to have a price")
+testing.assert(canSeeInsideProjectTest(paidProject, aliceCtx), "the owner still sees inside")
 
 object adminCtx = {authenticated: true, username: "site_admin", userId: "u_admin", isAdmin: true}
 testing.assert(canSeeInsideProjectTest(paidProject, adminCtx), "admins can see inside paid projects with See inside disabled")

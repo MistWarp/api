@@ -21,20 +21,6 @@ def projectIsViewable(object project) boolean (
   return projectVisibility(project) != "private"
 )
 
-def projectPrice(object project) number (
-  if project.contains("price") and project.price != null (
-    number p = project.price.toNum()
-    if p > 0 (
-      number priceLimit = mistwarpBenefitsForProject(project).maxProjectPrice.toNum()
-      if p > priceLimit (
-        return priceLimit
-      )
-      return p
-    )
-  )
-  return 0
-)
-
 def projectRevenue(object project) number (
   if project.contains("revenue") and project.revenue != null (
     return project.revenue.toNum()
@@ -70,20 +56,6 @@ def hasBought(object project, string userLower) boolean (
   return false
 )
 
-def canAccessPaidJson(object project,*serve.Context c) boolean (
-  if canEditProject(project, c) (
-    return true
-  )
-  return hasBought(project, normalizeUsername(contextString(c, "username")))
-)
-
-def canInteractProject(object project,*serve.Context c) boolean (
-  if projectPrice(project) > 0 (
-    return canAccessPaidJson(project, c)
-  )
-  return true
-)
-
 def projectRemixable(object project) boolean (
   return !project.contains("remixable") or project.remixable != false
 )
@@ -94,8 +66,7 @@ def projectSeeInside(object project) boolean (
 
 def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
   boolean owner = contextBool(c, "authenticated") and projectRole(project, contextString(c, "username")) == "owner"
-  boolean purchased = contextBool(c, "authenticated") and hasBought(project, normalizeUsername(contextString(c, "username")))
-  return projectSourcePolicyAllows(project, projectPrice(project), owner, purchased)
+  return projectSourcePolicyAllows(project, owner)
 )
 
 def canSeeInsideProject(object project,*serve.Context c) boolean (
@@ -120,13 +91,7 @@ def canSeeInsideProject(object project,*serve.Context c) boolean (
   if !projectSeeInside(project) (
     return false
   )
-  if !projectIsViewable(project) (
-    return false
-  )
-  if projectPrice(project) > 0 (
-    return canAccessPaidJson(project, c)
-  )
-  return true
+  return projectIsViewable(project)
 )
 
 def canRemixProject(object project,*serve.Context c) boolean (
@@ -382,7 +347,7 @@ def handleSetVisibility(*serve.Context c) (
     return
   )
   if target != "private" and projectMustStayPrivate(project) (
-    c.forbidden("remixes of paid projects stay private and can only be contributed back to the original project")
+    c.forbidden("classroom projects stay private")
     return
   )
   if target != "private" and refuseIfHiddenByModerator(project, c) (
@@ -472,58 +437,10 @@ def refuseOldPaymentClient(*serve.Context c) boolean (
   return true
 )
 
-def handlePurchaseIntent(*serve.Context c) (
-  if refuseOldPaymentClient(c) (
-    return
-  )
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
-    c.notFound("project not found")
-    return
-  )
-  object project = result.project.assert(object)
-  if !projectIsViewable(project) (
-    c.notFound("project not found")
-    return
-  )
-  number price = projectPrice(project)
-  if price <= 0 (
-    c.badRequest("this project is not for sale")
-    return
-  )
-  if canEditProject(project, c) (
-    c.badRequest("you already own this project")
-    return
-  )
-  string buyerLower = normalizeUsername(contextString(c, "username"))
-  if hasBought(project, buyerLower) (
-    c.json(200, {ok: true, already: true, project: projectResponse(project, c)})
-    return
-  )
-
-  string refusal = roturPurchaseRefusal(buyerLower, price, project.title.toStr())
-  if refusal != "" (
-    c.json(403, {ok: false, error: refusal})
-    return
-  )
-
-  array splits = projectCommerceSplits(project)
-  if splits.len == 0 (
-    c.json(503, {ok: false, error: "MistWarp can't take payments right now. Try again in a few minutes."})
-    return
-  )
-  object started = startPurchase("mwbuy_", {projectId: project.id.toStr(), buyer: buyerLower, price: price}, buyerLower, project.owner.toStr(), splits, price, project.title.toStr(), (requestJSON(c).returnUrl ?? "").toStr())
-  if !started.ok (
-    c.json(503, started)
-    return
-  )
-  started.amount = price
-  started.title = project.title
-  c.json(200, started)
+def handleProjectSalesEnded(*serve.Context c) (
+  c.json(410, {ok: false, code: "project_sales_ended", error: "Projects can no longer be bought on MistWarp. Paid projects are now free to play."})
 )
 
-// Delivers a paid project purchase, once, whether the editor or Rotur's
-// webhook gets here first.
 def completeProjectPurchase(string key) object (
   sync.lock("purchase:" ++ key)
   object entry = paidPurchase(key)
@@ -552,31 +469,4 @@ def completeProjectPurchase(string key) object (
   forgetPurchase(key)
   sync.unlock("purchase:" ++ key)
   return {ok: true, project: project}
-)
-
-def handlePurchaseConfirm(*serve.Context c) (
-  string key = (requestJSON(c).key ?? "").toStr().strip()
-  object pending = loadPurchaseKeys().keys[key] ?? {}
-  boolean mine = key.startsWith("mwbuy_") and (pending.buyer ?? "").toStr() == normalizeUsername(contextString(c, "username")) and (pending.projectId ?? "").toStr() == c.param("id")
-  object completed = {ok: false}
-  if mine (
-    completed = completeProjectPurchase(key)
-  )
-  if !completed.ok (
-    // Rotur's webhook may have got here first.
-    auto loaded = loadProject(c.param("id"))
-    if loaded.ok and hasBought(loaded.project.assert(object), normalizeUsername(contextString(c, "username"))) (
-      c.json(200, {ok: true, already: true, project: projectResponse(loaded.project.assert(object), c)})
-      return
-    )
-  )
-  if !mine (
-    c.badRequest("this purchase expired, start again")
-    return
-  )
-  if !completed.ok (
-    c.json(402, {ok: false, pending: true, error: "payment not received yet, try again in a moment"})
-    return
-  )
-  c.json(200, {ok: true, paidOut: true, project: projectResponse(completed.project.assert(object), c)})
 )

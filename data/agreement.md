@@ -56,7 +56,7 @@ MistWarp is a small website, and we ask you respect our limited storage and reso
 
 When uploading a project to MistWarp, you grant MistWarp and other users a non-exclusive, royalty-free license to view, run, and interact with your project on the platform. Where remixing is enabled, this license also covers remixing. However, these projects are not explicitly open-source; this license covers MistWarp and its services only. While we don’t currently have a license of which we distribute this content, we ask you follow these guidelines when accessing projects on MistWarp:
 
-- Do not redistribute content off-site without explicit permission. This also applies to paywalled projects — buying a project does not give you the right to reupload it elsewhere.  
+- Do not redistribute content off-site without explicit permission.  
 - Respect the remix and visibility settings the original creator chose.  
 - Do not insult other content, or encourage others to “mass-downvote” content. All criticism should be constructive.  
 - Do not abuse the reporting system on any content.  

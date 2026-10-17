@@ -418,10 +418,6 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
     c.notFound("project not found")
     return
   )
-  if !canInteractProject(project, c) (
-    c.json(403, {ok: false, error: "buy this project before donating with a comment"})
-    return
-  )
   if project.contains("commentsOff") and project.commentsOff == true (
     c.json(403, {ok: false, error: "comments are disabled on this project"})
     return
@@ -469,10 +465,6 @@ def handleCreateProjectComment(*serve.Context c) (
   )
   if !canViewProject(project, c) (
     c.notFound("project not found")
-    return
-  )
-  if !canInteractProject(project, c) (
-    c.json(403, {ok: false, error: "buy this project to comment on it"})
     return
   )
   if project.contains("commentsOff") and project.commentsOff == true (
@@ -832,10 +824,6 @@ def handleReactProjectComment(*serve.Context c) (
   object project = result.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
-    return
-  )
-  if !canInteractProject(project, c) (
-    c.json(403, {ok: false, error: "buy this project to react to its comments"})
     return
   )
   reactToComment(c, "project-" ++ project.id.toStr(), "/project/" ++ project.id.toStr())
