@@ -40,28 +40,37 @@ def handleGetThumbnail(*serve.Context c) (
 )
 
 def thumbUrlFor(object project) string (
-  return thumbUrlForChain(project, 0)
+  object source = thumbnailSource(project, 0)
+  if source.len == 0 (
+    return ""
+  )
+  return appURL ++ "/thumbnails/" ++ source.id.toStr() ++ ".png?v=" ++ source.edited.toStr()
 )
 
-def thumbUrlForChain(object project, number hops) string (
+def thumbnailFileFor(object project) string (
+  object source = thumbnailSource(project, 0)
+  return if source.len == 0 then "" else thumbnailPath(source.id.toStr())
+)
+
+def thumbnailSource(object project, number hops) object (
   string id = project.id.toStr()
   if fs.exists(thumbnailPath(id)) (
-    return appURL ++ "/thumbnails/" ++ id ++ ".png?v=" ++ project.edited.toStr()
+    return project
   )
 
   if hops >= 100 or !project.contains("remixParent") or project.remixParent.toStr() == "" (
-    return ""
+    return {}
   )
 
   string parentId = project.remixParent.toStr()
   if parentId == id (
-    return ""
+    return {}
   )
   auto parentResult = loadProject(parentId)
   if !parentResult.ok (
-    return ""
+    return {}
   )
-  return thumbUrlForChain(parentResult.project.assert(object), hops + 1)
+  return thumbnailSource(parentResult.project.assert(object), hops + 1)
 )
 
 def isUntouchedRemix(object project) boolean (

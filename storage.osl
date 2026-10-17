@@ -10,6 +10,7 @@ def ensureDirectories() boolean (
   result = result and fs.mkdir(tmpDir, {recursive: true})
   result = result and fs.mkdir(stagingDir, {recursive: true})
   result = result and fs.mkdir(thumbnailsDir, {recursive: true})
+  result = result and fs.mkdir(cardsDir, {recursive: true})
   result = result and fs.mkdir(quotaDir, {recursive: true})
   result = result and fs.mkdir(agreementAcceptDir, {recursive: true})
   result = result and fs.mkdir(extensionsDir, {recursive: true})
