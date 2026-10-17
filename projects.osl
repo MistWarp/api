@@ -1983,6 +1983,7 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
   releasePendingUploads(uploader, project.assets.assertElse(array, []))
   string replacedJsonKey = if previousJsonKey != project.jsonKey.toStr() then previousJsonKey else ""
   array replacedWorkspaceKeys = []
@@ -2090,6 +2091,7 @@ def handleSetThumbnail(*serve.Context c) (
     return
   )
   upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
   c.json(200, {ok: true, thumbUrl: thumbUrlFor(project)})
 )
 
@@ -3053,6 +3055,7 @@ def handlePublishProject(*serve.Context c) (
   project.edited = timestamp
   saveProject(project)
   upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
   if firstShare (
     projectFirstShared(project)
   )

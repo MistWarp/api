@@ -19,6 +19,7 @@ import "go:mistwarp.local/gitinspection"
 import "go:mistwarp.local/runtimeinfo"
 import "go:mistwarp.local/r2inventory"
 import "go:mistwarp.local/storagefs"
+import "go:mistwarp.local/sharecard"
 
 def dotenvValue(string name) string (
   if !fs.exists(".env") (
@@ -72,6 +73,7 @@ string userSettingsDir = "data/usersettings/"
 string tmpDir = "data/tmp/"
 string stagingDir = "data/staging/"
 string thumbnailsDir = "data/thumbnails/"
+string cardsDir = "data/cards/"
 string quotaDir = "data/quota/"
 string userIdsFile = "data/userids.json"
 string adminsFile = "data/admins.json"
@@ -479,6 +481,7 @@ def setupApiRoutes(*serve.Router api) (
   api.GET("/projects/:id/me/save", requireAuth, handleGetMyProjectSave)
   api.PUT("/projects/:id/me/save", requireAuth, handlePutMyProjectSave)
   api.GET("/projects/:id/card.svg", handleProjectCard)
+  api.GET("/projects/:id/card.png", handleProjectSharePng)
   api.PUT("/projects/:id", requireAuth, handleUpdateProject)
   api.DELETE("/projects/:id", requireAuth, handleDeleteProject)
   api.POST("/projects/:id/restore", requireAuth, handleRestoreProject)
