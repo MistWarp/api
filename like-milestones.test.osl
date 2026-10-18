@@ -7,6 +7,7 @@ import "std:requests"
 import "std:serve"
 import "std:url"
 import "std:cache"
+import "std:thread"
 import "./remote-milestones.osl"
 import "./like-milestone-policy.osl"
 import "./like-milestones.osl"
@@ -14,7 +15,7 @@ import "./like-milestones.osl"
 string path = "/tmp/mistwarp-milestones-" ++ timestamp.toStr() ++ ".db"
 auto milestoneDb = db.open(path)
 *db.Collection likeMilestoneDocs = milestoneDb.collection("milestones")
-string roturBase = "http://unused.invalid"
+string roturBase = "http://127.0.0.1:18342"
 auto remoteMilestoneChecks = cache.new({capacity: 100, ttl: 10000})
 array sent = []
 
@@ -104,6 +105,42 @@ testing.assert(sent.len == 12 and sent[12].data.milestone == 25, "sampled counts
 observeRemoteMilestone("alice", "followers", "remote", 24, "/users/alice/followers", {})
 observeRemoteMilestone("alice", "followers", "remote", 25, "/users/alice/followers", {})
 testing.assert(sent.len == 12, "follower drops and refollows do not repeat")
+// A fake Rotur: 97 followers, of whom only 25 are public.
+def handleFakeProfile(*serve.Context c) (
+  if c.param("name") == "hidden" (
+    c.json(200, {username: "hidden", private: true, restricted: true})
+    return
+  )
+  c.json(200, {username: c.param("name"), followers: 97, following: 31})
+)
+
+def handleFakeFollowers(*serve.Context c) (
+  array names = []
+  for i 25 (
+    names.append("public" ++ i.toStr())
+  )
+  c.json(200, {followers: names})
+)
+*serve.Router fakeRotur = serve.new()
+fakeRotur.GET("/v2/users/:name", handleFakeProfile)
+fakeRotur.GET("/v2/users/:name/followers", handleFakeFollowers)
+
+def runFakeRotur() (
+  fakeRotur.run(":18342")
+)
+thread.new(runFakeRotur)
+for i 50 (
+  if requests.get(roturBase ++ "/v2/users/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+observeRemoteMilestone("mist", "followers", "mist", 49, "/users/mist", {})
+syncFollowerMilestones("mist")
+testing.assert(sent.len == 13 and sent[13].data.milestone == 50, "follower milestones use the profile's count, private followers included")
+testing.assert(sent[13].data.path == "/users/mist", "follower milestones link to the profile")
+syncFollowerMilestones("hidden")
+testing.assert(sent.len == 13 and (likeMilestoneDocs.findById("observed:followers:hidden") ?? {}).len == 0, "a profile that hides its count records nothing")
 milestoneDb.close()
 void fs.remove(path)
 void fs.remove(path ++ "-wal")

@@ -40,16 +40,17 @@ def syncFollowerMilestones(string username) (
     return
   )
   remoteMilestoneChecks.set(key, true)
-  object data = remoteMilestoneData("/users/" ++ url.escape(name) ++ "/followers")
-  if !data.contains("followers") or typeof(data.followers) != "array" (
+  // The profile's count, not the public follower list: the list leaves out
+  // private accounts, so its length undercounts.
+  object profile = remoteMilestoneData("/users/" ++ url.escape(name) ++ "?include_posts=0")
+  if !profile.contains("followers") or typeof(profile.followers) != "number" (
     return
   )
-  array followers = data.followers.assert(array)
   string identity = userIdForUsername(name)
   if identity == "" (
     identity = name
   )
-  observeRemoteMilestone(name, "followers", identity, followers.len, "/users/" ++ name ++ "/followers", {profile: name})
+  observeRemoteMilestone(name, "followers", identity, profile.followers.toNum(), "/users/" ++ name, {profile: name})
 )
 
 def handleCheckFollowerMilestones(*serve.Context c) (
