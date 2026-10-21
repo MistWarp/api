@@ -1,28 +1,49 @@
-*db.DB communityDb = db.open("data/community.db")
-*db.Collection projectSearchDocs = communityDb.collection("project_search")
-*db.Collection profileSearchDocs = communityDb.collection("profile_search")
-*db.Collection spaceDocs = communityDb.collection("spaces")
-*db.Collection spaceMemberDocs = communityDb.collection("space_members")
-*db.Collection releaseDocs = communityDb.collection("releases")
-*db.Collection previewDocs = communityDb.collection("previews")
-*db.Collection diagnosticDocs = communityDb.collection("diagnostics")
-*db.Collection errorDocs = communityDb.collection("site_errors")
-*db.Collection feedbackDocs = communityDb.collection("project_feedback")
-*db.Collection ideaDocs = communityDb.collection("roadmap_ideas")
-*db.Collection developmentDocs = communityDb.collection("development_pulls")
-*db.Collection playtimeDocs = communityDb.collection("project_playtime")
-*db.Collection playtimeSessionDocs = communityDb.collection("project_playtime_sessions")
-*db.Collection reviewDocs = communityDb.collection("project_reviews")
-*db.Collection pullDocs = communityDb.collection("project_pulls")
-*db.Collection likeMilestoneDocs = communityDb.collection("like_milestones")
-*db.Collection bountyWorkerDocs = communityDb.collection("bounty_workers")
-*db.Collection classDocs = communityDb.collection("classroom_classes")
-*db.Collection studentDocs = communityDb.collection("classroom_students")
-*db.Collection classroomPlanDocs = communityDb.collection("classroom_plans")
-*db.Collection assignmentDocs = communityDb.collection("classroom_assignments")
-*db.Collection submissionDocs = communityDb.collection("classroom_submissions")
-*db.Collection classroomAuditDocs = communityDb.collection("classroom_audit")
-*db.Collection commentIndexDocs = communityDb.collection("comment_index")
+import "std:process"
+
+// The database and its collections are opened once at startup. A failure here
+// means the API cannot serve anything, so report the reason and stop instead of
+// carrying on with a half-initialized database.
+def openCommunityDatabase(string path) *db.DB (
+  *db.DB database = db.open(path) catch (err) (
+    log "FATAL: could not open " ++ path ++ ": " ++ err.toStr()
+    process.exit(1)
+  )
+  return database
+)
+
+def openCollection(*db.DB database, string name) *db.Collection (
+  *db.Collection collection = database.collection(name) catch (err) (
+    log "FATAL: could not open collection " ++ name ++ ": " ++ err.toStr()
+    process.exit(1)
+  )
+  return collection
+)
+
+*db.DB communityDb = openCommunityDatabase("data/community.db")
+*db.Collection projectSearchDocs = openCollection(communityDb, "project_search")
+*db.Collection profileSearchDocs = openCollection(communityDb, "profile_search")
+*db.Collection spaceDocs = openCollection(communityDb, "spaces")
+*db.Collection spaceMemberDocs = openCollection(communityDb, "space_members")
+*db.Collection releaseDocs = openCollection(communityDb, "releases")
+*db.Collection previewDocs = openCollection(communityDb, "previews")
+*db.Collection diagnosticDocs = openCollection(communityDb, "diagnostics")
+*db.Collection errorDocs = openCollection(communityDb, "site_errors")
+*db.Collection feedbackDocs = openCollection(communityDb, "project_feedback")
+*db.Collection ideaDocs = openCollection(communityDb, "roadmap_ideas")
+*db.Collection developmentDocs = openCollection(communityDb, "development_pulls")
+*db.Collection playtimeDocs = openCollection(communityDb, "project_playtime")
+*db.Collection playtimeSessionDocs = openCollection(communityDb, "project_playtime_sessions")
+*db.Collection reviewDocs = openCollection(communityDb, "project_reviews")
+*db.Collection pullDocs = openCollection(communityDb, "project_pulls")
+*db.Collection likeMilestoneDocs = openCollection(communityDb, "like_milestones")
+*db.Collection bountyWorkerDocs = openCollection(communityDb, "bounty_workers")
+*db.Collection classDocs = openCollection(communityDb, "classroom_classes")
+*db.Collection studentDocs = openCollection(communityDb, "classroom_students")
+*db.Collection classroomPlanDocs = openCollection(communityDb, "classroom_plans")
+*db.Collection assignmentDocs = openCollection(communityDb, "classroom_assignments")
+*db.Collection submissionDocs = openCollection(communityDb, "classroom_submissions")
+*db.Collection classroomAuditDocs = openCollection(communityDb, "classroom_audit")
+*db.Collection commentIndexDocs = openCollection(communityDb, "comment_index")
 
 def putDocument(*db.Collection collection, string id, object value) boolean (
   value["_id"] = id
@@ -41,21 +62,34 @@ def deleteDocumentsByField(*db.Collection collection, string field, string value
   return documents.len
 )
 
-def cleanupExpiredCommunityRecords() (
-  array previews = previewDocs.all()
+def cleanupExpiredCommunityRecords() boolean (
+  array previews = previewDocs.all() catch (err) (
+    log "WARNING: could not read previews for cleanup: " ++ err.toStr()
+    return false
+  )
   for i previews.len (
     object preview = previews[i].assert(object)
     if preview.expiresAt.toNum() <= timestamp (
-      void previewDocs.deleteOne({_id: preview["_id"]})
+      void previewDocs.deleteOne({_id: preview["_id"]}) catch (err) (
+        log "WARNING: could not delete expired preview: " ++ err.toStr()
+        return false
+      )
     )
   )
-  array sessions = playtimeSessionDocs.all()
+  array sessions = playtimeSessionDocs.all() catch (err) (
+    log "WARNING: could not read playtime sessions for cleanup: " ++ err.toStr()
+    return false
+  )
   for i sessions.len (
     object session = sessions[i].assert(object)
     if timestamp - session.lastSeen.toNum() > 86400000 (
-      void playtimeSessionDocs.deleteOne({_id: session["_id"]})
+      void playtimeSessionDocs.deleteOne({_id: session["_id"]}) catch (err) (
+        log "WARNING: could not delete expired playtime session: " ++ err.toStr()
+        return false
+      )
     )
   )
+  return true
 )
 
 def deleteProjectCommunityRecords(string projectId) boolean (

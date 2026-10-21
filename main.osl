@@ -25,7 +25,11 @@ def dotenvValue(string name) string (
   if !fs.exists(".env") (
     return ""
   )
-  array lines = fs.readFile(".env").split("\n")
+  string contents = fs.readFile(".env") catch (err) (
+    log "WARNING: could not read .env: " ++ err.toStr()
+    return ""
+  )
+  array lines = contents.split("\n")
   for i lines.len (
     string line = lines[i].toStr().strip()
     if line != "" and !line.startsWith("#") and line.contains("=") (
@@ -45,8 +49,16 @@ def dotenvValue(string name) string (
   return ""
 )
 
+def envValue(string name) string (
+  string value = env.get(name, "") catch (err) (
+    log "WARNING: could not read " ++ name ++ " from the environment: " ++ err.toStr()
+    return ""
+  )
+  return value
+)
+
 def configValue(string name, string defaultValue) string (
-  string value = env.get(name, "")
+  string value = envValue(name)
   if value != "" (
     return value
   )
@@ -258,11 +270,26 @@ auto developmentCache = cache.new({capacity: 4, ttl: 300000})
 auto classroomPoolCache = cache.new({capacity: 10000, ttl: 60000})
 
 ensureDirectories()
-initCommunityDatabase()
-migratePolicyNewsPosts()
-migrateSpaceMemberships()
-migrateExtensionUsage()
-refreshIndexUrls()
+void initCommunityDatabase() catch (err) (
+  log "FATAL: could not initialize the community database: " ++ err.toStr()
+  process.exit(1)
+)
+void migratePolicyNewsPosts() catch (err) (
+  log "FATAL: could not migrate policy news posts: " ++ err.toStr()
+  process.exit(1)
+)
+void migrateSpaceMemberships() catch (err) (
+  log "FATAL: could not migrate space memberships: " ++ err.toStr()
+  process.exit(1)
+)
+void migrateExtensionUsage() catch (err) (
+  log "FATAL: could not migrate extension usage: " ++ err.toStr()
+  process.exit(1)
+)
+void refreshIndexUrls() catch (err) (
+  log "FATAL: could not refresh index URLs: " ++ err.toStr()
+  process.exit(1)
+)
 void fs.mkdir(localBlobsDir, {recursive: true})
 if r2Local (
   log "R2 not configured; storing blobs on local disk at " ++ localBlobsDir
@@ -277,7 +304,7 @@ def stagedFlushLoop() (
     sweepStagedProjects()
     cleanupExpiredStagedUploadParts()
     flushR2UploadQueue()
-    cleanupExpiredCommunityRecords()
+    void cleanupExpiredCommunityRecords()
     void sweepSiteErrors()
     cleanupExpiredSessions()
   )
@@ -286,7 +313,7 @@ def stagedFlushLoop() (
 sweepStagedProjects()
 cleanupExpiredStagedUploadParts()
 cleanupExpiredSessions()
-cleanupExpiredCommunityRecords()
+void cleanupExpiredCommunityRecords()
 void sweepSiteErrors()
 thread.new(reconcileLoop)
 thread.new(processRoturWebhooks)
@@ -638,4 +665,7 @@ setupUploadRoutes(legacyUploads)
 setupApiRoutes(legacyApi)
 
 log "MistWarp API listening on " ++ appURL
-app.run(":" ++ port)
+app.run(":" ++ port) catch (err) (
+  log "FATAL: the MistWarp API stopped: " ++ err.toStr()
+  process.exit(1)
+)
