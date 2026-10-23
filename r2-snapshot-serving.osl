@@ -27,13 +27,25 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
   // An explicit encoding prevents the HTTP client from decompressing R2's body.
   auto fetched = requests.get(signedUrl, {headers: {"Accept-Encoding": "identity"}}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if fetched.status != 200 (
-    c.notFound("project snapshot not found")
+    // A missing object is a real 404, but a refused credential or an R2
+    // outage must not be reported as "this project has no snapshot".
+    log "WARNING: project snapshot fetch failed for " ++ key ++ ": status " ++ fetched.status.toStr()
+    if fetched.status == 404 (
+      c.notFound("project snapshot not found")
+    ) else (
+      c.json(502, {ok: false, error: "project snapshot unavailable"})
+    )
+    return
+  )
+  // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
+  string snapshotBody = fetched.body ?? ""
+  if snapshotBody.len == 0 or snapshotBody.len > maxStoredProjectJsonBytes (
+    log "WARNING: project snapshot fetch for " ++ key ++ " returned an empty or oversized body"
+    c.json(502, {ok: false, error: "project snapshot unavailable"})
     return
   )
   if gzip (
     c.setHeader("Content-Encoding", "gzip")
   )
-  // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
-  string snapshotBody = fetched.body
   c.send(200, "application/json", storagefs.Bytes(snapshotBody))
 )

@@ -11,6 +11,7 @@ import "std:url"
 string testDir = "/tmp/mistwarp-snapshot-test-" ++ timestamp.toStr()
 void fs.mkdir(testDir, {recursive: true})
 boolean r2Local = false
+number maxStoredProjectJsonBytes = 20971520
 
 // Fake R2: serves whatever the current case stages.
 number stubStatus = 200
@@ -107,6 +108,10 @@ stubStatus = 404
 stubGzip = false
 response = requestSnapshot("missing.json", false, "")
 testing.assert(response.status == 404, "missing remote snapshots return 404")
+
+stubStatus = 403
+response = requestSnapshot("denied.json", false, "")
+testing.assert(response.status == 502, "refused storage credentials return 502, not a fake 404")
 
 void fs.writeFile(localBlobPath("local.json"), plain)
 before = fetchCount
