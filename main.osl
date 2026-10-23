@@ -32,6 +32,9 @@ def dotenvValue(string name) string (
   array lines = contents.split("\n")
   for i lines.len (
     string line = lines[i].toStr().strip()
+    if line.startsWith("export ") (
+      line = line.replace("export ", "").strip()
+    )
     if line != "" and !line.startsWith("#") and line.contains("=") (
       array parts = line.split("=")
       string key = parts[1].toStr().strip()
@@ -57,12 +60,25 @@ def envValue(string name) string (
   return value
 )
 
+// Configuration is looked up in this order:
+//   1. MISTWARP_<NAME> in the real environment (an explicit, app-specific override)
+//   2. this app's .env
+//   3. <NAME> in the real environment (for deployments that don't ship a .env)
+//
+// Inherited variables come last on purpose. The API is often started from a
+// shared shell that exports another project's variables (for example Rotur's
+// R2_ACCESS_KEY_ID and R2_PUBLIC_BASE), and those must not silently replace
+// this service's own configuration.
 def configValue(string name, string defaultValue) string (
-  string value = envValue(name)
+  string value = envValue("MISTWARP_" ++ name)
   if value != "" (
     return value
   )
   value = dotenvValue(name)
+  if value != "" (
+    return value
+  )
+  value = envValue(name)
   if value != "" (
     return value
   )

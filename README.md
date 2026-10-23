@@ -10,7 +10,7 @@ Copy `.env.example` to `.env`, fill in the values, then run:
 osl run main.osl
 ```
 
-The server loads `.env` automatically. Real environment variables override `.env`.
+The server loads `.env` automatically. Configuration is read in this order: `MISTWARP_<NAME>` in the real environment, then `.env`, then `<NAME>` in the real environment. Put per-process overrides in `MISTWARP_<NAME>` (for example `MISTWARP_PORT`) so a shared shell that exports another project's variables can't replace this API's configuration.
 
 ## Environment
 
