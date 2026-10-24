@@ -102,6 +102,7 @@ string tmpDir = "data/tmp/"
 string stagingDir = "data/staging/"
 string thumbnailsDir = "data/thumbnails/"
 string cardsDir = "data/cards/"
+string thumbnailSecretFile = "data/thumbnail-secret"
 string quotaDir = "data/quota/"
 string userIdsFile = "data/userids.json"
 string adminsFile = "data/admins.json"
@@ -186,6 +187,7 @@ import "./storage.osl"
 import "./database.osl"
 import "./user-identity.osl"
 import "./asset-routing.osl"
+import "./thumbnail-access.osl"
 import "./r2.osl"
 import "./r2-upload-queue.osl"
 import "./cache-policy.osl"
@@ -288,6 +290,7 @@ auto developmentCache = cache.new({capacity: 4, ttl: 300000})
 auto classroomPoolCache = cache.new({capacity: 10000, ttl: 60000})
 
 ensureDirectories()
+string thumbnailSecret = loadThumbnailSecret(thumbnailSecretFile)
 void initCommunityDatabase() catch (err) (
   log "FATAL: could not initialize the community database: " ++ err.toStr()
   process.exit(1)
