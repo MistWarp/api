@@ -211,8 +211,9 @@ testing.assert(call("POST", "/v1/classroom/claim/ADMINCLAIM", "teen", "{}").stat
 testing.assert(call("GET", "/v1/classroom/claim/NOPECLAIM", "", "").status == 404, "unknown release links get 404")
 
 r = call("GET", "/v1/classroom/available", "teen", "")
-testing.assert(r.status == 404 and r.data.available != true, "Classroom is not offered to teachers who are not admins while it is off")
-testing.assert(call("GET", "/v1/classroom/available", "", "").status == 404, "Classroom is not offered to signed-out visitors while it is off")
+testing.assert(r.status == 200 and r.data.available == false, "Classroom is not offered to teachers who are not admins while it is off")
+r = call("GET", "/v1/classroom/available", "", "")
+testing.assert(r.status == 200 and r.data.available == false, "Classroom is not offered to signed-out visitors while it is off")
 r = call("GET", "/v1/classroom/available", "mist", "")
 testing.assert(r.status == 200 and r.data.available == true, "admins see Classroom while it is off")
 

@@ -84,6 +84,12 @@ def classroomSwitchGuard(*serve.Context c) (
     c.set("isMinor", false)
   )
   if isClassroomRoute(c.path()) and !classroomTestRequest(c) (
+    if c.method().toUpper() == "GET" and apiRoutePath(c.path()) == "/classroom/available" (
+      c.setHeader("Cache-Control", "no-store")
+      c.json(200, {ok: true, available: false})
+      c.abort()
+      return
+    )
     c.json(404, {ok: false, code: "classroom_unavailable", error: "MistWarp Classroom is not available yet."})
     c.abort()
     return
