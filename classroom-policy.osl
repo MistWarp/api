@@ -268,3 +268,43 @@ def submissionCanUnsubmit(object submission) boolean (
 def submissionIsLate(number dueAt, number turnedInAt) boolean (
   return dueAt > 0 and turnedInAt > dueAt
 )
+
+// The class as it should be once a teacher's account is erased: a co-teacher
+// takes over a class the teacher owned, and the teacher leaves any class they
+// co-taught. An owned class with no co-teacher returns {} and is deleted.
+def classAfterTeacherErased(object classDoc, string userId) object (
+  array kept = []
+  array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
+  for i coTeachers.len (
+    object teacher = coTeachers[i].assertElse(object, {})
+    if (teacher.userId ?? "").toStr() != userId (
+      kept.append(teacher)
+    )
+  )
+  object next = classDoc.clone()
+  if (classDoc.ownerId ?? "").toStr() == userId (
+    if kept.len == 0 (
+      return {}
+    )
+    object successor = kept[1].assertElse(object, {})
+    next.ownerId = (successor.userId ?? "").toStr()
+    next.owner = (successor.username ?? "").toStr()
+    kept = kept.filter((any teacher) boolean -> (teacher.assertElse(object, {}).userId ?? "").toStr() != next.ownerId)
+  )
+  next.coTeachers = kept
+  return next
+)
+
+// The school without an erased teacher. When they were its last admin, the
+// first remaining teacher becomes admin so the school can still be managed.
+def schoolAfterTeacherErased(object school, string userId) object (
+  object next = school.clone()
+  array teachers = (school.teacherIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != userId)
+  array admins = (school.adminIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != userId)
+  if admins.len == 0 and teachers.len > 0 (
+    admins.append(teachers[1].toStr())
+  )
+  next.teacherIds = teachers
+  next.adminIds = admins
+  return next
+)

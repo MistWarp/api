@@ -254,3 +254,38 @@ def handleAdminPurgeClassroom(*serve.Context c) (
   log "classroom purge by " ++ contextString(c, "username") ++ ": " ++ target ++ ", " ++ classes.len.toStr() ++ " classes, " ++ students.toStr() ++ " students"
   c.json(200, {ok: true, classes: classes.len, students: students})
 )
+
+// Called when a teacher's account is erased. Each class they owned passes to
+// a co-teacher, or is deleted with its students when it has none, and they
+// leave every class and school they taught in.
+def eraseClassroomTeacher(string userId) (
+  if userId == "" or isStudentUserId(userId) (
+    return
+  )
+  array classes = classDocs.all()
+  for i classes.len (
+    object classDoc = classes[i].assert(object)
+    if isClassTeacher(classDoc, userId) (
+      string classId = classDoc["_id"].toStr()
+      object next = classAfterTeacherErased(classDoc, userId)
+      if next.len == 0 (
+        number removed = purgeClassroomClass(classDoc)
+        log "classroom: deleted class " ++ classId ++ " with " ++ removed.toStr() ++ " students after its teacher's account was erased"
+      ) else (
+        putDocument(classDocs, classId, next)
+        string newOwnerId = (next.ownerId ?? "").toStr()
+        if newOwnerId != userId and (classDoc.ownerId ?? "").toStr() == userId (
+          invalidateClassroomPool(userId)
+          invalidateClassroomPool(newOwnerId)
+          recordClassroomSystemAudit(classId, "class_transferred", {from: userId, to: newOwnerId, reason: "owner_erased"})
+          addNotification(usernameForId(newOwnerId), "", "classroom_transferred", {classId: classId, className: classDoc.name})
+        )
+      )
+    )
+  )
+  object school = schoolForTeacher(userId)
+  if school.len > 0 (
+    putDocument(schoolDocs, school["_id"].toStr(), schoolAfterTeacherErased(school, userId))
+    classroomPoolCache.delete(school["_id"].toStr())
+  )
+)

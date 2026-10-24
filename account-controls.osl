@@ -188,6 +188,7 @@ def handleExportMyData(*serve.Context c) (
 // account itself. Used when they ask, and when Rotur says they deleted their
 // Rotur account, left MistWarp or were banned from Rotur (rotur-webhooks.osl).
 def eraseUser(string userId, string username) (
+  eraseClassroomTeacher(userId)
   purgeGameDataForUser(userId)
   purgeBackpackForUser(userId)
   deleteDocumentsByField(bountyWorkerDocs, "userId", userId)
