@@ -848,6 +848,7 @@ def handleMergePull(*serve.Context c) (
       return
     )
     upsertIndexEntry(target)
+    storageSettleProject(target)
     if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
       sync.unlock("project-history-" ++ target.id.toStr())
       c.internalError("the project merged, but the pull request could not be closed")

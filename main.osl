@@ -204,6 +204,8 @@ import "./upgrade-policy.osl"
 import "./perks.osl"
 import "./vanity-policy.osl"
 import "./quota-policy.osl"
+import "./storage-ledger-policy.osl"
+import "./storage-ledger.osl"
 import "./groups.osl"
 import "./banned-owners.osl"
 import "./related-projects.osl"
@@ -314,6 +316,34 @@ if !r2Local and appURL == "http://localhost:5627" (
   log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
 )
 
+// `main storage-report <file>` writes what MistWarp stores for everyone, for
+// the Rotur API's `claw storage-backfill`, and exits. Run it with the API
+// stopped.
+array commandArgs = process.args()
+if commandArgs.len >= 1 and commandArgs[1].toStr() == "storage-report" (
+  if commandArgs.len != 2 (
+    log "usage: main storage-report <file>"
+    process.exit(1)
+  )
+  result measured = try(backfillReleaseJsonBytes())
+  if measured.isErr() or !measured.unwrap() (
+    log "Some release sizes couldn't be measured, so the report counts them from what's on this machine"
+  )
+  result report = try(storageReport())
+  if report.isErr() (
+    log "Couldn't work out what MistWarp stores: " ++ report.unwrapErr().toStr()
+    process.exit(1)
+  )
+  string reportPath = commandArgs[2].toStr()
+  if !writeFile(reportPath, report.unwrap()) (
+    log "Couldn't write the storage report to " ++ reportPath
+    process.exit(1)
+  )
+  log "Wrote what MistWarp stores to " ++ reportPath
+  process.exit(0)
+)
+logLedgerSetup()
+
 def stagedFlushLoop() (
   while true (
     wait 300
@@ -336,6 +366,8 @@ thread.new(processRoturWebhooks)
 thread.new(stagedFlushLoop)
 thread.new(generateMissingProjectHistories)
 thread.new(backfillProjectHistoryBytes)
+thread.new(backfillReleaseJsonBytes)
+thread.new(storageSettleLoop)
 thread.new(developmentFeedLoop)
 thread.new(vanityLapseLoop)
 

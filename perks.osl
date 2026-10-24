@@ -79,8 +79,10 @@ def vanityEligibility(object project) string (
 
 def mistwarpBenefitsForTier(string rawTier) object (
   string tier = normalizeRoturTier(rawTier)
+  // Storage isn't a MistWarp benefit: projects count against the person's
+  // one Rotur storage allowance (storage-ledger.osl), shown in
+  // roturBenefitsForTier.
   object benefits = {
-    storageBytes: 524288000,
     maxProjectAssetBytes: 10485760,
     maxProjectAssetsBytes: 52428800,
     maxProjects: 100,
@@ -99,7 +101,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
     salesFeeBasisPoints: 1000
   }
   if tier == "Lite" (
-    benefits.storageBytes = 2147483648
     benefits.maxProjectAssetBytes = 26214400
     benefits.maxProjectAssetsBytes = 104857600
     benefits.maxProjects = 500
@@ -111,7 +112,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.analyticsDays = 30
     benefits.historyCheckpoints = true
   ) else if tier == "Plus" (
-    benefits.storageBytes = 10737418240
     benefits.maxProjectAssetBytes = 52428800
     benefits.maxProjectAssetsBytes = 262144000
     benefits.maxProjects = 2000
@@ -128,7 +128,6 @@ def mistwarpBenefitsForTier(string rawTier) object (
     benefits.customProjectBranding = true
     benefits.salesFeeBasisPoints = 700
   ) else if tier == "Pro" (
-    benefits.storageBytes = 53687091200
     benefits.maxProjectAssetBytes = 104857600
     benefits.maxProjectAssetsBytes = 1073741824
     benefits.maxProjects = 10000
@@ -173,8 +172,10 @@ def mistwarpBenefitsForProject(object project) object (
 
 def roturBenefitsForTier(string rawTier) object (
   string tier = normalizeRoturTier(rawTier)
+  // storageBytes is the one Rotur storage allowance, which MistWarp projects
+  // share with Rotur's other apps.
   object benefits = {
-    fileStorageBytes: 5000000,
+    storageBytes: 1000000000,
     accessProducts: 5,
     transactionHistoryMonths: 1,
     dailyCreditMultiplier: 1,
@@ -194,7 +195,7 @@ def roturBenefitsForTier(string rawTier) object (
     sableTokenDiscountPercent: 0
   }
   if tier == "Lite" (
-    benefits.fileStorageBytes = 25000000
+    benefits.storageBytes = 5000000000
     benefits.accessProducts = 10
     benefits.transactionHistoryMonths = 6
     benefits.loginHistory = 25
@@ -203,7 +204,7 @@ def roturBenefitsForTier(string rawTier) object (
     benefits.bioLength = 300
     benefits.bioTemplates = true
   ) else if tier == "Plus" (
-    benefits.fileStorageBytes = 100000000
+    benefits.storageBytes = 15000000000
     benefits.accessProducts = 20
     benefits.transactionHistoryMonths = 12
     benefits.dailyCreditMultiplier = 2
@@ -220,7 +221,7 @@ def roturBenefitsForTier(string rawTier) object (
     benefits.fullSableCatalogue = true
     benefits.sableTokenDiscountPercent = 25
   ) else if tier == "Pro" (
-    benefits.fileStorageBytes = 1000000000
+    benefits.storageBytes = 50000000000
     benefits.accessProducts = 50
     benefits.transactionHistoryMonths = 0
     benefits.dailyCreditMultiplier = 3

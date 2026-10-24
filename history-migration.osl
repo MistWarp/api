@@ -135,6 +135,7 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
     return {ok: false, error: "could not save generated history"}
   )
   upsertIndexEntry(current)
+  storageSettleProject(current)
   return {ok: true, project: current, generated: true}
 )
 

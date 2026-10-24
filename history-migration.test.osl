@@ -108,6 +108,11 @@ def upsertIndexEntry(object project) (
   return
 )
 
+array settledStorage = []
+def storageSettleProject(object project) (
+  settledStorage.append(project.id)
+)
+
 def readFile(string path) object (
   return {ok: false}
 )
@@ -118,6 +123,7 @@ object original = {id: "parent", owner: "Mist", created: 1000, jsonKey: "parent.
 records.parent = original
 object generated = ensureGeneratedProjectHistory(original, {}, false)
 testing.assert(generated.ok == true, "generate original")
+testing.equal(settledStorage, ["parent"], "the owner's storage is counted again with the new history")
 object parent = generated.project.assert(object)
 string base = parent.gitHead.toStr()
 object child = {id: "child", owner: "Mist", created: 2000, jsonKey: "child.json", lastUploadAt: 2000, remixParent: "parent", remixBaseCommit: base, assets: []}

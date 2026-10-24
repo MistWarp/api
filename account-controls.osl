@@ -200,6 +200,7 @@ def eraseUser(string userId, string username) (
   )
   if username == "" (
     purgeUserSessions(userId)
+    void ledgerFreeAll(userId)
     return
   )
   array ownedProjects = ownerIndexEntries(username, true)
@@ -240,6 +241,8 @@ def eraseUser(string userId, string username) (
   purgeUser(userId, username)
   removeUserFromSafetyLists(username)
   void fs.remove(safetyPath(username))
+  // Nothing of theirs is stored any more, so none of it counts.
+  void ledgerFreeAll(userId)
 )
 
 def handleDeleteMyData(*serve.Context c) (

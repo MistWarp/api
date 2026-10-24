@@ -1,0 +1,129 @@
+// What MistWarp counts against a person's one Rotur storage allowance, which
+// the Rotur API keeps in its storage ledger.
+//
+// It's every blob their projects (live and in the trash) and backpack keep in
+// storage, each counted once for that person however many of their projects
+// use it: a costume in ten of their projects counts once, and so does a remix's
+// project.json until the remix is first saved. Blobs are only ever shared
+// within one person's count; two people using the same asset each count it.
+// Thumbnails and share cards are made from projects, so they don't count, and
+// neither do backpack previews.
+//
+// The ledger holds one object per kind, named by ledgerKinds, at that kind's
+// total: "projects" is project.json snapshots (including those releases keep)
+// and history archives, "assets" is costumes and sounds, and "backpack" is
+// backpack items. A change to any of them replaces the total, so it only needs
+// room for what it adds.
+
+array ledgerKinds = ["projects", "assets", "backpack"]
+
+// The blobs one project keeps: { json: {key: bytes}, history: {key: bytes},
+// assets: [md5ext] }. assetSizes is the assets index, for working out the
+// size of project.json on projects saved before it was recorded.
+def projectStorageSummary(object project, object assetSizes) object (
+  array assets = (project.assets ?? []).assertElse(array, [])
+  object jsonBlobs = {}
+  string jsonKey = (project.jsonKey ?? "").toStr()
+  if jsonKey != "" (
+    number jsonBytes = 0
+    if project.contains("storedJsonBytes") and project.storedJsonBytes != null (
+      jsonBytes = project.storedJsonBytes.toNum()
+    ) else (
+      number assetBytes = 0
+      for i assets.len (
+        assetBytes += (assetSizes[assets[i].toStr()] ?? 0).toNum()
+      )
+      jsonBytes = (project.sizeBytes ?? 0).toNum() - assetBytes
+    )
+    jsonBlobs[jsonKey] = max(0, jsonBytes)
+  )
+  object historyBlobs = {}
+  array layers = projectWorkspaceKeys(project)
+  if layers.len > 0 (
+    historyBlobs[layers.join("|")] = max(0, (project.historyBytes ?? 0).toNum())
+  )
+  return {json: jsonBlobs, history: historyBlobs, assets: assets}
+)
+
+// Adds a release's project.json snapshot to its project's summary.
+def addReleaseBlob(object summary, string key, number bytes) object (
+  if key != "" (
+    object jsonBlobs = (summary.json ?? {}).assertElse(object, {})
+    jsonBlobs[key] = max(bytes, (jsonBlobs[key] ?? 0).toNum())
+    summary.json = jsonBlobs
+  )
+  return summary
+)
+
+// Each kind's total for one person: summaries are their projects', and
+// backpack their backpack items. A blob in more than one summary counts once.
+def storageTotals(array summaries, object assetSizes, array backpack) object (
+  object jsonSeen = {}
+  object historySeen = {}
+  object assetSeen = {}
+  number projectBytes = 0
+  number assetBytes = 0
+  for i summaries.len (
+    object summary = summaries[i].assertElse(object, {})
+    object jsonBlobs = (summary.json ?? {}).assertElse(object, {})
+    for key of jsonBlobs (
+      if !jsonSeen.contains(key) (
+        jsonSeen[key] = true
+        projectBytes += jsonBlobs[key].toNum()
+      )
+    )
+    object historyBlobs = (summary.history ?? {}).assertElse(object, {})
+    for key of historyBlobs (
+      if !historySeen.contains(key) (
+        historySeen[key] = true
+        projectBytes += historyBlobs[key].toNum()
+      )
+    )
+    array assets = (summary.assets ?? []).assertElse(array, [])
+    for j assets.len (
+      string name = assets[j].toStr()
+      if !assetSeen.contains(name) (
+        assetSeen[name] = true
+        assetBytes += (assetSizes[name] ?? 0).toNum()
+      )
+    )
+  )
+  object bodySeen = {}
+  number backpackBytes = 0
+  for i backpack.len (
+    object item = backpack[i].assertElse(object, {})
+    string key = (item.bodyKey ?? "").toStr()
+    if key != "" and !bodySeen.contains(key) (
+      bodySeen[key] = true
+      backpackBytes += (item.bodyBytes ?? 0).toNum()
+    )
+  )
+  return {projects: projectBytes, assets: assetBytes, backpack: backpackBytes}
+)
+
+// The kinds whose total would grow from what the ledger counts.
+def ledgerGrowth(object counted, object totals) array (
+  array grown = []
+  for i ledgerKinds.len (
+    string kind = ledgerKinds[i].toStr()
+    if (totals[kind] ?? 0).toNum() > (counted[kind] ?? 0).toNum() (
+      grown.append(kind)
+    )
+  )
+  return grown
+)
+
+// What brings the ledger in line with the totals: { kind, bytes } to set a
+// kind's total, with bytes 0 to stop counting it.
+def ledgerChanges(object counted, object totals) array (
+  array changes = []
+  for i ledgerKinds.len (
+    string kind = ledgerKinds[i].toStr()
+    number want = (totals[kind] ?? 0).toNum()
+    boolean listed = counted.contains(kind)
+    if (listed and ((counted[kind] ?? 0).toNum() != want or want == 0)) or (!listed and want > 0) (
+      changes.append({kind: kind, bytes: want})
+    )
+  )
+  return changes
+)
