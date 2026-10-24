@@ -113,3 +113,19 @@ testing.assert(!submissionCanUnsubmit({state: "returned"}), "returned work canno
 testing.assert(submissionIsLate(100, 101), "work after the due date is late")
 testing.assert(!submissionIsLate(100, 100), "work on the due date is on time")
 testing.assert(!submissionIsLate(0, 999), "assignments without a due date are never late")
+
+object owned = {_id: "c1", ownerId: "t1", owner: "ada", coTeachers: [{userId: "t2", username: "bo"}, {userId: "t3", username: "cy"}]}
+object handedOver = classAfterTeacherErased(owned, "t1")
+testing.assert(handedOver.ownerId == "t2" and handedOver.owner == "bo", "the first co-teacher takes over a class when its owner is erased")
+testing.assert(handedOver.coTeachers.len == 1 and handedOver.coTeachers[1].userId == "t3", "the new owner leaves the co-teacher list and the others stay")
+testing.assert(owned.ownerId == "t1" and owned.coTeachers.len == 2, "working out the handover leaves the stored class untouched")
+testing.assert(classAfterTeacherErased({_id: "c2", ownerId: "t1", owner: "ada", coTeachers: []}, "t1").len == 0, "a class with no co-teacher is deleted with its owner")
+object cotaught = classAfterTeacherErased(owned, "t3")
+testing.assert(cotaught.ownerId == "t1" and cotaught.coTeachers.len == 1 and cotaught.coTeachers[1].userId == "t2", "an erased co-teacher just leaves the class")
+
+object school = {_id: "s1", adminIds: ["t1"], teacherIds: ["t2", "t3"]}
+object schoolAfter = schoolAfterTeacherErased(school, "t1")
+testing.assert(schoolAfter.adminIds.len == 1 and schoolAfter.adminIds[1] == "t2", "a school losing its last admin promotes the first teacher")
+testing.assert(schoolAfter.teacherIds.len == 2, "promoting a teacher keeps them in the teacher list")
+object schoolKeepsAdmin = schoolAfterTeacherErased({_id: "s1", adminIds: ["t1", "t4"], teacherIds: ["t1", "t2"]}, "t1")
+testing.assert(schoolKeepsAdmin.adminIds.len == 1 and schoolKeepsAdmin.adminIds[1] == "t4" and schoolKeepsAdmin.teacherIds.len == 1, "a school with another admin just loses the erased teacher")
