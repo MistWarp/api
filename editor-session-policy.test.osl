@@ -48,3 +48,26 @@ testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/history/bootstrap
 testing.assert(!editorCanDeleteProject({lastUploadAt: 0, gitHead: "abc", assets: []}), "projects with history can't be deleted by the editor")
 testing.assert(!editorCanDeleteProject({lastUploadAt: 0, assets: ["a.png"]}), "projects with assets can't be deleted by the editor")
 testing.assert(editorCanDeleteProject({lastUploadAt: 0, assets: []}), "an empty project can be cleaned up")
+testing.assert(editorRouteAllowedTest("GET", "/v1/classroom/available"), "the editor can ask whether to show Classroom")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/classroom"), "class lists need the full session")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/classroom/available/extra"), "only the availability check is open to the editor")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/assignments/a1/turn-in"), "turning work in happens on MistWarp")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/classes/c1/present"), "starting a presentation needs the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/terms/accept"), "Classroom terms need the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/billing/checkout"), "billing needs the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/claim/ABC"), "release links need the full session")
+testing.assert(studentRouteAllowed("POST", "/v1/auth/editor-session"), "class students can open the editor")
+array studentEditorRoutes = [
+  ["GET", "/v1/me"],
+  ["GET", "/v1/projects/p1"],
+  ["GET", "/v1/projects/p1/project.json"],
+  ["GET", "/v1/projects/p1/trusted-extensions"],
+  ["POST", "/v1/projects/p1/live"],
+  ["POST", "/v1/projects/p1/upload"],
+  ["PUT", "/v1/projects/p1"],
+  ["GET", "/v1/classroom/available"]
+]
+for i studentEditorRoutes.len (
+  array route = studentEditorRoutes[i].assert(array)
+  testing.assert(editorRouteAllowedTest(route[1].toStr(), route[2].toStr()) and studentRouteAllowed(route[1].toStr(), route[2].toStr()), "a student's editor session can use " ++ route[1].toStr() ++ " " ++ route[2].toStr())
+)

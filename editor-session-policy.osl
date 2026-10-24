@@ -12,6 +12,7 @@ array editorSessionRoutes = [
   "GET ^/agreement$",
   "POST ^/agreement/accept$",
   "POST ^/errors$",
+  "GET ^/classroom/available$",
   "GET ^/users/[^/]+/projects$",
   "POST ^/projects$",
   "GET ^/projects/[^/]+$",
