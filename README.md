@@ -39,6 +39,12 @@ The server loads `.env` automatically. Configuration is read in this order: `MIS
 | GITHUB_ORG | MistWarp | GitHub org whose pull requests appear on the roadmap's Changes tab |
 | GITHUB_TOKEN | | Optional GitHub token; only raises the search rate limit, the feed works without one |
 | REALTIME_URL | wss://api.mistwarp.org/v1/connect | Public multiplayer WebSocket endpoint |
+| STRIPE_SECRET_KEY | | Stripe secret key for Classroom plans; online payment is off while any Stripe value is empty |
+| STRIPE_WEBHOOK_SECRET | | Signing secret of the Stripe webhook pointed at `/v1/classroom/billing/webhook` |
+| STRIPE_CLASSROOM_PRICE | | Recurring Stripe price for one Classroom plan |
+| STRIPE_SEAT_PACK_PRICE | | Optional recurring Stripe price for each pack of 10 extra student seats |
+| STRIPE_CLASSROOM_PRICE_YEARLY | | Yearly Stripe price for one Classroom plan; when set, checkout offers yearly billing and uses it by default. Online payment needs at least one of the monthly and yearly Classroom prices |
+| STRIPE_SEAT_PACK_PRICE_YEARLY | | Optional yearly Stripe price for each pack of 10 extra student seats, used with the yearly Classroom price |
 
 The multiplayer WebSocket runs inside this API process at `/v1/connect`. It
 uses the same listener, domain, and deployment as the HTTP API.

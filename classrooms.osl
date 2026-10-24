@@ -96,9 +96,18 @@ def studentsInClass(string classId) array (
   return students
 )
 
+def classesForPlanOwner(string ownerId) array (
+  array classes = []
+  array members = planMemberIds(classroomPlanKey(ownerId))
+  for i members.len (
+    classes ++= classesOwnedBy(members[i].toStr())
+  )
+  return classes
+)
+
 def studentsForPlanOwner(string ownerId) array (
   array students = []
-  array classes = classesOwnedBy(ownerId)
+  array classes = classesForPlanOwner(ownerId)
   for i classes.len (
     object classDoc = classes[i].assert(object)
     students ++= studentDocs.where("classId", "==", classDoc["_id"].toStr()).all()
@@ -107,26 +116,36 @@ def studentsForPlanOwner(string ownerId) array (
 )
 
 def classroomPlanFor(string ownerId) object (
-  return effectiveClassroomPlan((classroomPlanDocs.findById(ownerId) ?? {}), timestamp)
+  return effectiveClassroomPlan((classroomPlanDocs.findById(classroomPlanKey(ownerId)) ?? {}), timestamp)
+)
+
+def classroomPlanLock(string ownerId) string (
+  return "classroom-owner-" ++ classroomPlanKey(ownerId)
+)
+
+def invalidateClassroomPool(string ownerId) (
+  classroomPoolCache.delete(ownerId)
+  classroomPoolCache.delete(classroomPlanKey(ownerId))
 )
 
 def planOwnerStorageBytes(string ownerId) number (
-  if classroomPoolCache.has(ownerId) (
-    return classroomPoolCache.get(ownerId).toNum()
+  string key = classroomPlanKey(ownerId)
+  if classroomPoolCache.has(key) (
+    return classroomPoolCache.get(key).toNum()
   )
   number total = 0
   array students = studentsForPlanOwner(ownerId)
   for i students.len (
     total += ownerStorageBytes(students[i].username.toStr())
   )
-  classroomPoolCache.set(ownerId, total)
+  classroomPoolCache.set(key, total)
   return total
 )
 
 def classroomUsage(string ownerId) object (
   return {
     seats: studentsForPlanOwner(ownerId).len,
-    classes: classesOwnedBy(ownerId).len,
+    classes: classesForPlanOwner(ownerId).len,
     storageBytes: planOwnerStorageBytes(ownerId)
   }
 )
@@ -215,6 +234,7 @@ def taughtClassOrFail(*serve.Context c) object (
     c.notFound("class not found")
     return {}
   )
+  touchClassroomActivity(classDoc)
   return classDoc
 )
 
@@ -248,13 +268,17 @@ def handleGetClassroom(*serve.Context c) (
   array classes = classesTaughtBy(userId)
   array rows = []
   for i classes.len (
+    touchClassroomActivity(classes[i].assert(object))
     rows.append(classResponse(classes[i].assert(object), c))
   )
   c.json(200, {
     ok: true,
     role: "teacher",
+    terms: classroomTermsStatus(userId),
     plan: classroomPlanFor(userId),
     usage: classroomUsage(userId),
+    billing: classroomBillingInfo(userId),
+    school: if schoolForTeacher(userId).len == 0 then null else schoolSummary(schoolForTeacher(userId), userId),
     classes: rows
   })
 )
@@ -272,12 +296,13 @@ def handleCreateClass(*serve.Context c) (
     return
   )
   string userId = contextString(c, "userId")
-  string lockName = "classroom-owner-" ++ userId
+  string lockName = classroomPlanLock(userId)
   sync.lock(lockName)
   object plan = classroomPlanFor(userId)
-  if classesOwnedBy(userId).len >= plan.maxClasses.toNum() (
+  if classesForPlanOwner(userId).len >= plan.maxClasses.toNum() (
     sync.unlock(lockName)
-    c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ " classes. Archive and delete a class or upgrade your plan."})
+    string classWord = if plan.maxClasses.toNum() == 1 then " class" else " classes"
+    c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ classWord ++ ". Archive and delete a class or upgrade your plan."})
     return
   )
   string code = generateClassCode()
@@ -325,6 +350,7 @@ def handleGetClass(*serve.Context c) (
   c.json(200, {
     ok: true,
     class: classResponse(classDoc, c),
+    presentation: if classPresentation(classId).len == 0 then null else classPresentation(classId),
     students: studentRows,
     assignments: assignmentRows,
     plan: classroomPlanFor(ownerId),
@@ -372,6 +398,9 @@ def handleDeleteClass(*serve.Context c) (
     c.json(409, {ok: false, code: "class_not_empty", error: "Move or delete every student before deleting the class."})
     return
   )
+  deleteDocumentsByField(classroomGroupDocs, "classId", classId)
+  deleteDocumentsByField(classroomPresentationDocs, "classId", classId)
+  deleteDocumentsByField(classroomClaimDocs, "classId", classId)
   deleteDocumentsByField(assignmentDocs, "classId", classId)
   deleteDocumentsByField(submissionDocs, "classId", classId)
   deleteDocumentsByField(classroomAuditDocs, "classId", classId)
@@ -467,7 +496,7 @@ def handleTransferClass(*serve.Context c) (
     return
   )
   string classId = classDoc["_id"].toStr()
-  string lockName = "classroom-owner-" ++ nextOwnerId
+  string lockName = classroomPlanLock(nextOwnerId)
   sync.lock(lockName)
   object plan = classroomPlanFor(nextOwnerId)
   object usage = classroomUsage(nextOwnerId)
@@ -493,8 +522,8 @@ def handleTransferClass(*serve.Context c) (
   classDoc.owner = usernameForId(nextOwnerId)
   putDocument(classDocs, classId, classDoc)
   sync.unlock(lockName)
-  classroomPoolCache.delete(previousOwnerId)
-  classroomPoolCache.delete(nextOwnerId)
+  invalidateClassroomPool(previousOwnerId)
+  invalidateClassroomPool(nextOwnerId)
   recordClassroomAudit(classId, c, "class_transferred", {from: previousOwnerId, to: nextOwnerId})
   addNotification(classDoc.owner.toStr(), contextString(c, "username"), "classroom_transferred", {classId: classId, className: classDoc.name})
   c.json(200, {ok: true})
@@ -571,7 +600,7 @@ def handleCreateStudents(*serve.Context c) (
     return
   )
   string ownerId = classDoc.ownerId.toStr()
-  string lockName = "classroom-owner-" ++ ownerId
+  string lockName = classroomPlanLock(ownerId)
   sync.lock(lockName)
   object plan = classroomPlanFor(ownerId)
   number seatsUsed = studentsForPlanOwner(ownerId).len
@@ -626,7 +655,8 @@ def handleGetClassStudent(*serve.Context c) (
     projects.append({id: entry.id, title: entry.title, edited: entry.edited, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum()})
   )
   array submissions = submissionDocs.where("studentId", "==", student["_id"].toStr()).all()
-  c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions})
+  object claim = pendingClaimForStudent(student["_id"].toStr())
+  c.json(200, {ok: true, student: studentResponse(student), projects: projects, submissions: submissions, release: if claim.len == 0 then null else claimResponse(claim)})
 )
 
 def handleUpdateClassStudent(*serve.Context c) (
@@ -693,7 +723,7 @@ def handleMoveClassStudent(*serve.Context c) (
     return
   )
   string targetOwner = target.ownerId.toStr()
-  if targetOwner != classDoc.ownerId.toStr() (
+  if classroomPlanKey(targetOwner) != classroomPlanKey(classDoc.ownerId.toStr()) (
     object plan = classroomPlanFor(targetOwner)
     if studentsForPlanOwner(targetOwner).len + 1 > plan.seats.toNum() (
       c.json(413, {ok: false, code: "seat_limit", error: "The other class's plan has no free student seats."})
@@ -702,8 +732,8 @@ def handleMoveClassStudent(*serve.Context c) (
   )
   student.classId = target["_id"]
   putDocument(studentDocs, student["_id"].toStr(), student)
-  classroomPoolCache.delete(classDoc.ownerId.toStr())
-  classroomPoolCache.delete(targetOwner)
+  invalidateClassroomPool(classDoc.ownerId.toStr())
+  invalidateClassroomPool(targetOwner)
   recordClassroomAudit(classDoc["_id"].toStr(), c, "student_moved", {studentId: student["_id"], to: target["_id"]})
   recordClassroomAudit(target["_id"].toStr(), c, "student_moved", {studentId: student["_id"], from: classDoc["_id"]})
   c.json(200, {ok: true})
@@ -713,6 +743,7 @@ def deleteStudentAccount(object student) (
   string studentId = student["_id"].toStr()
   purgeUser(studentId, student.username.toStr())
   deleteDocumentsByField(submissionDocs, "studentId", studentId)
+  deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
   void studentDocs.deleteOne({_id: studentId})
 )
 
@@ -722,7 +753,7 @@ def handleDeleteClassStudent(*serve.Context c) (
   object student = classStudentOrFail(c, classDoc)
   if student.len == 0 return
   deleteStudentAccount(student)
-  classroomPoolCache.delete(classDoc.ownerId.toStr())
+  invalidateClassroomPool(classDoc.ownerId.toStr())
   recordClassroomAudit(classDoc["_id"].toStr(), c, "student_deleted", {studentId: student["_id"], displayName: student.displayName})
   c.json(200, {ok: true})
 )
@@ -922,7 +953,8 @@ def handleGetAssignment(*serve.Context c) (
     object submission = (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()) ?? {})
     rows.append({
       student: {id: student["_id"], displayName: student.displayName},
-      submission: if submission.len == 0 then null else submission
+      submission: if submission.len == 0 then null else submission,
+      group: if submission.len == 0 then null else groupForSubmission(submission)
     })
   )
   c.json(200, {ok: true, assignment: assignmentSummary(assignment, students.len), rows: rows})
@@ -961,13 +993,14 @@ def handleReviewSubmission(*serve.Context c) (
     return
   )
   object body = requestJSON(c)
+  object review = {}
   if body.contains("feedback") (
     string feedback = body.feedback.toStr().strip()
     if feedback.len > 5000 (
       c.badRequest("feedback is too long")
       return
     )
-    submission.feedback = feedback
+    review.feedback = feedback
   )
   if body.contains("grade") (
     string grade = (body.grade ?? "").toStr().strip()
@@ -975,15 +1008,20 @@ def handleReviewSubmission(*serve.Context c) (
       c.badRequest("grades can be up to 20 characters")
       return
     )
-    submission.grade = grade
+    review.grade = grade
   )
   if body["return"] == true (
-    submission.state = "returned"
-    submission.returnedAt = timestamp
-    submission.returnedBy = contextString(c, "userId")
-    addNotification(usernameForId(submission.studentId.toStr()), contextString(c, "username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+    review.state = "returned"
+    review.returnedAt = timestamp
+    review.returnedBy = contextString(c, "userId")
   )
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  array members = groupSubmissions(submission)
+  submission = updateGroupSubmissions(submission, review)
+  if body["return"] == true (
+    for i members.len (
+      addNotification(usernameForId(members[i].studentId.toStr()), contextString(c, "username"), "classroom_returned", {assignmentId: assignment["_id"], assignmentTitle: assignment.title})
+    )
+  )
   recordClassroomAudit(classDoc["_id"].toStr(), c, "submission_reviewed", {assignmentId: assignment["_id"], studentId: submission.studentId, returned: body["return"] == true})
   c.json(200, {ok: true, submission: submission})
 )
@@ -1001,7 +1039,8 @@ def studentAssignmentRows(object student) array (
       instructions: assignment.instructions,
       dueAt: assignment.dueAt,
       createdAt: assignment.createdAt,
-      submission: if submission.len == 0 then null else submission
+      submission: if submission.len == 0 then null else submission,
+      group: if submission.len == 0 then null else groupForSubmission(submission)
     })
   )
   return rows
@@ -1026,6 +1065,7 @@ def handleGetStudentClassroom(*serve.Context c) (
     role: "student",
     student: {id: student["_id"], displayName: student.displayName, username: student.username},
     class: {id: classDoc["_id"], name: classDoc.name, teacher: classDoc.owner},
+    presentation: if classPresentation(classDoc["_id"].toStr()).len == 0 then null else classPresentation(classDoc["_id"].toStr()),
     assignments: studentAssignmentRows(student),
     projects: projects,
     storage: storage
@@ -1144,7 +1184,7 @@ def handleStartAssignment(*serve.Context c) (
   }
   putDocument(submissionDocs, submissionId, submission)
   sync.unlock(lockName)
-  classroomPoolCache.delete(classForStudentId(student["_id"].toStr()).ownerId.toStr())
+  invalidateClassroomPool(classForStudentId(student["_id"].toStr()).ownerId.toStr())
   c.json(201, {ok: true, submission: submission, projectId: project.id})
 )
 
@@ -1164,11 +1204,13 @@ def handleTurnInAssignment(*serve.Context c) (
     return
   )
   object project = loaded.project.assert(object)
-  submission.state = "turned_in"
-  submission.turnedInAt = timestamp
-  submission.turnedInHead = (project.gitHead ?? "").toStr()
-  submission.late = submissionIsLate((assignment.dueAt ?? 0).toNum(), timestamp)
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  object turnedIn = {
+    state: "turned_in",
+    turnedInAt: timestamp,
+    turnedInHead: (project.gitHead ?? "").toStr(),
+    late: submissionIsLate((assignment.dueAt ?? 0).toNum(), timestamp)
+  }
+  submission = updateGroupSubmissions(submission, turnedIn)
   object classDoc = loadClass(student.classId.toStr())
   array teachers = classTeacherIds(classDoc)
   for i teachers.len (
@@ -1187,11 +1229,7 @@ def handleUnsubmitAssignment(*serve.Context c) (
     c.badRequest("this work is not waiting for your teacher")
     return
   )
-  submission.state = "started"
-  submission.turnedInAt = 0
-  submission.turnedInHead = ""
-  submission.late = false
-  putDocument(submissionDocs, submission["_id"].toStr(), submission)
+  submission = updateGroupSubmissions(submission, {state: "started", turnedInAt: 0, turnedInHead: "", late: false})
   c.json(200, {ok: true, submission: submission})
 )
 
@@ -1239,6 +1277,20 @@ def classroomAccessGuard(*serve.Context c) (
     return
   )
   string path = apiRoutePath(c.path())
+  string projectId = studentProjectRouteId(c.path())
+  if contextBool(c, "isStudent") and projectId != "" (
+    auto loaded = loadProject(projectId)
+    if !loaded.ok or projectRole(loaded.project.assert(object), contextString(c, "username")) == "" (
+      c.json(404, {ok: false, error: "project not found"})
+      c.abort()
+      return
+    )
+  )
+  if contextBool(c, "isStudent") and regex.match("^/projects/[^/]+/live$", path) and !studentLiveCollaborationAllowed(contextString(c, "userId")) (
+    c.json(403, {ok: false, code: "plan_required", error: "Live collaboration needs your teacher to have a Classroom plan."})
+    c.abort()
+    return
+  )
   if path.startsWith("/users/") (
     array parts = path.split("/")
     string name = url.unescape(parts[3].toStr())
@@ -1262,7 +1314,17 @@ def handleAdminGetClassroomPlan(*serve.Context c) (
 
 def handleAdminSetClassroomPlan(*serve.Context c) (
   object body = requestJSON(c)
-  string userId = teacherIdForUsername((body.username ?? "").toStr())
+  string userId = ""
+  string schoolId = (body.schoolId ?? "").toStr()
+  if schoolId != "" (
+    if (schoolDocs.findById(schoolId) ?? {}).len == 0 (
+      c.badRequest("school not found")
+      return
+    )
+    userId = schoolId
+  ) else (
+    userId = teacherIdForUsername((body.username ?? "").toStr())
+  )
   if userId == "" (
     c.badRequest("Rotur user not found")
     return
@@ -1284,6 +1346,6 @@ def handleAdminSetClassroomPlan(*serve.Context c) (
     updatedAt: timestamp
   }
   putDocument(classroomPlanDocs, userId, stored)
-  classroomPoolCache.delete(userId)
+  invalidateClassroomPool(userId)
   c.json(200, {ok: true, plan: classroomPlanFor(userId)})
 )

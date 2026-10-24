@@ -94,7 +94,7 @@ def classroomPlanDefaults(string tier) object (
   if tier == "classroom" (
     return {tier: "classroom", seats: 35, maxClasses: 12, storageBytes: 25 * classroomGiB, liveCollaboration: true}
   )
-  return {tier: "free", seats: 5, maxClasses: 1, storageBytes: classroomGiB, liveCollaboration: false}
+  return {tier: "free", seats: 35, maxClasses: 1, storageBytes: classroomGiB, liveCollaboration: false}
 )
 
 def validClassroomTier(string tier) boolean (
@@ -190,12 +190,39 @@ array studentWriteRoutes = [
   "POST ^/classroom/(login|assignments/[^/]+/(start|turn-in|unsubmit))$"
 ]
 
+array studentReadRoutes = [
+  "^/me$",
+  "^/me/(quota|settings|library|trash|shared-projects|backpack)$",
+  "^/notifications$",
+  "^/perks$",
+  "^/agreement$",
+  "^/health$",
+  "^/connect$",
+  "^/classroom(/.*)?$",
+  "^/projects/[^/]+$",
+  "^/projects/[^/]+/(project\\.json|trusted-extensions|editor|workspace\\.mwp|card\\.svg|commits|branches|game-inventory-config|me/save|me/inventory)$",
+  "^/projects/[^/]+/releases/[^/]+/project\\.json$",
+  "^/projects/[^/]+/extensions/[^/]+/source$",
+  "^/projects/[^/]+/commits/[^/]+(/(tree|file|co-authors|collaborators))?$"
+]
+
 def studentRouteAllowed(string method, string rawPath) boolean (
   string verb = method.toUpper()
-  if verb == "GET" or verb == "HEAD" or verb == "OPTIONS" (
+  if verb == "OPTIONS" (
     return true
   )
   string path = apiRoutePath(rawPath)
+  if path == "/projects/random" or path == "/projects/featured" (
+    return false
+  )
+  if verb == "GET" or verb == "HEAD" (
+    for i studentReadRoutes.len (
+      if regex.match(studentReadRoutes[i].toStr(), path) (
+        return true
+      )
+    )
+    return false
+  )
   for i studentWriteRoutes.len (
     string rule = studentWriteRoutes[i].toStr()
     array parts = rule.split(" ")
@@ -207,6 +234,18 @@ def studentRouteAllowed(string method, string rawPath) boolean (
 )
 
 array studentProjectFields = ["title", "description", "instructions", "notes", "credits", "compatibility"]
+
+def studentProjectRouteId(string rawPath) string (
+  string path = apiRoutePath(rawPath)
+  if !path.startsWith("/projects/") (
+    return ""
+  )
+  array parts = path.split("/")
+  if parts.len < 3 (
+    return ""
+  )
+  return parts[3].toStr()
+)
 
 def studentProjectUpdateAllowed(array keys) boolean (
   for i keys.len (

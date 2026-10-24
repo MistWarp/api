@@ -33,3 +33,7 @@ testing.assert(!classroomBodySizeAllowed("262145", 262144), "larger bodies are n
 testing.assert(!classroomBodySizeAllowed("", 262144), "bodies without a length are not read")
 testing.assert(!classroomBodySizeAllowed("12abc", 262144), "malformed lengths are not read")
 testing.assert(!classroomBodySizeAllowed("-1", 262144), "negative lengths are not read")
+
+testing.assert(classroomClaimCodeFromPath("/v1/classroom/claim/ABCD234567") == "ABCD234567", "the release code is read from the claim path")
+testing.assert(classroomClaimCodeFromPath("/v1/classroom/claim/ABCD234567/extra") == "", "longer claim paths give no code")
+testing.assert(classroomClaimCodeFromPath("/v1/classroom/classes/c1/students/s1/release") == "", "starting a release is not a claim")

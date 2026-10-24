@@ -108,7 +108,7 @@ def handleRecordSiteError(*serve.Context c) (
     componentStack = body.componentStack.toStr().trim(1, 10000)
   )
   string userAgent = (c.header("User-Agent") ?? "").strip().trim(1, 500)
-  string username = contextString(c, "username")
+  string username = if contextBool(c, "isStudent") then "" else contextString(c, "username")
   object entry = {
     _id: "e" ++ randomString(16),
     message: message,

@@ -153,6 +153,12 @@ string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
 string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
 string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
 string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
+string stripeSecretKey = configValue("STRIPE_SECRET_KEY", "")
+string stripeWebhookSecret = configValue("STRIPE_WEBHOOK_SECRET", "")
+string stripeClassroomPrice = configValue("STRIPE_CLASSROOM_PRICE", "")
+string stripeSeatPackPrice = configValue("STRIPE_SEAT_PACK_PRICE", "")
+string stripeClassroomPriceYearly = configValue("STRIPE_CLASSROOM_PRICE_YEARLY", "")
+string stripeSeatPackPriceYearly = configValue("STRIPE_SEAT_PACK_PRICE_YEARLY", "")
 string realtimeURL = configValue("REALTIME_URL", "wss://api.mistwarp.org/v1/connect")
 number historyMigrationWorkers = configValue("HISTORY_MIGRATION_WORKERS", "4").toNum().toInt()
 if historyMigrationWorkers < 1 (
@@ -261,6 +267,14 @@ import "./release-access-policy.osl"
 import "./editor-session-policy.osl"
 import "./privacy-policy.osl"
 import "./classrooms.osl"
+import "./classroom-billing-policy.osl"
+import "./classroom-billing.osl"
+import "./classroom-groups.osl"
+import "./classroom-release.osl"
+import "./classroom-schools.osl"
+import "./classroom-present.osl"
+import "./classroom-legal-policy.osl"
+import "./classroom-legal.osl"
 import "./classroom-switch-policy.osl"
 import "./classroom-switch.osl"
 import "./site-realtime.osl"
@@ -367,6 +381,7 @@ void sweepSiteErrors()
 thread.new(reconcileLoop)
 thread.new(processRoturWebhooks)
 thread.new(stagedFlushLoop)
+void startClassroomTimers()
 thread.new(generateMissingProjectHistories)
 thread.new(backfillProjectHistoryBytes)
 thread.new(backfillReleaseJsonBytes)
@@ -504,23 +519,46 @@ def setupApiRoutes(*serve.Router api) (
 
   api.GET("/classroom/join/:code", serve.limitRequests(30, {window: 60000}), handleClassroomJoinInfo)
   api.POST("/classroom/login", serve.limitRequests(20, {window: 60000}), handleClassroomLogin)
+  api.GET("/classroom/available", handleClassroomAvailable)
   api.GET("/classroom", requireAuth, handleGetClassroom)
-  api.POST("/classroom/classes", requireClassroomTeacher, serve.limitRequests(20, {window: 3600000}), handleCreateClass)
+  api.POST("/classroom/terms/accept", requireClassroomTeacher, serve.limitRequests(20, {window: 3600000}), handleAcceptClassroomTerms)
+  api.GET("/classroom/school", requireClassroomTeacher, handleGetSchool)
+  api.GET("/classroom/school/audit", requireClassroomTeacher, handleGetSchoolAudit)
+  api.GET("/classroom/school/export", requireClassroomTeacher, serve.limitRequests(10, {window: 3600000}), handleExportSchool)
+  api.POST("/classroom/school/teachers", requireClassroomTeacher, requireClassroomTerms, handleAddSchoolTeacher)
+  api.DELETE("/classroom/school/teachers/:teacher", requireClassroomTeacher, handleRemoveSchoolTeacher)
+  api.PUT("/classroom/school/teachers/:teacher/admin", requireClassroomTeacher, handleSetSchoolAdmin)
+  api.POST("/classroom/billing/checkout", requireClassroomTeacher, requireClassroomTerms, serve.limitRequests(20, {window: 3600000}), handleClassroomCheckout)
+  api.POST("/classroom/billing/portal", requireClassroomTeacher, serve.limitRequests(30, {window: 3600000}), handleClassroomBillingPortal)
+  api.POST("/classroom/billing/webhook", handleStripeWebhook)
+  api.POST("/classroom/trial", requireClassroomTeacher, requireClassroomTerms, serve.limitRequests(10, {window: 3600000}), handleStartClassroomTrial)
+  api.POST("/classroom/classes", requireClassroomTeacher, requireClassroomTerms, serve.limitRequests(20, {window: 3600000}), handleCreateClass)
   api.GET("/classroom/classes/:id", requireClassroomTeacher, handleGetClass)
   api.PUT("/classroom/classes/:id", requireClassroomTeacher, handleUpdateClass)
   api.DELETE("/classroom/classes/:id", requireClassroomTeacher, handleDeleteClass)
   api.POST("/classroom/classes/:id/code", requireClassroomTeacher, handleResetClassCode)
-  api.POST("/classroom/classes/:id/teachers", requireClassroomTeacher, handleAddCoTeacher)
+  api.POST("/classroom/classes/:id/teachers", requireClassroomTeacher, requireClassroomTerms, handleAddCoTeacher)
   api.DELETE("/classroom/classes/:id/teachers/:teacher", requireClassroomTeacher, handleRemoveCoTeacher)
   api.POST("/classroom/classes/:id/transfer", requireClassroomTeacher, handleTransferClass)
   api.GET("/classroom/classes/:id/audit", requireClassroomTeacher, handleGetClassAudit)
-  api.POST("/classroom/classes/:id/students", requireClassroomTeacher, serve.limitRequests(30, {window: 3600000}), handleCreateStudents)
+  api.GET("/classroom/classes/:id/export", requireClassroomTeacher, serve.limitRequests(30, {window: 3600000}), handleExportClass)
+  api.GET("/classroom/classes/:id/groups", requireClassroomTeacher, handleListClassGroups)
+  api.POST("/classroom/classes/:id/present", requireClassroomTeacher, requireClassroomTerms, handleStartPresentation)
+  api.DELETE("/classroom/classes/:id/present", requireClassroomTeacher, handleStopPresentation)
+  api.POST("/classroom/classes/:id/groups", requireClassroomTeacher, requireClassroomTerms, handleCreateClassGroup)
+  api.DELETE("/classroom/classes/:id/groups/:gid", requireClassroomTeacher, handleDeleteClassGroup)
+  api.POST("/classroom/classes/:id/students", requireClassroomTeacher, requireClassroomTerms, serve.limitRequests(30, {window: 3600000}), handleCreateStudents)
   api.GET("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleGetClassStudent)
+  api.GET("/classroom/classes/:id/students/:sid/export", requireClassroomTeacher, serve.limitRequests(60, {window: 3600000}), handleExportClassStudent)
   api.PUT("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleUpdateClassStudent)
   api.DELETE("/classroom/classes/:id/students/:sid", requireClassroomTeacher, handleDeleteClassStudent)
   api.POST("/classroom/classes/:id/students/:sid/reset", requireClassroomTeacher, handleResetStudentLogin)
   api.POST("/classroom/classes/:id/students/:sid/move", requireClassroomTeacher, handleMoveClassStudent)
-  api.POST("/classroom/classes/:id/assignments", requireClassroomTeacher, handleCreateAssignment)
+  api.POST("/classroom/classes/:id/students/:sid/release", requireClassroomTeacher, requireClassroomTerms, handleReleaseStudent)
+  api.DELETE("/classroom/classes/:id/students/:sid/release", requireClassroomTeacher, handleCancelStudentRelease)
+  api.GET("/classroom/claim/:code", serve.limitRequests(30, {window: 60000}), handleGetClaim)
+  api.POST("/classroom/claim/:code", requireAuth, serve.limitRequests(10, {window: 60000}), handleRedeemClaim)
+  api.POST("/classroom/classes/:id/assignments", requireClassroomTeacher, requireClassroomTerms, handleCreateAssignment)
   api.GET("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleGetAssignment)
   api.PUT("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleUpdateAssignment)
   api.DELETE("/classroom/classes/:id/assignments/:aid", requireClassroomTeacher, handleDeleteAssignment)
@@ -703,6 +741,9 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/admin/extensions/url-policy", requireAdmin, handleAdminSetExtensionUrlPolicy)
   api.GET("/admin/classroom/plans", requireAdmin, handleAdminGetClassroomPlan)
   api.POST("/admin/classroom/plans", requireAdmin, handleAdminSetClassroomPlan)
+  api.GET("/admin/classroom/schools", requireAdmin, handleAdminListSchools)
+  api.POST("/admin/classroom/schools", requireAdmin, handleAdminCreateSchool)
+  api.POST("/admin/classroom/purge", requireAdmin, handleAdminPurgeClassroom)
 )
 
 *serve.Router uploadsV1 = app.group("/v1")
