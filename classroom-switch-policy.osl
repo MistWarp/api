@@ -16,6 +16,14 @@ def classroomJoinCodeFromPath(string method, string rawPath) string (
   return path.split("/")[4]
 )
 
+def classroomClaimCodeFromPath(string rawPath) string (
+  string path = apiRoutePath(rawPath)
+  if !regex.match("^/classroom/claim/[^/]+$", path) (
+    return ""
+  )
+  return path.split("/")[4]
+)
+
 def isClassroomLoginRoute(string method, string rawPath) boolean (
   return method.toUpper() == "POST" and apiRoutePath(rawPath) == "/classroom/login"
 )

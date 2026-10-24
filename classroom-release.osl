@@ -1,5 +1,12 @@
 number classroomClaimLifetimeMs = 1209600000
 
+def loadClassroomClaim(string code) object (
+  if code == "" (
+    return {}
+  )
+  return (classroomClaimDocs.findById(code) ?? {})
+)
+
 def claimIsUsable(object claim, number now) boolean (
   return claim.len > 0 and (claim.expiresAt ?? 0).toNum() > now
 )

@@ -52,6 +52,20 @@ def loadClass(string id) object (
 void classDocs.insertOne({_id: "cls_admin", code: "ADMIN234", ownerId: "u_mist", owner: "mist"})
 void classDocs.insertOne({_id: "cls_other", code: "OTHER234", ownerId: "u_teen", owner: "teen"})
 
+object claims = {
+  ADMINCLAIM: {_id: "ADMINCLAIM", studentId: "mwc_admin"},
+  OTHERCLAIM: {_id: "OTHERCLAIM", studentId: "mwc_other"}
+}
+
+def loadClassroomClaim(string code) object (
+  return (claims[code] ?? {}).assertElse(object, {})
+)
+
+array timerRuns = []
+def classroomRetentionLoop() (
+  timerRuns.append(timestamp)
+)
+
 import "./classroom-switch.osl"
 
 testing.assert(!classroomEnabled, "Classroom is off unless the flag is set")
@@ -84,6 +98,46 @@ app.GET("/v1/classroom", handleState)
 app.GET("/api/classroom", handleState)
 app.GET("/v1/classroom/join/:code", handleState)
 app.POST("/v1/classroom/login", handleLogin)
+app.GET("/v1/classroom/available", handleClassroomAvailable)
+
+array stackRoutes = [
+  ["POST", "/v1/classroom/billing/checkout", "Stripe checkout"],
+  ["POST", "/v1/classroom/billing/portal", "the Stripe billing portal"],
+  ["POST", "/v1/classroom/billing/webhook", "the Stripe webhook"],
+  ["POST", "/v1/classroom/trial", "the trial"],
+  ["GET", "/v1/classroom/classes/cls_other/groups", "listing groups"],
+  ["POST", "/v1/classroom/classes/cls_other/groups", "creating groups"],
+  ["DELETE", "/v1/classroom/classes/cls_other/groups/g1", "deleting groups"],
+  ["POST", "/v1/classroom/classes/cls_other/students/mwc_other/release", "release links"],
+  ["DELETE", "/v1/classroom/classes/cls_other/students/mwc_other/release", "cancelling release links"],
+  ["GET", "/v1/classroom/claim/OTHERCLAIM", "the claim page"],
+  ["POST", "/v1/classroom/claim/OTHERCLAIM", "claiming"],
+  ["GET", "/v1/classroom/school", "the school page"],
+  ["GET", "/v1/classroom/school/audit", "the school audit log"],
+  ["GET", "/v1/classroom/school/export", "the school download"],
+  ["POST", "/v1/classroom/school/teachers", "adding school teachers"],
+  ["DELETE", "/v1/classroom/school/teachers/u_x", "removing school teachers"],
+  ["PUT", "/v1/classroom/school/teachers/u_x/admin", "school admin changes"],
+  ["POST", "/v1/classroom/classes/cls_other/present", "starting present mode"],
+  ["DELETE", "/v1/classroom/classes/cls_other/present", "stopping present mode"],
+  ["POST", "/v1/classroom/terms/accept", "terms acceptance"],
+  ["GET", "/v1/classroom/classes/cls_other/export", "class downloads"],
+  ["GET", "/v1/classroom/classes/cls_other/students/mwc_other/export", "student downloads"]
+]
+for i stackRoutes.len (
+  array route = stackRoutes[i].assert(array)
+  string method = route[1].toStr()
+  string routePath = route[2].toStr().replace("OTHERCLAIM", ":code")
+  if method == "GET" (
+    app.GET(routePath, handleState)
+  ) else if method == "POST" (
+    app.POST(routePath, handleState)
+  ) else if method == "PUT" (
+    app.PUT(routePath, handleState)
+  ) else (
+    app.DELETE(routePath, handleState)
+  )
+)
 
 def runApp() (
   app.run(":18341")
@@ -103,6 +157,11 @@ def call(string method, string path, string who, string body) object (
   if method == "POST" (
     options.body = body
     res = requests.post(base ++ path, options).unwrapOr({status: 0, body: ""})
+  ) else if method == "PUT" (
+    options.body = body
+    res = requests.put(base ++ path, options).unwrapOr({status: 0, body: ""})
+  ) else if method == "DELETE" (
+    res = requests.delete(base ++ path, options).unwrapOr({status: 0, body: ""})
   ) else (
     res = requests.get(base ++ path, options).unwrapOr({status: 0, body: ""})
   )
@@ -138,6 +197,29 @@ testing.assert(r.data.authenticated == false, "disabled students are signed out"
 r = call("GET", "/v1/me", "teen", "")
 testing.assert(r.status == 200 and r.data.authenticated == true, "other routes are unchanged")
 
+for i stackRoutes.len (
+  array route = stackRoutes[i].assert(array)
+  string method = route[1].toStr()
+  string routePath = route[2].toStr()
+  string what = route[3].toStr()
+  testing.assert(call(method, routePath, "teen", "{}").status == 404, "while Classroom is off, " ++ what ++ " is hidden from teachers who are not admins")
+  testing.assert(call(method, routePath, "", "{}").status == 404, "while Classroom is off, " ++ what ++ " is hidden from signed-out visitors")
+  testing.assert(call(method, routePath, "mist", "{}").status == 200, "admins can test " ++ what ++ " while Classroom is off")
+)
+testing.assert(call("GET", "/v1/classroom/claim/ADMINCLAIM", "", "").status == 200, "release links for students of admin classes still open")
+testing.assert(call("POST", "/v1/classroom/claim/ADMINCLAIM", "teen", "{}").status == 200, "a family can redeem a release link from an admin class")
+testing.assert(call("GET", "/v1/classroom/claim/NOPECLAIM", "", "").status == 404, "unknown release links get 404")
+
+r = call("GET", "/v1/classroom/available", "teen", "")
+testing.assert(r.status == 404 and r.data.available != true, "Classroom is not offered to teachers who are not admins while it is off")
+testing.assert(call("GET", "/v1/classroom/available", "", "").status == 404, "Classroom is not offered to signed-out visitors while it is off")
+r = call("GET", "/v1/classroom/available", "mist", "")
+testing.assert(r.status == 200 and r.data.available == true, "admins see Classroom while it is off")
+
+testing.assert(!startClassroomTimers() and timerRuns.len == 0, "the retention sweep does not start while Classroom is off")
+testing.assert(!classroomFeatureOpen({_id: "cls_other", ownerId: "u_teen", owner: "teen"}), "classes of other teachers get no Classroom features while it is off")
+testing.assert(classroomFeatureOpen({_id: "cls_admin", ownerId: "u_mist", owner: "mist"}), "admin classes keep Classroom features while it is off")
+
 testing.assert(classroomSessionAllowed("u_teen"), "Rotur sessions are always allowed")
 testing.assert(classroomSessionAllowed("mwc_admin"), "sessions of students in admin classes are allowed")
 testing.assert(!classroomSessionAllowed("mwc_other"), "sessions of other students are refused")
@@ -152,6 +234,18 @@ r = call("GET", "/v1/me", "mwc_other", "")
 testing.assert(r.data.authenticated == true and r.data.isStudent == true, "with the flag on, student sessions are left alone")
 testing.assert(classroomSessionAllowed("mwc_other"), "with the flag on, student sessions are allowed")
 testing.assert(!classroomSessionAllowed("mwc_off"), "disabled students stay refused with the flag on")
+r = call("GET", "/v1/classroom/available", "", "")
+testing.assert(r.status == 200 and r.data.available == true, "with the flag on, anyone can see that Classroom is available")
+testing.assert(call("POST", "/v1/classroom/trial", "teen", "{}").status == 200, "with the flag on, teachers reach the stack's routes")
+testing.assert(classroomFeatureOpen({_id: "cls_other", ownerId: "u_teen", owner: "teen"}), "with the flag on, every class gets Classroom features")
+testing.assert(startClassroomTimers(), "with the flag on, the retention sweep starts")
+for i 50 (
+  if timerRuns.len > 0 (
+    break
+  )
+  wait 0.1
+)
+testing.assert(timerRuns.len == 1, "the retention sweep runs once it is started")
 
 testDb.close()
 void fs.remove(dbPath)

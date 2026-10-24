@@ -20,6 +20,18 @@ def classroomTestStudent(string studentId) boolean (
   return classroomStudentActive(student) and classroomTestClass(loadClass((student.classId ?? "").toStr()))
 )
 
+def classroomFeatureOpen(object classDoc) boolean (
+  return classroomEnabled or classroomTestClass(classDoc)
+)
+
+def startClassroomTimers() boolean (
+  if !classroomEnabled (
+    return false
+  )
+  thread.new(classroomRetentionLoop)
+  return true
+)
+
 def classroomSessionAllowed(string userId) boolean (
   if !isStudentUserId(userId) (
     return true
@@ -39,6 +51,11 @@ def classroomTestRequest(*serve.Context c) boolean (
     array matches = classDocs.where("code", "==", code).all()
     return matches.len > 0 and classroomTestClass(matches[1].assertElse(object, {}))
   )
+  string claim = normalizeClassCode(url.unescape(classroomClaimCodeFromPath(c.path())))
+  if claim != "" (
+    object claimDoc = loadClassroomClaim(claim)
+    return claimDoc.len > 0 and classroomTestStudent((claimDoc.studentId ?? "").toStr())
+  )
   if isClassroomLoginRoute(c.method(), c.path()) (
     if !classroomBodySizeAllowed((c.header("Content-Length") ?? ""), maxStandardRequestBytes) (
       return false
@@ -47,6 +64,11 @@ def classroomTestRequest(*serve.Context c) boolean (
     return classroomTestStudent((body.studentId ?? "").toStr())
   )
   return false
+)
+
+def handleClassroomAvailable(*serve.Context c) (
+  c.setHeader("Cache-Control", "no-store")
+  c.json(200, {ok: true, available: true})
 )
 
 def classroomSwitchGuard(*serve.Context c) (

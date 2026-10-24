@@ -28,6 +28,10 @@ def presentationViewerRole(object project, string userId) string (
     return ""
   )
   string classId = presentation.classId.toStr()
+  object classDoc = loadClass(classId)
+  if !classroomFeatureOpen(classDoc) (
+    return ""
+  )
   if isStudentUserId(userId) (
     object student = loadStudent(userId)
     if student.len > 0 and student.classId.toStr() == classId and student.disabled != true (
@@ -35,7 +39,7 @@ def presentationViewerRole(object project, string userId) string (
     )
     return ""
   )
-  if isClassTeacher(loadClass(classId), userId) (
+  if isClassTeacher(classDoc, userId) (
     return "viewer"
   )
   return ""
