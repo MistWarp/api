@@ -237,7 +237,6 @@ def eraseUser(string userId, string username) (
   removeProjectsFromSpaces(ownedProjectIds)
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)
-  deleteDocumentsByField(errorDocs, "username", username)
   anonymiseReportsBy(username, userId)
   purgeUser(userId, username)
   removeUserFromSafetyLists(username)

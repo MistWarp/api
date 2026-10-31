@@ -11,7 +11,7 @@ Version 2026-10-01. This is MistWarp's written data retention policy for Classro
 | Class, assignments, groups, presentations, activity log | The teacher deletes the class, or 12 months without a teacher opening it | `purgeClassroomClass` |
 | Any class with no teacher visit for 11 months | Teachers are warned, and the class is deleted at 12 months, never less than 14 days after the warning | `sweepClassroomRetention`, every 6 hours |
 | All of a school's or teacher's Classroom data, on request | Within 30 days of a request to privacy@mistwarp.org | `POST /v1/admin/classroom/purge` with `confirm: "delete"` |
-| Editor error reports | 90 days, and at most the newest 1,000. Reports from student sessions never include the username | `pruneSiteErrors`, whenever a report arrives |
+| Editor error reports | 7 days, and at most the newest 1,000. No report includes a username, project ID, full user agent or IP address | `pruneSiteErrors`, when a report arrives, at start-up and every five minutes |
 | IP addresses | Not stored for signed-in users. Held in memory for rate limiting only | Not applicable |
 | Terms acceptance records, billing records | 6 years after the last use or payment | Manual yearly review |
 
