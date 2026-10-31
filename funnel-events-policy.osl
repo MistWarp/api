@@ -4,7 +4,7 @@ object funnelEventVariants = {
   project_view: ["signed_in", "signed_out"],
   project_play_start: [],
   start_creating: ["home"],
-  signin_prompt_shown: ["remix", "library", "react", "comment", "follow"],
+  signin_prompt_shown: ["remix", "save", "library", "react", "comment", "follow"],
   signin_completed: [],
   signup_completed: [],
   project_created: [],
