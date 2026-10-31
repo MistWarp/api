@@ -27,6 +27,7 @@ def openCollection(*db.DB database, string name) *db.Collection (
 *db.Collection releaseDocs = openCollection(communityDb, "releases")
 *db.Collection previewDocs = openCollection(communityDb, "previews")
 *db.Collection diagnosticDocs = openCollection(communityDb, "diagnostics")
+*db.Collection funnelDocs = openCollection(communityDb, "funnel_events")
 *db.Collection errorDocs = openCollection(communityDb, "site_errors")
 *db.Collection feedbackDocs = openCollection(communityDb, "project_feedback")
 *db.Collection ideaDocs = openCollection(communityDb, "roadmap_ideas")
