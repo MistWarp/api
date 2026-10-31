@@ -6,6 +6,7 @@ testing.assert(funnelEventKey("editor_open", "") == "editor_open", "known events
 testing.assert(funnelEventKey("Editor_Open ", "") == "editor_open", "names are normalised")
 testing.assert(funnelEventKey("project_view", "signed_out") == "project_view:signed_out", "listed variants get their own counter")
 testing.assert(funnelEventKey("signin_prompt_shown", "remix") == "signin_prompt_shown:remix", "sign-in prompts count by reason")
+testing.assert(funnelEventKey("signin_prompt_shown", "save") == "signin_prompt_shown:save", "the editor save window counts its sign-in prompt")
 testing.assert(funnelEventKey("editor_open", "editor") == "editor_open", "unlisted variants fall back to the event name")
 testing.assert(funnelEventKey("project_view", "p123") == "project_view", "project ids never become counter keys")
 testing.assert(funnelEventKey("made_up", "") == "", "unknown events are rejected")
