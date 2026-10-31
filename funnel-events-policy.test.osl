@@ -1,0 +1,22 @@
+import "std:testing"
+
+import "./funnel-events-policy.osl"
+
+testing.assert(funnelEventKey("editor_open", "") == "editor_open", "known events count by name")
+testing.assert(funnelEventKey("Editor_Open ", "") == "editor_open", "names are normalised")
+testing.assert(funnelEventKey("project_view", "signed_out") == "project_view:signed_out", "listed variants get their own counter")
+testing.assert(funnelEventKey("signin_prompt_shown", "remix") == "signin_prompt_shown:remix", "sign-in prompts count by reason")
+testing.assert(funnelEventKey("editor_open", "editor") == "editor_open", "unlisted variants fall back to the event name")
+testing.assert(funnelEventKey("project_view", "p123") == "project_view", "project ids never become counter keys")
+testing.assert(funnelEventKey("made_up", "") == "", "unknown events are rejected")
+testing.assert(funnelEventKey("", "remix") == "", "empty names are rejected")
+testing.assert(funnelEventKey("share_opened", "update") == "share_opened:update", "share opens count by action")
+testing.assert(funnelEventKey("starter_opened", "clicker") == "starter_opened:clicker", "starter projects count by id")
+testing.assert(isFunnelOrigin("https://mistwarp.org"), "the community site can count")
+testing.assert(isFunnelOrigin("https://editor.mistwarp.org"), "the editor origin can count")
+testing.assert(!isFunnelOrigin("http://mistwarp.org"), "plain http is rejected")
+testing.assert(!isFunnelOrigin("https://evilmistwarp.org"), "lookalike hosts are rejected")
+testing.assert(!isFunnelOrigin("https://mistwarp.org.evil.example"), "suffixed hosts are rejected")
+testing.assert(!isFunnelOrigin("https://.mistwarp.org"), "an empty subdomain is rejected")
+testing.assert(!isFunnelOrigin(""), "requests without an origin are rejected")
+testing.assert(funnelDayKey((86400000 * 20757) + 5000) == "20757", "days use the same UTC day number as the stats")

@@ -247,6 +247,8 @@ for entry in (editorOrigin ++ "," ++ configValue("ERROR_REPORT_ORIGINS", "")).sp
   )
 )
 import "./admin.osl"
+import "./funnel-events-policy.osl"
+import "./funnel-events.osl"
 import "./project-moderation.osl"
 import "./like-milestone-policy.osl"
 import "./like-milestones.osl"
@@ -699,6 +701,7 @@ def setupApiRoutes(*serve.Router api) (
   api.POST("/support", serve.limitRequests(5, {window: 3600000}), handleCreateSupportRequest)
   api.POST("/errors", serve.limitRequests(20, {window: 60000}), handleRecordSiteError)
   api.GET("/stats", handlePublicStats)
+  api.POST("/events", serve.limitRequests(120, {window: 60000}), handleRecordFunnelEvent)
 
   api.GET("/admin/reports", requireAdmin, handleGetReports)
   api.GET("/admin/reports/evidence/:id", requireAdmin, handleGetReportEvidence)

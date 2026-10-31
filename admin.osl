@@ -697,7 +697,8 @@ def handleAdminStats(*serve.Context c) (
     startsByDay: startsByDay,
     crashesByDay: crashesByDay,
     averageLoadMsByDay: averageLoadMsByDay,
-    loadSamplesByDay: loadSamplesByDay
+    loadSamplesByDay: loadSamplesByDay,
+    eventsByDay: funnelEventsByDay(since)
   })
 )
 
