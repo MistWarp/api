@@ -1,4 +1,155 @@
-number siteErrorRetentionMs = 90 * 86400000
+number siteErrorRetentionMs = 7 * 86400000
+
+array siteErrorPathWords = [
+  "about", "account-frame.html", "addon-settings.html", "addons", "admin", "assignments", "bounties", "changes",
+  "claim", "classroom", "commits", "compare", "dpa", "editor", "editor.html", "embed", "embed.html", "entry",
+  "explore", "followers", "following", "fullscreen", "fullscreen.html", "groups", "index.html", "join",
+  "leaderboard", "library", "manage", "mystuff", "news", "notifications", "p", "perks", "player", "player.html",
+  "posts", "privacy", "project", "pulls", "purchases", "random", "remixes", "roadmap", "school", "search",
+  "settings", "simple.html", "spaces", "stats", "status", "students", "subprocessors", "support", "terms",
+  "themes", "trust", "users", "wallet"
+]
+
+array siteErrorIdParents = [
+  "assignments", "bounties", "claim", "commits", "entry", "groups", "join", "news", "p", "posts", "project",
+  "pulls", "spaces", "students", "themes", "users"
+]
+
+def withoutQuery(string url) string (
+  return url.strip().split("#")[1].split("?")[1]
+)
+
+def siteErrorUrl(string url) string (
+  array parts = withoutQuery(url).split("/")
+  if parts.len < 3 or parts[2] != "" or parts[3] == "" (
+    return ""
+  )
+  string scheme = parts[1].toStr().toLower()
+  if scheme != "https:" and scheme != "http:" (
+    return ""
+  )
+  array hostParts = parts[3].toStr().toLower().split("@")
+  string scrubbed = scheme ++ "//" ++ hostParts[hostParts.len].toStr()
+  string path = ""
+  boolean idNext = false
+  for i parts.len (
+    if i > 3 and parts[i].toStr() != "" (
+      string segment = parts[i].toStr().toLower()
+      if !idNext and siteErrorPathWords.contains(segment) (
+        path ++= "/" ++ segment
+        idNext = siteErrorIdParents.contains(segment)
+      ) else (
+        path ++= "/:id"
+        idNext = false
+      )
+    )
+  )
+  if path == "" (
+    path = "/"
+  )
+  return scrubbed ++ path
+)
+
+def siteErrorText(string text, string pageUrl, string scrubbedUrl) string (
+  string value = text
+  string page = withoutQuery(pageUrl)
+  if scrubbedUrl != "" and page.contains("://") and page != scrubbedUrl (
+    value = regex.replace(regex.escape(page) ++ "([^A-Za-z0-9._~%/-]|$)", value, scrubbedUrl ++ "$1")
+  )
+  value = regex.replace("(https?://[^[:space:]?#()<>\"']+)[?#][^[:space:]()<>\"']*?((:[0-9]+){1,2})?([[:space:])<>\"']|$)", value, "$1$2$4")
+  value = regex.replace("(?i)(https?://([a-z0-9-]+[.])*mistwarp[.]org)/(p|project|users|spaces|groups|bounties|news|posts|themes|claim|join)/[^/?#[:space:]:()<>\"']+", value, "$1/$3/:id")
+  value = regex.replace("(?i)(https?://editor[.]mistwarp[.]org)/[0-9]+", value, "$1/:id")
+  value = regex.replace("(https?://avatars[.]rotur[.]dev)/[^/?#[:space:]:()<>\"']+", value, "$1/:id")
+  value = regex.replace("(?i)/(users|blocks|mutes|followers|following|curators|invitations|judges|profiles?|projects|classes|students|teachers|claim|join|vanity|game-saves|library)/[^/?#[:space:]:()<>\"']+", value, "/$1/:id")
+  return regex.replace("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,}", value, "[email]")
+)
+
+def siteErrorBrowser(string userAgent) string (
+  string name = "Other"
+  string token = ""
+  if userAgent.contains("Edg/") (
+    name = "Edge"
+    token = "Edg/"
+  ) else if userAgent.contains("EdgA/") (
+    name = "Edge"
+    token = "EdgA/"
+  ) else if userAgent.contains("EdgiOS/") (
+    name = "Edge"
+    token = "EdgiOS/"
+  ) else if userAgent.contains("SamsungBrowser/") (
+    name = "Samsung Internet"
+    token = "SamsungBrowser/"
+  ) else if userAgent.contains("OPR/") (
+    name = "Opera"
+    token = "OPR/"
+  ) else if userAgent.contains("FxiOS/") (
+    name = "Firefox"
+    token = "FxiOS/"
+  ) else if userAgent.contains("Firefox/") (
+    name = "Firefox"
+    token = "Firefox/"
+  ) else if userAgent.contains("CriOS/") (
+    name = "Chrome"
+    token = "CriOS/"
+  ) else if userAgent.contains("Chrome/") (
+    name = "Chrome"
+    token = "Chrome/"
+  ) else if userAgent.contains("Safari/") (
+    name = "Safari"
+    token = "Version/"
+  )
+  if token != "" and userAgent.contains(token) (
+    string version = regex.findFirst("^[0-9]+", userAgent.split(token)[2]) ?? ""
+    if version != "" (
+      name ++= " " ++ version
+    )
+  )
+  string system = "other"
+  if userAgent.contains("iPhone") or userAgent.contains("iPad") (
+    system = "iOS"
+  ) else if userAgent.contains("Android") (
+    system = "Android"
+  ) else if userAgent.contains("CrOS") (
+    system = "ChromeOS"
+  ) else if userAgent.contains("Windows") (
+    system = "Windows"
+  ) else if userAgent.contains("Macintosh") or userAgent.contains("Mac OS X") (
+    system = "macOS"
+  ) else if userAgent.contains("Linux") (
+    system = "Linux"
+  )
+  if userAgent.strip() == "" (
+    return ""
+  )
+  return name ++ " on " ++ system
+)
+
+def anonymousSiteError(object entry) object (
+  string pageUrl = (entry.url ?? "").toStr()
+  string url = siteErrorUrl(pageUrl)
+  string browser = (entry.browser ?? "").toStr()
+  if browser == "" and entry.contains("userAgent") (
+    browser = siteErrorBrowser((entry.userAgent ?? "").toStr())
+  )
+  object clean = {
+    _id: entry["_id"],
+    message: siteErrorText((entry.message ?? "").toStr(), pageUrl, url),
+    stack: siteErrorText((entry.stack ?? "").toStr(), pageUrl, url),
+    url: url,
+    kind: (entry.kind ?? "uncaught").toStr(),
+    browser: browser,
+    viewport: (entry.viewport ?? "").toStr(),
+    appVersion: (entry.appVersion ?? "").toStr(),
+    componentStack: siteErrorText((entry.componentStack ?? "").toStr(), pageUrl, url),
+    created: entry.created,
+    resolved: entry.resolved == true
+  }
+  return clean
+)
+
+def hasIdentifyingFields(object entry) boolean (
+  return entry.contains("username") or entry.contains("userAgent") or entry.contains("projectId") or entry.contains("resolvedBy")
+)
 
 def siteErrorCutoff(number now) number (
   return now - siteErrorRetentionMs
@@ -12,9 +163,11 @@ def pruneSiteErrors() (
   )
   array stored = errorDocs.sort("created", "desc").limit(1100).all()
   for i stored.len (
+    object entry = stored[i].assert(object)
     if i > 1000 (
-      object entry = stored[i].assert(object)
       void errorDocs.deleteOne({_id: entry["_id"]})
+    ) else if hasIdentifyingFields(entry) (
+      void errorDocs.replaceOne({_id: entry["_id"]}, anonymousSiteError(entry))
     )
   )
 )
@@ -81,10 +234,6 @@ def handleRecordSiteError(*serve.Context c) (
   if body.contains("url") and body.url != null (
     url = body.url.toStr().strip().trim(1, 2000)
   )
-  string projectId = ""
-  if body.contains("projectId") and body.projectId != null (
-    projectId = body.projectId.toStr().strip().trim(1, 120)
-  )
   string kind = "uncaught"
   if body.contains("kind") and body.kind != null (
     kind = body.kind.toStr().toLower().strip().trim(1, 40)
@@ -107,23 +256,19 @@ def handleRecordSiteError(*serve.Context c) (
   if body.contains("componentStack") and body.componentStack != null (
     componentStack = body.componentStack.toStr().trim(1, 10000)
   )
-  string userAgent = (c.header("User-Agent") ?? "").strip().trim(1, 500)
-  string username = if contextBool(c, "isStudent") then "" else contextString(c, "username")
-  object entry = {
+  object entry = anonymousSiteError({
     _id: "e" ++ randomString(16),
     message: message,
     stack: stack,
     url: url,
-    projectId: projectId,
     kind: kind,
-    username: username,
-    userAgent: userAgent,
+    browser: siteErrorBrowser((c.header("User-Agent") ?? "").trim(1, 500)),
     viewport: viewport,
     appVersion: appVersion,
     componentStack: componentStack,
     created: timestamp,
     resolved: false
-  }
+  })
   sync.lock("site-errors")
   void errorDocs.insertOne(entry)
   sync.unlock("site-errors")
@@ -176,8 +321,6 @@ def handleAdminResolveSiteError(*serve.Context c) (
     return
   )
   entry.resolved = resolved
-  entry.resolvedBy = contextString(c, "username")
-  entry.resolvedAt = timestamp
   boolean saved = putDocument(errorDocs, id, entry)
   sync.unlock("site-errors")
   if saved (

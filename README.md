@@ -92,9 +92,9 @@ Tests: `python3 -m unittest scripts/test_refund_project_sales.py`, and with a co
 
 ## Error reports
 
-The editor and community site send uncaught errors to `POST /v1/errors`, from `EDITOR_ORIGIN` or an origin in `ERROR_REPORT_ORIGINS`. A report holds the error message and stack, the page URL, the project ID, the viewport, the app version, the browser's user agent and the username of whoever was signed in. Admins read them through `GET /v1/admin/errors`.
+The editor and community site send uncaught errors to `POST /v1/errors`, from `EDITOR_ORIGIN` or an origin in `ERROR_REPORT_ORIGINS`. A report holds the error message and stack, the kind of page (its address with IDs, usernames, query and fragment removed), the browser name, major version and operating system, the viewport, the app version and the time. It never holds the username, the project ID, the full user agent or the IP address, and resolving a report does not record who resolved it. Email addresses, URL queries, avatar usernames and usernames, class, student or project IDs in API and file paths are removed from the message and stack too. Admins read them through `GET /v1/admin/errors`.
 
-Reports are kept for 90 days, and only the newest 1,000 are kept at all. Older ones are deleted when a new report comes in, when the server starts and every five minutes.
+Reports are kept for 7 days, resolved or not, and only the newest 1,000 are kept at all. Older ones are deleted when a new report comes in, when the server starts and every five minutes. Reports stored before this change are scrubbed the same way by the next sweep.
 
 ## Rotur webhooks
 
