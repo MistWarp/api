@@ -25,8 +25,10 @@ def refused(*serve.Context c, Refusal refusal) boolean (
     c.forbidden(refusal.message)
   ) else if refusal.status == 404 (
     c.notFound(refusal.message)
-  ) else (
+  ) else if refusal.status == 500 (
     c.internalError(refusal.message)
+  ) else (
+    c.json(refusal.status, {ok: false, error: refusal.message})
   )
   return true
 )
