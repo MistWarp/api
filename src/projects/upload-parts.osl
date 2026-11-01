@@ -213,8 +213,8 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     return
   )
   object body = requestJSON(c)
-  string kind = body.kind.toStr()
-  string name = body.name.toStr()
+  string kind = (body.kind ?? "").toStr()
+  string name = (body.name ?? "").toStr()
   number size = body.size.toNum().toInt()
   number chunks = body.chunks.toNum().toInt()
   if kind != "asset" and kind != "workspace" and kind != "mergeTree" (

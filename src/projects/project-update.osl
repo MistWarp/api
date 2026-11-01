@@ -74,7 +74,7 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !canTransfer (
     return refuse(403, "you cannot transfer this project")
   )
-  string requestedOwner = body.owner.toStr().strip()
+  string requestedOwner = (body.owner ?? "").toStr().strip()
   string nextOwnerId = discoverUserIdentity(requestedOwner)
   if nextOwnerId == "" (
     return refuse(400, "Rotur user not found")
@@ -103,8 +103,9 @@ def applyGroupTag(*serve.Context c, object project, object body) Refusal (
   if !body.contains("groupTag") (
     return noRefusal()
   )
-  string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
-  if body.groupTag.toStr().strip() == "" (
+  string requestedGroupTag = (body.groupTag ?? "").toStr()
+  string nextGroupTag = normalizeGroupTag(requestedGroupTag)
+  if requestedGroupTag.strip() == "" (
     nextGroupTag = ""
   ) else if nextGroupTag == "" (
     return refuse(400, "invalid group tag")
@@ -140,7 +141,7 @@ def applyVanitySlug(object project, object body, object creatorBenefits) Refusal
   if !body.contains("vanitySlug") (
     return noRefusal()
   )
-  string slug = body.vanitySlug.toStr().toLower().strip()
+  string slug = (body.vanitySlug ?? "").toStr().toLower().strip()
   string currentSlug = if project.contains("vanitySlug") then project.vanitySlug.toStr() else ""
   Refusal invalidSlug = vanitySlugRefusal(slug, currentSlug, creatorBenefits)
   if isRefused(invalidSlug) (

@@ -565,6 +565,8 @@ def update_flow(server, step, ids):
 
     patch("patch anonymous", {"title": "x"}, who=None)
     patch("patch by stranger", {"title": "x"}, who="alice")
+    patch("patch null title", {"title": None})
+    patch("patch null description", {"description": None, "notes": None})
     patch("patch text", {"title": "  Updated smoke  ", "description": "About", "instructions": "Press space", "notes": "Thanks"})
     patch("patch empty title", {"title": "   "})
     patch("patch long title", {"title": "t" * 101})
@@ -573,6 +575,7 @@ def update_flow(server, step, ids):
     patch("patch long notes", {"notes": "n" * 5001})
     patch("patch non-ascii description", {"description": "\u00e9\u2713" * 2400})
     patch("patch long non-ascii notes", {"notes": "\u00e9" * 5001})
+    patch("patch credit without role", {"credits": [{"who": "Ada"}, {"who": None, "role": "Art"}]})
     patch("patch credits", {"credits": [
         {"who": "Ada", "role": "Art", "url": "https://example.com/ada"},
         {"who": "Bo", "role": "Music", "url": None},
@@ -587,6 +590,7 @@ def update_flow(server, step, ids):
     patch("patch zero price", {"price": 0, "remixable": True})
     patch("patch remix share", {"remixShare": 20})
     patch("patch remix share too high", {"remixShare": 80})
+    patch("patch null tag", {"tags": [None, "Games"]})
     patch("patch tags", {"tags": ["Games", "games", "Puzzle", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]})
     items = [
         {"id": "Sword", "name": "Sword", "visual": {"type": "image", "url": "https://example.com/s.png"}},
@@ -595,6 +599,7 @@ def update_flow(server, step, ids):
         {"id": "pixel", "name": "Pixel", "visual": {"type": "image", "url": "data:image/png;base64,AAAA"}},
     ]
     product = {"id": "pack", "name": "Pack", "description": "Starter", "price": 10, "grantsItem": "sword", "icon": "https://example.com/i.png"}
+    patch("patch product without icon", {"gameItems": items, "gameProducts": [{"id": "plain", "name": "Plain", "price": 1}]})
     patch("patch game items and products", {"gameItems": items, "gameProducts": [product]})
     patch("patch product bad id", {"gameProducts": [dict(product, id="Bad Id")]})
     patch("patch product duplicate id", {"gameProducts": [product, product]})
@@ -624,10 +629,13 @@ def update_flow(server, step, ids):
     patch("patch branding without plan", {"branding": {"accentColor": "#123456", "tagline": "Hi"}})
     patch("patch branding cleared", {"branding": {}})
     patch("patch vanity without plan", {"vanitySlug": "smoke-game"})
+    patch("patch null vanity", {"vanitySlug": None})
     patch("patch vanity cleared", {"vanitySlug": ""})
     patch("patch group tag invalid", {"groupTag": "!!!"})
     patch("patch group tag not managed", {"groupTag": "somegroup"})
+    patch("patch null group tag", {"groupTag": None})
     patch("patch group tag cleared", {"groupTag": "  "})
+    patch("patch nameless teammate", {"collaborators": [{"role": "editor"}]})
     patch("patch team share too high", {"collaborators": [{"username": "alice", "role": "editor", "share": 60}]})
     patch("patch team unknown user", {"collaborators": [{"username": "ghost_user", "role": "editor"}]})
     patch("patch team duplicate", {"collaborators": [{"username": "alice", "role": "editor"}, {"username": "Alice", "role": "tester"}]})

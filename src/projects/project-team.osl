@@ -9,8 +9,8 @@ def applyCollaborators(object project, array incoming) Refusal (
     )
     if collaborators.len < 25 (
       object entry = incoming[i].assert(object)
-      string username = normalizeUsername(entry.username.toStr())
-      string role = entry.role.toStr().toLower().strip()
+      string username = normalizeUsername((entry.username ?? "").toStr())
+      string role = (entry.role ?? "").toStr().toLower().strip()
       boolean validRole = role == "editor" or role == "maintainer" or role == "contributor" or role == "tester"
       number share = 0
       if entry.contains("share") and entry.share != null (
