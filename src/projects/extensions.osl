@@ -368,7 +368,7 @@ def extensionUsageMigrated(object state) boolean (
   if !data.contains("version") (
     return false
   )
-  return data.version.toNum() >= 1
+  return data.version.toNum() >= 2
 )
 
 def migrateExtensionUsage() boolean (
@@ -395,7 +395,7 @@ def migrateExtensionUsage() boolean (
       )
     )
   )
-  boolean saved = writeFile(statePath, {version: 1})
+  boolean saved = writeFile(statePath, {version: 2})
   sync.unlock("extension-index-migration")
   return saved
 )
