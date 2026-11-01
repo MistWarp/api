@@ -25,8 +25,9 @@ jobs:
         env:
           OSL_COMMIT: 5895982fa61d3e7c9e9c7f819c9e33f645d04f0f
         run: |
-          mkdir -p "$HOME/.local/bin" /tmp/osl-source
-          curl -fsSL --retry 3 "https://git.rotur.dev/osl/.go/archive/$OSL_COMMIT.tar.gz" | tar -xz -C /tmp/osl-source --strip-components=1
+          mkdir -p "$HOME/.local/bin"
+          git clone --filter=blob:none https://git.rotur.dev/osl/.go /tmp/osl-source
+          git -C /tmp/osl-source checkout "$OSL_COMMIT"
           (cd /tmp/osl-source && go build -buildvcs=false -o "$HOME/.local/bin/osl" .)
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

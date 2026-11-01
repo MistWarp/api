@@ -6,7 +6,7 @@ mistwarp-api is the OSL backend behind https://api.mistwarp.org/v1, for the Mist
 
 - `main.osl` only composes the app: it imports every domain, runs startup and migrations, registers routes and starts the server. Don't put features in it.
 - `src/<domain>/` holds everything else (config, core, http, auth, storage, projects, history, git, games, realtime, community, admin, classroom, rotur). The [Backend Overview](https://mistwarp.org/docs/backend/overview/) describes what each owns.
-- Each file starts with an `export {...}` block listing what other directories may use; anything not listed is private. Keep exports minimal.
+- Each file has an `export {...}` block after its imports, listing what other directories may use; anything not listed is private. Keep exports minimal.
 - A domain registers its routes in its own `routes.osl` (`registerXRoutes(api)`). Global caches live next to the code that uses them. Tests sit beside their source as `<name>.test.osl`.
 
 ## The /v1 contract
