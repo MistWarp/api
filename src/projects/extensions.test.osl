@@ -1,0 +1,110 @@
+import "std:testing"
+import "std:json"
+import "std:fs"
+import "std:regex"
+import "std:sync"
+import "std:serve"
+import "std:zip"
+import "./extensions.osl"
+
+string tmpDir = "/tmp/mistwarp-extensions-test-" ++ timestamp.toStr() ++ "/"
+string extensionsDir = tmpDir ++ "extensions/"
+string extensionsFile = tmpDir ++ "extensions.json"
+string projectsDir = tmpDir ++ "projects/"
+number maxProjectJsonBytes = 1048576
+number maxProjectExtensions = 20
+number maxExtensionSourceBytes = 2097152
+number maxProjectExtensionBytes = 10485760
+void fs.mkdir(extensionsDir, {recursive: true})
+
+def readFile(string path) object (
+  auto text = fs.readFile(path)
+  if text.isErr() (
+    return {ok: false}
+  )
+  auto parsed = json.parse(text.unwrap())
+  if parsed.isErr() (
+    return {ok: false}
+  )
+  return {ok: true, data: parsed.unwrap()}
+)
+def writeFile(string path, object data) boolean (
+  return fs.writeFile(path, json.stringify(data))
+)
+def randomString(number length) string (
+  return "r" * length
+)
+def removeString(array items, string value) array (
+  array kept = []
+  for i items.len (
+    if items[i].toStr() != value (
+      kept.append(items[i])
+    )
+  )
+  return kept
+)
+def loadProject(string id) object (
+  return {ok: false, missing: true}
+)
+def copyStoredProjectJsonToPath(object project, string path) boolean (
+  return false
+)
+def loadProfile(string username) object (
+  return {}
+)
+def saveProfile(object profile) boolean (
+  return true
+)
+def addNotification(string target, string actor, string kind, object payload) (
+  return
+)
+def saveProject(object project) boolean (
+  return true
+)
+def canViewProjectJson(object project, *serve.Context c) boolean (
+  return true
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def upsertIndexEntry(object project) boolean (
+  return true
+)
+
+object noJson = collectProjectExtensions(tmpDir ++ "unpacked/project.json", "")
+testing.assert(noJson.ok == false and noJson.error == "sb3 has no project.json", "an sb3 without project.json is refused")
+void fs.writeFile(tmpDir ++ "project.json", json.stringify({targets: [], extensionURLs: {ext: "https://example.com/ext.js"}}))
+object collected = collectProjectExtensions(tmpDir ++ "project.json", json.stringify({"https://example.com/ext.js": "class Ext {}"}))
+testing.assert(collected.ok == true and collected.extensions.len == 1 and collected.extensions[1].url == "https://example.com/ext.js", "extension URLs are collected from project.json")
+
+object stored = collected.extensions[1].assert(object)
+string hash = stored.hash.toStr()
+testing.assert(storeProjectExtensions("p1", [], [stored], collected.sources.assert(object)), "extensions are stored")
+testing.assert(storeProjectExtensions("p2", [], [stored], {}), "a second project using the extension is stored")
+object record = readExtensionRecord(hash)
+testing.assert(record.urls == ["https://example.com/ext.js"] and record.projects == ["p1", "p2"], "the record lists the extension's URL and every project using it")
+testing.assert(fs.exists(extensionSourcePath(hash)), "the source is kept")
+testing.assert(storeProjectExtensions("p1", [stored], [], {}) and readExtensionRecord(hash).projects == ["p2"], "a project that drops the extension leaves the record")
+object gallery = {url: "https://extensions.turbowarp.org/a.js", hash: "https://extensions.turbowarp.org/a.js".hashSHA256()}
+testing.assert(storeProjectExtensions("p3", [], [gallery], {}) and readExtensionRecord(gallery.hash.toStr()).projects == ["p3"] and readExtensionRecord(gallery.hash.toStr()).gallery == true, "gallery extensions are recorded too")
+
+string staleUrl = "https://example.com/stale.js"
+string staleHash = staleUrl.hashSHA256()
+void fs.mkdir(projectsDir, {recursive: true})
+void writeFile(projectsDir ++ "p4.json", {id: "p4", extensions: [{url: staleUrl, hash: staleHash}]})
+void writeFile(projectsDir ++ "p5.json", {id: "p5", extensions: [{url: staleUrl, hash: staleHash}, {url: "https://example.com/ext.js", hash: hash}]})
+void writeFile(extensionRecordPath(staleHash), {status: "untrusted", urls: [], projects: [], firstSeen: 1})
+void writeFile(extensionsDir ++ "index.json", {version: 1})
+testing.assert(migrateExtensionUsage(), "the extension usage migration runs again after the record fix")
+object backfilled = readExtensionRecord(staleHash)
+array backfilledProjects = backfilled.projects.assert(array)
+testing.assert(backfilled.urls == [staleUrl] and backfilledProjects.len == 2 and backfilledProjects.contains("p4") and backfilledProjects.contains("p5") and backfilled.status == "untrusted" and backfilled.firstSeen == 1, "records written before the fix get their URLs and projects back")
+testing.assert(readFile(extensionsDir ++ "index.json").data.version == 2, "the migration records its new version")
+string afterFirst = json.stringify(readExtensionRecord(staleHash))
+string sharedAfterFirst = json.stringify(readExtensionRecord(hash))
+void writeFile(extensionsDir ++ "index.json", {version: 1})
+testing.assert(migrateExtensionUsage() and json.stringify(readExtensionRecord(staleHash)) == afterFirst and json.stringify(readExtensionRecord(hash)) == sharedAfterFirst, "running the migration again changes nothing")
+array sharedProjects = readExtensionRecord(hash).projects.assert(array)
+testing.assert(sharedProjects.contains("p2") and sharedProjects.contains("p5"), "the backfill keeps projects the record already listed")
+
+void fs.remove(tmpDir)

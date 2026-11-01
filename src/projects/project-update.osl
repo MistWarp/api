@@ -1,56 +1,138 @@
 export {}
 
-def handleUpdateProject(*serve.Context c) (
-  string lockName = "project-upload:" ++ c.param("id")
-  sync.lock(lockName)
-  handleUpdateProjectLocked(c)
-  sync.unlock(lockName)
+type UpdateOutcome (
+  boolean saved = false
+  object project = {}
+  array previousTeam = []
+  Refusal refusal = Refusal()
+  OwnerTransfer transfer = OwnerTransfer()
 )
 
-def handleUpdateProjectLocked(*serve.Context c) (
-  object? loaded = loadRequestedProject(c)
-  if loaded == null return
-  object project = loaded
-  array previousTeam = project.collaborators.assertElse(array, [])
-  if !canEditProject(project, c) (
-    c.forbidden("not your project")
+def handleUpdateProject(*serve.Context c) (
+  object body = requestJSON(c)
+  object knownIdentities = {}
+  for attempt 3 (
+    if !updateProjectOnce(c, body, knownIdentities) (
+      return
+    )
+  )
+  c.json(409, {ok: false, code: "project_changed", error: "The project changed while it was saving. Try again."})
+)
+
+def updateProjectOnce(*serve.Context c, object body, object knownIdentities) boolean (
+  object? snapshot = loadRequestedProject(c)
+  if snapshot == null return false
+  UpdateLookups lookups = lookupsKnowing(knownIdentities)
+  UpdateOutcome outcome = UpdateOutcome()
+  defer (
+    releaseStorageHolds(lookups, if outcome.saved then outcome.transfer.holdKey else "")
+    rememberIdentities(lookups, knownIdentities)
+  )
+  void applyProjectUpdate(c, snapshot, body, lookups, OwnerTransfer())
+  lookups.replay = true
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    saveProjectUpdate(c, body, lookups, outcome)
+  ))
+  if lookups.missed (
+    return true
+  )
+  finishProjectUpdate(c, body, outcome)
+  return false
+)
+
+def saveProjectUpdate(*serve.Context c, object body, UpdateLookups lookups, UpdateOutcome outcome) (
+  auto loaded = loadProject(c.param("id"))
+  if !loaded.ok (
+    outcome.refusal = refuse(404, "project not found")
     return
   )
-  object body = requestJSON(c)
-  if refused(c, updateScopeRefusal(c, project, body)) return
-
-  OwnerTransfer transfer = OwnerTransfer()
-  if refused(c, applyOwnerTransfer(c, project, body, transfer)) return
-  if refused(c, applyGroupTag(c, project, body)) return
-  object creatorBenefits = mistwarpBenefitsForProject(project)
-  if refused(c, applyBranding(project, body, creatorBenefits)) return
-  if refused(c, applyVanitySlug(project, body, creatorBenefits)) return
-  if refused(c, applyProjectText(project, body)) return
-  if refused(c, applyCredits(project, body)) return
-  applyProjectFlags(project, body)
-  if refused(c, projectSaleRefusal(body)) return
-  if refused(c, applyRemixShareUpdate(c, project, body)) return
-  applyTags(project, body)
-  if refused(c, applyGameProducts(project, body)) return
-  if refused(c, applyGameItems(project, body)) return
-  if refused(c, applyInventoryPolicy(project, body)) return
-  if refused(c, gameGrantRefusal(project, body)) return
-  applyCompatibility(project, body)
-  if refused(c, applyTeamUpdate(c, project, body)) return
-
-  if refused(c, holdTransferredStorage(c, project, transfer)) return
+  object project = loaded.project.assert(object)
+  outcome.previousTeam = project.collaborators.assertElse(array, [])
+  Refusal refusal = applyProjectUpdate(c, project, body, lookups, outcome.transfer)
+  if lookups.missed or isRefused(refusal) (
+    outcome.refusal = refusal
+    return
+  )
   project.edited = timestamp
   if !saveProject(project) (
-    storageHoldRelease(transfer.toId, transfer.hold)
-    c.internalError("could not save project access")
+    outcome.refusal = refuse(500, "could not save project access")
     return
   )
   upsertIndexEntry(project)
-  settleTransferredStorage(transfer)
-  if body.contains("collaborators") (
-    notifyNewTeammates(project, previousTeam, contextString(c, "username"))
+  outcome.saved = true
+  outcome.project = project
+)
+
+def finishProjectUpdate(*serve.Context c, object body, UpdateOutcome outcome) (
+  if !outcome.saved (
+    void refused(c, outcome.refusal)
+    return
   )
-  c.json(200, {ok: true, project: projectResponse(project, c)})
+  settleTransferredStorage(outcome.transfer)
+  if body.contains("collaborators") (
+    notifyNewTeammates(outcome.project, outcome.previousTeam, contextString(c, "username"))
+  )
+  c.json(200, {ok: true, project: projectResponse(outcome.project, c)})
+)
+
+def applyProjectUpdate(*serve.Context c, object project, object body, UpdateLookups lookups, OwnerTransfer transfer) Refusal (
+  if !canEditProjectWith(c, project, lookups) (
+    return refuse(403, "not your project")
+  )
+  Refusal refusal = applyAccessChanges(c, project, body, lookups, transfer)
+  if isRefused(refusal) return refusal
+  refusal = applyContentChanges(c, project, body, lookups)
+  if isRefused(refusal) return refusal
+  return holdTransferredStorage(c, project, transfer, lookups)
+)
+
+def applyAccessChanges(*serve.Context c, object project, object body, UpdateLookups lookups, OwnerTransfer transfer) Refusal (
+  Refusal refusal = updateScopeRefusal(c, project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyOwnerTransfer(c, project, body, transfer, lookups)
+  if isRefused(refusal) return refusal
+  refusal = applyGroupTag(c, project, body, lookups)
+  if isRefused(refusal) return refusal
+  object creatorBenefits = lookupProjectBenefits(lookups, project)
+  refusal = applyBranding(project, body, creatorBenefits)
+  if isRefused(refusal) return refusal
+  return applyVanitySlug(project, body, creatorBenefits, lookups)
+)
+
+def applyContentChanges(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
+  Refusal refusal = applyProjectText(project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyCredits(project, body)
+  if isRefused(refusal) return refusal
+  applyProjectFlags(project, body)
+  refusal = projectSaleRefusal(body)
+  if isRefused(refusal) return refusal
+  refusal = applyRemixShareUpdate(c, project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyTags(project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyGameProducts(project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyGameItems(project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyInventoryPolicy(project, body)
+  if isRefused(refusal) return refusal
+  refusal = gameGrantRefusal(project, body)
+  if isRefused(refusal) return refusal
+  refusal = applyCompatibility(project, body)
+  if isRefused(refusal) return refusal
+  return applyTeamUpdate(c, project, body, lookups)
+)
+
+def canEditProjectWith(*serve.Context c, object project, UpdateLookups lookups) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  if contextBool(c, "isAdmin") or lookupGroupContentManager(lookups, c, project) (
+    return true
+  )
+  string role = projectRole(project, contextString(c, "username"))
+  return role == "owner" or role == "maintainer"
 )
 
 def updateScopeRefusal(*serve.Context c, object project, object body) Refusal (
@@ -67,16 +149,20 @@ def isOwnerOrAdmin(*serve.Context c, object project) boolean (
   return projectRole(project, contextString(c, "username")) == "owner" or contextBool(c, "isAdmin")
 )
 
-def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTransfer transfer) Refusal (
+def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTransfer transfer, UpdateLookups lookups) Refusal (
   if !body.contains("owner") (
     return noRefusal()
   )
-  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or canManageGroupContent(project, c)
+  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupGroupContentManager(lookups, c, project)
   if !canTransfer (
     return refuse(403, "you cannot transfer this project")
   )
-  string requestedOwner = body.owner.toStr().strip()
-  string nextOwnerId = discoverUserIdentity(requestedOwner)
+  string requestedOwner = (body.owner ?? "").toStr().strip()
+  object identity = lookupIdentity(lookups, requestedOwner)
+  if identity.outcome == "unavailable" (
+    return roturUnavailableRefusal(requestedOwner)
+  )
+  string nextOwnerId = identity.id.toStr()
   if nextOwnerId == "" (
     return refuse(400, "Rotur user not found")
   )
@@ -84,7 +170,7 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if nextOwner == "" (
     return refuse(400, "Rotur user not found")
   )
-  number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxProjects.toNum()
+  number nextOwnerLimit = lookupBenefits(lookups, nextOwnerId).maxProjects.toNum()
   boolean sameOwner = identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner)
   if !sameOwner and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
     return refuse(400, "the new owner has reached their project limit")
@@ -100,54 +186,55 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   return noRefusal()
 )
 
-def applyGroupTag(*serve.Context c, object project, object body) Refusal (
+def applyGroupTag(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
   if !body.contains("groupTag") (
     return noRefusal()
   )
-  string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
-  if body.groupTag.toStr().strip() == "" (
+  string requestedGroupTag = (body.groupTag ?? "").toStr()
+  string nextGroupTag = normalizeGroupTag(requestedGroupTag)
+  if requestedGroupTag.strip() == "" (
     nextGroupTag = ""
   ) else if nextGroupTag == "" (
     return refuse(400, "invalid group tag")
-  ) else if !canManageGroupTag(nextGroupTag, c) (
+  ) else if !lookupGroupManager(lookups, c, nextGroupTag) (
     return refuse(403, "you cannot move this project into that group")
   )
   project.groupTag = nextGroupTag
   return noRefusal()
 )
 
-def vanitySlugHeldElsewhere(object project, string slug) boolean (
+def vanitySlugHeldElsewhere(object project, string slug, UpdateLookups lookups) boolean (
   array matches = vanityClaimEntries(slug)
   for i matches.len (
     object holder = matches[i].assert(object)
     string holderId = holder.id.toStr()
-    if holderId != project.id.toStr() (
-      string holderEligibility = vanityEligibility(holder)
-      string holderLock = "project-upload:" ++ holderId
-      boolean held = true
-      if sync.tryLock(holderLock) (
-        held = applyVanityLapseLocked(holderId, slug, holderEligibility) == slug
-        sync.unlock(holderLock)
-      )
-      if held (
-        return true
-      )
+    if holderId != project.id.toStr() and vanityHolderKeepsSlug(holderId, slug, lookupVanityEligibility(lookups, holder)) (
+      return true
     )
   )
   return false
 )
 
-def applyVanitySlug(object project, object body, object creatorBenefits) Refusal (
+def vanityHolderKeepsSlug(string holderId, string slug, string eligibility) boolean (
+  string holderLock = projectSaveLock(holderId)
+  if !sync.tryLock(holderLock) (
+    return true
+  )
+  defer sync.unlock(holderLock)
+  return applyVanityLapseLocked(holderId, slug, eligibility) == slug
+)
+
+def applyVanitySlug(object project, object body, object creatorBenefits, UpdateLookups lookups) Refusal (
   if !body.contains("vanitySlug") (
     return noRefusal()
   )
-  string slug = body.vanitySlug.toStr().toLower().strip()
+  string slug = (body.vanitySlug ?? "").toStr().toLower().strip()
   string currentSlug = if project.contains("vanitySlug") then project.vanitySlug.toStr() else ""
   Refusal invalidSlug = vanitySlugRefusal(slug, currentSlug, creatorBenefits)
   if isRefused(invalidSlug) (
     return invalidSlug
   )
-  if slug != "" and slug != currentSlug and vanitySlugHeldElsewhere(project, slug) (
+  if slug != "" and slug != currentSlug and vanitySlugHeldElsewhere(project, slug, lookups) (
     return refuseWithBody(409, {ok: false, error: "that vanity URL is already taken"})
   )
   if slug != currentSlug (
@@ -167,17 +254,20 @@ def applyRemixShareUpdate(*serve.Context c, object project, object body) Refusal
   return applyRemixShare(project, body.remixShare.toNum())
 )
 
-def applyTeamUpdate(*serve.Context c, object project, object body) Refusal (
+def applyTeamUpdate(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
   if !body.contains("collaborators") (
     return noRefusal()
   )
   if !isOwnerOrAdmin(c, project) (
     return refuse(403, "only the owner can manage the project team")
   )
-  return applyCollaborators(project, body.collaborators.assert(array))
+  if typeof(body.collaborators) != "array" (
+    return refuse(400, "collaborators must be a list")
+  )
+  return applyCollaborators(project, body.collaborators.assert(array), lookups)
 )
 
-def holdTransferredStorage(*serve.Context c, object project, OwnerTransfer transfer) Refusal (
+def holdTransferredStorage(*serve.Context c, object project, OwnerTransfer transfer, UpdateLookups lookups) Refusal (
   transfer.hold = noStorageHold()
   transfer.toId = projectOwnerId(project)
   if transfer.fromId == "" or !usesRoturStorage(transfer.toId) (
@@ -185,7 +275,10 @@ def holdTransferredStorage(*serve.Context c, object project, OwnerTransfer trans
   )
   object moving = {}
   moving[project.id.toStr()] = projectStorageSummary(project, loadAssetsIndex().assets.assertElse(object, {}))
-  transfer.hold = storageHold(transfer.toId, {projects: moving}, !contextBool(c, "isAdmin"))
+  object changes = {projects: moving}
+  boolean enforce = !contextBool(c, "isAdmin")
+  transfer.holdKey = storageHoldKey(transfer.toId, changes, enforce)
+  transfer.hold = lookupStorageHold(lookups, transfer.toId, changes, enforce)
   if transfer.hold.ok != true (
     object storageRefusal = transfer.hold.refusal.assertElse(object, {})
     return refuseWithBody(413, {ok: false, code: "storage_full", error: "The new owner's Rotur storage doesn't have room for this project.", needed: (storageRefusal.needed ?? 0).toNum()})

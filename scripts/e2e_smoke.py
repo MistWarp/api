@@ -31,9 +31,15 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
-EXPECTED_ERRORS = {"upload extension store failure", "upload json store failure", "upload metadata save failure"}
+GONE_USERS = {"gone_user"}
+BUSY_USERS = {"busy_user"}
+BANNED_USERS = {"banned_user"}
+SLOW_USERS = {"slow_user": "u_slow"}
+ROTUR_DELAY = 4
+EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
+UNORDERED = {"largest"}
 VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp")}
 SAVE_PATH = re.compile(r"^/v1/projects/([^/]+)(/upload)?$")
 HEX = re.compile(r"^[0-9a-f]{32,64}$")
@@ -70,6 +76,19 @@ class FakeRotur(BaseHTTPRequestHandler):
             self.answer(404, {"code": "not_found"})
             return
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
+        if name in GONE_USERS:
+            self.answer(404, {"error": "User not found"})
+            return
+        if name in BUSY_USERS:
+            self.answer(503, {"error": "Service unavailable"})
+            return
+        if name in BANNED_USERS:
+            self.answer(403, {"error": "User is banned"})
+            return
+        if name in SLOW_USERS:
+            time.sleep(ROTUR_DELAY)
+            self.answer(200, {"id": SLOW_USERS[name], "username": name})
+            return
         if name not in USERS:
             self.close_connection = True
             return
@@ -155,7 +174,7 @@ class Server:
         if not self.keep:
             shutil.rmtree(self.dir)
 
-    def call(self, method, path, who=None, body=None, raw=None, content_type="application/json"):
+    def call(self, method, path, who=None, body=None, raw=None, content_type="application/json", timeout=30):
         data = raw if raw is not None else (None if body is None else json.dumps(body).encode("utf-8"))
         request = urllib.request.Request(self.base + path, data=data, method=method)
         if who:
@@ -163,10 +182,12 @@ class Server:
         if data is not None:
             request.add_header("Content-Type", content_type)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 status, text, headers = response.status, response.read(), response.headers
         except urllib.error.HTTPError as error:
             status, text, headers = error.code, error.read(), error.headers
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+            return 599, {"timedOut": str(error)}, {}
         if text[:2] == b"\x1f\x8b":
             text = gzip.decompress(text)
         try:
@@ -178,7 +199,7 @@ class Server:
     def upload(self, project_id, who, sb3):
         return self.form("/v1/projects/%s/upload" % project_id, who, {}, {"project": sb3})
 
-    def form(self, path, who, fields, files):
+    def form(self, path, who, fields, files, timeout=30):
         boundary = uuid.uuid4().hex
         body = b""
         for name, value in fields.items():
@@ -187,16 +208,39 @@ class Server:
             body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s.bin\"\r\n"
                      "Content-Type: application/octet-stream\r\n\r\n" % (boundary, name, name)).encode() + value + b"\r\n"
         body += ("--%s--\r\n" % boundary).encode()
-        return self.call("POST", path, who, raw=body, content_type="multipart/form-data; boundary=" + boundary)
+        return self.call("POST", path, who, raw=body, content_type="multipart/form-data; boundary=" + boundary, timeout=timeout)
 
     def faulty(self, folder):
         path = os.path.join(self.dir, "data", folder)
         os.makedirs(path, exist_ok=True)
         return Fault(path)
 
+    def thumbnail(self, project_id):
+        path = os.path.join(self.dir, "data", "thumbnails", project_id + ".png")
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read().decode("latin-1")
+
+    def profile(self, username):
+        path = os.path.join(self.dir, "data", "users", username + ".json")
+        if not os.path.exists(path):
+            return {}
+        with open(path) as handle:
+            return json.load(handle)
+
     def read_project(self, project_id):
         with open(os.path.join(self.dir, "data", "projects", project_id + ".json")) as handle:
             return json.load(handle)
+
+    def extension_records(self):
+        folder = os.path.join(self.dir, "data", "extensions")
+        records = {}
+        for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+            if name.endswith(".json") and name != "index.json":
+                with open(os.path.join(folder, name)) as handle:
+                    records[name] = json.load(handle)
+        return records
 
     def blob_inventory(self):
         inventory = {}
@@ -372,17 +416,28 @@ def committed_workspace(server, ids, alias, who, message, delta=False, same_tree
     return history.archive(head, delta), json.dumps(history.metadata(head, delta))
 
 
-def staged_part(server, step, path, who, kind, data, name):
-    status, started = step(name + " start", "POST", path + "/upload-parts", who, {"kind": kind, "name": "", "size": len(data), "chunks": 1})
+def staged_part(server, step, path, who, kind, data, name, chunks=1):
+    status, started = step(name + " start", "POST", path + "/upload-parts", who, {"kind": kind, "name": "", "size": len(data), "chunks": chunks})
     token = started.get("token", "") if isinstance(started, dict) else ""
-    status, chunk = step(name + " chunk", "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": "0"}, {"chunk": data}))
-    for field in ("received", "size"):
-        if isinstance(chunk, dict) and chunk.get(field) == len(data):
-            chunk[field] = "<bytes sent>"
+    cut = (len(data) + chunks - 1) // chunks
+    for index in range(chunks):
+        part = data[index * cut:(index + 1) * cut]
+        status, chunk = step("%s chunk %d" % (name, index), "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": str(index)}, {"chunk": part}))
+        for field, sent in (("received", min(len(data), (index + 1) * cut)), ("size", len(data))):
+            if isinstance(chunk, dict) and chunk.get(field) == sent:
+                chunk[field] = "<bytes sent>"
     return token
 
 
-def upload_flow(server, step, ids):
+def complete_part(step, path, who, token, name):
+    step(name, "POST", path + "/upload-parts/%s/complete" % token, who, {})
+
+
+def upload_flow(server, step, ids, steps):
+    status, bare = step("create project for an sb3 without project.json", "POST", "/v1/projects", "sam", {"title": "No project.json"})
+    ids[str(bare.get("id", "")) if isinstance(bare, dict) else ""] = "<no-json>"
+    for name, sb3 in (("upload sb3 without project.json", sb3_archive(None, {"readme.txt": "no project here"})), ("upload after an sb3 without project.json", sb3_archive(project_with_costumes([])))):
+        step(name, "POST", "/v1/projects/<no-json>/upload", "sam", form=({}, {"project": sb3}), timeout=5)
     status, created = step("history create", "POST", "/v1/projects", "sam", {"title": "History smoke"})
     ids[str(created.get("id", ""))] = "<history>"
     path = "/v1/projects/<history>"
@@ -410,8 +465,10 @@ def upload_flow(server, step, ids):
     with_asset = sb3_archive(project_with_costumes([asset_name], {"ext": "https://example.com/ext.js"}), {asset_name: asset_content})
     upload("upload with asset and extension", {"extensions": json.dumps({"https://example.com/ext.js": "class SmokeExtension {}"})},
            {"project": with_asset, "thumbnail": b"\x89PNG smoke thumbnail"})
+    steps.append({"step": "extension records after an upload", "status": 0, "body": server.extension_records()})
     step("check assets", "POST", path + "/assets/check", "sam", {"assets": [asset_name, other_name]})
     step("check invalid asset name", "POST", path + "/assets/check", "sam", {"assets": ["nope"]})
+    step("check assets not a list", "POST", path + "/assets/check", "sam", {"assets": "x"})
     sparse = sb3_archive(project_with_costumes([asset_name], {"ext": "https://example.com/ext.js"}))
     upload("upload sparse", {"extensions": json.dumps({"https://example.com/ext.js": "class SmokeExtension {}"})}, {"project": sparse})
     upload("upload second asset", files={"project": sb3_archive(project_with_costumes([asset_name, other_name]), {other_name: other_content})})
@@ -425,14 +482,23 @@ def upload_flow(server, step, ids):
     with server.faulty("extensions"):
         upload("upload extension store failure", {"extensions": json.dumps({"https://example.com/fault.js": "class FaultExtension {}"})},
                {"project": sb3_archive(project_with_costumes([], {"ext": "https://example.com/fault.js"}))})
+    workspaces_before = server.blob_inventory().get("project-workspaces", 0)
+    archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Extension store failure")
+    with server.faulty("extensions"):
+        upload("upload extension store failure with history", {"git": metadata, "extensions": json.dumps({"https://example.com/fault.js": "class FaultExtension {}"})},
+               {"project": sb3_archive(project_with_costumes([], {"ext": "https://example.com/fault.js"})), "workspace": archive})
+    steps.append({"step": "history left by the extension store failure", "status": 0, "body": {
+        "newWorkspaceBlobs": server.blob_inventory().get("project-workspaces", 0) - workspaces_before,
+    }})
     unpublished = project_with_costumes([])
     unpublished["meta"]["agent"] = "unpublished"
     with server.faulty(os.path.join("blobs", "project-json")):
-        upload("upload json store failure", files={"project": sb3_archive(unpublished)})
+        upload("upload json store failure", files={"project": sb3_archive(unpublished), "thumbnail": b"\x89PNG unpublished thumbnail"})
     unsaved = project_with_costumes([])
     unsaved["meta"]["agent"] = "unsaved"
     with server.faulty("projects"):
-        upload("upload metadata save failure", files={"project": sb3_archive(unsaved)})
+        upload("upload metadata save failure", files={"project": sb3_archive(unsaved), "thumbnail": b"\x89PNG unsaved thumbnail"})
+    steps.append({"step": "thumbnail after failed uploads", "status": 0, "body": server.thumbnail(real_id(ids, "<history>"))})
 
     head, edited = head_and_edited()
     upload("upload stale edited", {"expectedEdited": "1"})
@@ -468,9 +534,11 @@ def upload_flow(server, step, ids):
     archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Delta save", delta=True)
     upload("upload delta workspace", {"git": metadata}, {"project": plain, "workspace": archive})
     archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Staged save", delta=True)
-    token = staged_part(server, step, path, "sam", "workspace", archive, "stage workspace")
+    token = staged_part(server, step, path, "sam", "workspace", archive, "stage workspace", chunks=2)
+    upload("upload unfinished staged workspace", {"git": metadata, "workspaceToken": token})
+    complete_part(step, path, "sam", token, "complete staged workspace")
     upload("upload staged workspace", {"git": metadata, "workspaceToken": token})
-    upload("upload reused workspace token", {"git": metadata, "workspaceToken": token})
+    upload("upload reused workspace token", {"workspaceToken": token})
 
     first = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<history>"), "sam"))
     oldest = first.head()
@@ -512,6 +580,13 @@ def upload_flow(server, step, ids):
     step("upload remix change", "POST", "/v1/projects/<history-remix>/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     status, pull = step("open pull", "POST", path + "/pulls", "alice", {"sourceProjectId": remix_id, "title": "Smoke pull", "body": "From the remix"})
     pull_index = str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    status, bob_project = step("bob create", "POST", "/v1/projects", "bob", {"title": "Bob smoke"})
+    ids[str(bob_project.get("id", "")) if isinstance(bob_project, dict) else ""] = "<bob>"
+    with server.faulty("projects"):
+        step("upload unsaved first save of the day", "POST", "/v1/projects/<bob>/upload", "bob", form=({}, {"project": sb3_archive(unsaved), "thumbnail": b"\x89PNG bob thumbnail"}))
+    steps.append({"step": "after an unsaved first save of the day", "status": 0, "body": {
+        "thumbnail": server.thumbnail(real_id(ids, "<bob>")), "creatingStreak": server.profile("bob").get("creatingStreak"),
+    }})
     status, bob_remixed = step("remix history for bob", "POST", path + "/remix", "bob", {})
     bob_remix_id = str(bob_remixed.get("id", "") or (bob_remixed.get("project") or {}).get("id", "")) if isinstance(bob_remixed, dict) else ""
     ids[bob_remix_id] = "<history-remix-bob>"
@@ -530,7 +605,8 @@ def upload_flow(server, step, ids):
     upload("upload pull merge stale head", {"pullId": pull_index, "expectedHead": ZERO_HEAD}, {"project": plain, "mergeTree": pull_tree})
     tree_token = staged_part(server, step, path, "sam", "mergeTree", pull_tree, "stage merge tree")
     upload("upload pull merge with unfinished tree", {"pullId": pull_index, "expectedHead": head, "mergeTreeToken": tree_token})
-    upload("upload pull merge", {"pullId": pull_index, "expectedHead": head}, {"project": plain, "mergeTree": pull_tree})
+    complete_part(step, path, "sam", tree_token, "complete staged merge tree")
+    upload("upload pull merge", {"pullId": pull_index, "expectedHead": head, "mergeTreeToken": tree_token})
     step("merged pull", "GET", path + "/pulls/" + pull_index, "sam")
     upload("upload merged pull again", {"pullId": pull_index}, {"project": plain, "mergeTree": pull_tree})
 
@@ -557,6 +633,8 @@ def update_flow(server, step, ids):
 
     patch("patch anonymous", {"title": "x"}, who=None)
     patch("patch by stranger", {"title": "x"}, who="alice")
+    patch("patch null title", {"title": None})
+    patch("patch null description", {"description": None, "notes": None})
     patch("patch text", {"title": "  Updated smoke  ", "description": "About", "instructions": "Press space", "notes": "Thanks"})
     patch("patch empty title", {"title": "   "})
     patch("patch long title", {"title": "t" * 101})
@@ -565,6 +643,7 @@ def update_flow(server, step, ids):
     patch("patch long notes", {"notes": "n" * 5001})
     patch("patch non-ascii description", {"description": "\u00e9\u2713" * 2400})
     patch("patch long non-ascii notes", {"notes": "\u00e9" * 5001})
+    patch("patch credit without role", {"credits": [{"who": "Ada"}, {"who": None, "role": "Art"}]})
     patch("patch credits", {"credits": [
         {"who": "Ada", "role": "Art", "url": "https://example.com/ada"},
         {"who": "Bo", "role": "Music", "url": None},
@@ -579,6 +658,7 @@ def update_flow(server, step, ids):
     patch("patch zero price", {"price": 0, "remixable": True})
     patch("patch remix share", {"remixShare": 20})
     patch("patch remix share too high", {"remixShare": 80})
+    patch("patch null tag", {"tags": [None, "Games"]})
     patch("patch tags", {"tags": ["Games", "games", "Puzzle", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]})
     items = [
         {"id": "Sword", "name": "Sword", "visual": {"type": "image", "url": "https://example.com/s.png"}},
@@ -587,6 +667,7 @@ def update_flow(server, step, ids):
         {"id": "pixel", "name": "Pixel", "visual": {"type": "image", "url": "data:image/png;base64,AAAA"}},
     ]
     product = {"id": "pack", "name": "Pack", "description": "Starter", "price": 10, "grantsItem": "sword", "icon": "https://example.com/i.png"}
+    patch("patch product without icon", {"gameItems": items, "gameProducts": [{"id": "plain", "name": "Plain", "price": 1}]})
     patch("patch game items and products", {"gameItems": items, "gameProducts": [product]})
     patch("patch product bad id", {"gameProducts": [dict(product, id="Bad Id")]})
     patch("patch product duplicate id", {"gameProducts": [product, product]})
@@ -616,10 +697,13 @@ def update_flow(server, step, ids):
     patch("patch branding without plan", {"branding": {"accentColor": "#123456", "tagline": "Hi"}})
     patch("patch branding cleared", {"branding": {}})
     patch("patch vanity without plan", {"vanitySlug": "smoke-game"})
+    patch("patch null vanity", {"vanitySlug": None})
     patch("patch vanity cleared", {"vanitySlug": ""})
     patch("patch group tag invalid", {"groupTag": "!!!"})
     patch("patch group tag not managed", {"groupTag": "somegroup"})
+    patch("patch null group tag", {"groupTag": None})
     patch("patch group tag cleared", {"groupTag": "  "})
+    patch("patch nameless teammate", {"collaborators": [{"role": "editor"}]})
     patch("patch team share too high", {"collaborators": [{"username": "alice", "role": "editor", "share": 60}]})
     patch("patch team unknown user", {"collaborators": [{"username": "ghost_user", "role": "editor"}]})
     patch("patch team duplicate", {"collaborators": [{"username": "alice", "role": "editor"}, {"username": "Alice", "role": "tester"}]})
@@ -643,17 +727,90 @@ def update_flow(server, step, ids):
     patch("patch transfer", {"owner": "bob", "keepGroup": True, "title": "Given away"})
     patch("patch after transfer", {"title": "Mine again"})
     step("get updated project", "GET", path, "bob")
+    for name, body in (
+        ("patch credits not a list", {"credits": "x"}),
+        ("patch credit not an object", {"credits": ["Ada"]}),
+        ("patch tags not a list", {"tags": "games"}),
+        ("patch compatibility not an object", {"compatibility": "mobile"}),
+        ("patch team not a list", {"collaborators": "alice"}),
+        ("patch teammate not an object", {"collaborators": ["alice"]}),
+        ("patch after bad input", {"title": "Still saving"}),
+    ):
+        step(name, "PUT", path, "bob", body, timeout=5)
+    patch("patch team deleted user", {"collaborators": [{"username": "gone_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer to deleted user", {"owner": "gone_user"}, who="bob")
+    patch("patch team rotur unavailable", {"collaborators": [{"username": "busy_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer rotur unavailable", {"owner": "busy_user"}, who="bob")
+    patch("patch team banned user", {"collaborators": [{"username": "banned_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer to banned user", {"owner": "banned_user"}, who="bob")
+
+
+def slow_rotur_flow(server, step, steps, ids):
+    status, created = step("slow rotur create", "POST", "/v1/projects", "sam", {"title": "Slow Rotur smoke"})
+    project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+    ids[project_id] = "<slow-rotur>"
+    results = {}
+
+    def save_team():
+        results["teamSave"] = server.call("PUT", "/v1/projects/" + project_id, "sam", {"collaborators": [{"username": "slow_user", "role": "editor"}]})[0]
+
+    saving = threading.Thread(target=save_team)
+    saving.start()
+    time.sleep(0.5)
+    waited = {}
+
+    def timed(name, send):
+        started = time.time()
+        results[name] = send()
+        waited[name] = time.time() - started >= ROTUR_DELAY / 2
+
+    others = [
+        threading.Thread(target=timed, args=("rename", lambda: server.call("PUT", "/v1/projects/" + project_id, "sam", {"title": "Renamed during a slow lookup"})[0])),
+        threading.Thread(target=timed, args=("upload", lambda: server.upload(project_id, "sam", sb3_archive(project_with_costumes([])))[0])),
+    ]
+    for other in others:
+        other.start()
+    for other in others + [saving]:
+        other.join()
+    stored = server.read_project(project_id)
+    steps.append({"step": "saves during a slow Rotur lookup", "status": 0, "body": {
+        "statuses": results, "waitedForRotur": waited, "team": stored.get("collaborators"), "title": stored.get("title"),
+    }})
 
 
 def volatile_key(key):
     return key in VOLATILE_NAMES
 
 
+def concurrent_flow(server, step, steps, ids):
+    status, created = step("concurrent create", "POST", "/v1/projects", "sam", {"title": "Concurrent smoke"})
+    project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+    ids[project_id] = "<concurrent>"
+    content = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>" + b" " * (9 * 1024 * 1024)
+    name = hashlib.md5(content).hexdigest() + ".svg"
+    sb3 = sb3_archive(project_with_costumes([name]), {name: content})
+    results = {}
+
+    def upload():
+        results["upload"] = server.form("/v1/projects/%s/upload" % project_id, "sam", {}, {"project": sb3})[0]
+
+    uploading = threading.Thread(target=upload)
+    uploading.start()
+    time.sleep(0.05)
+    results["update"] = server.call("PUT", "/v1/projects/" + project_id, "sam", {"title": "Renamed during upload"})[0]
+    uploading.join()
+    stored = server.read_project(project_id)
+    steps.append({"step": "concurrent update and upload", "status": 0, "body": {
+        "statuses": results, "title": stored.get("title"), "assets": stored.get("assets"),
+    }})
+
+
 def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
         return {k: normalize(v, ids, k, key) for k, v in sorted(value.items())}
     if isinstance(value, list):
-        return [normalize(v, ids, key, parent) for v in value]
+        items = [normalize(v, ids, key, parent) for v in value]
+        return sorted(items, key=json.dumps) if key in UNORDERED else items
     if (parent, key) in VOLATILE_FIELDS:
         return "<volatile>"
     if isinstance(value, str):
@@ -677,7 +834,7 @@ def run(binary, sb3, keep):
     ids = {}
     steps = []
 
-    def step(name, method, path, who=None, body=None, upload=None, headers=(), form=None):
+    def step(name, method, path, who=None, body=None, upload=None, headers=(), form=None, timeout=30):
         real_path = path
         for alias, real in ((a, r) for r, a in ids.items()):
             real_path = real_path.replace(alias, real)
@@ -685,9 +842,9 @@ def run(binary, sb3, keep):
             real_path = "/v1/projects/%s/upload" % upload
             status, parsed, response_headers = server.upload(upload, who, sb3)
         elif form is not None:
-            status, parsed, response_headers = server.form(real_path, who, form[0], form[1])
+            status, parsed, response_headers = server.form(real_path, who, form[0], form[1], timeout)
         else:
-            status, parsed, response_headers = server.call(method, real_path, who, body)
+            status, parsed, response_headers = server.call(method, real_path, who, body, timeout=timeout)
         record = {"step": name, "status": status, "body": parsed}
         for header in headers:
             record[header] = response_headers.get(header, "")
@@ -739,12 +896,15 @@ def run(binary, sb3, keep):
         step("wrong method", "PATCH", "/v1/projects/<project>", "sam", {}, headers=("Allow",))
         step("legacy prefix", "GET", "/api/agreement")
         step("health", "GET", "/v1/health")
-        upload_flow(server, step, ids)
+        upload_flow(server, step, ids, steps)
         update_flow(server, step, ids)
+        concurrent_flow(server, step, steps, ids)
+        slow_rotur_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
                 steps.append({"step": "stored " + alias, "status": 0, "body": server.read_project(real)})
+        steps.append({"step": "extension records", "status": 0, "body": server.extension_records()})
         steps.append({"step": "blob inventory", "status": 0, "body": server.blob_inventory()})
     finally:
         server.stop()

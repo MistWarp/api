@@ -153,9 +153,8 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
 def ensureUploadedProjectHistory(object project) object (
   string lockName = "project-history-" ++ project.id.toStr()
   sync.unlock(lockName)
-  object res = ensureGeneratedProjectHistory(project, {}, false)
-  sync.lock(lockName)
-  return res
+  defer sync.lock(lockName)
+  return ensureGeneratedProjectHistory(project, {}, false)
 )
 
 def ensureGeneratedProjectHistory(object project, object visiting, boolean allowMissingAssets) object (
@@ -221,6 +220,10 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
   )
 
   sync.lock("project-history-" ++ id)
+  defer (
+    sync.unlock("project-history-" ++ id)
+    void fs.remove(parentPath)
+  )
   auto currentResult = loadProject(id)
   object res = {ok: false, error: "project disappeared during migration"}
   if currentResult.ok (
@@ -233,8 +236,6 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
       res = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
     )
   )
-  sync.unlock("project-history-" ++ id)
-  void fs.remove(parentPath)
   return res
 )
 

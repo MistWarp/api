@@ -1,0 +1,95 @@
+import "std:testing"
+import "std:json"
+import "std:serve"
+import "./project-refusal.osl"
+import "./project-update-lookups.osl"
+
+array asked = []
+def discoverUserIdentityOutcome(string username) object (
+  asked.append("identity " ++ username)
+  if username == "alice" (
+    return {id: "u_alice", outcome: "found"}
+  )
+  return {id: "", outcome: "unavailable"}
+)
+def mistwarpBenefitsForTier(string tier) object (
+  return {maxProjects: 100}
+)
+def mistwarpBenefitsForUserId(string userId) object (
+  asked.append("benefits " ++ userId)
+  return {maxProjects: 500}
+)
+def userIdForUsername(string username) string (
+  return "u_" ++ username
+)
+def vanityEligibility(object project) string (
+  asked.append("vanity " ++ project.id.toStr())
+  return "yes"
+)
+def canManageGroupTag(string tag, *serve.Context c) boolean (
+  return true
+)
+def groupTagOf(object value) string (
+  return (value.groupTag ?? "").toStr()
+)
+def noStorageHold() object (
+  return {ok: true, reservations: []}
+)
+def storageHold(string userId, object changes, boolean enforce) object (
+  asked.append("hold " ++ userId)
+  return {ok: true, reservations: [{id: "hold-" ++ userId}]}
+)
+array released = []
+def storageHoldRelease(string userId, object hold) (
+  released.append(userId)
+)
+
+UpdateLookups live = UpdateLookups()
+testing.assert(lookupIdentity(live, "alice").id == "u_alice" and lookupIdentity(live, "busy").outcome == "unavailable", "a live pass asks Rotur")
+testing.assert(lookupProjectBenefits(live, {owner: "sam"}).maxProjects == 500, "benefits follow the project owner")
+testing.assert(lookupVanityEligibility(live, {id: "p2", ownerId: "u_bob"}) == "yes", "vanity eligibility is asked for each holder")
+testing.assert(lookupStorageHold(live, "u_bob", {projects: {p1: {bytes: 1}}}, true).ok == true, "a live pass takes the storage hold")
+testing.assert(!live.missed and asked.len == 5, "every answer is asked once")
+
+live.replay = true
+testing.assert(lookupIdentity(live, "alice").id == "u_alice" and lookupProjectBenefits(live, {owner: "sam"}).maxProjects == 500, "a replay reuses the answers")
+testing.assert(lookupVanityEligibility(live, {id: "p2", ownerId: "u_bob"}) == "yes" and lookupStorageHold(live, "u_bob", {projects: {p1: {bytes: 1}}}, true).reservations.len == 1, "a replay reuses the hold")
+testing.assert(!live.missed and asked.len == 5, "a replay with the same project asks Rotur nothing")
+
+testing.assert(lookupProjectBenefits(live, {owner: "sam", ownerId: "u_carol"}).maxProjects == 100 and live.missed, "a replay for another owner misses instead of asking")
+testing.assert(asked.len == 5, "a miss asks Rotur nothing")
+
+UpdateLookups changed = UpdateLookups()
+changed.replay = true
+testing.assert(lookupIdentity(changed, "bob").outcome == "unavailable" and changed.missed and asked.len == 5, "a teammate the live pass never looked up is a miss")
+UpdateLookups grown = UpdateLookups()
+void lookupStorageHold(grown, "u_bob", {projects: {p1: {bytes: 1}}}, true)
+grown.replay = true
+void lookupStorageHold(grown, "u_bob", {projects: {p1: {bytes: 2}}}, true)
+testing.assert(grown.missed, "a project that grew since the hold misses")
+
+UpdateLookups holds = UpdateLookups()
+void lookupStorageHold(holds, "u_a", {projects: {p1: {bytes: 1}}}, true)
+void lookupStorageHold(holds, "u_b", {projects: {p1: {bytes: 1}}}, true)
+releaseStorageHolds(holds, storageHoldKey("u_b", {projects: {p1: {bytes: 1}}}, true))
+testing.assert(released == ["u_a"], "every hold except the one the save used is released")
+released = []
+releaseStorageHolds(holds, "")
+testing.assert(released == ["u_a", "u_b"], "an unsaved update releases every hold")
+
+testing.assert(roturUnavailableRefusal("alice").status == 503 and roturUnavailableRefusal("alice").body.code == "rotur_unavailable", "an unreachable Rotur is a 503")
+
+object knownIdentities = {}
+UpdateLookups firstTry = lookupsKnowing(knownIdentities)
+void lookupIdentity(firstTry, "alice")
+void lookupIdentity(firstTry, "busy")
+void lookupProjectBenefits(firstTry, {owner: "sam"})
+rememberIdentities(firstTry, knownIdentities)
+testing.assert(knownIdentities.getKeys() == ["identity:alice"], "only settled identity answers are kept between tries")
+number askedBefore = asked.len
+UpdateLookups secondTry = lookupsKnowing(knownIdentities)
+testing.assert(lookupIdentity(secondTry, "alice").id == "u_alice" and asked.len == askedBefore, "a later try reuses the teammate answers")
+void lookupProjectBenefits(secondTry, {owner: "sam"})
+testing.assert(asked.len == askedBefore + 1, "a later try asks for plan benefits again")
+secondTry.replay = true
+testing.assert(lookupIdentity(secondTry, "alice").id == "u_alice" and !secondTry.missed, "a carried answer replays under the lock")

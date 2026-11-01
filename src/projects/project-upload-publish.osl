@@ -30,6 +30,7 @@ def rejectProjectFiles(*serve.Context c, object project, object uploadResult, Up
 
 def storeUploadExtensions(object project, object extensionResult, UploadRollback rollback) Refusal (
   if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), extensionResult.extensions.assert(array), extensionResult.sources.assert(object)) (
+    discardNewWorkspaceKeys(project.id.toStr(), storedWorkspaceLayers(project), rollback.previousWorkspaceKeys)
     storageHoldRelease(rollback.ownerId, rollback.hold)
     return refuse(500, "failed to store extension sources")
   )

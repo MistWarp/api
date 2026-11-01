@@ -1,5 +1,6 @@
 export {
   discoverUserIdentity,
+  discoverUserIdentityOutcome,
   identityMatches,
   loadUserIds,
   purgeUser,
@@ -528,12 +529,17 @@ def refreshUsernameForId(string userId) string (
 )
 
 def discoverUserIdentity(string username) string (
+  return discoverUserIdentityOutcome(username).id.toStr()
+)
+
+def discoverUserIdentityOutcome(string username) object (
   string key = normalizeUsername(username)
   if key == "" or isStudentUsername(key) (
-    return ""
+    return {id: "", outcome: "missing"}
   )
   object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if resp.status == 0 (
+  string outcome = profileLookupOutcome(resp.status)
+  if outcome != "found" (
     if resp.status == 404 (
       string uid = userIdForUsername(username)
       if uid != "" (
@@ -541,21 +547,21 @@ def discoverUserIdentity(string username) string (
         refreshUsernameForId(uid)
       )
     )
-    return ""
+    return {id: "", outcome: outcome}
   )
   auto parsed = json.parse(resp.body, {type: "object"})
   if parsed.isErr() (
-    return ""
+    return {id: "", outcome: "unavailable"}
   )
   object profile = parsed.unwrap().assert(object)
   string userId = profile.id.toStr()
   string currentUsername = profile.username.toStr()
   if userId == "" or currentUsername == "" (
-    return ""
+    return {id: "", outcome: "missing"}
   )
   ensureUserIdentity(userId, currentUsername)
   identityRefreshCache.set(userId, currentUsername)
-  return userId
+  return {id: userId, outcome: "found"}
 )
 
 def usernameForId(string userId) string (

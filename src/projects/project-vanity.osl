@@ -42,11 +42,6 @@ def vanityEntriesWhere(string op, string value) array (
   return found
 )
 
-// Records when the project's vanity URL lapsed, clears that once the owner's
-// plan includes vanity URLs again, and releases the URL after 30 days lapsed.
-// Call with the project's upload lock held, and its owner's eligibility looked
-// up beforehand, so a slow Rotur never holds the lock. Returns the URL it
-// still holds.
 def applyVanityLapseLocked(string id, string slug, string eligibility) string (
   auto loaded = loadProject(id)
   if !loaded.ok (
@@ -69,6 +64,13 @@ def applyVanityLapseLocked(string id, string slug, string eligibility) string (
   return after.slug.toStr()
 )
 
+def applyVanityLapse(string id, string slug, string eligibility) string (
+  string lockName = projectSaveLock(id)
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  return applyVanityLapseLocked(id, slug, eligibility)
+)
+
 // Notices lapsed vanity URLs and releases them on time, even if nobody visits.
 def vanityLapseLoop() (
   while true (
@@ -81,10 +83,7 @@ def vanityLapseLoop() (
       boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
       // Nothing changes while Rotur can't be reached, or for a URL in use.
       if eligibility == "no" or (eligibility == "yes" and lapsed) (
-        string lockName = "project-upload:" ++ entry.id.toStr()
-        sync.lock(lockName)
-        applyVanityLapseLocked(entry.id.toStr(), slug, eligibility)
-        sync.unlock(lockName)
+        void applyVanityLapse(entry.id.toStr(), slug, eligibility)
       )
     )
   )

@@ -4,6 +4,7 @@ type OwnerTransfer (
   string fromId = ""
   string toId = ""
   object hold = {}
+  string holdKey = ""
 )
 
 def applyBranding(object project, object body, object creatorBenefits) Refusal (
@@ -41,28 +42,28 @@ def vanitySlugRefusal(string slug, string currentSlug, object creatorBenefits) R
 
 def applyProjectText(object project, object body) Refusal (
   if body.contains("title") (
-    string title = body.title.toStr().strip()
+    string title = (body.title ?? "").toStr().strip()
     if title == "" or title.len > 100 (
       return refuse(400, "invalid title")
     )
     project.title = title
   )
   if body.contains("description") (
-    string description = body.description.toStr()
+    string description = (body.description ?? "").toStr()
     if description.len > 5000 (
       return refuse(400, "description too long")
     )
     project.description = description
   )
   if body.contains("instructions") (
-    string instructions = body.instructions.toStr()
+    string instructions = (body.instructions ?? "").toStr()
     if instructions.len > 5000 (
       return refuse(400, "instructions too long")
     )
     project.instructions = instructions
   )
   if body.contains("notes") (
-    string notes = body.notes.toStr()
+    string notes = (body.notes ?? "").toStr()
     if notes.len > 5000 (
       return refuse(400, "notes too long")
     )
@@ -75,15 +76,21 @@ def applyCredits(object project, object body) Refusal (
   if !body.contains("credits") (
     return noRefusal()
   )
+  if typeof(body.credits) != "array" (
+    return refuse(400, "credits must be a list")
+  )
   array incoming = body.credits.assert(array)
   if incoming.len > 50 (
     return refuse(400, "too many credits")
   )
   array credits = []
   for i incoming.len (
-    object entry = incoming[i]
-    string who = entry.who.toStr().strip()
-    string role = entry.role.toStr().strip()
+    if typeof(incoming[i]) != "object" (
+      return refuse(400, "each credit must be an object")
+    )
+    object entry = incoming[i].assert(object)
+    string who = (entry.who ?? "").toStr().strip()
+    string role = (entry.role ?? "").toStr().strip()
     string creditUrl = ""
     if entry.contains("url") and entry.url != null (
       creditUrl = entry.url.toStr().strip()
@@ -133,21 +140,25 @@ def applyRemixShare(object project, number remixShare) Refusal (
   return noRefusal()
 )
 
-def applyTags(object project, object body) (
+def applyTags(object project, object body) Refusal (
   if !body.contains("tags") (
-    return
+    return noRefusal()
+  )
+  if typeof(body.tags) != "array" (
+    return refuse(400, "tags must be a list")
   )
   array incoming = body.tags.assert(array)
   array tags = []
   for i incoming.len (
     if tags.len < 10 (
-      string t = normalizeTag(incoming[i].toStr())
+      string t = normalizeTag((incoming[i] ?? "").toStr())
       if t != "" and !tags.contains(t) (
         tags.append(t)
       )
     )
   )
   project.tags = tags
+  return noRefusal()
 )
 
 def applyGameProducts(object project, object body) Refusal (
@@ -162,12 +173,12 @@ def applyGameProducts(object project, object body) Refusal (
   array productIds = []
   for i incomingProducts.len (
     object incomingProduct = incomingProducts[i].assertElse(object, {})
-    string productId = incomingProduct.id.toStr().toLower().strip()
-    string productName = incomingProduct.name.toStr().strip()
-    string productDescription = incomingProduct.description.toStr().strip()
-    number productPrice = incomingProduct.price.toNum()
-    string grantsItem = incomingProduct.grantsItem.toStr().toLower().strip()
-    string productIcon = incomingProduct.icon.toStr().strip()
+    string productId = (incomingProduct.id ?? "").toStr().toLower().strip()
+    string productName = (incomingProduct.name ?? "").toStr().strip()
+    string productDescription = (incomingProduct.description ?? "").toStr().strip()
+    number productPrice = (incomingProduct.price ?? 0).toNum()
+    string grantsItem = (incomingProduct.grantsItem ?? "").toStr().toLower().strip()
+    string productIcon = (incomingProduct.icon ?? "").toStr().strip()
     if !regex.match("^[a-z0-9_-]{1,40}$", productId) or productIds.contains(productId) (
       return refuse(400, "game product ids must be unique lowercase identifiers")
     )
@@ -194,9 +205,9 @@ def applyGameProducts(object project, object body) Refusal (
 )
 
 def portableItemVisual(object visual) object (
-  string visualType = visual.type.toStr().toLower().strip()
+  string visualType = (visual.type ?? "").toStr().toLower().strip()
   if visualType == "image" (
-    string itemImage = visual.url.toStr().strip()
+    string itemImage = (visual.url ?? "").toStr().strip()
     if itemImage.startsWith("data:image/") (
       if itemImage.toBytes().len > 100000 (
         return {error: "portable item images must be smaller than 100KB"}
@@ -209,8 +220,8 @@ def portableItemVisual(object visual) object (
     return {visual: {type: "image", url: itemImage}}
   )
   if visualType == "costume" (
-    string assetId = visual.assetId.toStr().strip()
-    string dataFormat = visual.dataFormat.toStr().toLower().strip()
+    string assetId = (visual.assetId ?? "").toStr().strip()
+    string dataFormat = (visual.dataFormat ?? "").toStr().toLower().strip()
     if !regex.match("^[A-Za-z0-9_-]{8,128}$", assetId) or (dataFormat != "png" and dataFormat != "jpg" and dataFormat != "jpeg" and dataFormat != "svg") (
       return {error: "invalid portable item costume asset"}
     )
@@ -231,11 +242,12 @@ def applyGameItems(object project, object body) Refusal (
   array itemIds = []
   for i incomingItems.len (
     object incomingItem = incomingItems[i].assertElse(object, {})
-    string itemId = incomingItem.id.toStr().toLower().strip()
-    string itemName = incomingItem.name.toStr().strip()
+    string itemId = (incomingItem.id ?? "").toStr().toLower().strip()
+    string itemName = (incomingItem.name ?? "").toStr().strip()
     object visual = incomingItem.visual.assertElse(object, {})
-    if visual.getKeys().len == 0 and incomingItem.image.toStr().strip() != "" (
-      visual = {type: "image", url: incomingItem.image.toStr().strip()}
+    string itemImage = (incomingItem.image ?? "").toStr().strip()
+    if visual.getKeys().len == 0 and itemImage != "" (
+      visual = {type: "image", url: itemImage}
     )
     if !regex.match("^[a-z0-9_-]{1,40}$", itemId) or itemIds.contains(itemId) (
       return refuse(400, "portable item ids must be unique lowercase identifiers")
@@ -259,7 +271,7 @@ def applyInventoryPolicy(object project, object body) Refusal (
     return noRefusal()
   )
   object incomingPolicy = body.inventoryPolicy.assertElse(object, {})
-  string mode = incomingPolicy.mode.toStr().toLower().strip()
+  string mode = (incomingPolicy.mode ?? "").toStr().toLower().strip()
   if mode != "none" and mode != "allowlist" and mode != "all" (
     return refuse(400, "inventory policy must be none, allowlist, or all")
   )
@@ -270,7 +282,7 @@ def applyInventoryPolicy(object project, object body) Refusal (
   )
   array cleanItems = []
   for i allowedItems.len (
-    string globalId = allowedItems[i].toStr().strip()
+    string globalId = (allowedItems[i] ?? "").toStr().strip()
     if !regex.match("^[A-Za-z0-9_-]{1,80}:[a-z0-9_-]{1,40}$", globalId) (
       return refuse(400, "invalid global portable item id")
     )
@@ -280,7 +292,7 @@ def applyInventoryPolicy(object project, object body) Refusal (
   )
   array cleanProjects = []
   for i allowedProjects.len (
-    string allowedProject = allowedProjects[i].toStr().strip()
+    string allowedProject = (allowedProjects[i] ?? "").toStr().strip()
     if !isSafePathPart(allowedProject) (
       return refuse(400, "invalid portable item source project")
     )
@@ -311,13 +323,18 @@ def gameGrantRefusal(object project, object body) Refusal (
   return noRefusal()
 )
 
-def applyCompatibility(object project, object body) (
-  if body.contains("compatibility") and body.compatibility != null (
-    object compatibilityInfo = body.compatibility.assert(object)
-    project.compatibility = {
-      mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
-      keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
-      controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
-    }
+def applyCompatibility(object project, object body) Refusal (
+  if !body.contains("compatibility") or body.compatibility == null (
+    return noRefusal()
   )
+  if typeof(body.compatibility) != "object" (
+    return refuse(400, "compatibility must be an object")
+  )
+  object compatibilityInfo = body.compatibility.assert(object)
+  project.compatibility = {
+    mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
+    keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
+    controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
+  }
+  return noRefusal()
 )

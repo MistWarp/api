@@ -1,0 +1,101 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:regex"
+import "std:sync"
+import "std:serve"
+import "go:mistwarp.local/storagefs"
+import "./upload-parts.osl"
+
+number maxWorkspaceBytes = 1048576
+number maxWorkspaceFiles = 10
+number maxProjectJsonBytes = 1048576
+number maxUploadChunkBytes = 1048576
+def readFile(string path) object (
+  auto text = fs.readFile(path)
+  if text.isErr() (
+    return {ok: false}
+  )
+  return {ok: true, data: json.parse(text.unwrap()).unwrap()}
+)
+def writeFile(string path, object data) boolean (
+  return fs.writeFile(path, json.stringify(data))
+)
+def randomString(number length) string (
+  return "r" * length
+)
+def loadProject(string id) object (
+  return {ok: false}
+)
+def canSaveLiveProject(object project, *serve.Context c) boolean (
+  return false
+)
+def isValidMd5Ext(string name) boolean (
+  return true
+)
+def md5PartOf(string name) string (
+  return name
+)
+def mistwarpBenefitsForUserId(string userId) object (
+  return {maxProjectAssetBytes: 1, maxProjectAssetsBytes: 1}
+)
+def loadAssetsIndex() object (
+  return {assets: {}}
+)
+def saveAssetsIndex(object index) boolean (
+  return true
+)
+def holdUploadAhead(*serve.Context c, object project, string name, number bytes) boolean (
+  return false
+)
+def releaseUploadAhead(*serve.Context c, object project, array names) (
+  return
+)
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+  return false
+)
+def r2Remove(string key) boolean (
+  return true
+)
+def assetObjectKey(string name) string (
+  return name
+)
+def contentTypeForExt(string ext) string (
+  return ""
+)
+def extPartOf(string name) string (
+  return ""
+)
+def contextString(*serve.Context c, string key) string (
+  return ""
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def validateZipArchive(byte[] body, number maxCompressedBytes, number maxExpandedBytes, number maxFiles, boolean readContents) boolean (
+  return false
+)
+
+string tmpDir = "/tmp/mistwarp-upload-parts-test-" ++ timestamp.toStr() ++ "/"
+void fs.mkdir(tmpDir, {recursive: true})
+
+for index 3 (
+  void fs.writeFile(uploadPartChunkPath("tok", index - 1), "part" ++ (index - 1).toStr() ++ ";")
+)
+testing.assert(assembleUploadPart("tok", 3, 18), "chunks stored from index 0 assemble")
+testing.assert(fs.readFile(stagedUploadPartDataPath("tok")).unwrapOr("") == "part0;part1;part2;", "chunks are joined in order")
+removeUploadPartChunks("tok", 3)
+testing.assert(!fs.exists(uploadPartChunkPath("tok", 0)) and !fs.exists(uploadPartChunkPath("tok", 2)), "every chunk is removed")
+
+void writeFile(stagedUploadPartMetaPath("open"), {projectId: "p1", kind: "workspace", userId: "u1", size: 4, chunks: 1, complete: false, expires: timestamp + 60000})
+testing.assert(consumeStagedUploadPart("open", "p1", "workspace", "u1").error == "staged upload is incomplete", "an unfinished upload is refused")
+testing.assert(fs.exists(stagedUploadPartMetaPath("open")), "refusing an unfinished upload keeps it so it can still complete")
+void fs.writeFile(stagedUploadPartDataPath("open"), "data")
+object finished = readFile(stagedUploadPartMetaPath("open")).data.assert(object)
+finished.complete = true
+void writeFile(stagedUploadPartMetaPath("open"), finished)
+object consumed = consumeStagedUploadPart("open", "p1", "workspace", "u1")
+testing.assert(consumed.ok == true and consumed.file.size == 4, "a completed upload is consumed")
+testing.assert(consumeStagedUploadPart("open", "p1", "workspace", "u1").ok == false, "a consumed upload cannot be used again")
+
+void fs.remove(tmpDir)

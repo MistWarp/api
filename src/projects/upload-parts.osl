@@ -33,12 +33,12 @@ def consumeStagedUploadPart(string token, string projectId, string kind, string 
   if metadata.projectId.toStr() != projectId or metadata.kind.toStr() != kind or metadata.userId.toStr() != userId (
     return {ok: false, error: "staged upload does not match this project"}
   )
+  if metadata.contains("complete") and metadata.complete != true and metadata.expires.toNum() >= timestamp (
+    return {ok: false, error: "staged upload is incomplete"}
+  )
   if metadata.expires.toNum() < timestamp or !fs.exists(stagedUploadPartDataPath(token)) (
     removeStagedUploadPart(token, metadata)
     return {ok: false, error: "staged upload expired; upload it again"}
-  )
-  if metadata.contains("complete") and metadata.complete != true (
-    return {ok: false, error: "staged upload is incomplete"}
   )
   byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token)).unwrapOr("".toBytes())
   if data.len != metadata.size.toNum() (
@@ -188,7 +188,7 @@ def uploadPartChunkPath(string token, number index) string (
 
 def removeUploadPartChunks(string token, number count) (
   for i count (
-    void fs.remove(uploadPartChunkPath(token, i))
+    void fs.remove(uploadPartChunkPath(token, i - 1))
   )
 )
 
@@ -196,7 +196,7 @@ def assembleUploadPart(string token, number count, number expectedBytes) boolean
   string outputPath = stagedUploadPartDataPath(token)
   array chunkPaths = []
   for i count (
-    chunkPaths.append(uploadPartChunkPath(token, i))
+    chunkPaths.append(uploadPartChunkPath(token, i - 1))
   )
   return storagefs.ConcatenateFiles(outputPath, chunkPaths, expectedBytes)
 )
@@ -213,8 +213,8 @@ def handleCreateProjectUploadPart(*serve.Context c) (
     return
   )
   object body = requestJSON(c)
-  string kind = body.kind.toStr()
-  string name = body.name.toStr()
+  string kind = (body.kind ?? "").toStr()
+  string name = (body.name ?? "").toStr()
   number size = body.size.toNum().toInt()
   number chunks = body.chunks.toNum().toInt()
   if kind != "asset" and kind != "workspace" and kind != "mergeTree" (

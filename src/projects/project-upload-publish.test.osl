@@ -28,8 +28,9 @@ def projectJsonSnapshotKey(string hash) string (
 def projectWorkspaceKeys(object project) array (
   return []
 )
+array removedKeys = []
 def removeProjectStorageKeyIfOrphaned(string key, string id, boolean workspace) (
-  return
+  removedKeys.append(key)
 )
 def roturStorageFullResponse(*serve.Context c, object refusal) (
   return
@@ -49,8 +50,9 @@ def contentHash(any body) string (
 def storageHoldRelease(string userId, object hold) (
   return
 )
+boolean extensionStoreWorks = true
 def storeProjectExtensions(string projectId, array previousExtensions, array extensions, object sources) boolean (
-  return true
+  return extensionStoreWorks
 )
 def storedProjectExtensions(object project) array (
   return []
@@ -104,3 +106,11 @@ object filesError = projectFilesErrorBody({ok: false, error: "too many assets", 
 testing.assert(filesError.ok == false and filesError.error == "too many assets" and !filesError.contains("status") and !filesError.contains("code"), "file errors expose only ok, error and code")
 testing.assert(projectFilesErrorBody({ok: false, error: "big", code: "project_too_large"}).code == "project_too_large", "file errors keep their code")
 
+UploadRollback rollback = UploadRollback()
+rollback.previousWorkspaceKeys = ["old"]
+object uploaded = {id: "p1", workspaceLayers: ["new"]}
+object collected = {extensions: [], sources: {}}
+testing.assert(!isRefused(storeUploadExtensions(uploaded, collected, rollback)) and removedKeys.len == 0, "stored extensions keep the new history")
+extensionStoreWorks = false
+Refusal failedExtensions = storeUploadExtensions(uploaded, collected, rollback)
+testing.assert(failedExtensions.status == 500 and removedKeys == ["new"], "failing to store extensions removes the new history and keeps the old")

@@ -32,6 +32,8 @@ testing.assert(isRefused(applyProjectText(text, {title: "t" * 101})), "titles ar
 testing.assert(!isRefused(applyProjectText(text, {title: " New ", description: "d", instructions: "i", notes: "n"})) and text.title == "New" and text.notes == "n", "text fields are saved")
 testing.assert(applyProjectText(text, {description: "d" * 5001}).message == "description too long" and text.description == "d", "long descriptions are refused")
 testing.assert(applyProjectText(text, {title: "Kept", notes: "n" * 5001}).message == "notes too long" and text.title == "Kept", "fields before a refused one are already applied")
+testing.assert(applyProjectText(text, {title: null}).message == "invalid title" and text.title == "Kept", "a null title is blank, not the word null")
+testing.assert(!isRefused(applyProjectText(text, {description: null, instructions: null, notes: null})) and text.description == "" and text.instructions == "" and text.notes == "", "null text fields are cleared")
 
 object credited = {id: "p1"}
 testing.assert(!isRefused(applyCredits(credited, {credits: [{who: " Ada ", role: "Art", url: "https://a.example"}, {who: "", role: "x"}, {who: "Bo", role: "Music", url: null}]})), "credits are accepted")
@@ -43,6 +45,10 @@ for i 51 (
   manyCredits.append({who: "A", role: "B"})
 )
 testing.assert(applyCredits(credited, {credits: manyCredits}).message == "too many credits", "credits are capped at 50")
+testing.assert(applyCredits(credited, {credits: "x"}).message == "credits must be a list" and applyCredits(credited, {credits: null}).status == 400, "credits must be a list")
+testing.assert(applyCredits(credited, {credits: ["Ada"]}).message == "each credit must be an object", "each credit must be an object")
+testing.assert(credited.credits.len == 2, "refused credits leave the saved credits alone")
+testing.assert(!isRefused(applyCredits(credited, {credits: [{who: "Ada"}, {who: null, role: "Art"}]})) and credited.credits.len == 1 and credited.credits[1].role == "", "a credit without a role has an empty role and one without a name is dropped")
 
 object flagged = {id: "p1"}
 applyProjectFlags(flagged, {commentsOff: "yes", remixable: 0, seeInside: false})
@@ -54,6 +60,10 @@ testing.assert(!isRefused(applyRemixShare(flagged, 50)) and flagged.remixShare =
 object tagged = {id: "p1"}
 applyTags(tagged, {tags: ["Games", "games", "#Puzzle", "bad tag!", "a", "b", "c", "d", "e", "f", "g", "h", "i"]})
 testing.assert(tagged.tags == ["games", "puzzle", "a", "b", "c", "d", "e", "f", "g", "h"], "tags are normalized, unique and capped at 10")
+object nullTagged = {id: "p1"}
+applyTags(nullTagged, {tags: [null, "Games"]})
+testing.assert(nullTagged.tags == ["games"], "null tags are skipped")
+testing.assert(applyTags(tagged, {tags: "games"}).message == "tags must be a list" and tagged.tags.len == 10, "tags must be a list")
 
 object product = {id: "Pack", name: "Pack", description: "d", price: 10, grantsItem: "sword", icon: "https://i.example/i.png"}
 object shop = {id: "p1"}
@@ -74,6 +84,9 @@ testing.assert(applyGameProducts(shop, {gameProducts: [productWith(product, "x",
 testing.assert(applyGameProducts(shop, {gameProducts: [productWith(product, "x", "X", 1, "data:image/png," ++ ("a" * 100000), "")]}).message == "game product icons must be smaller than 100KB", "product icons are capped in bytes")
 testing.assert(applyGameProducts(shop, {gameProducts: [productWith(product, "x", "X", 1, "", "Bad!")]}).message == "invalid portable item id on game product", "granted item ids are checked")
 
+object plainProduct = {id: "plain", name: "Plain", price: 3}
+testing.assert(!isRefused(applyGameProducts(shop, {gameProducts: [plainProduct]})) and shop.gameProducts[1].icon == "" and shop.gameProducts[1].description == "" and shop.gameProducts[1].grantsItem == "", "a product without an icon, description or grant is accepted")
+testing.assert(!isRefused(applyGameProducts(shop, {gameProducts: [{id: "free", name: "Free", icon: null}]})) and shop.gameProducts[1].price == 0 and shop.gameProducts[1].icon == "", "null product fields are empty")
 testing.assert(portableItemVisual({type: "image", url: "https://i.example/a.png"}).visual.url == "https://i.example/a.png", "HTTPS images are kept")
 testing.assert(portableItemVisual({type: "image", url: "http://i.example/a.png"}).error == "portable item images must use a short HTTPS URL", "plain HTTP images are refused")
 testing.assert(portableItemVisual({type: "image", url: "data:image/png," ++ ("a" * 100000)}).error == "portable item images must be smaller than 100KB", "data images are capped")
@@ -87,6 +100,8 @@ testing.assert(items.gameItems[1].id == "sword" and items.gameItems[1].visual.ty
 testing.assert(applyGameItems(items, {gameItems: [{id: "a", name: "A", image: "https://i"}, {id: "A", name: "A", image: "https://i"}]}).message == "portable item ids must be unique lowercase identifiers", "item ids are unique")
 testing.assert(applyGameItems(items, {gameItems: [{id: "a", name: "", image: ""}]}).message == "invalid portable item definition", "items need a name")
 testing.assert(applyGameItems(items, {gameItems: [{id: "a", name: "A", image: ""}]}).message == "portable items need an image or costume", "item visual errors reach the caller")
+testing.assert(applyGameItems(items, {gameItems: [{id: "a", name: "A"}]}).message == "portable items need an image or costume", "an item without a visual needs one")
+testing.assert(portableItemVisual({type: "image"}).error == "portable item images must use a short HTTPS URL", "an image visual without a URL is refused")
 
 object granted = {id: "p1", gameProducts: [{id: "pack", grantsItem: "sword"}], gameItems: [{id: "sword"}]}
 testing.assert(!isRefused(gameGrantRefusal(granted, {gameItems: []})), "products may grant defined items")
@@ -96,6 +111,7 @@ testing.assert(gameGrantRefusal({id: "p1", gameProducts: [{grantsItem: "ghost"}]
 object inventory = {id: "p1"}
 testing.assert(applyInventoryPolicy(inventory, {inventoryPolicy: {mode: "some"}}).message == "inventory policy must be none, allowlist, or all", "inventory modes are fixed")
 testing.assert(applyInventoryPolicy(inventory, {inventoryPolicy: {mode: "all", allowedProjects: ["../x"]}}).message == "invalid portable item source project", "source projects must be safe ids")
+testing.assert(applyInventoryPolicy(inventory, {inventoryPolicy: {mode: "all", allowedProjects: [null]}}).message == "invalid portable item source project", "a null source project is refused")
 testing.assert(applyInventoryPolicy(inventory, {inventoryPolicy: {mode: "all", allowedItems: ["nope"]}}).message == "invalid global portable item id", "allowed items are global ids")
 testing.assert(!isRefused(applyInventoryPolicy(inventory, {inventoryPolicy: {mode: " Allowlist ", allowedItems: ["p1:sword", "p1:sword"], allowedProjects: ["p1", "p1"]}})), "a valid allowlist is accepted")
 testing.assert(inventory.inventoryPolicy.mode == "allowlist" and inventory.inventoryPolicy.allowedItems == ["p1:sword"] and inventory.inventoryPolicy.allowedProjects == ["p1"], "allowlists are deduplicated")
@@ -105,3 +121,4 @@ applyCompatibility(compatible, {compatibility: null})
 testing.assert(!compatible.contains("compatibility"), "null compatibility is ignored")
 applyCompatibility(compatible, {compatibility: {mobile: true, controller: "yes"}})
 testing.assert(compatible.compatibility.mobile == true and compatible.compatibility.keyboard == false and compatible.compatibility.controller == false, "compatibility only accepts true")
+testing.assert(applyCompatibility(compatible, {compatibility: "mobile"}).message == "compatibility must be an object" and compatible.compatibility.mobile == true, "compatibility must be an object")

@@ -199,7 +199,9 @@ def readProjectExtensionUrls(*json.Stream stream) object (
 )
 
 def inspectProjectExtensionUrls(string jsonPath) object (
-  *json.Stream stream = json.open(jsonPath, maxProjectJsonBytes)
+  *json.Stream stream = json.open(jsonPath, maxProjectJsonBytes) catch (err) (
+    return {ok: false, error: "invalid extension URLs"}
+  )
   object inspected = readProjectExtensionUrls(stream) catch (err) (
     stream.close()
     return {ok: false, error: "invalid extension URLs"}
@@ -220,6 +222,9 @@ def parseExtensionSources(string rawSources) object (
 )
 
 def collectProjectExtensions(string jsonPath, string rawSources) object (
+  if !fs.isFile(jsonPath) (
+    return {ok: false, error: "sb3 has no project.json"}
+  )
   object inspected = inspectProjectExtensionUrls(jsonPath)
   if !inspected.ok (
     return inspected
@@ -337,6 +342,8 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
     if !projects.contains(projectId) (
       projects.append(projectId)
     )
+    record.urls = recordUrls
+    record.projects = projects
     if !writeFile(extensionRecordPath(hash), record) (
       sync.unlock(lockName)
       return false
@@ -361,7 +368,7 @@ def extensionUsageMigrated(object state) boolean (
   if !data.contains("version") (
     return false
   )
-  return data.version.toNum() >= 1
+  return data.version.toNum() >= 2
 )
 
 def migrateExtensionUsage() boolean (
@@ -388,7 +395,7 @@ def migrateExtensionUsage() boolean (
       )
     )
   )
-  boolean saved = writeFile(statePath, {version: 1})
+  boolean saved = writeFile(statePath, {version: 2})
   sync.unlock("extension-index-migration")
   return saved
 )

@@ -12,7 +12,7 @@ def handleCheckProjectAssets(*serve.Context c) (
     return
   )
   object body = requestJSON(c)
-  if !body.contains("assets") or body.assets == null (
+  if !body.contains("assets") or typeof(body.assets) != "array" (
     c.badRequest("assets list is required")
     return
   )
@@ -38,10 +38,9 @@ def handleCheckProjectAssets(*serve.Context c) (
 )
 
 def handleUploadProject(*serve.Context c) (
-  string lockName = "project-history-" ++ c.param("id")
-  sync.lock(lockName)
-  handleUploadProjectLocked(c)
-  sync.unlock(lockName)
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    handleUploadProjectLocked(c)
+  ))
 )
 
 def handleUploadProjectLocked(*serve.Context c) (
@@ -88,18 +87,18 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
   if refused(c, archive.discardOn(storeUploadExtensions(project, extensionResult, rollback))) return
-  saveUploadThumbnail(c, project.id.toStr())
 
   applyUploadedFiles(project, uploadResult, extensionResult, rollback)
   if !publishProjectJson(project, uploadResult) (
     abandonUnpublishedUpload(c, project, rollback, archive)
     return
   )
-  recordCreatingDay(contextString(c, "username"))
   if !saveProject(project) (
     abandonUnsavedUpload(c, project, rollback, archive)
     return
   )
+  saveUploadThumbnail(c, project.id.toStr())
+  recordCreatingDay(contextString(c, "username"))
   settleSavedUpload(project, rollback, uploader)
   archive.discard()
 

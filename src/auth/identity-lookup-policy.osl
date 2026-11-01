@@ -1,0 +1,11 @@
+export {}
+
+def profileLookupOutcome(number status) string (
+  if status == 200 (
+    return "found"
+  )
+  if status == 0 or status == 408 or status == 429 or status >= 500 (
+    return "unavailable"
+  )
+  return "missing"
+)
