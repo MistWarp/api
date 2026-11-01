@@ -33,6 +33,7 @@ USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
+BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
@@ -80,6 +81,9 @@ class FakeRotur(BaseHTTPRequestHandler):
             return
         if name in BUSY_USERS:
             self.answer(503, {"error": "Service unavailable"})
+            return
+        if name in BANNED_USERS:
+            self.answer(403, {"error": "User is banned"})
             return
         if name in SLOW_USERS:
             time.sleep(ROTUR_DELAY)
@@ -737,6 +741,8 @@ def update_flow(server, step, ids):
     patch("patch transfer to deleted user", {"owner": "gone_user"}, who="bob")
     patch("patch team rotur unavailable", {"collaborators": [{"username": "busy_user", "role": "editor"}]}, who="bob")
     patch("patch transfer rotur unavailable", {"owner": "busy_user"}, who="bob")
+    patch("patch team banned user", {"collaborators": [{"username": "banned_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer to banned user", {"owner": "banned_user"}, who="bob")
 
 
 def slow_rotur_flow(server, step, steps, ids):
@@ -753,19 +759,22 @@ def slow_rotur_flow(server, step, steps, ids):
     time.sleep(0.5)
     waited = {}
 
-    def read(name, path):
+    def timed(name, send):
         started = time.time()
-        results[name] = server.call("GET", path, "sam")[0]
+        results[name] = send()
         waited[name] = time.time() - started >= ROTUR_DELAY / 2
 
-    readers = [threading.Thread(target=read, args=(name, path)) for name, path in (("view", "/v1/projects/" + project_id), ("editor", "/v1/projects/%s/editor" % project_id))]
-    for reader in readers:
-        reader.start()
-    for reader in readers + [saving]:
-        reader.join()
+    others = [
+        threading.Thread(target=timed, args=("rename", lambda: server.call("PUT", "/v1/projects/" + project_id, "sam", {"title": "Renamed during a slow lookup"})[0])),
+        threading.Thread(target=timed, args=("upload", lambda: server.upload(project_id, "sam", sb3_archive(project_with_costumes([])))[0])),
+    ]
+    for other in others:
+        other.start()
+    for other in others + [saving]:
+        other.join()
     stored = server.read_project(project_id)
-    steps.append({"step": "reads during a slow Rotur lookup", "status": 0, "body": {
-        "statuses": results, "waitedForRotur": waited, "team": stored.get("collaborators"),
+    steps.append({"step": "saves during a slow Rotur lookup", "status": 0, "body": {
+        "statuses": results, "waitedForRotur": waited, "team": stored.get("collaborators"), "title": stored.get("title"),
     }})
 
 
