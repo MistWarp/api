@@ -1,0 +1,80 @@
+import "std:testing"
+import "std:json"
+import "std:fs"
+import "std:regex"
+import "std:sync"
+import "std:serve"
+import "std:zip"
+import "./extensions.osl"
+
+string tmpDir = "/tmp/mistwarp-extensions-test-" ++ timestamp.toStr() ++ "/"
+string extensionsDir = tmpDir ++ "extensions/"
+string extensionsFile = tmpDir ++ "extensions.json"
+string projectsDir = tmpDir ++ "projects/"
+number maxProjectJsonBytes = 1048576
+number maxProjectExtensions = 20
+number maxExtensionSourceBytes = 2097152
+number maxProjectExtensionBytes = 10485760
+void fs.mkdir(extensionsDir, {recursive: true})
+
+def readFile(string path) object (
+  auto text = fs.readFile(path)
+  if text.isErr() (
+    return {ok: false}
+  )
+  auto parsed = json.parse(text.unwrap())
+  if parsed.isErr() (
+    return {ok: false}
+  )
+  return {ok: true, data: parsed.unwrap()}
+)
+def writeFile(string path, object data) boolean (
+  return fs.writeFile(path, json.stringify(data))
+)
+def randomString(number length) string (
+  return "r" * length
+)
+def removeString(array items, string value) array (
+  array kept = []
+  for i items.len (
+    if items[i].toStr() != value (
+      kept.append(items[i])
+    )
+  )
+  return kept
+)
+def loadProject(string id) object (
+  return {ok: false, missing: true}
+)
+def copyStoredProjectJsonToPath(object project, string path) boolean (
+  return false
+)
+def loadProfile(string username) object (
+  return {}
+)
+def saveProfile(object profile) boolean (
+  return true
+)
+def addNotification(string target, string actor, string kind, object payload) (
+  return
+)
+def saveProject(object project) boolean (
+  return true
+)
+def canViewProjectJson(object project, *serve.Context c) boolean (
+  return true
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def upsertIndexEntry(object project) boolean (
+  return true
+)
+
+object noJson = collectProjectExtensions(tmpDir ++ "unpacked/project.json", "")
+testing.assert(noJson.ok == false and noJson.error == "sb3 has no project.json", "an sb3 without project.json is refused")
+void fs.writeFile(tmpDir ++ "project.json", json.stringify({targets: [], extensionURLs: {ext: "https://example.com/ext.js"}}))
+object collected = collectProjectExtensions(tmpDir ++ "project.json", json.stringify({"https://example.com/ext.js": "class Ext {}"}))
+testing.assert(collected.ok == true and collected.extensions.len == 1 and collected.extensions[1].url == "https://example.com/ext.js", "extension URLs are collected from project.json")
+
+void fs.remove(tmpDir)

@@ -34,6 +34,7 @@ FULL_STORAGE = {"u_dee"}
 EXPECTED_ERRORS = {"upload extension store failure", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
+UNORDERED = {"largest"}
 VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp")}
 SAVE_PATH = re.compile(r"^/v1/projects/([^/]+)(/upload)?$")
 HEX = re.compile(r"^[0-9a-f]{32,64}$")
@@ -180,7 +181,7 @@ class Server:
     def upload(self, project_id, who, sb3):
         return self.form("/v1/projects/%s/upload" % project_id, who, {}, {"project": sb3})
 
-    def form(self, path, who, fields, files):
+    def form(self, path, who, fields, files, timeout=30):
         boundary = uuid.uuid4().hex
         body = b""
         for name, value in fields.items():
@@ -189,7 +190,7 @@ class Server:
             body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s.bin\"\r\n"
                      "Content-Type: application/octet-stream\r\n\r\n" % (boundary, name, name)).encode() + value + b"\r\n"
         body += ("--%s--\r\n" % boundary).encode()
-        return self.call("POST", path, who, raw=body, content_type="multipart/form-data; boundary=" + boundary)
+        return self.call("POST", path, who, raw=body, content_type="multipart/form-data; boundary=" + boundary, timeout=timeout)
 
     def faulty(self, folder):
         path = os.path.join(self.dir, "data", folder)
@@ -385,6 +386,10 @@ def staged_part(server, step, path, who, kind, data, name):
 
 
 def upload_flow(server, step, ids):
+    status, bare = step("create project for an sb3 without project.json", "POST", "/v1/projects", "sam", {"title": "No project.json"})
+    ids[str(bare.get("id", "")) if isinstance(bare, dict) else ""] = "<no-json>"
+    for name, sb3 in (("upload sb3 without project.json", sb3_archive(None, {"readme.txt": "no project here"})), ("upload after an sb3 without project.json", sb3_archive(project_with_costumes([])))):
+        step(name, "POST", "/v1/projects/<no-json>/upload", "sam", form=({}, {"project": sb3}), timeout=5)
     status, created = step("history create", "POST", "/v1/projects", "sam", {"title": "History smoke"})
     ids[str(created.get("id", ""))] = "<history>"
     path = "/v1/projects/<history>"
@@ -666,7 +671,8 @@ def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
         return {k: normalize(v, ids, k, key) for k, v in sorted(value.items())}
     if isinstance(value, list):
-        return [normalize(v, ids, key, parent) for v in value]
+        items = [normalize(v, ids, key, parent) for v in value]
+        return sorted(items, key=json.dumps) if key in UNORDERED else items
     if (parent, key) in VOLATILE_FIELDS:
         return "<volatile>"
     if isinstance(value, str):
@@ -698,7 +704,7 @@ def run(binary, sb3, keep):
             real_path = "/v1/projects/%s/upload" % upload
             status, parsed, response_headers = server.upload(upload, who, sb3)
         elif form is not None:
-            status, parsed, response_headers = server.form(real_path, who, form[0], form[1])
+            status, parsed, response_headers = server.form(real_path, who, form[0], form[1], timeout)
         else:
             status, parsed, response_headers = server.call(method, real_path, who, body, timeout=timeout)
         record = {"step": name, "status": status, "body": parsed}
