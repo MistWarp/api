@@ -29,7 +29,7 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist"}
 FULL_STORAGE = {"u_dee"}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
@@ -40,7 +40,7 @@ EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch t
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
-VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp")}
+VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp"), ("comment", "id"), ("item", "id"), ("items", "id"), ("platform_data", "commentId")}
 SAVE_PATH = re.compile(r"^/v1/projects/([^/]+)(/upload)?$")
 HEX = re.compile(r"^[0-9a-f]{32,64}$")
 ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T")
@@ -229,6 +229,13 @@ class Server:
         with open(path) as handle:
             return json.load(handle)
 
+    def extension_policy(self):
+        path = os.path.join(self.dir, "data", "extensions.json")
+        if not os.path.exists(path):
+            return {}
+        with open(path) as handle:
+            return json.load(handle)
+
     def read_project(self, project_id):
         with open(os.path.join(self.dir, "data", "projects", project_id + ".json")) as handle:
             return json.load(handle)
@@ -264,6 +271,7 @@ ZERO_HEAD = "0" * 40
 EMBEDDED_HEX = re.compile(r"[0-9a-f]{32,64}")
 CONTENT_NAME = re.compile(r"^(assets/)?[0-9a-f]{32}\.[a-z0-9]+$|^project-json/[0-9a-f]{64}\.json\.gz$")
 ACCESS_KEY = re.compile(r"([?&]k=)[A-Za-z0-9]+")
+BACKPACK_FOLDER = re.compile(r"(/blobs/backpack/)[A-Za-z0-9]{32}/")
 EMBEDDED_TIME = re.compile(r"(?<![0-9])1[0-9]{12}(?![0-9])")
 
 
@@ -608,6 +616,22 @@ def upload_flow(server, step, ids, steps):
     complete_part(step, path, "sam", tree_token, "complete staged merge tree")
     upload("upload pull merge", {"pullId": pull_index, "expectedHead": head, "mergeTreeToken": tree_token})
     step("merged pull", "GET", path + "/pulls/" + pull_index, "sam")
+    status, comment = step("comment on pull", "POST", path + "/pulls/" + pull_index + "/comments", "sam", {"content": "Thanks for this"})
+    step("comment on pull without content", "POST", path + "/pulls/" + pull_index + "/comments", "sam", {})
+    step("pull after a comment", "GET", path + "/pulls/" + pull_index, "sam")
+    comment_id = str(((comment.get("comment") or {}).get("id", "")) if isinstance(comment, dict) else "")
+    step("delete pull comment", "DELETE", path + "/pulls/" + pull_index + "/comments/" + comment_id, "sam")
+    step("delete missing pull comment", "DELETE", path + "/pulls/" + pull_index + "/comments/nope", "sam")
+    step("pull after deleting the comment", "GET", path + "/pulls/" + pull_index, "sam")
+    head, edited = head_and_edited()
+    step("credit commit co-author", "PATCH", path + "/commits/" + head, "sam", {"coAuthors": ["alice"]})
+    step("credit unknown commit", "PATCH", path + "/commits/" + "1" * 40, "sam", {"coAuthors": ["alice"]})
+    step("credit commit as stranger", "PATCH", path + "/commits/" + head, "bob", {"coAuthors": ["alice"]})
+    step("commit co-authors", "GET", path + "/commits/" + head + "/co-authors")
+    step("rename branch", "PATCH", path + "/branches", "sam", {"branch": "feature", "name": "feature-two"})
+    step("rename branch as stranger", "PATCH", path + "/branches", "bob", {"branch": "feature-two", "name": "x"})
+    step("delete branch", "DELETE", path + "/branches", "sam", {"branch": "feature-two"})
+    step("delete missing branch", "DELETE", path + "/branches", "sam", {"branch": "nope"})
     upload("upload merged pull again", {"pullId": pull_index}, {"project": plain, "mergeTree": pull_tree})
 
     head, edited = head_and_edited()
@@ -778,6 +802,59 @@ def slow_rotur_flow(server, step, steps, ids):
     }})
 
 
+def locks_flow(server, step, steps, ids):
+    status, created = step("locks create", "POST", "/v1/projects", "sam", {"title": "Locks smoke"})
+    ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<locks>"
+    path = "/v1/projects/<locks>"
+    shared = "/v1/projects/<history>"
+    step("react invalid", "POST", shared + "/react", "alice", {"type": "wow"})
+    step("react heart", "POST", shared + "/react", "alice", {"type": "heart"})
+    step("react broken heart", "POST", shared + "/react", "alice", {"type": "brokenheart"})
+    step("react missing project", "POST", "/v1/projects/nope/react", "alice", {"type": "heart"})
+    step("react on a private project", "POST", path + "/react", "alice", {"type": "heart"})
+    asset_name, asset_content = svg_asset("staged asset")
+    for label, name, content in (("staged asset", asset_name, asset_content), ("mismatched asset", svg_asset("never sent")[0], b"<svg/>")):
+        status, started = step("stage " + label + " start", "POST", path + "/upload-parts", "sam", {"kind": "asset", "name": name, "size": len(content), "chunks": 1})
+        token = started.get("token", "") if isinstance(started, dict) else ""
+        step("stage " + label + " chunk", "POST", path + "/upload-parts/%s/chunk" % token, "sam", form=({"index": "0"}, {"chunk": content}))
+        complete_part(step, path, "sam", token, "complete " + label)
+    step("check staged asset", "POST", path + "/assets/check", "sam", {"assets": [asset_name]})
+
+    for name, fields, files in (
+        ("backpack unsupported type", {"type": "sound", "mime": "text/plain"}, {"body": b"x"}),
+        ("backpack missing body", {"type": "costume", "mime": "image/svg+xml"}, {}),
+        ("backpack add", {"type": "costume", "mime": "image/svg+xml", "name": "Cat"}, {"body": b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"}),
+        ("backpack add with thumbnail", {"type": "costume", "mime": "image/svg+xml", "name": "Dog", "thumbnailMime": "image/png"}, {"body": b"<svg/>", "thumbnail": b"\x89PNG backpack"}),
+    ):
+        step(name, "POST", "/v1/me/backpack", "sam", form=(fields, files))
+    status, listed = step("backpack list", "GET", "/v1/me/backpack", "sam")
+    items = [item.get("id", "") for item in (listed.get("items") or [])] if isinstance(listed, dict) else []
+    first = items[0] if items else "none"
+    step("backpack rename", "PATCH", "/v1/me/backpack/" + first, "sam", {"name": "Renamed"})
+    step("backpack rename missing", "PATCH", "/v1/me/backpack/nope", "sam", {"name": "Renamed"})
+    step("backpack rename without name", "PATCH", "/v1/me/backpack/" + first, "sam", {})
+    step("backpack delete", "DELETE", "/v1/me/backpack/" + first, "sam")
+    step("backpack delete missing", "DELETE", "/v1/me/backpack/" + first, "sam")
+    step("backpack bulk delete", "POST", "/v1/me/backpack/delete", "sam", {"ids": items[1:] + ["nope"]})
+    step("backpack bulk delete empty", "POST", "/v1/me/backpack/delete", "sam", {"ids": []})
+    step("backpack after deletes", "GET", "/v1/me/backpack", "sam")
+    step("quota after backpack", "GET", "/v1/me/quota", "sam")
+
+    records = server.extension_records()
+    known_hash = sorted(records)[0][:-len(".json")] if records else "0" * 64
+    step("admin extension policy refused", "POST", "/v1/admin/extensions/policy", "sam", {"hash": known_hash, "status": "trusted"})
+    step("admin extension policy invalid", "POST", "/v1/admin/extensions/policy", "mist", {"hash": "nope", "status": "trusted"})
+    step("admin extension policy unknown", "POST", "/v1/admin/extensions/policy", "mist", {"hash": "f" * 64, "status": "trusted"})
+    step("admin extension policy trusted", "POST", "/v1/admin/extensions/policy", "mist", {"hash": known_hash, "status": "trusted"})
+    step("admin extension url blocked", "POST", "/v1/admin/extensions/url-policy", "mist", {"url": "https://example.com/blocked.js", "blocked": True})
+    step("admin extension url blocked again", "POST", "/v1/admin/extensions/url-policy", "mist", {"url": "https://example.com/blocked.js", "blocked": True})
+    step("admin extension url bad", "POST", "/v1/admin/extensions/url-policy", "mist", {"url": "ftp://example.com/x.js", "blocked": True})
+    steps.append({"step": "extension policy after blocking", "status": 0, "body": {"blockedUrls": server.extension_policy().get("blockedUrls")}})
+    step("admin extension url unblocked", "POST", "/v1/admin/extensions/url-policy", "mist", {"url": "https://example.com/blocked.js", "blocked": False})
+    steps.append({"step": "extension policy after unblocking", "status": 0, "body": {"blockedUrls": server.extension_policy().get("blockedUrls")}})
+    steps.append({"step": "extension records after policy changes", "status": 0, "body": server.extension_records()})
+
+
 def volatile_key(key):
     return key in VOLATILE_NAMES
 
@@ -807,7 +884,7 @@ def concurrent_flow(server, step, steps, ids):
 
 def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
-        return {k: normalize(v, ids, k, key) for k, v in sorted(value.items())}
+        return {("<hex>" if HEX.match(k) else k): normalize(v, ids, k, key) for k, v in sorted(value.items())}
     if isinstance(value, list):
         items = [normalize(v, ids, key, parent) for v in value]
         return sorted(items, key=json.dumps) if key in UNORDERED else items
@@ -819,7 +896,7 @@ def normalize(value, ids, key="", parent=""):
             value = value.replace(real, alias)
         if volatile_key(key) or HEX.match(value) or ISO.match(value):
             return "<volatile>"
-        value = ACCESS_KEY.sub(r"\1<key>", value)
+        value = BACKPACK_FOLDER.sub(r"\1<folder>/", ACCESS_KEY.sub(r"\1<key>", value))
         if CONTENT_NAME.match(value):
             return value
         return EMBEDDED_TIME.sub("<time>", EMBEDDED_HEX.sub("<hex>", value))
@@ -900,6 +977,7 @@ def run(binary, sb3, keep):
         update_flow(server, step, ids)
         concurrent_flow(server, step, steps, ids)
         slow_rotur_flow(server, step, steps, ids)
+        locks_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
