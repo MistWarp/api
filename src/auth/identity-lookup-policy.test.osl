@@ -1,0 +1,6 @@
+import "std:testing"
+import "./identity-lookup-policy.osl"
+
+testing.assert(profileLookupOutcome(200) == "found", "a 200 profile is a found user")
+testing.assert(profileLookupOutcome(404) == "missing", "a 404 means the user is gone")
+testing.assert(profileLookupOutcome(0) == "unavailable" and profileLookupOutcome(500) == "unavailable" and profileLookupOutcome(429) == "unavailable", "anything else means Rotur could not answer")

@@ -533,8 +533,9 @@ def discoverUserIdentity(string username) string (
     return ""
   )
   object resp = requests.get(roturBase ++ "/profile/" ++ url.escape(username) ++ "?include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-  if resp.status == 0 (
-    if resp.status == 404 (
+  string outcome = profileLookupOutcome(resp.status)
+  if outcome != "found" (
+    if outcome == "missing" (
       string uid = userIdForUsername(username)
       if uid != "" (
         identityRefreshCache.delete(uid)

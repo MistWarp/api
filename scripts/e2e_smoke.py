@@ -31,6 +31,7 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
+GONE_USERS = {"gone_user"}
 EXPECTED_ERRORS = {"upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
@@ -71,6 +72,9 @@ class FakeRotur(BaseHTTPRequestHandler):
             self.answer(404, {"code": "not_found"})
             return
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
+        if name in GONE_USERS:
+            self.answer(404, {"error": "User not found"})
+            return
         if name not in USERS:
             self.close_connection = True
             return
@@ -719,6 +723,8 @@ def update_flow(server, step, ids):
         ("patch after bad input", {"title": "Still saving"}),
     ):
         step(name, "PUT", path, "bob", body, timeout=5)
+    patch("patch team deleted user", {"collaborators": [{"username": "gone_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer to deleted user", {"owner": "gone_user"}, who="bob")
 
 
 def volatile_key(key):
