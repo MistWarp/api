@@ -1,0 +1,175 @@
+export {}
+
+type UploadRollback (
+  array previousWorkspaceKeys = []
+  string ownerId = ""
+  object hold = {}
+  string previousJsonKey = ""
+)
+
+def discardNewWorkspaceKeys(string projectId, array keys, array previousWorkspaceKeys) (
+  array added = keysNotIn(keys, previousWorkspaceKeys)
+  for i added.len (
+    removeProjectStorageKeyIfOrphaned(added[i].toStr(), projectId, true)
+  )
+)
+
+def rejectProjectFiles(*serve.Context c, object project, object uploadResult, UploadRollback rollback, UploadArchive archive) (
+  discardNewWorkspaceKeys(project.id.toStr(), projectWorkspaceKeys(project), rollback.previousWorkspaceKeys)
+  archive.discard()
+  if (uploadResult.code ?? "").toStr() == "storage_full" (
+    if uploadResult.contains("refusal") (
+      roturStorageFullResponse(c, uploadResult.refusal.assertElse(object, {}))
+      return
+    )
+    storageFullResponse(c, storageDetails(project.owner.toStr()), uploadResult.overBytes.toNum())
+    return
+  )
+  c.json(uploadResult.status.toInt(), projectFilesErrorBody(uploadResult))
+)
+
+def storeUploadExtensions(object project, object extensionResult, UploadRollback rollback) Refusal (
+  if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), extensionResult.extensions.assert(array), extensionResult.sources.assert(object)) (
+    storageHoldRelease(rollback.ownerId, rollback.hold)
+    return refuse(500, "failed to store extension sources")
+  )
+  return noRefusal()
+)
+
+def saveUploadThumbnail(*serve.Context c, string projectId) (
+  auto thumbResult = c.formFile("thumbnail")
+  if !thumbResult.isErr() (
+    object thumb = thumbResult.unwrap()
+    if thumb.size.toNum() <= maxThumbBytes (
+      void fs.writeFileBytes(thumbnailPath(projectId), thumb.data)
+    )
+  )
+)
+
+def applyUploadedFiles(object project, object uploadResult, object extensionResult, UploadRollback rollback) (
+  project.assets = uploadResult.assets
+  project.edited = timestamp
+  rollback.previousJsonKey = project.jsonKey.toStr()
+  if rollback.previousJsonKey.startsWith("project-json/") or (project.contains("inheritedJson") and project.inheritedJson == true) (
+    project.jsonKey = projectJsonKey(project.id.toStr())
+  )
+  project.inheritedJson = false
+  project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
+  project.jsonBytes = uploadResult.jsonBytes
+  project.storedJsonBytes = uploadResult.storedJsonBytes
+  project.assetBytes = uploadResult.assetBytes
+  project.jsonGzip = true
+  project.extensions = extensionResult.extensions.assert(array)
+  project.extensionsIndexed = true
+  project.delete("pendingExtensionUrls")
+)
+
+def publishProjectJson(object project, object uploadResult) boolean (
+  byte[] jsonBody = fs.readFileBytes(uploadResult.gzipPath.toStr()).unwrapOr("".toBytes())
+  project.jsonKey = projectJsonSnapshotKey(contentHash(jsonBody))
+  boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
+  project.lastUploadAt = timestamp
+  project.pendingJson = false
+  return storedJson
+)
+
+def abandonUnpublishedUpload(*serve.Context c, object project, UploadRollback rollback, UploadArchive archive) (
+  discardNewWorkspaceKeys(project.id.toStr(), storedWorkspaceLayers(project), rollback.previousWorkspaceKeys)
+  storageHoldRelease(rollback.ownerId, rollback.hold)
+  c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+  archive.discard()
+)
+
+def abandonUnsavedUpload(*serve.Context c, object project, UploadRollback rollback, UploadArchive archive) (
+  if project.jsonKey.toStr() != rollback.previousJsonKey (
+    removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
+  )
+  discardNewWorkspaceKeys(project.id.toStr(), storedWorkspaceLayers(project), rollback.previousWorkspaceKeys)
+  storageHoldRelease(rollback.ownerId, rollback.hold)
+  archive.discard()
+  c.internalError("failed to save project metadata")
+)
+
+def settleSavedUpload(object project, UploadRollback rollback, string uploader) (
+  upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
+  if usesRoturStorage(rollback.ownerId) (
+    thread.new(storageSettle, rollback.ownerId, rollback.hold)
+  ) else (
+    releasePendingUploads(uploader, project.assets.assertElse(array, []))
+  )
+  string replacedJsonKey = if rollback.previousJsonKey != project.jsonKey.toStr() then rollback.previousJsonKey else ""
+  array replacedKeys = replacedWorkspaceKeys(project, rollback.previousWorkspaceKeys)
+  if replacedJsonKey != "" or replacedKeys.len > 0 (
+    thread.new(cleanupReplacedProjectStorage, project.id.toStr(), replacedJsonKey, replacedKeys)
+  )
+)
+
+def projectWithUploadHistory(object project) object (
+  if projectHasWorkspace(project) (
+    return project
+  )
+  object generatedHistory = ensureUploadedProjectHistory(project)
+  if !generatedHistory.ok (
+    log "WARNING: project " ++ project.id.toStr() ++ " uploaded without history and fallback generation failed: " ++ generatedHistory.error.toStr()
+    return project
+  )
+  return generatedHistory.project.assert(object)
+)
+
+def completeUploadPull(object project, UploadRequest request, string username) Refusal (
+  if request.pullId != "" and !completeNativePull(project, request.pullId, request.expectedHead, username) (
+    return refuseWithBody(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})
+  )
+  return noRefusal()
+)
+
+def uploadResponse(object project, object uploadResult) object (
+  return {
+    ok: true,
+    project: {
+      id: project.id,
+      gitHead: projectGitHead(project),
+      gitBranch: project.gitBranch,
+      edited: project.edited,
+      remixBaseCommit: project.remixBaseCommit
+    },
+    uploaded: uploadResult.uploaded,
+    skipped: uploadResult.skipped,
+    projectJsonUrl: projectJsonUrlFor(project),
+    thumbUrl: viewerThumbUrlFor(project)
+  }
+)
+
+def storedWorkspaceLayers(object project) array (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null (
+    return project.workspaceLayers.assertElse(array, [])
+  )
+  return []
+)
+
+def keysNotIn(array keys, array kept) array (
+  array missing = []
+  for i keys.len (
+    string key = keys[i].toStr()
+    if !kept.contains(key) (
+      missing.append(key)
+    )
+  )
+  return missing
+)
+
+def replacedWorkspaceKeys(object project, array previousWorkspaceKeys) array (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null (
+    return keysNotIn(previousWorkspaceKeys, project.workspaceLayers.assertElse(array, []))
+  )
+  return []
+)
+
+def projectFilesErrorBody(object uploadResult) object (
+  object errorBody = {ok: false, error: uploadResult.error}
+  if uploadResult.contains("code") (
+    errorBody.code = uploadResult.code
+  )
+  return errorBody
+)

@@ -1,0 +1,293 @@
+export {
+  validateUploadedHistory
+}
+
+def invalidHistoryArchiveRefusal() Refusal (
+  return refuseWithBody(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
+)
+
+def unsafeProjectHistoryRefusal() Refusal (
+  return refuseWithBody(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
+)
+
+def isSafeHistoryArchive(byte[] body, UploadArchive archive, boolean readContents) boolean (
+  return validateZipArchive(body, maxWorkspaceBytes, archive.expandedLimit, maxWorkspaceFiles, readContents)
+)
+
+def checkUploadedWorkspace(object project, UploadRequest request, UploadHistory history, UploadArchive archive) Refusal (
+  if !history.hasWorkspace (
+    return noRefusal()
+  )
+  if history.workspaceSize > maxWorkspaceBytes or !isSafeHistoryArchive(history.workspace, archive, true) (
+    return invalidHistoryArchiveRefusal()
+  )
+  object materialized = materializeWorktreeAssets(project, history.workspace, archive.extractDir, request.replaceHistory)
+  if !materialized.ok (
+    return refuseWithBody(409, {ok: false, code: "worktree_assets_unavailable", error: "some project files could not be found on the server; save again to upload them"})
+  )
+  if materialized.refs.toNum() > 0 (
+    if materialized.size.toNum() > maxWorkspaceBytes or !isSafeHistoryArchive(materialized.data.assertElse(byte[], []), archive, false) (
+      return invalidHistoryArchiveRefusal()
+    )
+    history.workspace = materialized.data.assertElse(byte[], [])
+    history.workspaceSize = materialized.size.toNum()
+  )
+  object checked = validateUploadedHistoryMode(project, history.workspace, history.metadata, history.currentHead, request.replaceHistory)
+  if !checked.ok (
+    return refuseWithBody(409, {ok: false, code: "invalid_workspace", error: checked.error})
+  )
+  history.workspace = checked.data.assertElse(byte[], [])
+  history.workspaceSize = checked.size.toNum()
+  history.info = checked.manifest.assert(object)
+  history.metadata = json.stringify(history.info)
+  return noRefusal()
+)
+
+def unchangedVersionCheck(object project, UploadRequest request, UploadHistory history, UploadArchive archive) Refusal (
+  if !isOrdinaryVersionSave(request, history) (
+    return noRefusal()
+  )
+  string incomingHead = canonicalHistoryHead(history.info)
+  if incomingHead == history.currentHead (
+    return unchangedVersionRefusal()
+  )
+  if incomingHead == "" (
+    return noRefusal()
+  )
+  if history.workspaceSize > maxWorkspaceBytes or !isSafeHistoryArchive(history.workspace, archive, false) (
+    return unsafeProjectHistoryRefusal()
+  )
+  string compareBasePath = cachedProjectWorkspacePath(project)
+  string compareIncomingPath = tmpDir ++ archive.workId ++ ".compare-incoming.mwp"
+  boolean compareReady = compareBasePath != "" and fs.writeFileBytes(compareIncomingPath, history.workspace)
+  string comparisonJson = ""
+  if compareReady (
+    comparisonJson = gitinspection.CommitTreesDiffer(compareBasePath, history.currentHead, compareIncomingPath, incomingHead)
+  )
+  void fs.remove(compareIncomingPath)
+  auto parsedComparison = json.parse(comparisonJson, {type: "object"})
+  if !compareReady or parsedComparison.isErr() or parsedComparison.unwrap().assert(object).ok != true (
+    return refuseWithBody(400, {ok: false, error: "could not validate the MistWarp project history", code: "invalid_workspace"})
+  )
+  if parsedComparison.unwrap().assert(object).changed != true (
+    return unchangedVersionRefusal()
+  )
+  return noRefusal()
+)
+
+def createMergeCommit(object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+  if !needsMergeCommit(request, history) (
+    return noRefusal()
+  )
+  boolean branchMerge = isBranchMerge(request)
+  object mergeSource = project
+  string mergeSourceHead = request.mergeSourceHead
+  string mergeTargetHead = request.mergeTargetHead
+  if branchMerge (
+    Refusal branchChanged = branchMergeRefusal(request, projectBranchHead(project, request.mergeSourceBranch), projectBranchHead(project, request.mergeTargetBranch))
+    if isRefused(branchChanged) (
+      return branchChanged
+    )
+    history.baseHead = mergeTargetHead
+  ) else (
+    object mergePull = pullDocument(project.id.toStr(), request.pullId)
+    Refusal pullClosed = pullMergeRefusal(request, mergePull, project.id.toStr())
+    if isRefused(pullClosed) (
+      return pullClosed
+    )
+    auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
+    if !mergeSourceResult.ok (
+      return refuse(404, "merge source project not found")
+    )
+    mergeSource = mergeSourceResult.project.assert(object)
+    mergeSourceHead = mergePull.headCommit.toStr()
+    mergeTargetHead = history.currentHead
+  )
+  if !isSafeHistoryArchive(history.mergeTree, archive, false) (
+    return refuse(400, "invalid merged project tree")
+  )
+  string mergeTargetPath = tmpDir ++ archive.workId ++ ".merge-target.mwp"
+  string mergeSourcePath = tmpDir ++ archive.workId ++ ".merge-source.mwp"
+  string mergeTreePath = tmpDir ++ archive.workId ++ ".merge-tree.zip"
+  string mergeDeltaPath = tmpDir ++ archive.workId ++ ".merge-delta.mwp"
+  boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
+  mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
+  mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, history.mergeTree)
+  HistoryIdentity identity = historyIdentity(project)
+  string mergeBranch = if branchMerge then request.mergeTargetBranch else identity.branch
+  number mergeTimestamp = timestamp
+  string mergeJson = ""
+  if mergeReady (
+    mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, mergeBranch, uploader, mergeCommitMessage(request, branchMerge), mergeTimestamp / 1000)
+  )
+  object merged = parsedGeneratedHistory(mergeJson)
+  if !mergeReady or merged.len == 0 (
+    void fs.remove(mergeTargetPath)
+    void fs.remove(mergeSourcePath)
+    void fs.remove(mergeTreePath)
+    void fs.remove(mergeDeltaPath)
+    return refuseWithBody(409, {ok: false, error: "could not create the merge commit", code: "merge_unavailable"})
+  )
+  adoptGeneratedHistory(history, merged, fs.readFileBytes(mergeDeltaPath).unwrapOr("".toBytes()))
+  void fs.remove(mergeTargetPath)
+  void fs.remove(mergeSourcePath)
+  void fs.remove(mergeTreePath)
+  void fs.remove(mergeDeltaPath)
+  return noRefusal()
+)
+
+def createRestoreCommit(object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+  if !needsRestoreCommit(request, history) (
+    return noRefusal()
+  )
+  string restoreBasePath = tmpDir ++ archive.workId ++ ".restore-base.mwp"
+  string restoreDeltaPath = tmpDir ++ archive.workId ++ ".restore-delta.mwp"
+  HistoryIdentity identity = historyIdentity(project)
+  number restoreTimestamp = timestamp
+  boolean restoreReady = copyProjectWorkspaceToPath(project, restoreBasePath)
+  string restoreJson = ""
+  if restoreReady (
+    restoreJson = gitinspection.RestoreArchiveJSON(restoreBasePath, history.currentHead, request.restoreCommit, restoreDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, identity.branch, uploader, request.restoreMessage, restoreTimestamp / 1000)
+  )
+  object restored = parsedGeneratedHistory(restoreJson)
+  if !restoreReady or restored.len == 0 (
+    void fs.remove(restoreBasePath)
+    void fs.remove(restoreDeltaPath)
+    return refuseWithBody(409, {ok: false, error: "could not restore that project version", code: "restore_unavailable"})
+  )
+  adoptGeneratedHistory(history, restored, fs.readFileBytes(restoreDeltaPath).unwrapOr("".toBytes()))
+  void fs.remove(restoreBasePath)
+  void fs.remove(restoreDeltaPath)
+  return noRefusal()
+)
+
+def checkGeneratedHistory(object project, UploadHistory history) Refusal (
+  if !history.generated (
+    return noRefusal()
+  )
+  object checked = validateUploadedHistory(project, history.generatedWorkspace, history.metadata, history.baseHead)
+  if !checked.ok (
+    return refuseWithBody(409, {ok: false, code: "invalid_workspace", error: checked.error})
+  )
+  history.generatedWorkspace = checked.data.assert(byte[])
+  history.info = checked.manifest.assert(object)
+  history.metadata = json.stringify(history.info)
+  return noRefusal()
+)
+
+def storeUploadedHistory(object project, UploadRequest request, UploadHistory history, UploadArchive archive) Refusal (
+  if !history.hasWorkspace and !history.generated (
+    return noRefusal()
+  )
+  byte[] incomingWorkspaceBody = history.generatedWorkspace
+  number incomingWorkspaceSize = history.generatedWorkspace.len
+  if history.hasWorkspace (
+    incomingWorkspaceBody = history.workspace
+    incomingWorkspaceSize = history.workspaceSize
+  )
+  if incomingWorkspaceSize > maxWorkspaceBytes (
+    return refuseWithBody(413, {ok: false, error: "one history update exceeds the 512 MB safety limit", code: "workspace_update_too_large"})
+  )
+  if !isSafeHistoryArchive(incomingWorkspaceBody, archive, false) (
+    return unsafeProjectHistoryRefusal()
+  )
+  string workspaceKey = projectWorkspaceSnapshotKey(contentHash(incomingWorkspaceBody))
+  if !stageR2Blob(workspaceKey, incomingWorkspaceBody, "application/x-mistwarp-project", "") (
+    return refuse(500, "failed to store MistWarp project history")
+  )
+  project.workspaceKey = workspaceKey
+  project.workspaceLayers = [workspaceKey]
+  project.historyBytes = incomingWorkspaceSize
+  project.gitHead = history.info.head
+  project.gitBranch = history.info.branch
+  project.gitCommits = history.info.commits
+  project.gitGraph = history.info.graph
+  if request.replaceHistory (
+    project.remixBaseCommit = ""
+  )
+  return noRefusal()
+)
+
+def materializeWorktreeAssets(object project, byte[] body, string extractDir, boolean replaceHistory) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".refs.mwp"
+  string outputPath = workId ++ ".materialized.mwp"
+  string fetchDir = workId ++ ".assets"
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false}
+  )
+  string basePath = ""
+  if !replaceHistory and projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+  )
+  string assetDirs = extractDir ++ "\n" ++ localBlobsDir ++ "assets"
+  auto parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs), {type: "object"})
+  object res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  array missing = (res.missing ?? []).assertElse(array, [])
+  if !res.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
+    void fs.mkdir(fetchDir, {recursive: true})
+    for i missing.len (
+      string name = missing[i].toStr()
+      if isValidMd5Ext(name) (
+        void copyStorageKeyToPath(assetObjectKey(name), fetchDir ++ "/" ++ name)
+      )
+    )
+    parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs ++ "\n" ++ fetchDir), {type: "object"})
+    res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  )
+  void fs.remove(incomingPath)
+  void fs.remove(fetchDir)
+  if res.ok != true (
+    void fs.remove(outputPath)
+    return {ok: false}
+  )
+  number refs = (res.refs ?? 0).toNum()
+  if refs == 0 (
+    return {ok: true, refs: 0}
+  )
+  byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+  void fs.remove(outputPath)
+  return {ok: data.len > 0, refs: refs, data: data, size: data.len}
+)
+
+def validateUploadedHistory(object project, byte[] body, string metadata, string currentHead) object (
+  return validateUploadedHistoryMode(project, body, metadata, currentHead, false)
+)
+
+def validateUploadedHistoryMode(object project, byte[] body, string metadata, string currentHead, boolean replaceHistory) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".incoming.mwp"
+  string outputPath = workId ++ ".validated.mwp"
+  string basePath = ""
+  if !replaceHistory and projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+    if basePath == "" (
+      return {ok: false, error: "stored history unavailable; retry later"}
+    )
+  )
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false, error: "could not stage history"}
+  )
+  string forkBase = (project.remixBaseCommit ?? "").toStr()
+  if replaceHistory (
+    currentHead = ""
+    forkBase = ""
+  )
+  string projectId = project.id.toStr()
+  string remixParent = (project.remixParent ?? "").toStr()
+  string resultJson = gitinspection.ValidateHistoryArchiveJSON(basePath, incomingPath, outputPath, currentHead, forkBase, metadata, projectId, remixParent)
+  void fs.remove(incomingPath)
+  auto parsed = json.parse(resultJson, {type: "object"})
+  if parsed.isErr() (
+    void fs.remove(outputPath)
+    return {ok: false, error: "could not validate history"}
+  )
+  object res = parsed.unwrap().assert(object)
+  if res.ok (
+    byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+    res.data = data
+    res.size = data.len
+  )
+  void fs.remove(outputPath)
+  return res
+)

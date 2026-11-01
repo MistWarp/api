@@ -1,0 +1,171 @@
+export {}
+
+type UploadRequest (
+  boolean replaceHistory = false
+  string expectedHead = ""
+  string expectedEdited = ""
+  string restoreCommit = ""
+  string restoreMessage = ""
+  string pullId = ""
+  string mergeSourceBranch = ""
+  string mergeTargetBranch = ""
+  string mergeSourceHead = ""
+  string mergeTargetHead = ""
+  string git = ""
+  string extensions = ""
+  string workspaceToken = ""
+  string mergeTreeToken = ""
+)
+
+type UploadHistory (
+  string currentHead = ""
+  string baseHead = ""
+  object info = {}
+  string metadata = ""
+  boolean hasWorkspace = false
+  byte[] workspace = []
+  number workspaceSize = 0
+  boolean hasMergeTree = false
+  byte[] mergeTree = []
+  boolean generated = false
+  byte[] generatedWorkspace = []
+)
+
+type HistoryIdentity (
+  string projectId = ""
+  string remixParent = ""
+  string baseCommit = ""
+  string branch = "main"
+)
+
+def newUploadHistory(UploadRequest request, string currentHead) UploadHistory (
+  return UploadHistory{currentHead: currentHead, baseHead: currentHead, metadata: request.git}
+)
+
+def liveContributorRefusal(UploadRequest request, boolean canEdit) Refusal (
+  if canEdit (
+    return noRefusal()
+  )
+  if request.expectedEdited == "" or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "" or request.replaceHistory (
+    return refuse(403, "live contributors can save the current project; history and publishing require a maintainer")
+  )
+  return noRefusal()
+)
+
+def staleUploadRefusal(UploadRequest request, object project, string currentHead) Refusal (
+  if request.expectedEdited != "" and request.expectedEdited.toNum() != project.edited.toNum() (
+    return refuseWithBody(409, {ok: false, error: "someone saved newer changes; refresh project history before saving again", code: "head_changed"})
+  )
+  if request.expectedHead != "" and request.expectedHead != currentHead (
+    return refuseWithBody(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
+  )
+  if request.replaceHistory and (request.expectedHead != currentHead or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "") (
+    return refuseWithBody(409, {ok: false, error: "history replacement requires the current saved head and a full workspace", code: "head_changed"})
+  )
+  return noRefusal()
+)
+
+def readUploadGitMetadata(UploadHistory history, boolean storedWorkspace) Refusal (
+  if history.metadata == "" (
+    return noRefusal()
+  )
+  auto parsedGit = json.parse(history.metadata, {type: "object"})
+  if parsedGit.isErr() (
+    return refuse(400, "invalid MistWarp history metadata")
+  )
+  history.info = parsedGit.unwrap().assert(object)
+  if history.info.contains("delta") and history.info.delta == true (
+    string baseHead = (history.info.baseHead ?? "").toStr()
+    if baseHead == "" or baseHead != history.currentHead or !storedWorkspace (
+      return refuseWithBody(409, {ok: false, error: "the saved project history changed", code: "workspace_base_changed", currentHead: history.currentHead})
+    )
+  )
+  return noRefusal()
+)
+
+def restoreCommitRefusal(UploadRequest request) Refusal (
+  if request.restoreCommit != "" and !validGitObjectId(request.restoreCommit) (
+    return refuse(400, "invalid restore commit")
+  )
+  return noRefusal()
+)
+
+def replaceWithoutWorkspaceRefusal(UploadRequest request, UploadHistory history) Refusal (
+  if request.replaceHistory and !history.hasWorkspace (
+    return refuse(400, "history replacement requires a full workspace")
+  )
+  return noRefusal()
+)
+
+def isOrdinaryVersionSave(UploadRequest request, UploadHistory history) boolean (
+  return !request.replaceHistory and (history.info.worktree ?? false) != true and history.hasWorkspace and request.restoreCommit == "" and !history.hasMergeTree and history.metadata != "" and history.currentHead != ""
+)
+
+def unchangedVersionRefusal() Refusal (
+  return refuseWithBody(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
+)
+
+def extensionRefusal(object extensionResult) Refusal (
+  if extensionResult.ok (
+    return noRefusal()
+  )
+  object extensionError = {ok: false, error: extensionResult.error}
+  if extensionResult.contains("code") (
+    extensionError.code = extensionResult.code
+  )
+  return refuseWithBody(400, extensionError)
+)
+
+def needsMergeCommit(UploadRequest request, UploadHistory history) boolean (
+  return history.hasMergeTree and !history.hasWorkspace and request.restoreCommit == ""
+)
+
+def needsRestoreCommit(UploadRequest request, UploadHistory history) boolean (
+  return request.restoreCommit != "" and !history.hasWorkspace
+)
+
+def isBranchMerge(UploadRequest request) boolean (
+  return request.pullId == "" and request.mergeSourceBranch != "" and request.mergeTargetBranch != "" and request.mergeSourceHead != "" and request.mergeTargetHead != ""
+)
+
+def branchMergeRefusal(UploadRequest request, string latestSourceHead, string latestTargetHead) Refusal (
+  if request.mergeSourceBranch == request.mergeTargetBranch or latestSourceHead == "" or latestTargetHead == "" or latestSourceHead != request.mergeSourceHead or latestTargetHead != request.mergeTargetHead (
+    return refuseWithBody(409, {ok: false, error: "a branch changed while this merge was processing", code: "branch_head_changed"})
+  )
+  return noRefusal()
+)
+
+def pullMergeRefusal(UploadRequest request, object pull, string projectId) Refusal (
+  if request.pullId == "" or pull.len == 0 or pull.state.toStr() != "open" or pull.targetProjectId.toStr() != projectId (
+    return refuseWithBody(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+  )
+  return noRefusal()
+)
+
+def mergeCommitMessage(UploadRequest request, boolean branchMerge) string (
+  return if branchMerge then "Merge branch '" ++ request.mergeSourceBranch ++ "' into '" ++ request.mergeTargetBranch ++ "'" else "Merge pull request #" ++ request.pullId
+)
+
+def historyIdentity(object project) HistoryIdentity (
+  return HistoryIdentity{
+    projectId: project.id.toStr(),
+    remixParent: if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else "",
+    baseCommit: if project.contains("remixBaseCommit") and project.remixBaseCommit != null then project.remixBaseCommit.toStr() else "",
+    branch: if project.contains("gitBranch") and project.gitBranch != null then project.gitBranch.toStr() else "main"
+  }
+)
+
+def parsedGeneratedHistory(string resultJson) object (
+  auto parsed = json.parse(resultJson, {type: "object"})
+  if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
+    return {}
+  )
+  return parsed.unwrap().assert(object)
+)
+
+def adoptGeneratedHistory(UploadHistory history, object generated, byte[] generatedWorkspace) (
+  history.info = generated.manifest.assert(object)
+  history.metadata = json.stringify(history.info)
+  history.generatedWorkspace = generatedWorkspace
+  history.generated = true
+)

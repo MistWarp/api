@@ -1,0 +1,106 @@
+import "std:testing"
+import "std:serve"
+import "std:json"
+import "std:regex"
+import "./project-refusal.osl"
+import "./project-upload-policy.osl"
+import "std:fs"
+import "std:thread"
+import "./project-upload-publish.osl"
+
+type UploadArchive (
+  def discard() (
+    return
+  )
+)
+
+number maxThumbBytes = 1048576
+string tmpDir = "/tmp/"
+def validGitObjectId(string oid) boolean (
+  return regex.match("^[a-f0-9]{40}$", oid)
+)
+def projectJsonKey(string id) string (
+  return "projects/" ++ id ++ ".json"
+)
+def projectJsonSnapshotKey(string hash) string (
+  return "project-json/" ++ hash
+)
+def projectWorkspaceKeys(object project) array (
+  return []
+)
+def removeProjectStorageKeyIfOrphaned(string key, string id, boolean workspace) (
+  return
+)
+def roturStorageFullResponse(*serve.Context c, object refusal) (
+  return
+)
+def storageFullResponse(*serve.Context c, object details, number neededBytes) (
+  return
+)
+def storageDetails(string username) object (
+  return {}
+)
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+  return true
+)
+def contentHash(any body) string (
+  return "hash"
+)
+def storageHoldRelease(string userId, object hold) (
+  return
+)
+def storeProjectExtensions(string projectId, array previousExtensions, array extensions, object sources) boolean (
+  return true
+)
+def storedProjectExtensions(object project) array (
+  return []
+)
+def thumbnailPath(string id) string (
+  return tmpDir ++ id ++ ".png"
+)
+def upsertIndexEntry(object project) (
+  return
+)
+def warmShareCard(string id) (
+  return
+)
+def usesRoturStorage(string userId) boolean (
+  return false
+)
+def storageSettle(string userId, object hold) (
+  return
+)
+def releasePendingUploads(string username, array names) (
+  return
+)
+def cleanupReplacedProjectStorage(string id, string jsonKey, array workspaceKeys) (
+  return
+)
+def projectHasWorkspace(object project) boolean (
+  return true
+)
+def ensureUploadedProjectHistory(object project) object (
+  return {ok: true, project: project}
+)
+def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
+  return true
+)
+def projectGitHead(object project) string (
+  return ""
+)
+def projectJsonUrlFor(object project) string (
+  return ""
+)
+def viewerThumbUrlFor(object project) string (
+  return ""
+)
+
+testing.assert(storedWorkspaceLayers({}).len == 0 and storedWorkspaceLayers({workspaceLayers: null}).len == 0, "projects without layers have none")
+testing.assert(keysNotIn(["a", "b", "c"], ["b"]) == ["a", "c"], "keysNotIn keeps order")
+testing.assert(replacedWorkspaceKeys({workspaceLayers: ["n"]}, ["o", "n"]) == ["o"], "replaced layers are the old ones not kept")
+testing.assert(replacedWorkspaceKeys({}, ["o"]).len == 0, "nothing is replaced without stored layers")
+
+object filesError = projectFilesErrorBody({ok: false, error: "too many assets", status: 400})
+testing.assert(filesError.ok == false and filesError.error == "too many assets" and !filesError.contains("status") and !filesError.contains("code"), "file errors expose only ok, error and code")
+testing.assert(projectFilesErrorBody({ok: false, error: "big", code: "project_too_large"}).code == "project_too_large", "file errors keep their code")
+

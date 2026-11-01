@@ -1,0 +1,111 @@
+export {}
+
+type UploadArchive (
+  byte[] data = []
+  string workId = ""
+  string zipPath = ""
+  string extractDir = ""
+  number expandedLimit = 0
+
+  def discard() (
+    void fs.remove(self.zipPath)
+    void fs.remove(self.extractDir)
+  )
+
+  def discardOn(Refusal refusal) Refusal (
+    if isRefused(refusal) (
+      self.discard()
+    )
+    return refusal
+  )
+)
+
+def uploadFormValue(*serve.Context c, string name) string (
+  return (c.formValue(name) ?? "").strip()
+)
+
+def readUploadRequest(*serve.Context c) UploadRequest (
+  UploadRequest request = UploadRequest()
+  request.replaceHistory = (c.formValue("replaceHistory") ?? "") == "true"
+  request.expectedHead = uploadFormValue(c, "expectedHead")
+  request.expectedEdited = uploadFormValue(c, "expectedEdited")
+  request.restoreCommit = uploadFormValue(c, "restoreCommit")
+  request.restoreMessage = uploadFormValue(c, "restoreMessage")
+  request.pullId = uploadFormValue(c, "pullId")
+  request.mergeSourceBranch = uploadFormValue(c, "mergeSourceBranch")
+  request.mergeTargetBranch = uploadFormValue(c, "mergeTargetBranch")
+  request.mergeSourceHead = uploadFormValue(c, "mergeSourceHead")
+  request.mergeTargetHead = uploadFormValue(c, "mergeTargetHead")
+  request.git = (c.formValue("git") ?? "")
+  request.extensions = (c.formValue("extensions") ?? "")
+  request.workspaceToken = (c.formValue("workspaceToken") ?? "")
+  request.mergeTreeToken = (c.formValue("mergeTreeToken") ?? "")
+  return request
+)
+
+def editorReplaceRefusal(*serve.Context c, UploadRequest request, object project) Refusal (
+  if request.replaceHistory and isEditorSession(c) and !editorCanDeleteProject(project) (
+    return editorScopeRefusal("Open MistWarp to replace this project's saved history.")
+  )
+  return noRefusal()
+)
+
+def receiveProjectArchive(*serve.Context c, UploadArchive archive) Refusal (
+  auto fileResult = c.formFile("project")
+  if fileResult.isErr() (
+    return refuse(400, "missing project file")
+  )
+  archive.data = fileResult.unwrap().data
+  return noRefusal()
+)
+
+def receiveHistoryParts(*serve.Context c, object project, UploadRequest request, UploadHistory history) Refusal (
+  auto workspaceResult = c.formFile("workspace")
+  auto mergeTreeResult = c.formFile("mergeTree")
+  history.hasWorkspace = !workspaceResult.isErr()
+  history.hasMergeTree = !mergeTreeResult.isErr()
+  if history.hasWorkspace (
+    object workspaceFile = workspaceResult.unwrap()
+    history.workspace = workspaceFile.data
+    history.workspaceSize = workspaceFile.size.toNum()
+  ) else if request.workspaceToken != "" (
+    object stagedWorkspace = consumeStagedUploadPart(request.workspaceToken, project.id.toStr(), "workspace", contextString(c, "userId"))
+    if !stagedWorkspace.ok (
+      return refuse(400, stagedWorkspace.error.toStr())
+    )
+    object workspaceFile = stagedWorkspace.file.assert(object)
+    history.workspace = workspaceFile.data.assertElse(byte[], [])
+    history.workspaceSize = workspaceFile.size.toNum()
+    history.hasWorkspace = true
+  )
+  if history.hasMergeTree (
+    history.mergeTree = mergeTreeResult.unwrap().data
+  ) else if request.mergeTreeToken != "" (
+    object stagedMergeTree = consumeStagedUploadPart(request.mergeTreeToken, project.id.toStr(), "mergeTree", contextString(c, "userId"))
+    if !stagedMergeTree.ok (
+      return refuse(400, stagedMergeTree.error.toStr())
+    )
+    history.mergeTree = stagedMergeTree.file.assert(object).data.assertElse(byte[], [])
+    history.hasMergeTree = true
+  )
+  return noRefusal()
+)
+
+def unpackProjectArchive(object project, object benefits, UploadArchive archive) Refusal (
+  archive.workId = project.id.toStr() ++ "." ++ randomString(8)
+  archive.zipPath = tmpDir ++ archive.workId ++ ".sb3"
+  archive.extractDir = tmpDir ++ archive.workId
+  if !fs.writeFileBytes(archive.zipPath, archive.data) (
+    return refuse(500, "failed to stage project upload")
+  )
+  archive.expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
+  if !validateZipArchive(archive.data, maxProjectUploadRequestBytes, archive.expandedLimit, maxAssetCount + 1, false) (
+    void fs.remove(archive.zipPath)
+    return refuse(400, "invalid or unsafe sb3 file")
+  )
+  if !zip.decompress(archive.zipPath, archive.extractDir, {maxBytes: archive.expandedLimit, maxFiles: maxAssetCount + 1}) (
+    archive.discard()
+    return refuse(400, "invalid sb3 file")
+  )
+  return noRefusal()
+)
