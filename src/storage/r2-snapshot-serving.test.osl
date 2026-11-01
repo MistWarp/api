@@ -13,7 +13,6 @@ void fs.mkdir(testDir, {recursive: true})
 boolean r2Local = false
 number maxStoredProjectJsonBytes = 20971520
 
-// Fake R2: serves whatever the current case stages.
 number stubStatus = 200
 boolean stubGzip = false
 string stubBodyPath = testDir ++ "/stub-body.bin"

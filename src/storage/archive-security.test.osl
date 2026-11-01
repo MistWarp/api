@@ -5,6 +5,7 @@ import "go:mistwarp.local/storagefs"
 import "./archive-security.osl"
 
 string fixtureDir = "/tmp/mistwarp-zip-fixtures-" ++ timestamp.toStr()
+array zipCentralDirectoryHeader = [80, 75, 1, 2]
 void fs.mkdir(fixtureDir, {recursive: true})
 
 def stageParent(string stage, string name) (
@@ -38,8 +39,6 @@ def compressFixture(string kind) byte[] (
   return fs.readFileBytes(outPath)
 )
 
-// Little-endian reads over 1-based byte arrays. Positions are 1-based, so
-// 0-based offset N of a header starting at H becomes H + N.
 def read16le(byte[] data, number pos) number (
   return data[pos].toNum() + (data[(pos + 1)].toNum() * 256)
 )
@@ -48,8 +47,6 @@ def read32le(byte[] data, number pos) number (
   return read16le(data, pos) + (read16le(data, (pos + 2)) * 65536)
 )
 
-// Byte search over 1-based OSL byte arrays. Returns the first match at or after
-// from, or 0.
 def findBytes(byte[] data, array needle, number from) number (
   for i in 1 to ((data.len - needle.len - from) + 2) (
     number pos = (from + i) - 1
@@ -67,8 +64,6 @@ def findBytes(byte[] data, array needle, number from) number (
   return 0
 )
 
-// Overwrite every occurrence of orig with replacement. Both stay the same
-// length, so offsets elsewhere in the archive are untouched.
 def patchAll(byte[] data, array orig, array replacement) byte[] (
   number pos = findBytes(data, orig, 1)
   while pos != 0 (
@@ -80,8 +75,6 @@ def patchAll(byte[] data, array orig, array replacement) byte[] (
   return data
 )
 
-// Malformed fixtures start as honest archives and get byte patches, since no
-// honest writer emits duplicates, traversal names, or symlink entries.
 def zipFixture(string kind) byte[] (
   if kind == "valid" (
     stageText(kind, "project.json", "{}")
@@ -99,7 +92,7 @@ def zipFixture(string kind) byte[] (
   if kind == "symlink" (
     stageText(kind, "link", "target")
     byte[] data = compressFixture(kind)
-    number header = findBytes(data, [80, 75, 1, 2], 1)
+    number header = findBytes(data, zipCentralDirectoryHeader, 1)
     while header != 0 (
       number nameLen = read16le(data, (header + 28))
       number nameEnd = ((header + 46) + nameLen) - 1
@@ -111,7 +104,7 @@ def zipFixture(string kind) byte[] (
         data[(header + 41)] = 161
         return data
       )
-      header = findBytes(data, [80, 75, 1, 2], header + 1)
+      header = findBytes(data, zipCentralDirectoryHeader, header + 1)
     )
     testing.assert(false, "symlink entry not found")
     return data
@@ -142,9 +135,7 @@ def zipFixture(string kind) byte[] (
   )
   stageText(kind, "corrupt", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
   byte[] data = compressFixture(kind)
-  // Flip the first payload byte of the file entry: directories have no payload
-  // and only corrupt payload bytes trip the CRC check on read.
-  number entry = findBytes(data, [80, 75, 1, 2], 1)
+  number entry = findBytes(data, zipCentralDirectoryHeader, 1)
   while entry != 0 (
     number entryNameLen = read16le(data, (entry + 28))
     number entryNameEnd = ((entry + 46) + entryNameLen) - 1
@@ -154,7 +145,7 @@ def zipFixture(string kind) byte[] (
       data[payloadStart] = 255 - data[payloadStart]
       return data
     )
-    entry = findBytes(data, [80, 75, 1, 2], (entry + 1))
+    entry = findBytes(data, zipCentralDirectoryHeader, (entry + 1))
   )
   testing.assert(false, "file entry not found")
   return data

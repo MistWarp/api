@@ -70,11 +70,6 @@ def canAppendPendingReport(array reports, string sourceKey) boolean (
   return totalPending < 1000 and sourcePending < 10
 )
 
-// Reports also go to the MistWarp Rotur App's report queue. Reports in a
-// priority category (child sexual exploitation or abuse, a threat to life,
-// encouraging suicide or self-harm, terrorism) reach Rotur's safety team as
-// soon as they're filed. MistWarp's own queue and tools are unchanged, and
-// closing a report here closes it on Rotur too.
 array roturReportCategories = ["spam", "harassment", "hate", "sexual", "violence", "scam", "other", "csea", "threat_to_life", "self_harm", "terrorism"]
 
 def reportCategory(object body, string reason) string (
@@ -82,7 +77,6 @@ def reportCategory(object body, string reason) string (
   if roturReportCategories.contains(category) (
     return category
   )
-  // Older clients only send the category's wording at the start of the reason.
   object worded = {
     "Inappropriate or explicit content": "sexual",
     "Harassment or bullying": "harassment",
@@ -99,8 +93,6 @@ def reportCategory(object body, string reason) string (
   return "other"
 )
 
-// The reported comment, by ID: in the store the report's context names, else
-// in any store.
 def findReportedComment(string id, string context) object (
   array keys = []
   if context.startsWith("project ") (
@@ -122,9 +114,6 @@ def findReportedComment(string id, string context) object (
   return {}
 )
 
-// What was reported, worked out here and not taken from the reporter: who it
-// is about, and what it said, so Rotur's safety team sees it even if it's
-// deleted later. user is "" when it can't be worked out.
 def reportedContent(object report) object (
   string type = report.type.toStr()
   string target = report.target.toStr()
@@ -155,7 +144,6 @@ def setReportRotur(string id, string state, string roturReportId) object (
   object found = {}
   for i reports.len (
     object stored = reports[i].assertElse(object, {})
-    // Only the first filing to finish counts.
     if (stored.id ?? "").toStr() == id and (stored.rotur ?? "").toStr() == "pending" (
       stored.rotur = state
       if roturReportId != "" (
@@ -169,10 +157,6 @@ def setReportRotur(string id, string state, string roturReportId) object (
   return found
 )
 
-// Files the report in the Rotur App's queue. Its rotur state is "filed" once
-// Rotur has it, "unfiled" if Rotur won't take it (or nobody can be named), and
-// stays "pending" to be tried again by the reconcile loop. False if Rotur
-// couldn't be reached or failed, so the reconcile loop stops for now.
 def fileRoturReport(object report) boolean (
   string subject = (report.subject ?? "").toStr()
   if !roturAppReady() (
@@ -200,7 +184,6 @@ def fileRoturReport(object report) boolean (
   )
   object res = roturApp("POST", "/reports", request)
   if !res.ok and res.status == 400 and request.contains("reporter") (
-    // Only people who have used MistWarp through Rotur can be named.
     request.delete("reporter")
     res = roturApp("POST", "/reports", request)
   )
@@ -217,15 +200,14 @@ def fileRoturReport(object report) boolean (
   if state == "filed" and (res.data.escalated ?? false) == true (
     void updateReport(report.id.toStr(), {roturEscalated: true, roturEscalatedAt: timestamp, roturEscalatedBy: ""})
   )
-  // A moderator may have closed it while it was being filed.
   if state == "filed" and stored.resolved == true (
     closeRoturReport(stored, if (stored.action ?? "").toStr() == "dismiss" then "dismissed" else "resolved")
   )
   return true
 )
 
-// Tries again to file reports Rotur couldn't be reached for, from the
-// reconcile loop.
+number roturReportFilingGraceMs = 60000
+
 def fileUnfiledRoturReports() (
   if !roturAppReady() (
     return
@@ -233,11 +215,7 @@ def fileUnfiledRoturReports() (
   array reports = loadReports()
   for i reports.len (
     object report = reports[i].assertElse(object, {})
-    // A report made in the last minute is still being filed by its own
-    // request.
-    if (report.rotur ?? "").toStr() == "pending" and timestamp - (report.created ?? 0).toNum() > 60000 (
-      // Stop at the first sign Rotur is down, rather than waiting on every
-      // report in turn.
+    if (report.rotur ?? "").toStr() == "pending" and timestamp - (report.created ?? 0).toNum() > roturReportFilingGraceMs (
       if !fileRoturReport(report) (
         return
       )
@@ -245,8 +223,6 @@ def fileUnfiledRoturReports() (
   )
 )
 
-// outcome is "resolved" (action taken) or "dismissed". Rotur keeps reports
-// it is reviewing, and says no to closing them, which is fine.
 def closeRoturReport(object report, string outcome) (
   string reportId = (report.roturReportId ?? "").toStr()
   if reportId != "" (
@@ -287,7 +263,6 @@ def handleCreateReport(*serve.Context c) (
   if body.contains("context") and body.context != null (
     report.context = body.context.toStr().trim(1, 5000)
   )
-  // Who it's about comes from the content, never from the reporter.
   object reported = reportedContent(report)
   report.snapshot = reported.snapshot.toStr().trim(1, 4000)
   if reported.user.toStr() != "" (
@@ -517,7 +492,6 @@ def resolveReportLocked(*serve.Context c, string id) object (
   return {found: true, saved: saved, projectTarget: projectTarget, resolved: resolved}
 )
 
-// Reports someone filed stay for moderation, without saying who filed them.
 def anonymiseReportsBy(string username, string userId) (
   string key = normalizeUsername(username)
   string sourceKey = "user:" ++ userId

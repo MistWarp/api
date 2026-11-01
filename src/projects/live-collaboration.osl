@@ -3,7 +3,6 @@ import "./live-collaboration-policy.osl"
 export {}
 
 
-// Temporary approvals are leases; explicitly shared Editor access persists.
 *cache.Cache liveEditorSessions = cache.new({capacity: 10000, ttl: 90000})
 *cache.Cache projectEditorPresence = cache.new({capacity: 10000, ttl: 90000})
 

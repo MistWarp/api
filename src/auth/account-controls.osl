@@ -190,10 +190,6 @@ def handleExportMyData(*serve.Context c) (
   })
 )
 
-// Delete everything MistWarp holds about someone: their projects and what
-// hangs off them, their community records, game data and backpack, then the
-// account itself. Used when they ask, and when Rotur says they deleted their
-// Rotur account, left MistWarp or were banned from Rotur (rotur-webhooks.osl).
 def eraseUser(string userId, string username) (
   eraseClassroomTeacher(userId)
   purgeGameDataForUser(userId)
@@ -248,7 +244,6 @@ def eraseUser(string userId, string username) (
   purgeUser(userId, username)
   removeUserFromSafetyLists(username)
   void fs.remove(safetyPath(username))
-  // Nothing of theirs is stored any more, so none of it counts.
   void ledgerFreeAll(userId)
 )
 

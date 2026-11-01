@@ -4,8 +4,6 @@ export {
 
 *cache.Cache remoteMilestoneChecks = cache.new({capacity: 10000, ttl: 10000})
 
-// Use existing public Rotur APIs. Counts, recipients and links never come
-// from the caller. This records milestones observed through MistWarp.
 def remoteMilestoneData(string path) object (
   return milestoneDataFromUrl(roturBase ++ "/v2" ++ path)
 )
@@ -27,7 +25,6 @@ def observeRemoteMilestone(string target, string kind, string id, number count, 
   sync.lock(key)
   defer sync.unlock(key)
   object previous = (likeMilestoneDocs.findById(key) ?? {})
-  // First observation establishes a baseline; an exact milestone still counts.
   number before = count - 1
   if previous.contains("count") (
     before = previous.count.toNum()
@@ -46,8 +43,6 @@ def syncFollowerMilestones(string username) (
     return
   )
   remoteMilestoneChecks.set(key, true)
-  // The profile's count, not the public follower list: the list leaves out
-  // private accounts, so its length undercounts.
   object profile = remoteMilestoneData("/users/" ++ url.escape(name) ++ "?include_posts=0")
   if !profile.contains("followers") or typeof(profile.followers) != "number" (
     return

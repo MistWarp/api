@@ -5,12 +5,6 @@ export {
   roturUserRef
 }
 
-// MistWarp's Rotur App, called with its client ID and secret:
-// https://docs.rotur.dev/build-an-app/apps-api
-//
-// This is how mistwarp-api talks to Rotur about MistWarp itself: bans,
-// reports, safety signals, badges and payment requests.
-
 string roturClientId = configValue("ROTUR_CLIENT_ID", "")
 string roturClientSecret = configValue("ROTUR_CLIENT_SECRET", "")
 
@@ -18,8 +12,6 @@ def roturAppReady() boolean (
   return roturClientId != "" and roturClientSecret != ""
 )
 
-// How the apps API names someone: their Rotur ID when MistWarp knows it,
-// which never changes, else their username.
 def roturUserRef(string username) string (
   string userId = userIdForUsername(username)
   if userId != "" (
@@ -28,8 +20,6 @@ def roturUserRef(string username) string (
   return username
 )
 
-// Calls https://api.rotur.dev/v2/apps/<client id><path>. Returns {ok, status,
-// data}: ok is false when the app isn't set up or Rotur didn't say yes.
 def roturApp(string method, string path, object body) object (
   if !roturAppReady() (
     return {ok: false, status: 0, data: {}}

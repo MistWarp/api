@@ -187,8 +187,6 @@ def handleGameProductIntent(*serve.Context c) (
   started.title = product.name
   c.json(200, started))
 
-// Delivers a paid game product, once, whether the editor or Rotur's webhook
-// gets here first.
 def completeGameProductPurchase(string key) object (
   sync.lock("purchase:" ++ key)
   defer sync.unlock("purchase:" ++ key)
@@ -210,7 +208,6 @@ def completeGameProductPurchase(string key) object (
     if !saveGameProductEntitlement(project.id.toStr(), userId, product.id.toStr(), paymentId) or !grantGameProductItem(project, product, userId, paymentId) (
       return {ok: false, error: "failed to grant game product"}
     )
-    // What the buyer paid, which a refund pays back.
     number paid = (entry.price ?? product.price).toNum()
     addPurchaseRecord(buyer, {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: paid, at: timestamp, type: "game_product"})
     addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: paid})
@@ -228,7 +225,6 @@ def handleGameProductConfirm(*serve.Context c) (
     completed = completeGameProductPurchase(key)
   )
   if !completed.ok and ownsGameProduct(c.param("id"), contextString(c, "userId"), c.param("product")) (
-    // Rotur's webhook got here first.
     auto loaded = loadProject(c.param("id"))
     object found = findGameProduct(loaded.project.assertElse(object, {}), c.param("product"))
     if loaded.ok and found.ok (
@@ -247,8 +243,6 @@ def handleGameProductConfirm(*serve.Context c) (
   c.json(200, {ok: true, product: gameProductResponse(completed.project.assert(object), completed.product.assert(object), c)})
 )
 
-// What the buyer last paid for this product, from their purchase records, or 0
-// if they never paid for it (a creator grant or a free claim).
 def gameProductAmountPaid(string buyer, string projectId, string productId) number (
   object profile = loadProfile(normalizeUsername(buyer))
   array purchases = (profile.purchases ?? []).assertElse(array, [])
@@ -261,8 +255,6 @@ def gameProductAmountPaid(string buyer, string projectId, string productId) numb
   return 0
 )
 
-// The creator pays the buyer back through Rotur before revoking a paid
-// product: this asks Rotur for that payment.
 def handleGameProductRefundIntent(*serve.Context c) (
   auto loaded = loadProject(c.param("id"))
   if !loaded.ok or !canEditProject(loaded.project.assert(object), c) (
@@ -374,7 +366,6 @@ def handleRevokeGameProduct(*serve.Context c) (
     refunded = true
   )
   if !removeGameProductEntitlement(project.id.toStr(), targetId, product.id.toStr()) (
-    // The refund key stays, so revoking can be tried again with it.
     c.internalError("failed to revoke game product")
     return
   )

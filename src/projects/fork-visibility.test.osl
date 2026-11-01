@@ -189,8 +189,6 @@ def canSeeInsideProjectTest(object project, object ctx) boolean (
   return projectIsViewable(project)
 )
 
-// Setup projects
-// Project A: original project created by Alice, maintained by Dan
 object projectA = {
   id: "proj_original",
   owner: "alice",
@@ -200,7 +198,6 @@ object projectA = {
   collaborators: [{username: "maintainer_dan", userId: "u_dan", role: "maintainer"}]
 }
 
-// Project B: private fork of Project A created by Bob
 object projectB = {
   id: "p178804999473398600081XWkq",
   owner: "bob",
@@ -212,7 +209,6 @@ object projectB = {
   collaborators: []
 }
 
-// Project C: chained fork of Project B created by Charlie
 object projectC = {
   id: "proj_chained_fork",
   owner: "charlie",
@@ -236,7 +232,6 @@ object danCtx = {authenticated: true, username: "maintainer_dan", userId: "u_dan
 object anonCtx = {authenticated: false, username: "", userId: "", isAdmin: false}
 object strangerCtx = {authenticated: true, username: "stranger", userId: "u_stranger", isAdmin: false}
 
-// Tests for Project B (fork of A)
 testing.assert(canViewProjectTest(projectB, aliceCtx), "Alice (creator of forked project) can view private fork")
 testing.assert(canViewProjectTest(projectB, danCtx), "Dan (maintainer of forked project) can view private fork")
 testing.assert(canViewProjectTest(projectB, bobCtx), "Bob (fork owner) can view own fork")
@@ -253,7 +248,6 @@ testing.assert(canViewProjectJsonTest(projectB, danCtx), "Dan can view project J
 testing.assert(canViewProjectJsonTest(projectB, bobCtx), "Bob can view project JSON for private fork")
 testing.assert(!canViewProjectJsonTest(projectB, strangerCtx), "Stranger cannot view project JSON for private fork")
 
-// Tests for chained fork C (remixRoot = proj_original)
 testing.assert(canViewProjectTest(projectC, charlieCtx), "Charlie (creator of chained fork) can view own fork")
 testing.assert(canViewProjectTest(projectC, aliceCtx), "Alice (creator of root project) can view chained fork")
 testing.assert(canViewProjectTest(projectC, bobCtx), "Bob (creator of direct parent fork) can view chained fork")

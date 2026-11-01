@@ -12,7 +12,6 @@ import "std:regex"
 import "std:db"
 import "go:mistwarp.local/storagefs"
 
-// The accounting works in a folder of its own.
 string work = "/tmp/mistwarp-storage-ledger-" ++ timestamp.toStr()
 void fs.mkdir(work, {recursive: true})
 string projectsDir = work ++ "/projects/"
@@ -117,8 +116,6 @@ testing.assert(!ledgerIsLoopback("http://127.0.0.1.example.com:80"), "a host tha
 testing.assert(!ledgerReady(), "without the service secret, nothing is counted")
 testing.equal(storageHold("u-ana", {}, true), {ok: true, reservations: []}, "and nothing is refused")
 testing.assert(usesRoturStorage("u-ana") and !usesRoturStorage("mwc_123") and !usesRoturStorage(""), "students and unknown owners aren't Rotur accounts")
-
-// ---------- A stand-in for the Rotur API's storage ledger ----------
 
 object stub = {max: 0, failing: false, calls: 0, lastApp: ""}
 object stubObjects = {}
@@ -270,8 +267,6 @@ def putProject(string dir, object project) (
   )
 )
 
-// ---------- What Ana stores ----------
-
 string a1 = "a" * 32 ++ ".png"
 string a2 = "b" * 32 ++ ".wav"
 string a3 = "c" * 32 ++ ".svg"
@@ -286,26 +281,22 @@ putProject(projectsDir, {
   workspaceKey: "project-workspaces/h1.mwp", workspaceLayers: ["project-workspaces/h1.mwp"], historyBytes: 4000,
   assets: [a1, a2]
 })
-// Her untouched remix of it shares its project.json and assets.
 putProject(projectsDir, {
   id: "p2", owner: "ana", ownerId: "u-ana", remixParent: "p1", inheritedJson: true,
   jsonKey: "project-json/j1.json.gz", storedJsonBytes: 500,
   workspaceLayers: ["project-workspaces/h2.mwp"], historyBytes: 3000,
   assets: [a1, a2]
 })
-// An older project from before ownerIds, in the trash.
 putProject(trashDir, {
   id: "p3", owner: "Ana",
   jsonKey: "projects/p3/project.json", sizeBytes: 1300,
   assets: [a3]
 })
-// Bea's project uses one of the same assets; that counts for her too.
 putProject(projectsDir, {
   id: "p4", owner: "bea", ownerId: "u-bea",
   jsonKey: "project-json/j4.json.gz", storedJsonBytes: 70,
   assets: [a1]
 })
-// A release keeps p1's previous project.json.
 void releaseDocs.insertOne({_id: "p1:r1", projectId: "p1", jsonKey: "project-json/j0.json.gz", jsonBytes: 450})
 backpacks["u-ana"] = [{bodyKey: "backpack/x/body.png", bodyBytes: 800, thumbnailKey: "backpack/x/thumbnail.png", thumbnailBytes: 90}]
 
@@ -320,8 +311,6 @@ testing.equal(report.accounts["u-ana"], {projects: 8950, assets: 21300, backpack
 testing.equal(report.accounts["u-bea"], {projects: 70, assets: 1000}, "and Bea's, with her own copy of the shared asset")
 testing.assert(!report.accounts.assertElse(object, {}).contains("u-cy"), "someone who stores nothing isn't in it")
 
-// ---------- Settling sets the ledger to what's stored ----------
-
 stub.max = 100000
 storageSettle("u-ana", noStorageHold())
 testing.equal(countedFor("u-ana"), {projects: 8950, assets: 21300, backpack: 800}, "settling counts what she stores")
@@ -329,8 +318,6 @@ testing.equal(stub.lastApp, "mistwarp", "MistWarp calls as itself")
 number before = stub.calls.toNum()
 storageSettle("u-ana", noStorageHold())
 testing.equal(stub.calls.toNum() - before, 1, "settling again only asks what's counted")
-
-// ---------- A save holds what it adds ----------
 
 object grown = projectStorageSummary(readFile(projectsDir ++ "p1.json").data.assertElse(object, {}), assetIndex.assets)
 grown.json = {"incoming:p1": 600}
@@ -342,7 +329,6 @@ testing.equal(hold.reservations.len, 1, "only the kind that grows")
 testing.equal(hold.reservations[1].kind, "projects", "its project.json is new; the asset is already counted from the trash")
 testing.equal(stubReservations[hold.reservations[1].id.toStr()].held, 600, "the ledger holds only the growth")
 
-// The save lands: p1's project.json is replaced.
 putProject(projectsDir, {
   id: "p1", owner: "ana", ownerId: "u-ana",
   jsonKey: "project-json/j2.json.gz", storedJsonBytes: 600,
@@ -352,8 +338,6 @@ putProject(projectsDir, {
 storageSettle("u-ana", hold)
 testing.equal(heldFor("u-ana"), [], "settling commits what was held")
 testing.equal(countedFor("u-ana").projects, 9550, "at what was really stored: the remix still keeps the old project.json")
-
-// ---------- Full ----------
 
 stub.max = stubUsed("u-ana") + 100
 object bigger = projectStorageSummary(readFile(projectsDir ++ "p1.json").data.assertElse(object, {}), assetIndex.assets)
@@ -374,8 +358,6 @@ smaller.history = {"incoming:p1": 10}
 testing.assert(storageHold("u-ana", {projects: {p1: smaller}}, true).ok, "over her allowance, she can still make a project smaller")
 testing.assert(storageHold("u-ana", {}, true).ok, "or save without adding anything")
 
-// ---------- Deleting frees ----------
-
 stub.max = 100000
 void fs.remove(trashDir ++ "p3.json")
 storageSettle("u-ana", noStorageHold())
@@ -384,8 +366,6 @@ testing.equal(countedFor("u-ana").assets, 21300, "but its asset stays counted, a
 backpacks["u-ana"] = []
 storageSettle("u-ana", noStorageHold())
 testing.assert(!countedFor("u-ana").contains("backpack"), "an empty backpack stops counting")
-
-// ---------- Uploads ahead of a save ----------
 
 string d1 = "d" * 32 ++ ".png"
 string e1 = "e" * 32 ++ ".png"
@@ -403,15 +383,11 @@ testing.assert(!stubReservations.contains("pending-" ++ d1), "the save that uses
 testing.equal(pendingUploadEvents("ana").len, 0)
 stub.max = 100000
 
-// ---------- Rotur can't be reached ----------
-
 stub.failing = true
 object down = storageHold("u-ana", {projects: {p9: grown}}, true)
 testing.equal(down, {ok: true, reservations: []}, "MistWarp saves anyway rather than lose work")
 storageSettle("u-ana", noStorageHold())
 stub.failing = false
-
-// ---------- Everyone, every six hours ----------
 
 stubObjects[stubKey("u-cy", "projects")] = 999
 putProject(projectsDir, {id: "p5", owner: "ana", ownerId: "u-ana", jsonKey: "project-json/j5.json.gz", storedJsonBytes: 40, assets: []})
@@ -421,8 +397,6 @@ testing.equal(countedFor("u-ana").projects, 8550 + 40, "a project saved while Ro
 testing.equal(countedFor("u-bea"), {projects: 70, assets: 1000})
 testing.equal(countedFor("u-cy"), {}, "what's counted for someone who stores nothing is freed")
 testing.equal(settleEveryoneOnce(), 0, "and once in line, nothing changes")
-
-// ---------- Students and deleted accounts ----------
 
 before = stub.calls.toNum()
 storageSettle("mwc_student", noStorageHold())

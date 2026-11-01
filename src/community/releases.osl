@@ -113,8 +113,6 @@ def handleCreateRelease(*serve.Context c) (
   )
   project = snapshot.project.assert(object)
   string jsonUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
-  // jsonBytes is the snapshot's size, which counts against the owner's
-  // storage for as long as the release keeps it.
   object release = {_id: releaseId, projectId: project.id, version: version, channel: releaseChannel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonBytes: (project.storedJsonBytes ?? 0).toNum(), jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: contextString(c, "username"), creatorId: contextString(c, "userId")}
   void releaseDocs.insertOne(release)
   storageSettleProject(project)

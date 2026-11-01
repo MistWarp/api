@@ -10,7 +10,6 @@ testing.assert(pullWebUrl("scratch-vm", 12) == "https://github.com/MistWarp/scra
 testing.assert(githubRepoName("https://api.github.com/repos/MistWarp/scratch-gui") == "scratch-gui", "the repository name comes off the search result URL")
 testing.assert(githubRepoName("") == "", "a missing repository URL yields no name")
 
-// Roadmap references written by contributors
 array linked = roadmapReferencesIn("Fixes https://mistwarp.org/roadmap/entry/iAbCdEf1234567X please review")
 testing.assert(linked.len == 1 and linked[1].toStr() == "iAbCdEf1234567X", "a roadmap entry link is recognised")
 array shorthand = roadmapReferencesIn("Roadmap: iAbCdEf1234567X")
@@ -22,14 +21,12 @@ testing.assert(repeated.len == 1, "the same entry is only referenced once")
 testing.assert(roadmapReferencesIn("fixes #218 in the editor").len == 0, "a plain GitHub issue number is not a roadmap reference")
 testing.assert(roadmapReferencesIn("").len == 0, "an empty body references nothing")
 
-// Pull request state
 testing.assert(developmentPullState({state: "open", pull_request: {}}) == "open", "an open pull request reads as open")
 testing.assert(developmentPullState({state: "open", draft: true, pull_request: {}}) == "draft", "drafts are called out separately")
 testing.assert(developmentPullState({state: "closed", pull_request: {merged_at: "2026-09-01T00:00:00Z"}}) == "merged", "a merged pull request reads as merged")
 testing.assert(developmentPullState({state: "closed", pull_request: {merged_at: null}}) == "closed", "a closed but unmerged pull request reads as closed")
 testing.assert(developmentPullState({state: "closed", draft: true, pull_request: {merged_at: "2026-09-01T00:00:00Z"}}) == "merged", "merging wins over a stale draft flag")
 
-// Admin-typed references
 testing.assert(parsePullLink("scratch-gui#218").ok == true, "the short form parses")
 testing.assert(parsePullLink("scratch-gui#218").repo.toStr() == "scratch-gui", "the short form keeps the repository")
 testing.assert(parsePullLink("scratch-gui#218").number.toNum() == 218, "the short form keeps the number")
@@ -53,7 +50,6 @@ for i 20 (
 )
 testing.assert(normalizePullLinks(manyLinks).len == developmentMaxLinksPerIdea, "an entry cannot accumulate unbounded links")
 
-// Feed assembly
 object openItem = {
   number: 218,
   title: "Sprite pane redesign",
@@ -82,7 +78,6 @@ testing.assert(collected.len == 1, "search results that are issues rather than p
 array merged = dedupeDevelopmentPulls([pull], [pull, {id: "scratch-vm#7"}])
 testing.assert(merged.len == 2, "a pull request appearing in both searches is listed once")
 
-// Resolving an entry's pull requests
 object idea = {_id: "iAbCdEf1234567X", pulls: [{repo: "scratch-vm", number: 7}]}
 array resolved = resolveIdeaPulls(idea, [pull])
 testing.assert(resolved.len == 2, "manual links and body references both attach")
@@ -99,7 +94,6 @@ testing.assert(once[1].assert(object).linkedBy.toStr() == "manual", "an explicit
 array otherEntry = resolveIdeaPulls({_id: "iZzZzZz9999999Z", pulls: []}, [pull])
 testing.assert(otherEntry.len == 0, "an unrelated entry picks up nothing")
 
-// Staying inside GitHub's search quota
 testing.assert(snapshotIsFresh(1000000, 1000000 + 60000, 300), "a snapshot a minute old is still fresh")
 testing.assert(snapshotIsFresh(1000000, 1000000 + 299999, 300), "a snapshot is fresh right up to the refresh interval")
 testing.assert(!snapshotIsFresh(1000000, 1000000 + 300000, 300), "a snapshot older than the interval is stale")

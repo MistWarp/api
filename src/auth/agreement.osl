@@ -20,7 +20,6 @@ def loadAgreement() object (
   if metaResult.ok (
     meta = metaResult.data.assert(object)
   )
-  // Read text from .md file, fall back to the text field in json
   if fs.exists(agreementTextPath()) (
     meta.text = fs.readFile(agreementTextPath()).unwrapOr("")
   )
@@ -28,11 +27,10 @@ def loadAgreement() object (
 )
 
 def saveAgreement(object data) boolean (
-  // Write metadata to json, text to md
   string text = data.text
-  data.text = "" // don't store the text in json
+  data.text = ""
   bool ok = writeFile(agreementMetaPath(), data)
-  data.text = text // restore
+  data.text = text
   if text != "" (
     if !fs.writeFile(agreementTextPath(), text) (
       ok = false

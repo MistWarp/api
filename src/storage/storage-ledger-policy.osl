@@ -2,28 +2,8 @@ export {
   projectStorageSummary
 }
 
-// What MistWarp counts against a person's one Rotur storage allowance, which
-// the Rotur API keeps in its storage ledger.
-//
-// It's every blob their projects (live and in the trash) and backpack keep in
-// storage, each counted once for that person however many of their projects
-// use it: a costume in ten of their projects counts once, and so does a remix's
-// project.json until the remix is first saved. Blobs are only ever shared
-// within one person's count; two people using the same asset each count it.
-// Thumbnails and share cards are made from projects, so they don't count, and
-// neither do backpack previews.
-//
-// The ledger holds one object per kind, named by ledgerKinds, at that kind's
-// total: "projects" is project.json snapshots (including those releases keep)
-// and history archives, "assets" is costumes and sounds, and "backpack" is
-// backpack items. A change to any of them replaces the total, so it only needs
-// room for what it adds.
-
 array ledgerKinds = ["projects", "assets", "backpack"]
 
-// The blobs one project keeps: { json: {key: bytes}, history: {key: bytes},
-// assets: [md5ext] }. assetSizes is the assets index, for working out the
-// size of project.json on projects saved before it was recorded.
 def projectStorageSummary(object project, object assetSizes) object (
   array assets = (project.assets ?? []).assertElse(array, [])
   object jsonBlobs = {}
@@ -49,7 +29,6 @@ def projectStorageSummary(object project, object assetSizes) object (
   return {json: jsonBlobs, history: historyBlobs, assets: assets}
 )
 
-// Adds a release's project.json snapshot to its project's summary.
 def addReleaseBlob(object summary, string key, number bytes) object (
   if key != "" (
     object jsonBlobs = (summary.json ?? {}).assertElse(object, {})
@@ -59,8 +38,6 @@ def addReleaseBlob(object summary, string key, number bytes) object (
   return summary
 )
 
-// Each kind's total for one person: summaries are their projects', and
-// backpack their backpack items. A blob in more than one summary counts once.
 def storageTotals(array summaries, object assetSizes, array backpack) object (
   object jsonSeen = {}
   object historySeen = {}
@@ -105,7 +82,6 @@ def storageTotals(array summaries, object assetSizes, array backpack) object (
   return {projects: projectBytes, assets: assetBytes, backpack: backpackBytes}
 )
 
-// The kinds whose total would grow from what the ledger counts.
 def ledgerGrowth(object counted, object totals) array (
   array grown = []
   for i ledgerKinds.len (
@@ -117,8 +93,6 @@ def ledgerGrowth(object counted, object totals) array (
   return grown
 )
 
-// What brings the ledger in line with the totals: { kind, bytes } to set a
-// kind's total, with bytes 0 to stop counting it.
 def ledgerChanges(object counted, object totals) array (
   array changes = []
   for i ledgerKinds.len (

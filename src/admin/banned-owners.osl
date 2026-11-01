@@ -2,11 +2,6 @@ export {
   entryOwnerBanned
 }
 
-// A banned user's projects are hidden everywhere except from admins. Bans are
-// kept by username; the set also holds each banned user's ID, so a project
-// still matches if its stored owner name is out of date after a rename.
-// Nothing is moved or deleted: lifting the ban brings everything back.
-
 def bannedOwnerSet(object bans, object idsByKey) object (
   object names = {}
   object ids = {}
@@ -38,13 +33,10 @@ def entryOwnerBanned(object banned, object entry) boolean (
   return ownerInBannedSet(banned, (entry.owner ?? "").toStr(), (entry.ownerId ?? "").toStr())
 )
 
-// A direct lookup of a hidden project answers like a missing one.
 def bannedProjectHidden(object banned, object project, boolean isAdmin) boolean (
   return !isAdmin and entryOwnerBanned(banned, project)
 )
 
-// Always a new list, so callers can sort it without touching a cached one.
-// Admins get every entry, with banned owners' copies marked ownerBanned.
 def projectEntriesVisible(array entries, object banned, boolean isAdmin) array (
   array visible = []
   for i entries.len (

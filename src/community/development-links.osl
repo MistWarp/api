@@ -1,10 +1,5 @@
 export {}
 
-// Pure helpers behind the development feed: normalising a GitHub search item
-// into a feed entry, parsing the pull request references an admin types, and
-// resolving which pull requests belong to a roadmap entry. Kept separate from
-// development.osl so the linking rules can be tested without HTTP or a cache.
-
 number developmentMaxLinksPerIdea = 12
 
 def pullLinkKey(string repo, number index) string (
@@ -15,8 +10,6 @@ def pullWebUrl(string repo, number index) string (
   return "https://github.com/" ++ githubOrg ++ "/" ++ repo ++ "/pull/" ++ index.toStr()
 )
 
-// Contributors link their own work by naming the entry in the pull request:
-// a /roadmap/entry/<id> link, "Roadmap: <id>", or a bare "#<id>".
 def roadmapReferencesIn(string text) array (
   array found = []
   array matches = regex.findAll("(roadmap/entry/|[Rr]oadmap: *|#)i[A-Za-z0-9]{14}", text)
@@ -102,7 +95,6 @@ def collectDevelopmentPulls(array items) array (
   array pulls = []
   for i items.len (
     object item = items[i].assertElse(object, {})
-    // Search also matches issues; only entries carrying a pull_request are ours.
     if item.contains("pull_request") and item.pull_request != null and item.contains("number") (
       object pull = normalizeDevelopmentPull(item)
       if pull.repo.toStr() != "" (
@@ -133,8 +125,6 @@ def dedupeDevelopmentPulls(array first, array second) array (
   return pulls
 )
 
-// Accepts "scratch-gui#218", "MistWarp/scratch-gui#218", or a pasted
-// https://github.com/MistWarp/scratch-gui/pull/218 link.
 def parsePullLink(string raw) object (
   string value = raw.strip()
   if value == "" or value.len > 300 (
@@ -146,7 +136,6 @@ def parsePullLink(string raw) object (
   if parts.len != 2 (
     return {ok: false}
   )
-  // Either "repo" or "owner/repo"; anything else is not a reference we wrote.
   array repoSegments = parts[1].toStr().strip().split("/")
   if repoSegments.len < 1 or repoSegments.len > 2 (
     return {ok: false}
@@ -173,7 +162,6 @@ def normalizePullLinks(array raw) array (
   array links = []
   array seen = []
   for i raw.len (
-    // Clients send strings; stored links round-trip as {repo, number} objects.
     string reference = ""
     if typeof(raw[i]) == "object" (
       object link = raw[i].assertElse(object, {})
@@ -195,9 +183,6 @@ def normalizePullLinks(array raw) array (
   return links
 )
 
-// A manual link stays visible even when the feed has not seen that pull
-// request — an older merge drops out of the window, but the entry still
-// deserves to show what shipped it.
 def developmentPullFor(array pulls, string key, string repo, number index) object (
   for i pulls.len (
     object pull = pulls[i].assertElse(object, {})
@@ -224,9 +209,6 @@ def developmentPullFor(array pulls, string key, string repo, number index) objec
   }
 )
 
-// Copied rather than tagged in place: the same pull request can be a manual
-// link on one entry and a reference match on another, and the feed entries are
-// shared with the cached snapshot.
 def withLinkSource(object pull, string source) object (
   return {
     id: pull.id,
@@ -274,11 +256,6 @@ def resolveIdeaPulls(object idea, array pulls) array (
   return resolved
 )
 
-// GitHub's search quota is separate from the core REST quota: ten requests a
-// minute for an unauthenticated caller, and no ETag on search responses, so a
-// conditional request cannot buy a free 304. The only way to stay inside the
-// budget is to never spend a request we do not need or cannot afford.
-
 def snapshotIsFresh(number updated, number now, number refreshSeconds) boolean (
   if updated <= 0 or now < updated (
     return false
@@ -291,15 +268,12 @@ def quotaFromHeaders(object headers, number nowSeconds) object (
     return {ok: false}
   )
   number reset = headers["X-Ratelimit-Reset"].toNum()
-  // A reset already in the past tells us nothing about the window ahead.
   if reset < nowSeconds (
     reset = nowSeconds
   )
   return {ok: true, remaining: headers["X-Ratelimit-Remaining"].toNum(), reset: reset}
 )
 
-// Retry-After is seconds from now; a 403 without one still means the window is
-// spent, so hold off until the reset GitHub last reported.
 def quotaAfterRateLimit(object headers, number nowSeconds, number fallbackSeconds) object (
   number reset = nowSeconds + fallbackSeconds
   if headers.contains("Retry-After") (
@@ -317,7 +291,6 @@ def quotaAfterRateLimit(object headers, number nowSeconds, number fallbackSecond
 )
 
 def searchAffordable(object quota, number nowSeconds, number calls, number reserve) boolean (
-  // Nothing observed yet, or the window has rolled over since we last looked.
   if !quota.contains("remaining") or quota.remaining.toNum() < 0 (
     return true
   )

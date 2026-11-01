@@ -24,7 +24,6 @@ testing.equal(projectStorageSummary(older, sizes).json, {"projects/p0/project.js
 testing.equal(projectStorageSummary(older, sizes).history, {}, "and with no history, none counts")
 testing.equal(projectStorageSummary({id: "p9"}, sizes), {json: {}, history: {}, assets: []}, "an empty project keeps nothing")
 
-// An untouched remix of their own project shares its project.json and assets.
 object remix = {
   id: "p2",
   jsonKey: "project-json/j1.json.gz",
@@ -39,7 +38,6 @@ testing.equal(totals.projects, 50 + 400 + 300, "a shared project.json counts onc
 testing.equal(totals.assets, 1100, "an asset in two projects counts once")
 testing.equal(totals.backpack, 0)
 
-// A release keeps an older project.json after the project moves on.
 object released = addReleaseBlob(projectStorageSummary(game, sizes), "project-json/j0.json.gz", 45)
 testing.equal(storageTotals([released], sizes, []).projects, 50 + 400 + 45, "a release's snapshot counts")
 testing.equal(storageTotals([addReleaseBlob(projectStorageSummary(game, sizes), "project-json/j1.json.gz", 50)], sizes, []).projects, 450, "a release of the current version adds nothing")
@@ -51,7 +49,6 @@ array backpack = [
 testing.equal(storageTotals([], sizes, backpack).backpack, 100, "backpack items count, their previews don't")
 testing.equal(storageTotals([{assets: ["missing.png"]}], sizes, []).assets, 0, "an asset that isn't stored counts nothing")
 
-// What the ledger is asked to change.
 object counted = {projects: 750, assets: 1100}
 testing.equal(ledgerGrowth(counted, {projects: 800, assets: 1100, backpack: 100}), ["projects", "backpack"], "only what grows needs room")
 testing.equal(ledgerGrowth(counted, {projects: 10, assets: 0, backpack: 0}), [], "shrinking needs none")

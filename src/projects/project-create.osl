@@ -97,7 +97,6 @@ def ownedProjectSlotCount(string userId, string username) number (
   return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
 )
 
-// A project is shared for the first time, from either way of sharing it.
 def projectFirstShared(object project) (
   addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
   notifyPublishedRemix(project)

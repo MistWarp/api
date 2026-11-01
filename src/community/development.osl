@@ -5,25 +5,10 @@ export {
 
 *cache.Cache developmentCache = cache.new({capacity: 4, ttl: 300000})
 
-// MistWarp's own source lives in public GitHub repositories, so the work in
-// flight there is invisible from inside the site. This pulls the org's open
-// and recently merged pull requests into the community API and links them to
-// roadmap entries, so a reader can follow a feature from "planned" to the
-// change that delivers it.
-//
-// The GitHub search API answers for the whole org in one request, so a refresh
-// costs two calls rather than one per repository. That keeps the unauthorised
-// rate limit comfortable; GITHUB_TOKEN only raises the ceiling.
-
 number developmentOpenLimit = 100
 number developmentMergedLimit = 40
 number developmentRefreshSeconds = 300
-// The loop ticks more often than the refresh window so a tick landing a
-// moment early cannot push the next refresh out to a second full interval.
-// Ticks that find fresh data cost nothing.
 number developmentTickSeconds = 60
-// One refresh spends two search requests. The quota is per IP, so leave room
-// for anything else on this host that talks to GitHub.
 number developmentSearchCalls = 2
 number developmentRateReserve = 2
 number developmentRateLimitBackoffSeconds = 60
@@ -63,8 +48,6 @@ def githubSearchPulls(string query, number limit) object (
   object response = requests.get(endpoint, {headers: githubHeaders(), timeoutMs: 10000, maxBytes: 8388608}).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   object headers = object(response.headers)
   number status = response.status
-  // 403 and 429 are how a spent quota arrives. Record when it reopens so the
-  // next refresh waits instead of asking again.
   if status == 403 or status == 429 (
     storeDevelopmentQuota(quotaAfterRateLimit(headers, nowSeconds(), developmentRateLimitBackoffSeconds))
     return {ok: false, items: []}
@@ -87,7 +70,6 @@ def githubSearchPulls(string query, number limit) object (
 def fetchDevelopmentPulls() object (
   object openPulls = githubSearchPulls("org:" ++ githubOrg ++ " is:pr is:open", developmentOpenLimit)
   object mergedPulls = githubSearchPulls("org:" ++ githubOrg ++ " is:pr is:merged", developmentMergedLimit)
-  // A total failure must not overwrite the last good snapshot with nothing.
   if !openPulls.ok and !mergedPulls.ok (
     return {ok: false, pulls: []}
   )
@@ -117,8 +99,6 @@ def developmentPulls() array (
 
 def refreshDevelopmentPullsLocked() object (
   object current = developmentSnapshot()
-  // A restart must not cost a request: the stored snapshot is still good, and
-  // a crash loop would otherwise burn the whole minute's budget.
   if snapshotIsFresh((current.updated ?? 0).toNum(), timestamp, developmentRefreshSeconds) (
     return current
   )
