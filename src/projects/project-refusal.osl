@@ -1,0 +1,28 @@
+export {}
+
+type Refusal (
+  number status = 0
+  string message = ""
+  boolean hasBody = false
+  object body = {}
+)
+
+def noRefusal() Refusal (
+  return Refusal()
+)
+
+def refuse(number status, string message) Refusal (
+  return Refusal{status: status, message: message}
+)
+
+def refuseWithBody(number status, object body) Refusal (
+  return Refusal{status: status, hasBody: true, body: body}
+)
+
+def editorScopeRefusal(string message) Refusal (
+  return refuseWithBody(403, {ok: false, code: "editor_scope", error: message})
+)
+
+def isRefused(Refusal refusal) boolean (
+  return refusal.status != 0
+)

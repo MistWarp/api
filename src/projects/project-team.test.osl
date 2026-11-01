@@ -1,0 +1,44 @@
+import "std:testing"
+import "std:crypto"
+import "std:regex"
+import "std:fs"
+import "go:mistwarp.local/storagefs"
+import "../core/utils.osl"
+import "./project-refusal.osl"
+import "./project-team.osl"
+
+array lookups = []
+def discoverUserIdentity(string username) string (
+  lookups.append(username)
+  if username == "alice" or username == "bob" (
+    return "u_" ++ username
+  )
+  return ""
+)
+
+array sent = []
+def addNotification(string target, string actor, string notifType, object payload) (
+  sent.append({target: target, actor: actor, type: notifType, role: payload.role})
+)
+
+object project = {id: "p1", title: "Team", owner: "Sam"}
+Refusal saved = applyCollaborators(project, [
+  {username: " Alice ", role: "Maintainer", share: 10},
+  {username: "bob", role: "tester"},
+  {username: "sam", role: "editor"},
+  {username: "carol", role: "owner"}
+])
+testing.assert(!isRefused(saved), "a valid team is saved")
+testing.assert(project.collaborators.len == 2 and project.collaborators[1].username == "alice" and project.collaborators[1].userId == "u_alice" and project.collaborators[1].role == "maintainer", "teammates are normalized and resolved")
+testing.assert(project.collaborators[2].share == 0, "missing shares are zero")
+testing.assert(!lookups.contains("sam") and !lookups.contains("carol"), "the owner and invalid roles are skipped before any lookup")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 51}]).message == "each teammate share must be between 0 and 50 percent", "shares are capped per teammate")
+testing.assert(applyCollaborators(project, [{username: "ghost", role: "editor"}]).message == "Rotur user not found: ghost", "unknown users are refused")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor"}, {username: "ALICE", role: "tester"}]).message == "a person can only appear once in the project team", "teammates appear once")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 40}, {username: "bob", role: "editor", share: 40}]).message == "teammate revenue shares cannot exceed 70 percent", "total shares are capped")
+testing.assert(project.collaborators.len == 2, "a refused team leaves the saved team alone")
+
+array previousTeam = [{username: "Alice", role: "maintainer"}, {username: "bob", role: "editor"}]
+notifyNewTeammates(project, previousTeam, "sam")
+testing.assert(sent.len == 1 and sent[1].target == "bob" and sent[1].role == "tester" and sent[1].type == "project_shared" and sent[1].actor == "sam", "only new teammates and changed roles are notified")
+testing.assert(isNewTeammate({username: "dan", role: "editor"}, previousTeam) and !isNewTeammate({username: "ALICE", role: "maintainer"}, previousTeam), "teammates match by normalized name and role")

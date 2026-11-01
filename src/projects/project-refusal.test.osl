@@ -1,0 +1,13 @@
+import "std:testing"
+import "./project-refusal.osl"
+
+testing.assert(!isRefused(noRefusal()), "no refusal lets the request continue")
+Refusal plain = refuse(400, "invalid title")
+testing.assert(isRefused(plain) and plain.status == 400 and plain.message == "invalid title" and !plain.hasBody, "plain refusals carry a status and message")
+Refusal detailed = refuseWithBody(409, {ok: false, code: "head_changed"})
+testing.assert(detailed.hasBody and detailed.body.code == "head_changed" and detailed.status == 409, "refusals with a body keep it whole")
+Refusal scoped = editorScopeRefusal("Open MistWarp to do this.")
+testing.assert(scoped.status == 403 and scoped.body.code == "editor_scope" and scoped.body.ok == false and scoped.body.error == "Open MistWarp to do this.", "editor scope refusals share one shape")
+Refusal other = refuse(404, "x")
+Refusal fresh = noRefusal()
+testing.assert(fresh.body.len == 0 and other.body.len == 0, "each refusal gets its own body")

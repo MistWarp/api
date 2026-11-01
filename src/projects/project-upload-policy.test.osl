@@ -1,0 +1,157 @@
+import "std:testing"
+import "std:json"
+import "std:regex"
+import "./project-refusal.osl"
+import "./project-upload-policy.osl"
+
+def validGitObjectId(string oid) boolean (
+  return regex.match("^[a-f0-9]{40}$", oid)
+)
+
+string headA = "a" * 40
+string headB = "b" * 40
+
+def request() UploadRequest (
+  return UploadRequest()
+)
+
+UploadRequest plain = request()
+testing.assert(!isRefused(liveContributorRefusal(plain, true)), "maintainers may save without an edited stamp")
+testing.assert(liveContributorRefusal(plain, false).status == 403, "live contributors must send the edited stamp they saw")
+UploadRequest contributor = request()
+contributor.expectedEdited = "5"
+testing.assert(!isRefused(liveContributorRefusal(contributor, false)), "live contributors may save the current project")
+contributor.restoreCommit = headA
+testing.assert(liveContributorRefusal(contributor, false).message == "live contributors can save the current project; history and publishing require a maintainer", "live contributors cannot restore")
+UploadRequest replacing = request()
+replacing.expectedEdited = "5"
+replacing.replaceHistory = true
+testing.assert(isRefused(liveContributorRefusal(replacing, false)), "live contributors cannot replace history")
+
+object project = {id: "p1", edited: 5}
+UploadRequest stale = request()
+stale.expectedEdited = "4"
+Refusal staleEdit = staleUploadRefusal(stale, project, headA)
+testing.assert(staleEdit.status == 409 and staleEdit.body.code == "head_changed" and !staleEdit.body.contains("currentHead"), "an older edited stamp is a conflict")
+stale.expectedEdited = "5"
+testing.assert(!isRefused(staleUploadRefusal(stale, project, headA)), "the current edited stamp is accepted")
+stale.expectedHead = headB
+Refusal staleHead = staleUploadRefusal(stale, project, headA)
+testing.assert(staleHead.status == 409 and staleHead.body.currentHead == headA and staleHead.body.error == "the project changed while you were merging", "a moved head reports the current head")
+UploadRequest replace = request()
+replace.replaceHistory = true
+Refusal replaceWithoutHead = staleUploadRefusal(replace, project, headA)
+testing.assert(replaceWithoutHead.status == 409 and replaceWithoutHead.body.error == "history replacement requires the current saved head and a full workspace", "replacing history needs the saved head")
+replace.expectedHead = headA
+testing.assert(!isRefused(staleUploadRefusal(replace, project, headA)), "replacing from the saved head is accepted")
+replace.pullId = "3"
+testing.assert(isRefused(staleUploadRefusal(replace, project, headA)), "replacing history cannot merge a pull request")
+
+UploadHistory noMetadata = newUploadHistory(request(), headA)
+testing.assert(!isRefused(readUploadGitMetadata(noMetadata, true)) and noMetadata.info.len == 0, "uploads without metadata keep an empty manifest")
+testing.assert(noMetadata.baseHead == headA and noMetadata.currentHead == headA, "history starts from the saved head")
+UploadRequest withGit = request()
+withGit.git = "not json"
+testing.assert(readUploadGitMetadata(newUploadHistory(withGit, headA), true).message == "invalid MistWarp history metadata", "unreadable metadata is a bad request")
+withGit.git = json.stringify({delta: true, baseHead: headB})
+Refusal staleDelta = readUploadGitMetadata(newUploadHistory(withGit, headA), true)
+testing.assert(staleDelta.status == 409 and staleDelta.body.code == "workspace_base_changed" and staleDelta.body.currentHead == headA, "a delta from another base is a conflict")
+withGit.git = json.stringify({delta: true, baseHead: headA})
+testing.assert(isRefused(readUploadGitMetadata(newUploadHistory(withGit, headA), false)), "a delta needs stored history")
+UploadHistory delta = newUploadHistory(withGit, headA)
+testing.assert(!isRefused(readUploadGitMetadata(delta, true)) and delta.info.delta == true, "a delta from the saved head is read")
+
+UploadRequest restore = request()
+restore.restoreCommit = "xyz"
+testing.assert(restoreCommitRefusal(restore).message == "invalid restore commit", "restore targets must be commit ids")
+restore.restoreCommit = headB
+testing.assert(!isRefused(restoreCommitRefusal(restore)), "a commit id can be restored")
+
+UploadHistory bare = newUploadHistory(replace, headA)
+testing.assert(replaceWithoutWorkspaceRefusal(replace, bare).message == "history replacement requires a full workspace", "replacing history needs a workspace")
+bare.hasWorkspace = true
+testing.assert(!isRefused(replaceWithoutWorkspaceRefusal(replace, bare)), "a workspace can replace history")
+
+UploadRequest save = request()
+save.git = "{}"
+UploadHistory version = newUploadHistory(save, headA)
+version.hasWorkspace = true
+testing.assert(isOrdinaryVersionSave(save, version), "a workspace with metadata on a saved head is a version save")
+version.info = {worktree: true}
+testing.assert(!isOrdinaryVersionSave(save, version), "worktree saves skip the unchanged check")
+version.info = {}
+version.hasMergeTree = true
+testing.assert(!isOrdinaryVersionSave(save, version), "merges skip the unchanged check")
+version.hasMergeTree = false
+testing.assert(!isOrdinaryVersionSave(save, newUploadHistory(save, "")), "first saves skip the unchanged check")
+testing.assert(unchangedVersionRefusal().body.code == "no_changes", "unchanged saves report no_changes")
+
+testing.assert(!isRefused(extensionRefusal({ok: true})), "collected extensions pass")
+Refusal blocked = extensionRefusal({ok: false, error: "blocked", code: "blocked_extension"})
+testing.assert(blocked.status == 400 and blocked.body.code == "blocked_extension" and blocked.body.ok == false, "extension errors keep their code")
+testing.assert(!extensionRefusal({ok: false, error: "bad"}).body.contains("code"), "extension errors without a code stay without one")
+
+UploadHistory merging = newUploadHistory(request(), headA)
+merging.hasMergeTree = true
+testing.assert(needsMergeCommit(request(), merging), "a merge tree without a workspace makes a merge commit")
+UploadRequest restoring = request()
+restoring.restoreCommit = headB
+testing.assert(!needsMergeCommit(restoring, merging) and needsRestoreCommit(restoring, merging), "a restore wins over a merge tree")
+merging.hasWorkspace = true
+testing.assert(!needsMergeCommit(request(), merging) and !needsRestoreCommit(restoring, merging), "a full workspace needs no generated commit")
+
+UploadRequest branch = request()
+branch.mergeSourceBranch = "feature"
+branch.mergeTargetBranch = "main"
+branch.mergeSourceHead = headB
+branch.mergeTargetHead = headA
+testing.assert(isBranchMerge(branch), "two branches and their heads make a branch merge")
+testing.assert(!isRefused(branchMergeRefusal(branch, headB, headA)), "unchanged branch heads can merge")
+testing.assert(branchMergeRefusal(branch, headA, headA).body.code == "branch_head_changed", "a moved source head stops the merge")
+testing.assert(isRefused(branchMergeRefusal(branch, headB, "")), "a missing target branch stops the merge")
+testing.assert(mergeCommitMessage(branch, true) == "Merge branch 'feature' into 'main'", "branch merges name both branches")
+UploadRequest sameBranch = request()
+sameBranch.mergeSourceBranch = "main"
+sameBranch.mergeTargetBranch = "main"
+sameBranch.mergeSourceHead = headA
+sameBranch.mergeTargetHead = headA
+testing.assert(isRefused(branchMergeRefusal(sameBranch, headA, headA)), "a branch cannot merge into itself")
+branch.pullId = "7"
+testing.assert(!isBranchMerge(branch) and mergeCommitMessage(branch, false) == "Merge pull request #7", "a pull id makes a pull request merge")
+object openPull = {state: "open", targetProjectId: "p1"}
+testing.assert(!isRefused(pullMergeRefusal(branch, openPull, "p1")), "an open pull into this project can merge")
+testing.assert(pullMergeRefusal(branch, {state: "closed", targetProjectId: "p1"}, "p1").body.code == "pull_not_open", "a closed pull cannot merge")
+testing.assert(isRefused(pullMergeRefusal(branch, openPull, "p2")), "a pull into another project cannot merge")
+testing.assert(isRefused(pullMergeRefusal(branch, {}, "p1")), "a missing pull cannot merge")
+testing.assert(isRefused(pullMergeRefusal(request(), openPull, "p1")), "a merge without a pull id or branches is refused")
+
+HistoryIdentity fresh = historyIdentity({id: "p1", remixParent: null})
+testing.assert(fresh.projectId == "p1" and fresh.remixParent == "" and fresh.baseCommit == "" and fresh.branch == "main", "missing identity fields fall back")
+HistoryIdentity forked = historyIdentity({id: "p2", remixParent: "p1", remixBaseCommit: headA, gitBranch: "dev"})
+testing.assert(forked.remixParent == "p1" and forked.baseCommit == headA and forked.branch == "dev", "fork identity is read from the project")
+
+testing.assert(parsedGeneratedHistory("").len == 0 and parsedGeneratedHistory("{\"ok\":false}").len == 0, "failed generation yields nothing")
+object generated = parsedGeneratedHistory(json.stringify({ok: true, manifest: {head: headB, branch: "main"}}))
+UploadHistory adopted = newUploadHistory(request(), headA)
+adoptGeneratedHistory(adopted, generated, "delta".toBytes())
+testing.assert(adopted.generated and adopted.info.head == headB and adopted.generatedWorkspace.len == 5, "generated history replaces the manifest and body")
+testing.assert(json.parse(adopted.metadata, {type: "object"}).unwrap().head == headB, "generated metadata matches the manifest")
+
+testing.assert(storedWorkspaceLayers({}).len == 0 and storedWorkspaceLayers({workspaceLayers: null}).len == 0, "projects without layers have none")
+testing.assert(keysNotIn(["a", "b", "c"], ["b"]) == ["a", "c"], "keysNotIn keeps order")
+testing.assert(replacedWorkspaceKeys({workspaceLayers: ["n"]}, ["o", "n"]) == ["o"], "replaced layers are the old ones not kept")
+testing.assert(replacedWorkspaceKeys({}, ["o"]).len == 0, "nothing is replaced without stored layers")
+
+object filesError = projectFilesErrorBody({ok: false, error: "too many assets", status: 400})
+testing.assert(filesError.ok == false and filesError.error == "too many assets" and !filesError.contains("status") and !filesError.contains("code"), "file errors expose only ok, error and code")
+testing.assert(projectFilesErrorBody({ok: false, error: "big", code: "project_too_large"}).code == "project_too_large", "file errors keep their code")
+
+testing.assert(megabytes(10485760) == 10 and megabytes(1572864) == 1, "limits are whole megabytes")
+testing.assert(assetSizeFailure("a.svg", 10, 10).len == 0, "an asset at the limit is accepted")
+object bigAsset = assetSizeFailure("a.svg", 10485761, 10485760)
+testing.assert(bigAsset.status == 413 and bigAsset.error == "an asset exceeds your 10 MB limit: a.svg", "an oversized asset names the limit and file")
+testing.assert(projectAssetsFailure(5, 5).len == 0 and projectAssetsFailure(6, 5).code == "project_too_large", "project assets are capped")
+testing.assert(storageAllowanceFailure(100, -1).len == 0, "a negative allowance means storage is counted elsewhere")
+testing.assert(storageAllowanceFailure(100, 100).len == 0, "a project that exactly fits is accepted")
+object full = storageAllowanceFailure(150, 100)
+testing.assert(full.code == "storage_full" and full.overBytes == 50 and full.status == 413, "a full allowance reports the overflow")

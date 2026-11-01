@@ -1,0 +1,190 @@
+export {}
+
+def scanProjectJsonEvents(*json.Stream stream) object (
+  boolean started = false
+  boolean readingMd5ext = false
+  number targets = 0
+  array md5ext = []
+  for event in stream.events() (
+    if !started (
+      started = true
+      if event.type != "object-start" (
+        return {ok: false}
+      )
+    ) else if readingMd5ext (
+      readingMd5ext = false
+      if event.type == "string" (
+        md5ext.append(event.value)
+        if md5ext.len > maxAssetCount * 50 (
+          return {ok: false}
+        )
+      )
+    ) else if event.type == "key" (
+      string key = event.value.toStr()
+      if key == "targets" (
+        targets += 1
+      )
+      readingMd5ext = key == "md5ext"
+    )
+  )
+  if !started (
+    return {ok: false}
+  )
+  return {ok: true, targets: targets, md5ext: md5ext}
+)
+
+def inspectProjectJson(string path) object (
+  *json.Stream stream = json.open(path, maxProjectJsonBytes)
+  object inspected = scanProjectJsonEvents(stream) catch (err) (
+    stream.close()
+    return {ok: false}
+  )
+  stream.close()
+  return inspected
+)
+
+// storageAllowanceBytes is a student's local limit, or -1. A Rotur owner's
+// storage is held in the ledger instead, unless enforceStorage is off
+// (admins); the result's hold is committed or released by the caller.
+def uploadProjectFiles(object project, string extractDir, object benefits, number storageAllowanceBytes, boolean enforceStorage) object (
+  array names = fs.readDir(extractDir).unwrapOr([])
+  string jsonPath = extractDir ++ "/project.json"
+  if !fs.exists(jsonPath) (
+    return {ok: false, error: "sb3 has no project.json", status: 400}
+  )
+  number projectJsonBytes = fs.size(jsonPath).unwrapOr(0)
+  if projectJsonBytes > maxProjectJsonBytes (
+    return {ok: false, error: "project.json exceeds the 256 MB expanded limit", code: "project_too_large", status: 413}
+  )
+  object inspected = inspectProjectJson(jsonPath)
+  if !inspected.ok (
+    return {ok: false, error: "invalid project.json", status: 400}
+  )
+  if inspected.targets.toNum() == 0 (
+    return {ok: false, error: "invalid project.json", status: 400}
+  )
+  string gzipPath = jsonPath ++ ".gz"
+  if !zip.gzip(jsonPath, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+    return {ok: false, error: "compressed project data exceeds the 20 MB limit", code: "project_too_large", status: 413}
+  )
+
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  array projectAssets = []
+  array pendingUploads = []
+  object pendingNames = {}
+  number assetCount = 0
+
+  for i names.len (
+    string name = names[i].toStr()
+    if name != "project.json" (
+      if isValidMd5Ext(name) (
+        assetCount += 1
+        if assetCount > maxAssetCount (
+          return {ok: false, error: "too many assets", status: 400}
+        )
+        string assetPath = extractDir ++ "/" ++ name
+        object tooLarge = assetSizeFailure(name, fs.size(assetPath).unwrapOr(0), benefits.maxProjectAssetBytes.toNum())
+        if tooLarge.len > 0 (
+          return tooLarge
+        )
+        string content = fs.readFile(assetPath).unwrapOr("")
+        string actualHash = content.hashMD5()
+        if actualHash != md5PartOf(name) (
+          return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
+        )
+        projectAssets.append(name)
+        string localAssetPath = localBlobPath(assetObjectKey(name))
+        boolean needsUpload = assetNeedsUpload(knownAssets.contains(name), fs.exists(localAssetPath),!r2Local)
+        if needsUpload and !pendingNames.contains(name) (
+          pendingUploads.append({path: assetPath, name: name})
+          pendingNames[name] = true
+          knownAssets[name] = content.toBytes().len
+        )
+      )
+    )
+  )
+
+  object providedSet = {}
+  for i projectAssets.len (
+    providedSet[projectAssets[i].toStr()] = true
+  )
+  array referencedList = inspected.md5ext.assert(array)
+  object referencedNames = {}
+  for i referencedList.len (
+    string name = referencedList[i].toStr()
+    if isValidMd5Ext(name) (
+      referencedNames[name] = true
+    )
+  )
+  array referencedUnique = referencedNames.getKeys()
+  for i referencedUnique.len (
+    string name = referencedUnique[i].toStr()
+    if !providedSet.contains(name) (
+      if !knownAssets.contains(name) (
+        return {ok: false, error: "missing asset: " ++ name, status: 400}
+      )
+      projectAssets.append(name)
+      string localAssetPath = localBlobPath(assetObjectKey(name))
+      if !r2Local and fs.exists(localAssetPath) and !pendingNames.contains(name) (
+        pendingUploads.append({path: localAssetPath, name: name})
+        pendingNames[name] = true
+      )
+    )
+  )
+  if projectAssets.len > maxAssetCount (
+    return {ok: false, error: "too many assets", status: 400}
+  )
+
+  number assetBytes = 0
+  for i projectAssets.len (
+    string name = projectAssets[i].toStr()
+    if knownAssets.contains(name) (
+      assetBytes += knownAssets[name].toNum()
+    )
+  )
+  object assetsTooLarge = projectAssetsFailure(assetBytes, benefits.maxProjectAssetsBytes.toNum())
+  if assetsTooLarge.len > 0 (
+    return assetsTooLarge
+  )
+  object storageFull = storageAllowanceFailure(assetBytes + fs.size(gzipPath).unwrapOr(0) + projectHistoryBytes(project), storageAllowanceBytes)
+  if storageFull.len > 0 (
+    return storageFull
+  )
+  object hold = noStorageHold()
+  string ownerId = projectOwnerId(project)
+  if usesRoturStorage(ownerId) (
+    // Assets uploaded ahead are counted by this save now, not twice.
+    releasePendingAssetHolds(ownerId, project.owner.toStr(), projectAssets)
+    object incoming = projectStorageSummary(project, knownAssets)
+    object incomingJson = {}
+    incomingJson["incoming:" ++ project.id.toStr()] = fs.size(gzipPath).unwrapOr(0)
+    incoming.json = incomingJson
+    incoming.assets = projectAssets
+    object saving = {}
+    saving[project.id.toStr()] = incoming
+    hold = storageHold(ownerId, {projects: saving}, enforceStorage)
+    if hold.ok != true (
+      return {ok: false, error: "storage full", code: "storage_full", status: 413, refusal: hold.refusal}
+    )
+  )
+
+  number uploaded = 0
+  for i pendingUploads.len (
+    object upload = pendingUploads[i].assert(object)
+    string path = upload.path.toStr()
+    string name = upload.name.toStr()
+    string content = fs.readFile(path).unwrapOr("")
+    if !stageR2Blob(assetObjectKey(name), content, contentTypeForExt(extPartOf(name)), "") (
+      storageHoldRelease(ownerId, hold)
+      return {ok: false, error: "asset upload failed", status: 502}
+    )
+    knownAssets[name] = content.toBytes().len
+    uploaded += 1
+  )
+  if uploaded > 0 (
+    saveAssetsIndex(assetsIndex)
+  )
+
+  return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.size(gzipPath).unwrapOr(0), assetBytes: assetBytes, hold: hold}
+)

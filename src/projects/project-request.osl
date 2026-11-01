@@ -1,0 +1,32 @@
+export {}
+
+def loadRequestedProject(*serve.Context c) object? (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return null
+  )
+  return res.project.assert(object)
+)
+
+def isEditorSession(*serve.Context c) boolean (
+  return contextString(c, "sessionScope") == "editor"
+)
+
+def refused(*serve.Context c, Refusal refusal) boolean (
+  if !isRefused(refusal) (
+    return false
+  )
+  if refusal.hasBody (
+    c.json(refusal.status, refusal.body)
+  ) else if refusal.status == 400 (
+    c.badRequest(refusal.message)
+  ) else if refusal.status == 403 (
+    c.forbidden(refusal.message)
+  ) else if refusal.status == 404 (
+    c.notFound(refusal.message)
+  ) else (
+    c.internalError(refusal.message)
+  )
+  return true
+)

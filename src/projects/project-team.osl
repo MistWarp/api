@@ -1,0 +1,61 @@
+export {}
+
+def applyCollaborators(object project, array incoming) Refusal (
+  array collaborators = []
+  number totalShare = 0
+  for i incoming.len (
+    if collaborators.len < 25 (
+      object entry = incoming[i].assert(object)
+      string username = normalizeUsername(entry.username.toStr())
+      string role = entry.role.toStr().toLower().strip()
+      boolean validRole = role == "editor" or role == "maintainer" or role == "contributor" or role == "tester"
+      number share = 0
+      if entry.contains("share") and entry.share != null (
+        share = entry.share.toNum()
+      )
+      if share < 0 or share > 50 (
+        return refuse(400, "each teammate share must be between 0 and 50 percent")
+      )
+      if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
+        string teammateId = discoverUserIdentity(username)
+        if teammateId == "" (
+          return refuse(400, "Rotur user not found: " ++ username)
+        )
+        for memberIndex collaborators.len (
+          if collaborators[memberIndex].username.toStr() == username (
+            return refuse(400, "a person can only appear once in the project team")
+          )
+        )
+        totalShare += share
+        collaborators.append({username: username, userId: teammateId, role: role, share: share})
+      )
+    )
+  )
+  if totalShare > 70 (
+    return refuse(400, "teammate revenue shares cannot exceed 70 percent")
+  )
+  project.collaborators = collaborators
+  return noRefusal()
+)
+
+def isNewTeammate(object member, array previousTeam) boolean (
+  for j previousTeam.len (
+    object previousMember = previousTeam[j].assert(object)
+    if normalizeUsername(previousMember.username.toStr()) == normalizeUsername(member.username.toStr()) and previousMember.role == member.role (
+      return false
+    )
+  )
+  return true
+)
+
+def notifyNewTeammates(object project, array previousTeam, string actor) (
+  array nextTeam = project.collaborators.assert(array)
+  for i nextTeam.len (
+    object member = nextTeam[i].assert(object)
+    if isNewTeammate(member, previousTeam) (
+      addNotification(member.username.toStr(), actor, "project_shared", {
+        projectId: project.id, projectTitle: project.title, role: member.role
+      })
+    )
+  )
+)
