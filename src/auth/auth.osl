@@ -1,0 +1,369 @@
+export {
+  cleanupExpiredSessions,
+  createSession,
+  getSession,
+  isAdminUser,
+  requestToken,
+  setAuthCookie
+}
+
+auto sessionCache = cache.new({capacity: 10000, ttl: 3600000})
+
+def setAuthCookie(*serve.Context c, string sessionId) (
+  c.setCookie("auth_token", sessionId, {maxAge: 604800000, path: "/", domain: "", secure: appURL.startsWith("https://"), httpOnly: true})
+)
+
+def clearAuthCookie(*serve.Context c) (
+  c.clearCookie("auth_token")
+)
+
+def createSession(string username, string userId, boolean minor) string (
+  string sessionId = randomString(32)
+  object session = {
+    username: username,
+    userId: userId,
+    minor: minor,
+    createdAt: timestamp
+  }
+  writeFile(sessionsDir ++ sessionId ++ ".json", session)
+  sessionCache.set(sessionId, session)
+  return sessionId
+)
+
+def createScopedSession(string parentToken, object parent, string scope, number expiresAt) string (
+  string sessionId = randomString(32)
+  object session = {
+    username: parent.username,
+    userId: parent.userId,
+    minor: parent.minor == true,
+    createdAt: timestamp,
+    scope: scope,
+    expiresAt: expiresAt,
+    parent: parentToken
+  }
+  writeFile(sessionsDir ++ sessionId ++ ".json", session)
+  sessionCache.set(sessionId, session)
+  return sessionId
+)
+
+def getSession(string token) object (
+  if !isSafePathPart(token) (
+    return {ok: false, error: "invalid token"}
+  )
+  string path = sessionsDir ++ token ++ ".json"
+  object session = {}
+  if sessionCache.has(token) (
+    session = sessionCache.get(token).assert(object)
+  ) else (
+    auto res = readFile(path)
+    if !res.ok (
+      return {ok: false, error: "session not found"}
+    )
+    session = res.data.assert(object)
+    sessionCache.set(token, session)
+  )
+  if timestamp - session.createdAt.toNum() > 604800000 (
+    void fs.remove(path)
+    sessionCache.delete(token)
+    return {ok: false, error: "session expired"}
+  )
+  string scope = (session.scope ?? "").toStr()
+  if scope != "" (
+    string parentToken = (session.parent ?? "").toStr()
+    if timestamp > (session.expiresAt ?? 0).toNum() or parentToken == "" or parentToken == token or !getSession(parentToken).ok (
+      void fs.remove(path)
+      sessionCache.delete(token)
+      return {ok: false, error: "session expired"}
+    )
+  )
+  string username = session.username.toStr()
+  string userId = session.userId.toStr()
+  string mapped = refreshUsernameForId(userId)
+  if mapped != "" (
+    username = mapped
+  )
+  return {ok: true, username: username, userId: userId, minor: session.minor == true, scope: scope}
+)
+
+def deleteSession(string token) boolean (
+  if !isSafePathPart(token) (
+    return false
+  )
+  sessionCache.delete(token)
+  return fs.remove(sessionsDir ++ token ++ ".json")
+)
+
+def cleanupExpiredSessions() (
+  array files = fs.readDir(sessionsDir).unwrapOr([])
+  for i files.len (
+    string path = sessionsDir ++ files[i].toStr()
+    auto res = readFile(path)
+    if res.ok (
+      object session = res.data.assert(object)
+      boolean scopedExpired = (session.scope ?? "").toStr() != "" and (timestamp > (session.expiresAt ?? 0).toNum() or !fs.exists(sessionsDir ++ (session.parent ?? "").toStr() ++ ".json"))
+      if timestamp - session.createdAt.toNum() > 604800000 or scopedExpired (
+        void fs.remove(path)
+      )
+    )
+  )
+)
+
+def requestToken(*serve.Context c) string (
+  string token = (c.bearer() ?? "")
+  if token != "" (
+    return token
+  )
+  string verb = c.method().toUpper()
+  if verb != "GET" and verb != "HEAD" (
+    return ""
+  )
+  return (c.cookie("auth_token") ?? "")
+)
+
+def isAdminUser(string username) boolean (
+  string key = normalizeUsername(username)
+  if adminUsers.contains(key) (
+    return true
+  )
+  return cachedAdmins().contains(key)
+)
+
+def handleRoturAuth(*serve.Context c) (
+  string validator = (c.query("v") ?? "")
+  if validator == "" (
+    c.json(401, {ok: false, error: "missing validator"})
+    return
+  )
+
+  // The editor makes validators keyed to MistWarp's Rotur App, which its own
+  // sign-in token can do without validators:generate; Rotur then also refuses
+  // anyone the app has banned. Older editors use the old key. A validator
+  // checked against the wrong key is just invalid, so try the next.
+  array keys = [roturAppKey]
+  if roturClientId != "" (
+    keys = [roturClientId, roturAppKey]
+  )
+  object data = {}
+  for i keys.len (
+    object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator)).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+    // Rotur answers every validator with 200, valid or not.
+    number status = (resp.status ?? 0).toNum().toInt()
+    if status < 200 or status >= 300 (
+      c.json(401, {ok: false, error: "failed to validate token"})
+      return
+    )
+    auto parsed = json.parse(resp.body, {type: "object"})
+    if parsed.isErr() (
+      c.json(401, {ok: false, error: "invalid response from rotur"})
+      return
+    )
+    data = parsed.unwrap().assert(object)
+    if (data.code ?? "").toStr() != "invalid_validator" (
+      break
+    )
+  )
+
+  // Rotur answers every "no" with valid false and a code. Only a real "yes"
+  // signs anyone in.
+  if data.valid != true (
+    string code = (data.code ?? "").toStr()
+    if code != "" and code != "invalid_validator" (
+      object refusal = {ok: false, code: code, error: (data.error ?? "Rotur refused this sign-in.").toStr(), redirectUrl: (data.redirect_url ?? "https://rotur.dev/me").toStr()}
+      // An app ban says why, and until when.
+      if (data.reason ?? "").toStr() != "" (
+        refusal.reason = data.reason.toStr()
+      )
+      if (data.until ?? 0).toNum() > 0 (
+        refusal.until = data.until.toNum()
+      )
+      c.json(403, refusal)
+      return
+    )
+    c.json(401, {ok: false, error: "rotur rejected the login validator", redirectUrl: "https://rotur.dev"})
+    return
+  )
+
+  // Old-key validators skip Rotur's checks for the app. One made by another
+  // Rotur App's sign-in was passed on to MistWarp, so it isn't accepted.
+  string madeBy = (data.app ?? "").toStr()
+  if roturClientId != "" and madeBy.startsWith("app_") and madeBy != roturClientId (
+    c.json(401, {ok: false, error: "this sign-in was made for another app", redirectUrl: "https://rotur.dev"})
+    return
+  )
+
+  string userId = data.id.toStr()
+  string username = data.username.toStr()
+  boolean minor = roturReportsMinor(data)
+
+  ensureUserIdentity(userId, username)
+
+  if isBannedUser(username) (
+    string reason = banReasonFor(username)
+    string banError = "This account is banned from MistWarp."
+    if reason != "" (
+      banError = "This account is banned from MistWarp: " ++ reason
+    )
+    c.json(403, {ok: false, code: "banned", error: banError, redirectUrl: "https://rotur.dev/me"})
+    return
+  )
+
+  object profile = loadProfile(username)
+  profile.userId = userId
+  profile.username = username
+  profile.minor = minor
+  saveProfile(profile)
+
+  string sessionId = createSession(username, userId, minor)
+  setAuthCookie(c, sessionId)
+
+  c.json(200, {
+    ok: true,
+    token: sessionId,
+    username: username,
+    isAdmin: isAdminUser(username),
+    minor: minor
+  })
+)
+
+def handleLogout(*serve.Context c) (
+  string token = requestToken(c)
+  if token != "" (
+    deleteSession(token)
+  )
+  clearAuthCookie(c)
+  c.json(200, {ok: true})
+)
+
+object editorSessionMints = {}
+
+def editorSessionMintAllowed(string userId) boolean (
+  sync.lock("editor-session-mints")
+  object entry = (editorSessionMints[userId] ?? {}).assertElse(object, {})
+  if timestamp - (entry.since ?? 0).toNum() > 3600000 (
+    entry = {since: timestamp, count: 0}
+  )
+  boolean allowed = entry.count.toNum() < editorSessionMintsPerHour
+  if allowed (
+    entry.count = entry.count.toNum() + 1
+  )
+  editorSessionMints[userId] = entry
+  sync.unlock("editor-session-mints")
+  return allowed
+)
+
+def handleCreateEditorSession(*serve.Context c) (
+  if contextString(c, "sessionScope") != "" (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if !editorSessionMintAllowed(contextString(c, "userId")) (
+    c.json(429, {ok: false, code: "rate_limited", error: "Too many editor sign-ins. Try again later."})
+    return
+  )
+  string token = requestToken(c)
+  object parent = getSession(token)
+  if !parent.ok (
+    c.json(401, {ok: false, error: "not authenticated"})
+    return
+  )
+  number expiresAt = timestamp + editorSessionTtlMs
+  string editorToken = createScopedSession(token, parent, "editor", expiresAt)
+  c.json(200, {ok: true, token: editorToken, expiresAt: expiresAt})
+)
+
+def handleGetMe(*serve.Context c) (
+  if !contextBool(c, "authenticated") (
+    c.json(401, {ok: false, error: "not authenticated"})
+    return
+  )
+  string username = contextString(c, "username")
+  if contextBool(c, "isStudent") (
+    object student = loadStudent(contextString(c, "userId"))
+    c.json(200, {
+      ok: true,
+      username: username,
+      displayName: student.displayName,
+      created: student.createdAt,
+      isAdmin: false,
+      isStudent: true,
+      minor: true,
+      classId: student.classId,
+      standing: "good"
+    })
+    return
+  )
+  object profile = loadProfile(username)
+  number created = 0
+  if profile.contains("created") and profile.created != null (
+    created = profile.created.toNum()
+  )
+  c.json(200, {
+    ok: true,
+    username: username,
+    created: created,
+    bio: profile.bio,
+    featuredProject: profile.featuredProject,
+    isAdmin: contextBool(c, "isAdmin"),
+    minor: contextBool(c, "isMinor") or profileIsMinor(profile),
+    standing: standingLevel(username)
+  })
+)
+
+def handleHealth(*serve.Context c) (
+  c.json(200, {ok: true, status: "operational", checkedAt: timestamp})
+)
+
+def externalDependency(string url) object (
+  number started = timestamp
+  object resp = requests.get(url).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
+  string status = "unavailable"
+  if resp.status != 0 (
+    status = "operational"
+  )
+  return {
+    status: status,
+    latencyMs: timestamp - started
+  }
+)
+
+def handleDependencyHealth(*serve.Context c) (
+  string probePath = tmpDir ++ "health-" ++ randomString(8)
+  boolean storageOk = fs.writeFile(probePath, "ok")
+  if storageOk (
+    storageOk = fs.readFile(probePath).unwrapOr("") == "ok"
+    void fs.remove(probePath)
+  )
+
+  object roturStatus = externalDependency(roturBase)
+  object giteaStatus = externalDependency(giteaURL ++ "/api/v1/version")
+  string assetMode = "r2"
+  if r2Local (
+    assetMode = "local"
+  )
+  object assetStatus = {status: "operational", mode: assetMode}
+  if !r2Local and (r2PublicBase == "" or r2Bucket == "") (
+    assetStatus.status = "misconfigured"
+  )
+
+  string overall = "operational"
+  if !storageOk or roturStatus.status != "operational" or assetStatus.status != "operational" (
+    overall = "degraded"
+  )
+  string storageStatus = "unavailable"
+  if storageOk (
+    storageStatus = "operational"
+  )
+  giteaStatus.optional = true
+  c.json(200, {
+    ok: true,
+    status: overall,
+    checkedAt: timestamp,
+    dependencies: {
+      api: {status: "operational"},
+      storage: {status: storageStatus},
+      assets: assetStatus,
+      rotur: roturStatus,
+      gitea: giteaStatus
+    }
+  })
+)

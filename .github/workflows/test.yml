@@ -1,0 +1,47 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Conventions
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check_conventions.py --base=origin/${{ github.base_ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install OSL
+        env:
+          OSL_COMMIT: 5895982fa61d3e7c9e9c7f819c9e33f645d04f0f
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone --filter=blob:none https://git.rotur.dev/osl/.go /tmp/osl-source
+          git -C /tmp/osl-source checkout "$OSL_COMMIT"
+          (cd /tmp/osl-source && go build -buildvcs=false -o "$HOME/.local/bin/osl" .)
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: OSL version
+        run: osl version
+
+      - name: Type check
+        run: osl lsp check main.osl
+
+      - name: Test
+        run: osl test
+
+      - name: Compile
+        run: osl compile main.osl -o "$RUNNER_TEMP/mwapi"
+
+      - name: Smoke test
+        run: python3 scripts/e2e_smoke.py "$RUNNER_TEMP/mwapi"

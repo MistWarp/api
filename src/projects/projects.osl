@@ -1,0 +1,4001 @@
+export {
+  bannedKeyMatches,
+  canEditProject,
+  canViewProject,
+  canViewProjectJson,
+  cleanupExpiredStagedUploadParts,
+  deleteOrphanedAssets,
+  ensureProjectJsonSnapshot,
+  ensureProjectWorkspaceSnapshots,
+  ensureViewKey,
+  forkFailureResponse,
+  forkProjectFor,
+  ownerStorageBytes,
+  pendingUploadEvents,
+  projectJsonAccess,
+  projectMustStayPrivate,
+  projectResponse,
+  projectRole,
+  projectVersionHistory,
+  purgeProject,
+  purgeProjects,
+  quotaPath,
+  removeProjectStorageKeyIfOrphaned,
+  removeString,
+  roturMembershipUrl,
+  roturStorageFullResponse,
+  sharedProjectsCache,
+  storageDetails,
+  storageFullResponse,
+  sweepStagedProjects,
+  trashedProjectsOwnedBy,
+  validateUploadedHistory,
+  vanityLapseLoop
+}
+
+auto viewDedup = cache.new({capacity: 100000, ttl: 21600000})
+auto viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
+auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
+
+def removeString(array items, string value) array (
+  array next = []
+  for i items.len (
+    if items[i].toStr() != value (
+      next.append(items[i])
+    )
+  )
+  return next
+)
+
+def projectRole(object project, string username) string (
+  string userId = userIdForUsername(username)
+  string ownerId = ""
+  if project.contains("ownerId") and project.ownerId != null (
+    ownerId = project.ownerId.toStr()
+  )
+  if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+    return "owner"
+  )
+  if project.contains("collaborators") and project.collaborators != null (
+    array collaborators = project.collaborators.assert(array)
+    for i collaborators.len (
+      object collaborator = collaborators[i].assert(object)
+      string collaboratorId = ""
+      if collaborator.contains("userId") and collaborator.userId != null (
+        collaboratorId = collaborator.userId.toStr()
+      )
+      if identityMatches(collaboratorId, collaborator.username.toStr(), userId, username) (
+        return collaborator.role.toStr()
+      )
+    )
+  )
+  string teacherRole = classTeacherRoleForProject(project, userId)
+  if teacherRole != "" (
+    return teacherRole
+  )
+  return presentationViewerRole(project, userId)
+)
+
+def canEditProject(object project,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  if contextBool(c, "isAdmin") (
+    return true
+  )
+  if canManageGroupContent(project, c) (
+    return true
+  )
+  string role = projectRole(project, contextString(c, "username"))
+  return role == "owner" or role == "maintainer"
+)
+
+def canViewForkProject(object project,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
+    auto parentResult = loadProject(project.remixParent.toStr())
+    if parentResult.ok and canEditProject(parentResult.project.assert(object), c) (
+      return true
+    )
+  )
+  if project.contains("remixRoot") and project.remixRoot != null and project.remixRoot.toStr() != "" (
+    string rootId = project.remixRoot.toStr()
+    if !project.contains("remixParent") or project.remixParent.toStr() != rootId (
+      auto rootResult = loadProject(rootId)
+      if rootResult.ok and canEditProject(rootResult.project.assert(object), c) (
+        return true
+      )
+    )
+  )
+  return false
+)
+
+def canViewProject(object project,*serve.Context c) boolean (
+  if projectHiddenFrom(project, c) (
+    return false
+  )
+  if projectIsViewable(project) (
+    return true
+  )
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+    return true
+  )
+  if projectRole(project, contextString(c, "username")) != "" (
+    return true
+  )
+  if canViewForkProject(project, c) (
+    return true
+  )
+  return canEditProject(project, c)
+)
+
+def canViewProjectJson(object project,*serve.Context c) boolean (
+  if projectHiddenFrom(project, c) (
+    return bannedKeyMatches(project, (c.query("k") ?? ""))
+  )
+  if contextBool(c, "authenticated") and projectRole(project, contextString(c, "username")) == "viewer" (
+    return true
+  )
+  if canSaveLiveProject(project, c) return true
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+    return true
+  )
+  if canViewForkProject(project, c) (
+    return true
+  )
+  if project.shared == true or projectVisibility(project) == "unlisted" (
+    return true
+  )
+  string k = projectViewKey(project)
+  if k != "" and (c.query("k") ?? "") == k (
+    return true
+  )
+  return canEditProject(project, c)
+)
+
+def ensureViewKey(object project) (
+  if project.shared != true and projectViewKey(project) == "" (
+    project.viewKey = randomString(16)
+    saveProject(project)
+  )
+  boolean ownerBanned = projectOwnerBanned(project)
+  if ownerBanned and bannedViewKey(project) == "" (
+    project.bannedViewKey = randomString(16)
+    saveProject(project)
+  ) else if !ownerBanned and bannedViewKey(project) != "" (
+    // A later ban gets a new key.
+    project.delete("bannedViewKey")
+    saveProject(project)
+  )
+)
+
+// While the owner is banned, a project's JSON is only served with this key,
+// which only admins are handed (the player fetches the JSON signed out).
+// Older view keys stop working until the ban is lifted.
+def bannedViewKey(object project) string (
+  return (project.bannedViewKey ?? "").toStr()
+)
+
+def bannedKeyMatches(object project, string key) boolean (
+  return bannedViewKey(project) != "" and key == bannedViewKey(project)
+)
+
+def projectMustStayPrivate(object project) boolean (
+  return isStudentUserId((project.ownerId ?? "").toStr())
+)
+
+def projectVersionHistory(object project) object (
+  string branch = "main"
+  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+    branch = project.gitBranch.toStr()
+  )
+  array commits = []
+  if project.contains("gitCommits") and project.gitCommits != null (
+    commits = project.gitCommits.assert(array)
+  )
+  object graph = {branches: [], branchLogs: [], nodes: []}
+  if project.contains("gitGraph") and project.gitGraph != null (
+    graph = project.gitGraph.assert(object)
+  )
+  boolean virtual = commits.len == 0
+  if virtual (
+    string sha = "virtual-" ++ project.id.toStr()
+    object first = {
+      sha: sha,
+      message: "Initial version",
+      author: project.owner,
+      date: project.created,
+      virtual: true
+    }
+    commits = [first]
+    graph = {
+      branches: [branch],
+      branchLogs: [{branch: branch, oids: [sha]}],
+      nodes: [{
+        sha: sha,
+        message: "Initial version",
+        author: project.owner,
+        date: project.created,
+        parents: [],
+        branches: [branch],
+        virtual: true
+      }]
+    }
+  )
+  return {branch: branch, commits: commits, graph: graph, virtual: virtual}
+)
+
+def projectCommentDonationAnalytics(object project) object (
+  array comments = loadComments("project-" ++ project.id.toStr())
+  array donors = []
+  array recent = []
+  number total = 0
+  number count = 0
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    if comment.contains("donationAmount") and comment.donationAmount != null and comment.donationAmount.toNum() > 0 (
+      number amount = comment.donationAmount.toNum()
+      number donatedAt = comment.created.toNum()
+      string username = comment.author.toStr()
+      string donorKey = normalizeUsername(username)
+      number donorIndex = -1
+      for d donors.len (
+        object existingDonor = donors[d].assert(object)
+        if normalizeUsername(existingDonor.username.toStr()) == donorKey (
+          donorIndex = d
+        )
+      )
+      if donorIndex >= 0 (
+        object donor = donors[donorIndex].assert(object)
+        donor.amount = donor.amount.toNum() + amount
+        donor.count = donor.count.toNum() + 1
+        if donatedAt > donor.lastDonatedAt.toNum() (
+          donor.lastDonatedAt = donatedAt
+          donor.username = username
+        )
+        donors[donorIndex] = donor
+      ) else (
+        donors.append({username: username, amount: amount, count: 1, lastDonatedAt: donatedAt})
+      )
+      recent.append({
+        commentId: comment.id,
+        username: username,
+        amount: amount,
+        at: donatedAt
+      })
+      total += amount
+      count += 1
+    )
+  )
+  donors.sortBy("amount", "descending")
+  recent.sortBy("at", "descending")
+  return {
+    total: (total * 100).toInt() / 100,
+    count: count,
+    uniqueDonors: donors.len,
+    donors: paginate(donors, 0, 25),
+    recent: paginate(recent, 0, 50)
+  }
+)
+
+def projectJsonAccess(object project,*serve.Context c) object (
+  string key = ""
+  if project.shared != true and projectViewKey(project) != "" (
+    key = projectViewKey(project)
+    if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+      key = (c.query("k") ?? "")
+    )
+  )
+  boolean allowed = true
+  if projectOwnerBanned(project) (
+    if allowed and contextBool(c, "isAdmin") (
+      key = bannedViewKey(project)
+    ) else (
+      allowed = false
+    )
+  )
+  return {allowed: allowed, key: key}
+)
+
+def projectResponse(object project,*serve.Context c) object (
+  array loves = project.loves.assert(array)
+  array broken = []
+  if project.contains("brokenhearts") (
+    broken = project.brokenhearts.assert(array)
+  )
+  string viewer = normalizeUsername(contextString(c, "username"))
+  string myReaction = ""
+  if loves.contains(viewer) (
+    myReaction = "heart"
+  )
+  if broken.contains(viewer) (
+    myReaction = "brokenheart"
+  )
+  string notes = ""
+  if project.contains("notes") and project.notes != null (
+    notes = project.notes.toStr()
+  )
+  array credits = []
+  if project.contains("credits") and project.credits != null (
+    credits = project.credits.assert(array)
+  )
+  boolean commentsOff = false
+  if project.contains("commentsOff") and project.commentsOff == true (
+    commentsOff = true
+  )
+  array tags = []
+  if project.contains("tags") and project.tags != null (
+    tags = project.tags.assert(array)
+  )
+  object compatibility = {mobile: false, keyboard: false, controller: false}
+  if project.contains("compatibility") and project.compatibility != null (
+    compatibility = project.compatibility.assert(object)
+  )
+  boolean isOwner = canEditProject(project, c)
+  array collaborators = []
+  if project.contains("collaborators") and project.collaborators != null (
+    collaborators = project.collaborators.assert(array)
+  )
+  boolean hasContent = project.lastUploadAt.toNum() > 0
+  hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
+  object activeVanity = vanityState(project)
+  string jsonBase = projectJsonBaseUrl(project)
+  object jsonAccess = projectJsonAccess(project, c)
+  string jsonUrl = keyedJsonUrl(jsonBase, jsonAccess)
+  boolean ownerBanned = projectOwnerBanned(project)
+  if !hasContent (
+    jsonUrl = ""
+  )
+  number myPlaytimeMs = 0
+  number myLastPlayed = 0
+  if contextBool(c, "authenticated") (
+    myPlaytimeMs = projectPlaytime(project.id.toStr(), contextString(c, "username"))
+    myLastPlayed = projectLastPlayed(project.id.toStr(), contextString(c, "username"))
+  )
+  object response = {
+    id: project.id,
+    owner: project.owner,
+    groupTag: groupTagOf(project),
+    branding: if project.contains("branding") then project.branding else {},
+    vanitySlug: activeVanity.slug.toStr(),
+    title: project.title,
+    tags: tags,
+    compatibility: compatibility,
+    description: project.description,
+    instructions: project.instructions,
+    notes: notes,
+    credits: credits,
+    repo: project.repo,
+    projectJsonUrl: jsonUrl,
+    assetsBase: assetsBaseUrl(),
+    thumbUrl: viewerThumbUrlFor(project),
+    cardUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/card.svg",
+    created: project.created,
+    edited: project.edited,
+    sharedAt: project.sharedAt,
+    shared: project.shared,
+    visibility: projectVisibility(project),
+    remixShare: if project.contains("remixShare") then project.remixShare else 0,
+    saved: isInLibrary(viewer, project.id.toStr()),
+    saveCount: projectSaves(project),
+    myPlaytimeMs: myPlaytimeMs,
+    myLastPlayed: myLastPlayed,
+    hasContent: hasContent,
+    remixable: projectRemixable(project),
+    canRemix: canRemixProject(project, c),
+    seeInside: projectSeeInside(project),
+    canSeeInside: canSeeInsideProject(project, c),
+    lastUploadAt: project.lastUploadAt,
+    remixParent: project.remixParent,
+    contributionOnly: projectMustStayPrivate(project),
+    scratchOrigin: project.scratchOrigin,
+    views: project.views,
+    loveCount: loves.len,
+    brokenHeartCount: broken.len,
+    myReaction: myReaction,
+    commentsOff: commentsOff,
+    sizeBytes: projectSizeBytes(project),
+    isOwner: isOwner
+  }
+  // Owners see a lapsed vanity URL, so they can keep it or clear it.
+  if isOwner and activeVanity.lapsed == true (
+    response.vanityReserved = project.vanitySlug
+    response.vanityLapsed = true
+  )
+  if ownerBanned (
+    response.ownerBanned = true
+  )
+  if isOwner and projectHiddenByModerator(project) (
+    response.moderationHidden = moderationHoldResponse(project, c)
+  )
+  if contextBool(c, "isAdmin") (
+    object shadowed = shadowBannedSet()
+    object projectShadow = projectShadowBanEntry(project.id.toStr())
+    response.shadowBan = {
+      project: projectShadow.len > 0,
+      projectReason: (projectShadow.reason ?? "").toStr(),
+      owner: entryOwnerBanned(shadowed, {owner: project.owner, ownerId: project.ownerId ?? ""})
+    }
+  )
+  response.workspaceUrl = ""
+  response.canViewSource = canSeeInsideProject(project, c)
+  if response.canViewSource == true and project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
+    response.workspaceUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
+  )
+  response.gitHead = projectGitHead(project)
+  response.uploadFeatures = ["worktreeAssets"]
+  response.gitBranch = "main"
+  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+    response.gitBranch = project.gitBranch
+  )
+  response.commitCount = projectVersionHistory(project).commits.assert(array).len
+  response.remixBaseCommit = ""
+  if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
+    response.remixBaseCommit = project.remixBaseCommit
+  )
+  response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
+  object searchEntry = indexEntryFromProject(project)
+  response.collaboration = {
+    teamSize: searchEntry.teamSize,
+    contributors: searchEntry.contributors,
+    acceptedChanges: searchEntry.acceptedChanges
+  }
+  response.myRole = projectRole(project, viewer)
+  response.canSaveDirectly = canSaveLiveProject(project, c)
+  if isOwner (
+    response.collaborators = collaborators
+  )
+  if project.contains("jsonBytes") (
+    response.jsonBytes = project.jsonBytes
+  )
+  if project.contains("storedJsonBytes") (
+    response.storedJsonBytes = project.storedJsonBytes
+  )
+  if project.contains("assetBytes") (
+    response.assetBytes = project.assetBytes
+  )
+  if hasContent (
+    array trustedExtensions = projectTrustedExtensions(project)
+    if trustedExtensions.len > 0 (
+      response.trustedExtensions = trustedExtensions
+    )
+  )
+  if isOwner (
+    number analyticsDays = mistwarpBenefitsForProject(project).analyticsDays.toNum()
+    object viewHistory = {}
+    if project.contains("viewHistory") and project.viewHistory != null (
+      viewHistory = project.viewHistory.assert(object)
+    )
+    object saleHistory = {}
+    if project.contains("saleHistory") and project.saleHistory != null (
+      saleHistory = project.saleHistory.assert(object)
+    )
+    response.analytics = {
+      revenue: projectRevenue(project),
+      buyers: trimTimedEntries(projectBuyers(project), analyticsDays),
+      donations: projectCommentDonationAnalytics(project),
+      saves: projectSaves(project),
+      totalPlaytimeMs: projectTotalPlaytime(project.id.toStr()),
+      viewHistory: trimDayHistory(viewHistory, analyticsDays),
+      saleHistory: trimDayHistory(saleHistory, analyticsDays),
+      historyDays: analyticsDays
+    }
+  )
+  return response
+)
+
+def handleGetMyQuota(*serve.Context c) (
+  string username = contextString(c, "username")
+  object details = storageDetails(username)
+  array projects = []
+  array entries = ownerIndexEntries(username, true)
+  for i entries.len (
+    object entry = entries[i].assert(object)
+    projects.append({id: entry.id, title: entry.title, bytes: (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum(), trashed: false})
+  )
+  array trashed = trashedProjectsOwnedBy(contextString(c, "userId"), username)
+  for i trashed.len (
+    object project = trashed[i].assert(object)
+    projects.append({id: project.id, title: project.title, bytes: projectStorageBytes(project), trashed: true})
+  )
+  projects.sortBy("bytes", "descending")
+  // shared: used, limit and remaining are the person's whole Rotur storage,
+  // and mistwarp is what MistWarp holds of it.
+  c.json(200, {
+    ok: true,
+    shared: details.shared,
+    known: details.known,
+    used: details.used,
+    pending: details.pending,
+    limit: details.limit,
+    remaining: details.remaining,
+    mistwarp: details.mistwarp,
+    backpack: backpackStoredBytes(contextString(c, "userId")),
+    largest: paginate(projects, 0, 5),
+    membershipUrl: roturMembershipUrl
+  })
+)
+
+def handleCreateProject(*serve.Context c) (
+  object body = requestJSON(c)
+  string username = contextString(c, "username")
+  number projectLimit = mistwarpBenefitsForUserId(contextString(c, "userId")).maxProjects.toNum()
+  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(contextString(c, "userId"), username) >= projectLimit (
+    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+    return
+  )
+  string groupTag = ""
+  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
+    groupTag = normalizeGroupTag(body.groupTag.toStr())
+    if groupTag == "" (
+      c.badRequest("invalid group tag")
+      return
+    )
+    if !canManageGroupTag(groupTag, c) (
+      c.forbidden("you cannot create projects for this group")
+      return
+    )
+  )
+
+  string title = body.title.toStr().strip()
+  if title == "" (
+    c.badRequest("title is required")
+    return
+  )
+  if title.len > 100 (
+    c.badRequest("title too long")
+    return
+  )
+
+  string remixParent = ""
+  if body.contains("remixParent") and body.remixParent != null (
+    remixParent = body.remixParent.toStr()
+    auto parentResult = loadProject(remixParent)
+    if !parentResult.ok (
+      c.badRequest("remix parent not found")
+      return
+    )
+    if !canRemixProject(parentResult.project.assert(object), c) (
+      c.forbidden("this project cannot be remixed")
+      return
+    )
+  )
+
+  string scratchOrigin = ""
+  if body.contains("scratchOrigin") and body.scratchOrigin != null (
+    scratchOrigin = body.scratchOrigin.toStr()
+  )
+
+  string id = generateId()
+  object project = {
+    id: id,
+    owner: username,
+    ownerId: contextString(c, "userId"),
+    groupTag: groupTag,
+    branding: {},
+    vanitySlug: "",
+    title: title,
+    description: "",
+    instructions: "",
+    repo: null,
+    jsonKey: projectJsonKey(id),
+    workspaceKey: "",
+    gitHead: "",
+    gitBranch: "main",
+    gitCommits: [],
+    gitGraph: {branches: [], branchLogs: [], nodes: []},
+    viewKey: randomString(16),
+    created: timestamp,
+    edited: timestamp,
+    sharedAt: 0,
+    shared: false,
+    lastUploadAt: 0,
+    remixParent: remixParent,
+    remixShare: if remixParent == "" then 0 else 10,
+    remixNotified: false,
+    scratchOrigin: scratchOrigin,
+    views: 0,
+    loves: [],
+    brokenhearts: [],
+    assets: [],
+    tags: [],
+    collaborators: []
+  }
+
+  if !saveProject(project) (
+    c.internalError("failed to save project")
+    return
+  )
+  upsertIndexEntry(project)
+
+  c.json(201, {ok: true, id: id})
+)
+
+def ownedProjectSlotCount(string userId, string username) number (
+  return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
+)
+
+// A project is shared for the first time, from either way of sharing it.
+def projectFirstShared(object project) (
+  addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+  notifyPublishedRemix(project)
+  roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
+)
+
+def notifyPublishedRemix(object project) (
+  if !project.contains("remixNotified") or project.remixNotified != false or !project.contains("remixParent") or project.remixParent.toStr() == "" (
+    return
+  )
+  auto parentResult = loadProject(project.remixParent.toStr())
+  if !parentResult.ok (
+    return
+  )
+  object parent = parentResult.project.assert(object)
+  addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) (
+    roturBadgeEvent(parent.owner.toStr(), "remixed", 0)
+  )
+  addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  project.remixNotified = true
+  saveProject(project)
+)
+
+def quotaPath(string username) string (
+  return quotaDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def pendingUploadEvents(string username) array (
+  auto res = readFile(quotaPath(username))
+  if !res.ok (
+    return []
+  )
+  object data = res.data.assertElse(object, {})
+  if !data.contains("pending") (
+    return []
+  )
+  return quotaPruneEvents(data.pending.assertElse(array, []), timestamp, quotaWindowMs)
+)
+
+def trashedProjectsOwnedBy(string userId, string username) array (
+  array owned = []
+  array trashFiles = fs.readDir(trashDir).unwrapOr([])
+  for i trashFiles.len (
+    string file = trashFiles[i].toStr()
+    if file.endsWith(".json") (
+      auto loaded = readFile(trashDir ++ file)
+      if loaded.ok (
+        object project = loaded.data.assert(object)
+        if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, username) (
+          owned.append(project)
+        )
+      )
+    )
+  )
+  return owned
+)
+
+def ownerStorageBytes(string username) number (
+  number total = 0
+  array entries = ownerIndexEntries(username, true)
+  for i entries.len (
+    object entry = entries[i].assert(object)
+    total += (entry.sizeBytes ?? 0).toNum() + (entry.historyBytes ?? 0).toNum()
+  )
+  array trashed = trashedProjectsOwnedBy(userIdForUsername(username), username)
+  for i trashed.len (
+    total += projectStorageBytes(trashed[i].assert(object))
+  )
+  total += backpackStoredBytes(userIdForUsername(username))
+  return total
+)
+
+// shared is true for Rotur accounts, whose used, limit and remaining are their
+// whole Rotur storage, shared with Rotur's other apps; mistwarp is MistWarp's
+// part of it. known is false when Rotur couldn't say.
+def storageDetails(string username) object (
+  string userId = userIdForUsername(username)
+  if usesRoturStorage(userId) (
+    object allowance = ledgerAllowance(userId)
+    if allowance.ok != true (
+      return {shared: true, known: false, used: 0, pending: 0, limit: 0, remaining: 0, mistwarp: ownerStorageBytes(username)}
+    )
+    return {shared: true, known: true, used: allowance.used, pending: 0, limit: allowance.max, remaining: allowance.available, mistwarp: allowance.bytes + allowance.reserved}
+  )
+  number limit = mistwarpBenefitsForUsername(username).storageBytes.toNum()
+  number used = ownerStorageBytes(username)
+  number pending = quotaTotalBytes(pendingUploadEvents(username), timestamp, quotaWindowMs)
+  number remaining = limit - used - pending
+  if remaining < 0 (
+    remaining = 0
+  )
+  return {shared: false, known: true, used: used, pending: pending, limit: limit, remaining: remaining, mistwarp: used}
+)
+
+string roturMembershipUrl = "https://rotur.dev/membership"
+
+// The ledger refused something because the person's Rotur storage is full.
+def roturStorageFullResponse(*serve.Context c, object refusal) (
+  c.json(413, {
+    ok: false,
+    code: "storage_full",
+    shared: true,
+    error: "Your Rotur storage is full. Delete projects or backpack items you no longer need and empty the trash, or get more storage with a Rotur membership at rotur.dev/membership.",
+    used: (refusal.used ?? 0).toNum(),
+    pending: 0,
+    limit: (refusal.max ?? 0).toNum(),
+    remaining: (refusal.available ?? 0).toNum(),
+    needed: (refusal.needed ?? 0).toNum(),
+    membershipUrl: roturMembershipUrl
+  })
+)
+
+def storageFullResponse(*serve.Context c, object details, number neededBytes) (
+  number usedMb = ((details.used.toNum() + details.pending.toNum()) / 1048576).toInt()
+  number limitMb = (details.limit.toNum() / 1048576).toInt()
+  number neededMb = (neededBytes / 1048576).toInt() + 1
+  c.json(413, {ok: false, code: "storage_full", error: "Your projects and backpack use " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB of storage, and this needs about " ++ neededMb.toStr() ++ " MB more. Delete projects or backpack items you no longer need and empty the trash, or upgrade your plan.", used: details.used, pending: details.pending, limit: details.limit, remaining: details.remaining})
+)
+
+// Assets uploaded ahead of a save count against storage until a saved
+// project references them or they age out.
+def reservePendingUpload(string username, string name, number bytes, number limit, boolean enforceLimit) object (
+  string lockName = "upload-quota-" ++ normalizeUsername(username)
+  sync.lock(lockName)
+  array events = pendingUploadEvents(username)
+  number used = ownerStorageBytes(username) + quotaTotalBytes(events, timestamp, quotaWindowMs)
+  if enforceLimit and used + bytes > limit (
+    sync.unlock(lockName)
+    return {ok: false, used: used}
+  )
+  events.append({t: timestamp, bytes: bytes, name: name})
+  writeFile(quotaPath(username), {pending: events})
+  sync.unlock(lockName)
+  return {ok: true, used: used}
+)
+
+def releasePendingUploads(string username, array names) (
+  if names.len == 0 (
+    return
+  )
+  string lockName = "upload-quota-" ++ normalizeUsername(username)
+  sync.lock(lockName)
+  array events = pendingUploadEvents(username)
+  if events.len > 0 (
+    writeFile(quotaPath(username), {pending: quotaWithoutNames(events, names, timestamp, quotaWindowMs)})
+  )
+  sync.unlock(lockName)
+)
+
+// The most a student's project may occupy after a save, or -1 when the
+// owner's storage is counted by Rotur instead.
+def projectStorageAllowance(object project) number (
+  if usesRoturStorage(projectOwnerId(project)) (
+    return -1
+  )
+  number limit = mistwarpBenefitsForProject(project).storageBytes.toNum()
+  return storageAllowance(limit, ownerStorageBytes(project.owner.toStr()), projectStorageBytes(project))
+)
+
+// Holds room for an asset uploaded ahead of the save that uses it, or
+// answers that there isn't any.
+def holdUploadAhead(*serve.Context c, object project, string name, number bytes) boolean (
+  boolean enforce = !contextBool(c, "isAdmin")
+  string ownerId = projectOwnerId(project)
+  if usesRoturStorage(ownerId) (
+    object held = pendingAssetHold(ownerId, project.owner.toStr(), name, bytes, enforce)
+    if held.ok != true (
+      roturStorageFullResponse(c, held.refusal.assertElse(object, {}))
+      return false
+    )
+    return true
+  )
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  object reservation = reservePendingUpload(contextString(c, "username"), name, bytes, benefits.storageBytes.toNum(), enforce)
+  if !reservation.ok (
+    storageFullResponse(c, storageDetails(contextString(c, "username")), bytes)
+    return false
+  )
+  return true
+)
+
+def releaseUploadAhead(*serve.Context c, object project, array names) (
+  string ownerId = projectOwnerId(project)
+  if usesRoturStorage(ownerId) (
+    releasePendingAssetHolds(ownerId, project.owner.toStr(), names)
+    return
+  )
+  releasePendingUploads(contextString(c, "username"), names)
+)
+
+number stagedUploadPartTtlMs = 900000
+
+def stagedUploadPartMetaPath(string token) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".json"
+)
+
+def stagedUploadPartDataPath(string token) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".bin"
+)
+
+def validStagedUploadPartKind(string kind) boolean (
+  return kind == "workspace" or kind == "mergeTree"
+)
+
+def removeStagedUploadPart(string token, object metadata) (
+  void fs.remove(stagedUploadPartDataPath(token))
+  void fs.remove(stagedUploadPartMetaPath(token))
+)
+
+def consumeStagedUploadPart(string token, string projectId, string kind, string userId) object (
+  if token == "" or token.len > 64 or !regex.match("^[A-Za-z0-9]+$", token) (
+    return {ok: false, error: "invalid staged upload token"}
+  )
+  auto loaded = readFile(stagedUploadPartMetaPath(token))
+  if !loaded.ok (
+    return {ok: false, error: "staged upload expired; upload it again"}
+  )
+  object metadata = loaded.data.assert(object)
+  if metadata.projectId.toStr() != projectId or metadata.kind.toStr() != kind or metadata.userId.toStr() != userId (
+    return {ok: false, error: "staged upload does not match this project"}
+  )
+  if metadata.expires.toNum() < timestamp or !fs.exists(stagedUploadPartDataPath(token)) (
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "staged upload expired; upload it again"}
+  )
+  if metadata.contains("complete") and metadata.complete != true (
+    return {ok: false, error: "staged upload is incomplete"}
+  )
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token)).unwrapOr("".toBytes())
+  if data.len != metadata.size.toNum() (
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "staged upload is incomplete"}
+  )
+  removeStagedUploadPart(token, metadata)
+  return {ok: true, file: {data: data, size: data.len}}
+)
+
+def cleanupExpiredStagedUploadParts() (
+  array files = fs.readDir(tmpDir).unwrapOr([])
+  for i files.len (
+    string filename = files[i].toStr()
+    if filename.startsWith("upload-part-") and filename.endsWith(".json") (
+      string token = filename.replace("upload-part-", "").replace(".json", "")
+      auto loaded = readFile(tmpDir ++ filename)
+      if !loaded.ok or loaded.data.expires.toNum() < timestamp (
+        object metadata = if loaded.ok then loaded.data.assert(object) else {}
+        if metadata.contains("chunks") (
+          removeUploadPartChunks(token, metadata.chunks.toNum())
+        )
+        removeStagedUploadPart(token, metadata)
+      )
+    )
+  )
+)
+
+def handleUploadProjectAsset(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSaveLiveProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  string name = c.param("name")
+  if !isValidMd5Ext(name) (
+    c.badRequest("invalid asset name")
+    return
+  )
+  auto fileResult = c.formFile("asset")
+  if fileResult.isErr() (
+    c.badRequest("missing asset file")
+    return
+  )
+  object file = fileResult.unwrap()
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  number assetLimit = benefits.maxProjectAssetBytes.toNum()
+  if assetLimit > maxWorkspaceBytes (
+    assetLimit = maxWorkspaceBytes
+  )
+  if file.size.toNum() > assetLimit (
+    c.json(413, {ok: false, error: "asset exceeds the 90 MB upload limit", code: "asset_too_large"})
+    return
+  )
+  string content = file.data.toStr()
+  if content.hashMD5() != md5PartOf(name) (
+    c.badRequest("asset filename does not match its content")
+    return
+  )
+
+  string assetLock = "asset-upload-" ++ name
+  sync.lock(assetLock)
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  if knownAssets.contains(name) (
+    sync.unlock(assetLock)
+    c.json(200, {ok: true, uploaded: false, name: name})
+    return
+  )
+  if !holdUploadAhead(c, project, name, file.size.toNum()) (
+    sync.unlock(assetLock)
+    return
+  )
+  if !stageR2Blob(assetObjectKey(name), file.data, contentTypeForExt(extPartOf(name)), "") (
+    releaseUploadAhead(c, project, [name])
+    sync.unlock(assetLock)
+    c.internalError("asset upload failed")
+    return
+  )
+  knownAssets[name] = file.size
+  if !saveAssetsIndex(assetsIndex) (
+    r2Remove(assetObjectKey(name))
+    sync.unlock(assetLock)
+    c.internalError("asset index update failed")
+    return
+  )
+  sync.unlock(assetLock)
+  c.json(201, {ok: true, uploaded: true, name: name})
+)
+
+def handleStageProjectUploadPart(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSaveLiveProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  string kind = c.param("kind")
+  if !validStagedUploadPartKind(kind) (
+    c.badRequest("invalid upload part")
+    return
+  )
+  auto fileResult = c.formFile("file")
+  if fileResult.isErr() (
+    c.badRequest("missing upload part")
+    return
+  )
+  object file = fileResult.unwrap()
+  if file.size.toNum() > maxWorkspaceBytes (
+    c.json(413, {ok: false, error: "upload part exceeds the 90 MB limit", code: "upload_part_too_large"})
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
+  boolean readContents = kind == "workspace"
+  if !validateZipArchive(file.data, maxWorkspaceBytes, expandedLimit, maxWorkspaceFiles, readContents) (
+    c.badRequest("invalid or unsafe upload part")
+    return
+  )
+  string token = randomString(32)
+  if !fs.writeFileBytes(stagedUploadPartDataPath(token), file.data) or !writeFile(stagedUploadPartMetaPath(token), {
+    projectId: project.id,
+    kind: kind,
+    userId: contextString(c, "userId"),
+    size: file.size,
+    expires: timestamp + stagedUploadPartTtlMs
+  }) (
+  removeStagedUploadPart(token, {})
+  c.internalError("could not stage upload part")
+  return
+)
+c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
+)
+
+def uploadPartChunkPath(string token, number index) string (
+  return tmpDir ++ "upload-part-" ++ token ++ ".chunk." ++ index.toInt().toStr()
+)
+
+def removeUploadPartChunks(string token, number count) (
+  for i count (
+    void fs.remove(uploadPartChunkPath(token, i))
+  )
+)
+
+def assembleUploadPart(string token, number count, number expectedBytes) boolean (
+  string outputPath = stagedUploadPartDataPath(token)
+  array chunkPaths = []
+  for i count (
+    chunkPaths.append(uploadPartChunkPath(token, i))
+  )
+  return storagefs.ConcatenateFiles(outputPath, chunkPaths, expectedBytes)
+)
+
+def handleCreateProjectUploadPart(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSaveLiveProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object body = requestJSON(c)
+  string kind = body.kind.toStr()
+  string name = body.name.toStr()
+  number size = body.size.toNum().toInt()
+  number chunks = body.chunks.toNum().toInt()
+  if kind != "asset" and kind != "workspace" and kind != "mergeTree" (
+    c.badRequest("invalid upload part")
+    return
+  )
+  if size < 1 or size > maxWorkspaceBytes or chunks < 1 or chunks > 64 or chunks * maxUploadChunkBytes < size (
+    c.badRequest("invalid upload size")
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  if kind == "asset" (
+    if !isValidMd5Ext(name) or size > benefits.maxProjectAssetBytes.toNum() (
+      c.badRequest("invalid or oversized asset")
+      return
+    )
+    object knownAssets = loadAssetsIndex().assets
+    if knownAssets.contains(name) (
+      c.json(200, {ok: true, alreadyPresent: true, name: name})
+      return
+    )
+  )
+  if kind == "asset" and !holdUploadAhead(c, project, name, size) (
+    return
+  )
+  string token = randomString(32)
+  object metadata = {
+    projectId: project.id,
+    kind: kind,
+    name: name,
+    userId: contextString(c, "userId"),
+    size: size,
+    chunks: chunks,
+    nextChunk: 0,
+    received: 0,
+    complete: false,
+    expires: timestamp + stagedUploadPartTtlMs
+  }
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    if kind == "asset" (
+      releaseUploadAhead(c, project, [name])
+    )
+    c.internalError("could not start upload")
+    return
+  )
+  c.json(201, {ok: true, token: token, chunkBytes: maxUploadChunkBytes, expiresInMs: stagedUploadPartTtlMs})
+)
+
+def loadOwnedUploadPart(*serve.Context c) object (
+  string token = c.param("token")
+  if token == "" or token.len > 64 or !regex.match("^[A-Za-z0-9]+$", token) (
+    return {ok: false, error: "invalid upload token"}
+  )
+  auto loaded = readFile(stagedUploadPartMetaPath(token))
+  if !loaded.ok (
+    return {ok: false, error: "upload expired; start it again"}
+  )
+  object metadata = loaded.data.assert(object)
+  if metadata.projectId.toStr() != c.param("id") or metadata.userId.toStr() != contextString(c, "userId") (
+    return {ok: false, error: "upload token does not match this project"}
+  )
+  if metadata.expires.toNum() < timestamp (
+    removeUploadPartChunks(token, metadata.chunks.toNum())
+    removeStagedUploadPart(token, metadata)
+    return {ok: false, error: "upload expired; start it again"}
+  )
+  return {ok: true, token: token, metadata: metadata}
+)
+
+def handleUploadProjectPartChunk(*serve.Context c) (
+  object loaded = loadOwnedUploadPart(c)
+  if !loaded.ok (
+    c.badRequest(loaded.error.toStr())
+    return
+  )
+  string token = loaded.token.toStr()
+  object metadata = loaded.metadata.assert(object)
+  if metadata.complete == true (
+    c.badRequest("upload is already complete")
+    return
+  )
+  auto chunkResult = c.formFile("chunk")
+  if chunkResult.isErr() (
+    c.badRequest("missing upload chunk")
+    return
+  )
+  object chunk = chunkResult.unwrap()
+  number index = (c.formValue("index") ?? "").toNum().toInt()
+  if index != metadata.nextChunk.toNum() or chunk.size.toNum() < 1 or chunk.size.toNum() > maxUploadChunkBytes (
+    c.badRequest("unexpected upload chunk")
+    return
+  )
+  if metadata.received.toNum() + chunk.size.toNum() > metadata.size.toNum() (
+    c.badRequest("upload exceeds its declared size")
+    return
+  )
+  if !fs.writeFileBytes(uploadPartChunkPath(token, index), chunk.data) (
+    c.internalError("could not store upload chunk")
+    return
+  )
+  metadata.nextChunk = index + 1
+  metadata.received = metadata.received.toNum() + chunk.size.toNum()
+  metadata.expires = timestamp + stagedUploadPartTtlMs
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    void fs.remove(uploadPartChunkPath(token, index))
+    c.internalError("could not update upload")
+    return
+  )
+  c.json(200, {ok: true, received: metadata.received, size: metadata.size})
+)
+
+def handleCompleteProjectUploadPart(*serve.Context c) (
+  object loaded = loadOwnedUploadPart(c)
+  if !loaded.ok (
+    c.badRequest(loaded.error.toStr())
+    return
+  )
+  string token = loaded.token.toStr()
+  object metadata = loaded.metadata.assert(object)
+  if metadata.received.toNum() != metadata.size.toNum() or metadata.nextChunk.toNum() != metadata.chunks.toNum() (
+    c.badRequest("upload is incomplete")
+    return
+  )
+  if !assembleUploadPart(token, metadata.chunks.toNum(), metadata.size.toNum()) (
+    c.internalError("could not assemble upload")
+    return
+  )
+  removeUploadPartChunks(token, metadata.chunks.toNum())
+  byte[] data = fs.readFileBytes(stagedUploadPartDataPath(token)).unwrapOr("".toBytes())
+  string kind = metadata.kind.toStr()
+  if kind == "asset" (
+    string name = metadata.name.toStr()
+    if data.toStr().hashMD5() != md5PartOf(name) (
+      removeStagedUploadPart(token, metadata)
+      c.badRequest("asset filename does not match its content")
+      return
+    )
+    string assetLock = "asset-upload-" ++ name
+    sync.lock(assetLock)
+    object assetsIndex = loadAssetsIndex()
+    object knownAssets = assetsIndex.assets
+    boolean stored = knownAssets.contains(name)
+    if !stored (
+      stored = stageR2Blob(assetObjectKey(name), data, contentTypeForExt(extPartOf(name)), "")
+      if stored (
+        knownAssets[name] = metadata.size
+        stored = saveAssetsIndex(assetsIndex)
+      )
+    )
+    sync.unlock(assetLock)
+    removeStagedUploadPart(token, metadata)
+    if !stored (
+      c.internalError("could not store asset")
+      return
+    )
+    c.json(201, {ok: true, complete: true, kind: kind, name: name})
+    return
+  )
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  number expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
+  boolean readContents = kind == "workspace"
+  if !validateZipArchive(data, metadata.size.toNum(), expandedLimit, maxWorkspaceFiles, readContents) (
+    removeStagedUploadPart(token, metadata)
+    c.badRequest("invalid or unsafe upload part")
+    return
+  )
+  metadata.complete = true
+  metadata.expires = timestamp + stagedUploadPartTtlMs
+  if !writeFile(stagedUploadPartMetaPath(token), metadata) (
+    removeStagedUploadPart(token, metadata)
+    c.internalError("could not finish upload")
+    return
+  )
+  c.json(201, {ok: true, complete: true, token: token, kind: kind})
+)
+
+def scanProjectJsonEvents(*json.Stream stream) object (
+  boolean started = false
+  boolean readingMd5ext = false
+  number targets = 0
+  array md5ext = []
+  for event in stream.events() (
+    if !started (
+      started = true
+      if event.type != "object-start" (
+        return {ok: false}
+      )
+    ) else if readingMd5ext (
+      readingMd5ext = false
+      if event.type == "string" (
+        md5ext.append(event.value)
+        if md5ext.len > maxAssetCount * 50 (
+          return {ok: false}
+        )
+      )
+    ) else if event.type == "key" (
+      string key = event.value.toStr()
+      if key == "targets" (
+        targets += 1
+      )
+      readingMd5ext = key == "md5ext"
+    )
+  )
+  if !started (
+    return {ok: false}
+  )
+  return {ok: true, targets: targets, md5ext: md5ext}
+)
+
+def inspectProjectJson(string path) object (
+  *json.Stream stream = json.open(path, maxProjectJsonBytes)
+  object inspected = scanProjectJsonEvents(stream) catch (err) (
+    stream.close()
+    return {ok: false}
+  )
+  stream.close()
+  return inspected
+)
+
+// storageAllowanceBytes is a student's local limit, or -1. A Rotur owner's
+// storage is held in the ledger instead, unless enforceStorage is off
+// (admins); the result's hold is committed or released by the caller.
+def uploadProjectFiles(object project, string extractDir, object benefits, number storageAllowanceBytes, boolean enforceStorage) object (
+  array names = fs.readDir(extractDir).unwrapOr([])
+  string jsonPath = extractDir ++ "/project.json"
+  if !fs.exists(jsonPath) (
+    return {ok: false, error: "sb3 has no project.json", status: 400}
+  )
+  number projectJsonBytes = fs.size(jsonPath).unwrapOr(0)
+  if projectJsonBytes > maxProjectJsonBytes (
+    return {ok: false, error: "project.json exceeds the 256 MB expanded limit", code: "project_too_large", status: 413}
+  )
+  object inspected = inspectProjectJson(jsonPath)
+  if !inspected.ok (
+    return {ok: false, error: "invalid project.json", status: 400}
+  )
+  if inspected.targets.toNum() == 0 (
+    return {ok: false, error: "invalid project.json", status: 400}
+  )
+  string gzipPath = jsonPath ++ ".gz"
+  if !zip.gzip(jsonPath, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+    return {ok: false, error: "compressed project data exceeds the 20 MB limit", code: "project_too_large", status: 413}
+  )
+
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  array projectAssets = []
+  array pendingUploads = []
+  object pendingNames = {}
+  number assetCount = 0
+
+  for i names.len (
+    string name = names[i].toStr()
+    if name != "project.json" (
+      if isValidMd5Ext(name) (
+        assetCount += 1
+        if assetCount > maxAssetCount (
+          return {ok: false, error: "too many assets", status: 400}
+        )
+        string assetPath = extractDir ++ "/" ++ name
+        number assetLimit = benefits.maxProjectAssetBytes.toNum()
+        if fs.size(assetPath).unwrapOr(0) > assetLimit (
+          number assetLimitMb = (assetLimit / 1048576).toInt()
+          return {ok: false, error: "an asset exceeds your " ++ assetLimitMb.toStr() ++ " MB limit: " ++ name, code: "project_too_large", status: 413}
+        )
+        string content = fs.readFile(assetPath).unwrapOr("")
+        string actualHash = content.hashMD5()
+        if actualHash != md5PartOf(name) (
+          return {ok: false, error: "asset filename does not match its content: " ++ name, status: 400}
+        )
+        projectAssets.append(name)
+        string localAssetPath = localBlobPath(assetObjectKey(name))
+        boolean needsUpload = assetNeedsUpload(knownAssets.contains(name), fs.exists(localAssetPath),!r2Local)
+        if needsUpload and !pendingNames.contains(name) (
+          pendingUploads.append({path: assetPath, name: name})
+          pendingNames[name] = true
+          knownAssets[name] = content.toBytes().len
+        )
+      )
+    )
+  )
+
+  object providedSet = {}
+  for i projectAssets.len (
+    providedSet[projectAssets[i].toStr()] = true
+  )
+  array referencedList = inspected.md5ext.assert(array)
+  object referencedNames = {}
+  for i referencedList.len (
+    string name = referencedList[i].toStr()
+    if isValidMd5Ext(name) (
+      referencedNames[name] = true
+    )
+  )
+  array referencedUnique = referencedNames.getKeys()
+  for i referencedUnique.len (
+    string name = referencedUnique[i].toStr()
+    if !providedSet.contains(name) (
+      if !knownAssets.contains(name) (
+        return {ok: false, error: "missing asset: " ++ name, status: 400}
+      )
+      projectAssets.append(name)
+      string localAssetPath = localBlobPath(assetObjectKey(name))
+      if !r2Local and fs.exists(localAssetPath) and !pendingNames.contains(name) (
+        pendingUploads.append({path: localAssetPath, name: name})
+        pendingNames[name] = true
+      )
+    )
+  )
+  if projectAssets.len > maxAssetCount (
+    return {ok: false, error: "too many assets", status: 400}
+  )
+
+  number assetBytes = 0
+  for i projectAssets.len (
+    string name = projectAssets[i].toStr()
+    if knownAssets.contains(name) (
+      assetBytes += knownAssets[name].toNum()
+    )
+  )
+  number projectAssetLimit = benefits.maxProjectAssetsBytes.toNum()
+  if assetBytes > projectAssetLimit (
+    number projectAssetLimitMb = (projectAssetLimit / 1048576).toInt()
+    return {ok: false, error: "project assets exceed your " ++ projectAssetLimitMb.toStr() ++ " MB limit", code: "project_too_large", status: 413}
+  )
+  number projectBytes = assetBytes + fs.size(gzipPath).unwrapOr(0) + projectHistoryBytes(project)
+  if storageAllowanceBytes >= 0 and projectBytes > storageAllowanceBytes (
+    return {ok: false, error: "storage full", code: "storage_full", status: 413, overBytes: projectBytes - storageAllowanceBytes}
+  )
+  object hold = noStorageHold()
+  string ownerId = projectOwnerId(project)
+  if usesRoturStorage(ownerId) (
+    // Assets uploaded ahead are counted by this save now, not twice.
+    releasePendingAssetHolds(ownerId, project.owner.toStr(), projectAssets)
+    object incoming = projectStorageSummary(project, knownAssets)
+    object incomingJson = {}
+    incomingJson["incoming:" ++ project.id.toStr()] = fs.size(gzipPath).unwrapOr(0)
+    incoming.json = incomingJson
+    incoming.assets = projectAssets
+    object saving = {}
+    saving[project.id.toStr()] = incoming
+    hold = storageHold(ownerId, {projects: saving}, enforceStorage)
+    if hold.ok != true (
+      return {ok: false, error: "storage full", code: "storage_full", status: 413, refusal: hold.refusal}
+    )
+  )
+
+  number uploaded = 0
+  for i pendingUploads.len (
+    object upload = pendingUploads[i].assert(object)
+    string path = upload.path.toStr()
+    string name = upload.name.toStr()
+    string content = fs.readFile(path).unwrapOr("")
+    if !stageR2Blob(assetObjectKey(name), content, contentTypeForExt(extPartOf(name)), "") (
+      storageHoldRelease(ownerId, hold)
+      return {ok: false, error: "asset upload failed", status: 502}
+    )
+    knownAssets[name] = content.toBytes().len
+    uploaded += 1
+  )
+  if uploaded > 0 (
+    saveAssetsIndex(assetsIndex)
+  )
+
+  return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.size(gzipPath).unwrapOr(0), assetBytes: assetBytes, hold: hold}
+)
+
+def pushProjectJsonToR2(object project, string gzipPath) boolean (
+  if !r2PutEncoded(project.jsonKey.toStr(), fs.readFileBytes(gzipPath).unwrapOr("".toBytes()), "application/json", "gzip") (
+    return false
+  )
+  void fs.remove(stagingJsonPath(project.id.toStr()))
+  return true
+)
+
+def stageProjectJson(object project, string gzipPath) boolean (
+  string path = stagingJsonPath(project.id.toStr())
+  string tmpPath = path ++ ".tmp." ++ randomString(8)
+  if !copyFileReplacing(gzipPath, tmpPath) (
+    return false
+  )
+  if !fs.rename(tmpPath, path) (
+    void fs.remove(tmpPath)
+    return false
+  )
+  return true
+)
+
+def projectReferencesWorkspaceKey(object project, string key) boolean (
+  array keys = projectWorkspaceKeys(project)
+  return keys.contains(key)
+)
+
+def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean workspace) boolean (
+  if key == "" (
+    return false
+  )
+  array directories = [projectsDir, trashDir]
+  for d directories.len (
+    string directory = directories[d].toStr()
+    array files = fs.readDir(directory).unwrapOr([])
+    for i files.len (
+      auto loaded = readFile(directory ++ files[i].toStr())
+      if loaded.ok (
+        object candidate = loaded.data.assert(object)
+        if candidate.id.toStr() != excludedId (
+          if workspace and projectReferencesWorkspaceKey(candidate, key) (
+            return true
+          )
+          if !workspace and candidate.jsonKey.toStr() == key (
+            return true
+          )
+        )
+      )
+    )
+  )
+  if !workspace and releaseDocs.where("jsonKey", "==", key).limit(1).all().len > 0 (
+    return true
+  )
+  if !workspace (
+    array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
+    for i evidenceIds.len (
+      object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+      if (evidence.evidenceJsonKey ?? "").toStr() == key (
+        return true
+      )
+    )
+  )
+  return false
+)
+
+def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean workspace) (
+  if key != "" and !projectStorageKeyUsedByAnotherProject(key, excludedId, workspace) (
+    r2Remove(key)
+  )
+)
+
+def cleanupReplacedProjectStorage(string id, string jsonKey, array workspaceKeys) (
+  string lockName = "project-history-" ++ id
+  sync.lock(lockName)
+  if jsonKey != "" (
+    removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+  )
+  for i workspaceKeys.len (
+    removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), "", true)
+  )
+  sync.unlock(lockName)
+)
+
+def ensureProjectJsonSnapshot(object project) object (
+  if project.jsonKey.toStr().startsWith("project-json/") and (!project.contains("pendingJson") or project.pendingJson != true) (
+    return {ok: true, project: project}
+  )
+  string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".json.gz"
+  if !copyStoredProjectJsonToPath(project, tempPath) (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  byte[] snapshotBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
+  string key = projectJsonSnapshotKey(contentHash(snapshotBody))
+  if !stageR2Blob(key, snapshotBody, "application/json", "gzip") (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  project.jsonKey = key
+  project.jsonGzip = true
+  project.pendingJson = false
+  void fs.remove(tempPath)
+  // Return an immutable snapshot to the caller without rewriting the source
+  // record. Another save may have advanced that record while storage was read.
+  return {ok: true, project: project}
+)
+
+def ensureProjectWorkspaceSnapshots(object project) object (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null and project.workspaceLayers.assertElse(array, []).len > 0 (
+    return {ok: true, project: project}
+  )
+  array previousKeys = projectWorkspaceKeys(project)
+  if previousKeys.len == 0 (
+    return {ok: true, project: project}
+  )
+  string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
+  if !copyProjectWorkspaceToPath(project, tempPath) (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  byte[] workspaceBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
+  string key = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
+  if !stageR2Blob(key, workspaceBody, "application/x-mistwarp-project", "") (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  void fs.remove(tempPath)
+  project.workspaceKey = key
+  project.workspaceLayers = [key]
+  project.historyBytes = workspaceBody.len
+  return {ok: true, project: project}
+)
+
+def maybeFlushProject(object project) (
+  string lockName = "project-history-" ++ project.id.toStr()
+  sync.lock(lockName)
+  auto latest = loadProject(project.id.toStr())
+  if latest.ok (
+    flushProjectLocked(latest.project.assert(object))
+  )
+  sync.unlock(lockName)
+)
+
+def flushProjectLocked(object project) (
+  if project.contains("pendingJson") and project.pendingJson == true (
+    if timestamp - projectStorageActivityAt(project) >= uploadDebounceMs (
+      string path = stagingJsonPath(project.id.toStr())
+      if fs.exists(path) (
+        string gzipPath = path
+        if !projectJsonIsGzip(project) (
+          gzipPath = path ++ ".gz"
+          if !zip.gzip(path, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+            return
+          )
+        )
+        if pushProjectJsonToR2(project, gzipPath) (
+          project.lastUploadAt = timestamp
+          project.pendingJson = false
+          project.jsonGzip = true
+          saveProject(project)
+        )
+        if gzipPath != path (
+          void fs.remove(gzipPath)
+        )
+      )
+    )
+  )
+)
+
+def sweepStagedProjects() (
+  array files = fs.readDir(stagingDir).unwrapOr([])
+  for i files.len (
+    array parts = files[i].toStr().split(".")
+    string id = parts[1].toStr()
+    auto res = loadProject(id)
+    if res.ok (
+      maybeFlushProject(res.project.assert(object))
+    )
+  )
+)
+
+def handleCheckProjectAssets(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSaveLiveProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object body = requestJSON(c)
+  if !body.contains("assets") or body.assets == null (
+    c.badRequest("assets list is required")
+    return
+  )
+  array requested = body.assets.assert(array)
+  if requested.len > maxAssetCount (
+    c.badRequest("too many assets")
+    return
+  )
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  array missing = []
+  for i requested.len (
+    string name = requested[i].toStr()
+    if !isValidMd5Ext(name) (
+      c.badRequest("invalid asset name: " ++ name)
+      return
+    )
+    if !knownAssets.contains(name) (
+      missing.append(name)
+    )
+  )
+  c.json(200, {ok: true, missing: missing})
+)
+
+def handleUploadProject(*serve.Context c) (
+  string lockName = "project-history-" ++ c.param("id")
+  sync.lock(lockName)
+  handleUploadProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleUploadProjectLocked(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSaveLiveProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+
+  boolean replaceHistory = (c.formValue("replaceHistory") ?? "") == "true"
+  if replaceHistory and contextString(c, "sessionScope") == "editor" and !editorCanDeleteProject(project) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to replace this project's saved history."})
+    return
+  )
+  string expectedHead = (c.formValue("expectedHead") ?? "").strip()
+  string restoreCommit = (c.formValue("restoreCommit") ?? "").strip()
+  string restoreMessage = (c.formValue("restoreMessage") ?? "").strip()
+  string pullId = (c.formValue("pullId") ?? "").strip()
+  string mergeSourceBranch = (c.formValue("mergeSourceBranch") ?? "").strip()
+  string mergeTargetBranch = (c.formValue("mergeTargetBranch") ?? "").strip()
+  string requestedMergeSourceHead = (c.formValue("mergeSourceHead") ?? "").strip()
+  string requestedMergeTargetHead = (c.formValue("mergeTargetHead") ?? "").strip()
+  string currentHead = projectGitHead(project)
+  string expectedEdited = (c.formValue("expectedEdited") ?? "").strip()
+  if !canEditProject(project, c) (
+    if expectedEdited == "" or restoreCommit != "" or pullId != "" or mergeSourceBranch != "" or replaceHistory (
+      c.forbidden("live contributors can save the current project; history and publishing require a maintainer")
+      return
+    )
+  )
+  if expectedEdited != "" and expectedEdited.toNum() != project.edited.toNum() (
+    c.json(409, {ok: false, error: "someone saved newer changes; refresh project history before saving again", code: "head_changed"})
+    return
+  )
+  if expectedHead != "" and expectedHead != currentHead (
+    c.json(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
+    return
+  )
+
+  if replaceHistory and (expectedHead != currentHead or restoreCommit != "" or pullId != "" or mergeSourceBranch != "") (
+    c.json(409, {ok: false, error: "history replacement requires the current saved head and a full workspace", code: "head_changed"})
+    return
+  )
+
+  string gitMetadata = (c.formValue("git") ?? "")
+  object gitInfo = {}
+  if gitMetadata != "" (
+    auto parsedGit = json.parse(gitMetadata, {type: "object"})
+    if parsedGit.isErr() (
+      c.badRequest("invalid MistWarp history metadata")
+      return
+    )
+    gitInfo = parsedGit.unwrap().assert(object)
+    if gitInfo.contains("delta") and gitInfo.delta == true (
+      string baseHead = (gitInfo.baseHead ?? "").toStr()
+      if baseHead == "" or baseHead != currentHead or !projectHasWorkspace(project) (
+        c.json(409, {ok: false, error: "the saved project history changed", code: "workspace_base_changed", currentHead: currentHead})
+        return
+      )
+    )
+  )
+
+  if restoreCommit != "" and !validGitObjectId(restoreCommit) (
+    c.badRequest("invalid restore commit")
+    return
+  )
+
+  auto fileResult = c.formFile("project")
+  if fileResult.isErr() (
+    c.badRequest("missing project file")
+    return
+  )
+  object file = fileResult.unwrap()
+  object projectBenefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+
+  string uploader = normalizeUsername(contextString(c, "username"))
+  auto workspaceResult = c.formFile("workspace")
+  auto mergeTreeResult = c.formFile("mergeTree")
+  boolean hasWorkspace = !workspaceResult.isErr()
+  boolean hasMergeTree = !mergeTreeResult.isErr()
+  object workspaceFile = {}
+  object mergeTreeFile = {}
+  if hasWorkspace (
+    workspaceFile = workspaceResult.unwrap()
+  ) else if (c.formValue("workspaceToken") ?? "") != "" (
+    object stagedWorkspace = consumeStagedUploadPart((c.formValue("workspaceToken") ?? ""), project.id.toStr(), "workspace", contextString(c, "userId"))
+    if !stagedWorkspace.ok (
+      c.badRequest(stagedWorkspace.error.toStr())
+      return
+    )
+    workspaceFile = stagedWorkspace.file.assert(object)
+    hasWorkspace = true
+  )
+  if hasMergeTree (
+    mergeTreeFile = mergeTreeResult.unwrap()
+  ) else if (c.formValue("mergeTreeToken") ?? "") != "" (
+    object stagedMergeTree = consumeStagedUploadPart((c.formValue("mergeTreeToken") ?? ""), project.id.toStr(), "mergeTree", contextString(c, "userId"))
+    if !stagedMergeTree.ok (
+      c.badRequest(stagedMergeTree.error.toStr())
+      return
+    )
+    mergeTreeFile = stagedMergeTree.file.assert(object)
+    hasMergeTree = true
+  )
+  number storageAllowanceBytes = if contextBool(c, "isAdmin") then -1 else projectStorageAllowance(project)
+
+  string id = project.id.toStr()
+  string workId = id ++ "." ++ randomString(8)
+  string zipPath = tmpDir ++ workId ++ ".sb3"
+  string extractDir = tmpDir ++ workId
+  if !fs.writeFileBytes(zipPath, file.data) (
+    c.internalError("failed to stage project upload")
+    return
+  )
+
+  number extractedLimit = maxProjectJsonBytes + projectBenefits.maxProjectAssetsBytes.toNum()
+  if !validateZipArchive(file.data, maxProjectUploadRequestBytes, extractedLimit, maxAssetCount + 1, false) (
+    void fs.remove(zipPath)
+    c.badRequest("invalid or unsafe sb3 file")
+    return
+  )
+  if !zip.decompress(zipPath, extractDir, {maxBytes: extractedLimit, maxFiles: maxAssetCount + 1}) (
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    c.badRequest("invalid sb3 file")
+    return
+  )
+
+  if replaceHistory and !hasWorkspace (
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    c.badRequest("history replacement requires a full workspace")
+    return
+  )
+
+  if hasWorkspace (
+    if workspaceFile.size.toNum() > maxWorkspaceBytes or !validateZipArchive(workspaceFile.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, true) (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
+      return
+    )
+    object materialized = materializeWorktreeAssets(project, workspaceFile.data.assertElse(byte[], []), extractDir, replaceHistory)
+    if !materialized.ok (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, code: "worktree_assets_unavailable", error: "some project files could not be found on the server; save again to upload them"})
+      return
+    )
+    if materialized.refs.toNum() > 0 (
+      if materialized.size.toNum() > maxWorkspaceBytes or !validateZipArchive(materialized.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(400, {ok: false, code: "invalid_workspace", error: "invalid or unsafe MistWarp history archive"})
+        return
+      )
+      workspaceFile.data = materialized.data
+      workspaceFile.size = materialized.size
+    )
+    object checked = validateUploadedHistoryMode(project, workspaceFile.data.assertElse(byte[], []), gitMetadata, currentHead, replaceHistory)
+    if !checked.ok (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
+      return
+    )
+    workspaceFile.data = checked.data
+    workspaceFile.size = checked.size
+    gitInfo = checked.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+  )
+
+  // An editor with a shallow history can create a new commit object even when
+  // its project tree is identical to the current version. Compare the commit
+  // trees on the server before storing project JSON, assets, or history.
+  boolean ordinaryVersionSave = !replaceHistory and (gitInfo.worktree ?? false) != true and hasWorkspace and restoreCommit == "" and !hasMergeTree and gitMetadata != "" and currentHead != ""
+  if ordinaryVersionSave (
+    string incomingHead = canonicalHistoryHead(gitInfo)
+    if incomingHead == currentHead (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
+      return
+    )
+    if incomingHead != "" (
+      byte[] incomingWorkspaceBody = workspaceFile.data.assertElse(byte[], [])
+      number incomingWorkspaceSize = workspaceFile.size.toNum()
+      if incomingWorkspaceSize > maxWorkspaceBytes or !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
+        return
+      )
+      string compareBasePath = cachedProjectWorkspacePath(project)
+      string compareIncomingPath = tmpDir ++ workId ++ ".compare-incoming.mwp"
+      boolean compareReady = compareBasePath != "" and fs.writeFileBytes(compareIncomingPath, incomingWorkspaceBody)
+      string comparisonJson = ""
+      if compareReady (
+        comparisonJson = gitinspection.CommitTreesDiffer(compareBasePath, currentHead, compareIncomingPath, incomingHead)
+      )
+      void fs.remove(compareIncomingPath)
+      auto parsedComparison = json.parse(comparisonJson, {type: "object"})
+      if !compareReady or parsedComparison.isErr() or parsedComparison.unwrap().assert(object).ok != true (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(400, {ok: false, error: "could not validate the MistWarp project history", code: "invalid_workspace"})
+        return
+      )
+      if parsedComparison.unwrap().assert(object).changed != true (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(409, {ok: false, error: "No files changed in this commit.", code: "no_changes"})
+        return
+      )
+    )
+  )
+
+  object extensionResult = collectProjectExtensions(extractDir ++ "/project.json", (c.formValue("extensions") ?? ""))
+  if !extensionResult.ok (
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    object extensionError = {ok: false, error: extensionResult.error}
+    if extensionResult.contains("code") (
+      extensionError.code = extensionResult.code
+    )
+    c.json(400, extensionError)
+    return
+  )
+
+  boolean generatedWorkspace = false
+  byte[] generatedWorkspaceBody = []
+  string historyBaseHead = currentHead
+  if hasMergeTree and !hasWorkspace and restoreCommit == "" (
+    object mergeTree = mergeTreeFile
+    boolean branchMerge = pullId == "" and mergeSourceBranch != "" and mergeTargetBranch != "" and requestedMergeSourceHead != "" and requestedMergeTargetHead != ""
+    object mergePull = {}
+    object mergeSource = project
+    string mergeSourceHead = requestedMergeSourceHead
+    string mergeTargetHead = requestedMergeTargetHead
+    if branchMerge (
+      string latestSourceHead = projectBranchHead(project, mergeSourceBranch)
+      string latestTargetHead = projectBranchHead(project, mergeTargetBranch)
+      if mergeSourceBranch == mergeTargetBranch or latestSourceHead == "" or latestTargetHead == "" or latestSourceHead != requestedMergeSourceHead or latestTargetHead != requestedMergeTargetHead (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(409, {ok: false, error: "a branch changed while this merge was processing", code: "branch_head_changed"})
+        return
+      )
+      historyBaseHead = mergeTargetHead
+    ) else (
+      mergePull = pullDocument(project.id.toStr(), pullId)
+      if pullId == "" or mergePull.len == 0 or mergePull.state.toStr() != "open" or mergePull.targetProjectId.toStr() != project.id.toStr() (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+        return
+      )
+      auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
+      if !mergeSourceResult.ok (
+        void fs.remove(zipPath)
+        void fs.remove(extractDir)
+        c.notFound("merge source project not found")
+        return
+      )
+      mergeSource = mergeSourceResult.project.assert(object)
+      mergeSourceHead = mergePull.headCommit.toStr()
+      mergeTargetHead = currentHead
+    )
+    if !validateZipArchive(mergeTree.data.assertElse(byte[], []), maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.badRequest("invalid merged project tree")
+      return
+    )
+    string mergeTargetPath = tmpDir ++ workId ++ ".merge-target.mwp"
+    string mergeSourcePath = tmpDir ++ workId ++ ".merge-source.mwp"
+    string mergeTreePath = tmpDir ++ workId ++ ".merge-tree.zip"
+    string mergeDeltaPath = tmpDir ++ workId ++ ".merge-delta.mwp"
+    boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
+    mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
+    mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, mergeTree.data)
+    string mergeBranch = if branchMerge then mergeTargetBranch else (project.gitBranch ?? "main").toStr()
+    string mergeRemixParent = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
+    string mergeBaseCommit = if project.contains("remixBaseCommit") and project.remixBaseCommit != null then project.remixBaseCommit.toStr() else ""
+    string mergeProjectId = project.id.toStr()
+    string mergeMessage = if branchMerge then "Merge branch '" ++ mergeSourceBranch ++ "' into '" ++ mergeTargetBranch ++ "'" else "Merge pull request #" ++ pullId
+    number mergeTimestamp = timestamp
+    string mergeJson = ""
+    if mergeReady (
+      mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, mergeProjectId, mergeRemixParent, mergeBaseCommit, mergeBranch, uploader, mergeMessage, mergeTimestamp / 1000)
+    )
+    auto parsedMerge = json.parse(mergeJson, {type: "object"})
+    if !mergeReady or parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
+      void fs.remove(mergeTargetPath)
+      void fs.remove(mergeSourcePath)
+      void fs.remove(mergeTreePath)
+      void fs.remove(mergeDeltaPath)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, error: "could not create the merge commit", code: "merge_unavailable"})
+      return
+    )
+    object mergeResult = parsedMerge.unwrap().assert(object)
+    gitInfo = mergeResult.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+    generatedWorkspaceBody = fs.readFileBytes(mergeDeltaPath).unwrapOr("".toBytes())
+    generatedWorkspace = true
+    void fs.remove(mergeTargetPath)
+    void fs.remove(mergeSourcePath)
+    void fs.remove(mergeTreePath)
+    void fs.remove(mergeDeltaPath)
+  )
+  if restoreCommit != "" and !hasWorkspace (
+    string restoreBasePath = tmpDir ++ workId ++ ".restore-base.mwp"
+    string restoreDeltaPath = tmpDir ++ workId ++ ".restore-delta.mwp"
+    string restoreBranch = if project.contains("gitBranch") and project.gitBranch != null then project.gitBranch.toStr() else "main"
+    string restoreRemixParent = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
+    string restoreBaseCommit = if project.contains("remixBaseCommit") and project.remixBaseCommit != null then project.remixBaseCommit.toStr() else ""
+    number restoreTimestamp = timestamp
+    boolean restoreReady = copyProjectWorkspaceToPath(project, restoreBasePath)
+    string restoreJson = ""
+    if restoreReady (
+      restoreJson = gitinspection.RestoreArchiveJSON(restoreBasePath, currentHead, restoreCommit, restoreDeltaPath, id, restoreRemixParent, restoreBaseCommit, restoreBranch, uploader, restoreMessage, restoreTimestamp / 1000)
+    )
+    auto parsedRestore = json.parse(restoreJson, {type: "object"})
+    if !restoreReady or parsedRestore.isErr() or parsedRestore.unwrap().assert(object).ok != true (
+      void fs.remove(restoreBasePath)
+      void fs.remove(restoreDeltaPath)
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, error: "could not restore that project version", code: "restore_unavailable"})
+      return
+    )
+    object restoreResult = parsedRestore.unwrap().assert(object)
+    gitInfo = restoreResult.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+    generatedWorkspaceBody = fs.readFileBytes(restoreDeltaPath).unwrapOr("".toBytes())
+    generatedWorkspace = true
+    void fs.remove(restoreBasePath)
+    void fs.remove(restoreDeltaPath)
+  )
+
+  if generatedWorkspace (
+    object checked = validateUploadedHistory(project, generatedWorkspaceBody, gitMetadata, historyBaseHead)
+    if !checked.ok (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(409, {ok: false, code: "invalid_workspace", error: checked.error})
+      return
+    )
+    generatedWorkspaceBody = checked.data.assert(byte[])
+    gitInfo = checked.manifest.assert(object)
+    gitMetadata = json.stringify(gitInfo)
+  )
+
+  array previousWorkspaceKeys = projectWorkspaceKeys(project)
+  if hasWorkspace or generatedWorkspace (
+    byte[] incomingWorkspaceBody = generatedWorkspaceBody
+    number incomingWorkspaceSize = generatedWorkspaceBody.len
+    if hasWorkspace (
+      incomingWorkspaceBody = workspaceFile.data.assertElse(byte[], [])
+      incomingWorkspaceSize = workspaceFile.size.toNum()
+    )
+    if incomingWorkspaceSize > maxWorkspaceBytes (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(413, {ok: false, error: "one history update exceeds the 512 MB safety limit", code: "workspace_update_too_large"})
+      return
+    )
+    if !validateZipArchive(incomingWorkspaceBody, maxWorkspaceBytes, extractedLimit, maxWorkspaceFiles, false) (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.json(400, {ok: false, error: "invalid or unsafe MistWarp project history", code: "invalid_workspace"})
+      return
+    )
+    // Validation has materialized all required layers and derived metadata.
+    previousWorkspaceKeys = projectWorkspaceKeys(project)
+    string workspaceKey = projectWorkspaceSnapshotKey(contentHash(incomingWorkspaceBody))
+    if !stageR2Blob(workspaceKey, incomingWorkspaceBody, "application/x-mistwarp-project", "") (
+      void fs.remove(zipPath)
+      void fs.remove(extractDir)
+      c.internalError("failed to store MistWarp project history")
+      return
+    )
+    project.workspaceKey = workspaceKey
+    project.workspaceLayers = [workspaceKey]
+    project.historyBytes = incomingWorkspaceSize
+    project.gitHead = gitInfo.head
+    project.gitBranch = gitInfo.branch
+    project.gitCommits = gitInfo.commits
+    project.gitGraph = gitInfo.graph
+    if replaceHistory (
+      project.remixBaseCommit = ""
+    )
+  )
+
+  object uploadResult = uploadProjectFiles(project, extractDir, projectBenefits, storageAllowanceBytes, !contextBool(c, "isAdmin"))
+  string storageOwnerId = projectOwnerId(project)
+  object storageHeld = (uploadResult.hold ?? {}).assertElse(object, {})
+
+  if !uploadResult.ok (
+    array failedWorkspaceKeys = projectWorkspaceKeys(project)
+    for i failedWorkspaceKeys.len (
+      string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+      if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+        removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+      )
+    )
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    if (uploadResult.code ?? "").toStr() == "storage_full" (
+      if uploadResult.contains("refusal") (
+        roturStorageFullResponse(c, uploadResult.refusal.assertElse(object, {}))
+        return
+      )
+      storageFullResponse(c, storageDetails(project.owner.toStr()), uploadResult.overBytes.toNum())
+      return
+    )
+    object errorBody = {ok: false, error: uploadResult.error}
+    if uploadResult.contains("code") (
+      errorBody.code = uploadResult.code
+    )
+    c.json(uploadResult.status.toInt(), errorBody)
+    return
+  )
+
+  array projectExtensions = extensionResult.extensions.assert(array)
+  if !storeProjectExtensions(project.id.toStr(), storedProjectExtensions(project), projectExtensions, extensionResult.sources.assert(object)) (
+    storageHoldRelease(storageOwnerId, storageHeld)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    c.internalError("failed to store extension sources")
+    return
+  )
+
+  auto thumbResult = c.formFile("thumbnail")
+  if !thumbResult.isErr() (
+    object thumb = thumbResult.unwrap()
+    if thumb.size.toNum() <= maxThumbBytes (
+      void fs.writeFileBytes(thumbnailPath(id), thumb.data)
+    )
+  )
+
+  project.assets = uploadResult.assets
+  project.edited = timestamp
+
+  string gzipPath = uploadResult.gzipPath.toStr()
+  string previousJsonKey = project.jsonKey.toStr()
+  if previousJsonKey.startsWith("project-json/") or (project.contains("inheritedJson") and project.inheritedJson == true) (
+    project.jsonKey = projectJsonKey(id)
+  )
+  project.inheritedJson = false
+  project.sizeBytes = uploadResult.assetBytes.toNum() + uploadResult.storedJsonBytes.toNum()
+  project.jsonBytes = uploadResult.jsonBytes
+  project.storedJsonBytes = uploadResult.storedJsonBytes
+  project.assetBytes = uploadResult.assetBytes
+  project.jsonGzip = true
+  project.extensions = projectExtensions
+  project.extensionsIndexed = true
+  project.delete("pendingExtensionUrls")
+
+  // Use an immutable JSON key so a failed metadata publication cannot
+  // overwrite the playable content referenced by the previous record.
+  byte[] jsonBody = fs.readFileBytes(gzipPath).unwrapOr("".toBytes())
+  project.jsonKey = projectJsonSnapshotKey(contentHash(jsonBody))
+  boolean storedJson = stageR2Blob(project.jsonKey.toStr(), jsonBody, "application/json", "gzip")
+  project.lastUploadAt = timestamp
+  project.pendingJson = false
+  if !storedJson (
+    if project.contains("workspaceLayers") and project.workspaceLayers != null (
+      array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+      for i failedWorkspaceKeys.len (
+        string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+        if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+          removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+        )
+      )
+    )
+    storageHoldRelease(storageOwnerId, storageHeld)
+    c.json(500, {ok: false, error: "failed to store project data, please try saving again"})
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    return
+  )
+  recordCreatingDay(contextString(c, "username"))
+
+  // The wrapper holds the publication lock from the initial version read.
+  boolean savedProject = saveProject(project)
+  if !savedProject (
+    if project.jsonKey.toStr() != previousJsonKey (
+      removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), project.id.toStr(), false)
+    )
+    if project.contains("workspaceLayers") and project.workspaceLayers != null (
+      array failedWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+      for i failedWorkspaceKeys.len (
+        string failedWorkspaceKey = failedWorkspaceKeys[i].toStr()
+        if !previousWorkspaceKeys.contains(failedWorkspaceKey) (
+          removeProjectStorageKeyIfOrphaned(failedWorkspaceKey, project.id.toStr(), true)
+        )
+      )
+    )
+    storageHoldRelease(storageOwnerId, storageHeld)
+    void fs.remove(zipPath)
+    void fs.remove(extractDir)
+    c.internalError("failed to save project metadata")
+    return
+  )
+  upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
+  if usesRoturStorage(storageOwnerId) (
+    thread.new(storageSettle, storageOwnerId, storageHeld)
+  ) else (
+    releasePendingUploads(uploader, project.assets.assertElse(array, []))
+  )
+  string replacedJsonKey = if previousJsonKey != project.jsonKey.toStr() then previousJsonKey else ""
+  array replacedWorkspaceKeys = []
+  if project.contains("workspaceLayers") and project.workspaceLayers != null (
+    array keptWorkspaceKeys = project.workspaceLayers.assertElse(array, [])
+    for i previousWorkspaceKeys.len (
+      string oldWorkspaceKey = previousWorkspaceKeys[i].toStr()
+      if !keptWorkspaceKeys.contains(oldWorkspaceKey) (
+        replacedWorkspaceKeys.append(oldWorkspaceKey)
+      )
+    )
+  )
+  if replacedJsonKey != "" or replacedWorkspaceKeys.len > 0 (
+    thread.new(cleanupReplacedProjectStorage, project.id.toStr(), replacedJsonKey, replacedWorkspaceKeys)
+  )
+  void fs.remove(zipPath)
+  void fs.remove(extractDir)
+
+  if !projectHasWorkspace(project) (
+    object generatedHistory = ensureUploadedProjectHistory(project)
+    if generatedHistory.ok (
+      project = generatedHistory.project.assert(object)
+    ) else (
+      log "WARNING: project " ++ project.id.toStr() ++ " uploaded without history and fallback generation failed: " ++ generatedHistory.error.toStr()
+    )
+  )
+
+  if pullId != "" (
+    if !completeNativePull(project, pullId, expectedHead, contextString(c, "username")) (
+      c.json(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})
+      return
+    )
+  )
+
+  c.json(200, {
+    ok: true,
+    project: {
+      id: project.id,
+      gitHead: projectGitHead(project),
+      gitBranch: project.gitBranch,
+      edited: project.edited,
+      remixBaseCommit: project.remixBaseCommit
+    },
+    uploaded: uploadResult.uploaded,
+    skipped: uploadResult.skipped,
+    projectJsonUrl: projectJsonUrlFor(project),
+    thumbUrl: viewerThumbUrlFor(project)
+  })
+)
+
+def handleBootstrapProjectHistory(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object ensured = ensureGeneratedProjectHistory(project, {}, false)
+  if !ensured.ok or !projectHasWorkspace(ensured.project.assertElse(object, {})) (
+    c.json(409, {ok: false, code: "history_unavailable", error: "stored history could not be prepared; retry or recover the original repository"})
+    return
+  )
+  project = ensured.project.assert(object)
+  c.json(200, {
+    ok: true, usedExisting: true,
+    workspaceUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp",
+    head: projectGitHead(project), branch: project.gitBranch,
+    remixBaseCommit: project.remixBaseCommit
+  })
+)
+
+def handleSetThumbnail(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+
+  auto thumbResult = c.formFile("thumbnail")
+  if thumbResult.isErr() (
+    c.badRequest("missing thumbnail file")
+    return
+  )
+  object thumb = thumbResult.unwrap()
+  if thumb.size.toNum() > maxThumbBytes (
+    c.badRequest("thumbnail too large")
+    return
+  )
+  if !fs.writeFileBytes(thumbnailPath(project.id.toStr()), thumb.data) (
+    c.internalError("thumbnail save failed")
+    return
+  )
+  project.edited = timestamp
+  if !saveProject(project) (
+    c.internalError("failed to save the remix")
+    return
+  )
+  upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
+  c.json(200, {ok: true, thumbUrl: viewerThumbUrlFor(project)})
+)
+
+def handleGetProject(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  ensureViewKey(project)
+  maybeFlushProject(project)
+  object response = projectResponse(project, c)
+  object jsonAccess = projectJsonAccess(project, c)
+  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and jsonAccess.allowed == true (
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    if release.len > 0 and release.contains("jsonUrl") (
+      response.projectJsonUrl = keyedJsonUrl(release.jsonUrl.toStr(), jsonAccess)
+      response.releaseVersion = release.version
+      response.releaseChannel = release.channel
+    )
+  )
+  c.json(200, {ok: true, project: response})
+)
+
+// The vanity URL that works for a project right now (slug, or "" while the
+// owner's plan doesn't include one), and whether one is held but lapsed.
+def vanityState(object project) object (
+  string slug = (project.vanitySlug ?? "").toStr()
+  if slug == "" (
+    return {slug: "", lapsed: false}
+  )
+  object after = vanityAfter(slug, (project.vanityLapsedAt ?? 0).toNum(), vanityEligibility(project), timestamp)
+  if after.active == true (
+    return {slug: slug, lapsed: false}
+  )
+  return {slug: "", lapsed: after.slug.toStr() != ""}
+)
+
+def activeVanitySlug(object project) string (
+  return vanityState(project).slug.toStr()
+)
+
+// Projects holding a vanity URL, including lapsed ones. Entries indexed before
+// vanityClaim existed only have vanitySlug.
+def vanityClaimEntries(string slug) array (
+  return vanityEntriesWhere("==", slug)
+)
+
+def vanityEntriesWhere(string op, string value) array (
+  array found = projectSearchDocs.where("vanityClaim", op, value).all()
+  object seen = {}
+  for i found.len (
+    seen[found[i].assert(object).id.toStr()] = true
+  )
+  array legacy = projectSearchDocs.where("vanitySlug", op, value).all()
+  for i legacy.len (
+    object entry = legacy[i].assert(object)
+    if !seen.contains(entry.id.toStr()) (
+      found.append(entry)
+    )
+  )
+  return found
+)
+
+// Records when the project's vanity URL lapsed, clears that once the owner's
+// plan includes vanity URLs again, and releases the URL after 30 days lapsed.
+// Call with the project's upload lock held, and its owner's eligibility looked
+// up beforehand, so a slow Rotur never holds the lock. Returns the URL it
+// still holds.
+def applyVanityLapseLocked(string id, string slug, string eligibility) string (
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    return if loaded.missing == true then "" else slug
+  )
+  object project = loaded.project.assert(object)
+  string current = (project.vanitySlug ?? "").toStr()
+  number lapsedAt = (project.vanityLapsedAt ?? 0).toNum()
+  object after = vanityAfter(current, lapsedAt, eligibility, timestamp)
+  if after.slug.toStr() != current or after.lapsedAt.toNum() != lapsedAt (
+    project.vanitySlug = after.slug
+    if after.lapsedAt.toNum() > 0 (
+      project.vanityLapsedAt = after.lapsedAt
+    ) else (
+      project.delete("vanityLapsedAt")
+    )
+    saveProject(project)
+    upsertIndexEntry(project)
+  )
+  return after.slug.toStr()
+)
+
+// Notices lapsed vanity URLs and releases them on time, even if nobody visits.
+def vanityLapseLoop() (
+  while true (
+    wait 900
+    array entries = vanityEntriesWhere(">", "")
+    for i entries.len (
+      object entry = entries[i].assert(object)
+      string slug = (entry.vanityClaim ?? entry.vanitySlug ?? "").toStr()
+      string eligibility = if slug == "" then "unknown" else vanityEligibility(entry)
+      boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
+      // Nothing changes while Rotur can't be reached, or for a URL in use.
+      if eligibility == "no" or (eligibility == "yes" and lapsed) (
+        string lockName = "project-upload:" ++ entry.id.toStr()
+        sync.lock(lockName)
+        applyVanityLapseLocked(entry.id.toStr(), slug, eligibility)
+        sync.unlock(lockName)
+      )
+    )
+  )
+)
+
+def handleResolveVanityProject(*serve.Context c) (
+  string slug = c.param("slug").toLower().strip()
+  array matches = vanityClaimEntries(slug)
+  if matches.len == 0 (
+    c.notFound("vanity project not found")
+    return
+  )
+  object entry = matches[1].assert(object)
+  auto res = loadProject(entry.id.toStr())
+  if !res.ok (
+    c.notFound("vanity project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) or activeVanitySlug(project) != slug (
+    c.notFound("vanity project not found")
+    return
+  )
+  c.json(200, {ok: true, id: entry.id})
+)
+
+def handleGetEditorProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if projectHiddenFrom(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canSeeInsideProject(project, c) (
+    c.forbidden("see inside is disabled for this project")
+    return
+  )
+  ensureViewKey(project)
+  maybeFlushProject(project)
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleGetProjectTrustedExtensions(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProjectJson(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  array jsonUrls = [projectJsonBaseUrl(project)]
+  if project.shared == true and (project.publicRelease ?? "").toStr() != "" (
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    if (release.jsonUrl ?? "").toStr() != "" (
+      jsonUrls.append(release.jsonUrl.toStr())
+    )
+  )
+  c.json(200, {ok: true, trustedExtensions: projectTrustedExtensions(project), jsonUrls: jsonUrls})
+)
+
+def handleGetProjectJson(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProjectJson(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if serveNotModified(c, project) (
+    return
+  )
+  serveProjectJson(c, project)
+)
+
+def handleUpdateProject(*serve.Context c) (
+  string lockName = "project-upload:" ++ c.param("id")
+  sync.lock(lockName)
+  handleUpdateProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleUpdateProjectLocked(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  array previousTeam = project.collaborators.assertElse(array, [])
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+
+  object body = requestJSON(c)
+  if contextString(c, "sessionScope") == "editor" and !editorProjectUpdateAllowed(body.getKeys()) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if isStudentUserId((project.ownerId ?? "").toStr()) and !contextBool(c, "isAdmin") and !studentProjectUpdateAllowed(body.getKeys()) (
+    c.json(403, {ok: false, code: "student_restricted", error: "Class work can only change its title, description, instructions, notes and credits."})
+    return
+  )
+  string transferredFromId = ""
+  if body.contains("owner") (
+    boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or canManageGroupContent(project, c)
+    if !canTransfer (
+      c.forbidden("you cannot transfer this project")
+      return
+    )
+    string requestedOwner = body.owner.toStr().strip()
+    string nextOwnerId = discoverUserIdentity(requestedOwner)
+    if nextOwnerId == "" (
+      c.badRequest("Rotur user not found")
+      return
+    )
+    string nextOwner = usernameForId(nextOwnerId)
+    if nextOwner == "" (
+      c.badRequest("Rotur user not found")
+      return
+    )
+    number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxProjects.toNum()
+    if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner) and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
+      c.badRequest("the new owner has reached their project limit")
+      return
+    )
+    if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), nextOwnerId, nextOwner) (
+      transferredFromId = projectOwnerId(project)
+    )
+    project.owner = nextOwner
+    project.ownerId = nextOwnerId
+    if !body.contains("keepGroup") or body.keepGroup != true (
+      project.groupTag = ""
+    )
+  )
+  if body.contains("groupTag") (
+    string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
+    if body.groupTag.toStr().strip() == "" (
+      nextGroupTag = ""
+    ) else if nextGroupTag == "" (
+      c.badRequest("invalid group tag")
+      return
+    ) else if !canManageGroupTag(nextGroupTag, c) (
+      c.forbidden("you cannot move this project into that group")
+      return
+    )
+    project.groupTag = nextGroupTag
+  )
+  object creatorBenefits = mistwarpBenefitsForProject(project)
+  if body.contains("branding") (
+    object incomingBranding = body.branding.assertElse(object, {})
+    boolean clearingBranding = incomingBranding.getKeys().len == 0
+    string accentColor = (incomingBranding.accentColor ?? "").toStr().strip()
+    string tagline = (incomingBranding.tagline ?? "").toStr().strip()
+    if accentColor != "" and !regex.match("^#[0-9a-fA-F]{6}$", accentColor) (
+      c.badRequest("branding accent must be a six-digit hex colour")
+      return
+    )
+    if tagline.len > 120 (
+      c.badRequest("branding tagline is too long")
+      return
+    )
+    object nextBranding = if clearingBranding then {} else {accentColor: accentColor, tagline: tagline}
+    object currentBranding = if project.contains("branding") then project.branding.assertElse(object, {}) else {}
+    if creatorBenefits.customProjectBranding != true and json.stringify(nextBranding) != json.stringify(currentBranding) (
+      c.forbidden("custom project branding requires Rotur Plus or Pro")
+      return
+    )
+    project.branding = nextBranding
+  )
+  if body.contains("vanitySlug") (
+    string slug = body.vanitySlug.toStr().toLower().strip()
+    string currentSlug = if project.contains("vanitySlug") then project.vanitySlug.toStr() else ""
+    if slug != "" and slug != currentSlug and creatorBenefits.vanityProjectUrls != true (
+      c.forbidden("vanity project URLs require Rotur Pro")
+      return
+    )
+    if slug != "" and (slug.len < 3 or slug.len > 40 or !regex.match("^[a-z0-9][a-z0-9-]*[a-z0-9]$", slug)) (
+      c.badRequest("vanity URLs must be 3 to 40 letters, numbers, or hyphens")
+      return
+    )
+    if slug != "" and slug != currentSlug (
+      array matches = vanityClaimEntries(slug)
+      for i matches.len (
+        object holder = matches[i].assert(object)
+        string holderId = holder.id.toStr()
+        if holderId != project.id.toStr() (
+          // Free if it has been lapsed for 30 days. Never wait on the other
+          // project's lock while holding this one's.
+          string holderEligibility = vanityEligibility(holder)
+          string holderLock = "project-upload:" ++ holderId
+          boolean held = true
+          if sync.tryLock(holderLock) (
+            held = applyVanityLapseLocked(holderId, slug, holderEligibility) == slug
+            sync.unlock(holderLock)
+          )
+          if held (
+            c.json(409, {ok: false, error: "that vanity URL is already taken"})
+            return
+          )
+        )
+      )
+    )
+    if slug != currentSlug (
+      project.delete("vanityLapsedAt")
+    )
+    project.vanitySlug = slug
+  )
+  if body.contains("title") (
+    string title = body.title.toStr().strip()
+    if title == "" or title.len > 100 (
+      c.badRequest("invalid title")
+      return
+    )
+    project.title = title
+  )
+  if body.contains("description") (
+    string description = body.description.toStr()
+    if description.len > 5000 (
+      c.badRequest("description too long")
+      return
+    )
+    project.description = description
+  )
+  if body.contains("instructions") (
+    string instructions = body.instructions.toStr()
+    if instructions.len > 5000 (
+      c.badRequest("instructions too long")
+      return
+    )
+    project.instructions = instructions
+  )
+  if body.contains("notes") (
+    string notes = body.notes.toStr()
+    if notes.len > 5000 (
+      c.badRequest("notes too long")
+      return
+    )
+    project.notes = notes
+  )
+  if body.contains("credits") (
+    array incoming = body.credits.assert(array)
+    if incoming.len > 50 (
+      c.badRequest("too many credits")
+      return
+    )
+    array credits = []
+    for i incoming.len (
+      object entry = incoming[i]
+      string who = entry.who.toStr().strip()
+      string role = entry.role.toStr().strip()
+      string creditUrl = ""
+      if entry.contains("url") and entry.url != null (
+        creditUrl = entry.url.toStr().strip()
+      )
+      if creditUrl != "" and (!creditUrl.startsWith("https://") and !creditUrl.startsWith("http://")) (
+        c.badRequest("credit URL must use http or https")
+        return
+      )
+      if creditUrl.len > 500 (
+        c.badRequest("credit URL too long")
+        return
+      )
+      if who != "" and who.len <= 60 and role.len <= 120 (
+        object credit = {who: who, role: role}
+        if creditUrl != "" (
+          credit.url = creditUrl
+        )
+        credits.append(credit)
+      )
+    )
+    project.credits = credits
+  )
+  if body.contains("commentsOff") (
+    project.commentsOff = body.commentsOff == true
+  )
+  if body.contains("remixable") (
+    project.remixable = body.remixable != false
+  )
+  if body.contains("seeInside") (
+    project.seeInside = body.seeInside != false
+  )
+  if body.contains("price") and (body.price ?? 0).toNum() != 0 (
+    c.json(400, {ok: false, code: "project_sales_ended", error: "Projects can no longer be sold on MistWarp."})
+    return
+  )
+  if body.contains("remixShare") (
+    if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+      c.forbidden("only the owner can change the remix share")
+      return
+    )
+    number remixShare = body.remixShare.toNum()
+    if remixShare < 0 or remixShare > 50 (
+      c.badRequest("remix share must be between 0 and 50 percent")
+      return
+    )
+    project.remixShare = remixShare
+  )
+  if body.contains("tags") (
+    array incoming = body.tags.assert(array)
+    array tags = []
+    for i incoming.len (
+      if tags.len < 10 (
+        string t = normalizeTag(incoming[i].toStr())
+        if t != "" and !tags.contains(t) (
+          tags.append(t)
+        )
+      )
+    )
+    project.tags = tags
+  )
+  if body.contains("gameProducts") (
+    array incomingProducts = body.gameProducts.assertElse(array, [])
+    if incomingProducts.len > 50 (
+      c.badRequest("projects can have at most 50 game products")
+      return
+    )
+    array products = []
+    array productIds = []
+    for i incomingProducts.len (
+      object incomingProduct = incomingProducts[i].assertElse(object, {})
+      string productId = incomingProduct.id.toStr().toLower().strip()
+      string productName = incomingProduct.name.toStr().strip()
+      string productDescription = incomingProduct.description.toStr().strip()
+      number productPrice = incomingProduct.price.toNum()
+      string grantsItem = incomingProduct.grantsItem.toStr().toLower().strip()
+      string productIcon = incomingProduct.icon.toStr().strip()
+      if !regex.match("^[a-z0-9_-]{1,40}$", productId) or productIds.contains(productId) (
+        c.badRequest("game product ids must be unique lowercase identifiers")
+        return
+      )
+      if productName.len < 1 or productName.len > 80 or productDescription.len > 300 (
+        c.badRequest("invalid game product name or description")
+        return
+      )
+      if productPrice < 0 or productPrice > 1000 (
+        c.badRequest("game product prices must be between 0 and 1000 credits")
+        return
+      )
+      if productIcon != "" and productIcon.toBytes().len > 100000 (
+        c.badRequest("game product icons must be smaller than 100KB")
+        return
+      )
+      if productIcon != "" and !productIcon.startsWith("data:image/") and !productIcon.startsWith("https://") and !productIcon.startsWith("http://") (
+        c.badRequest("game product icons must be image data URLs or image URLs")
+        return
+      )
+      if grantsItem != "" and !regex.match("^[a-z0-9_-]{1,40}$", grantsItem) (
+        c.badRequest("invalid portable item id on game product")
+        return
+      )
+      productIds.append(productId)
+      products.append({id: productId, name: productName, description: productDescription, price: productPrice, grantsItem: grantsItem, icon: productIcon})
+    )
+    project.gameProducts = products
+  )
+  if body.contains("gameItems") (
+    array incomingItems = body.gameItems.assertElse(array, [])
+    if incomingItems.len > 100 (
+      c.badRequest("projects can define at most 100 portable items")
+      return
+    )
+    array items = []
+    array itemIds = []
+    for i incomingItems.len (
+      object incomingItem = incomingItems[i].assertElse(object, {})
+      string itemId = incomingItem.id.toStr().toLower().strip()
+      string itemName = incomingItem.name.toStr().strip()
+      object visual = incomingItem.visual.assertElse(object, {})
+      if visual.getKeys().len == 0 and incomingItem.image.toStr().strip() != "" (
+        visual = {type: "image", url: incomingItem.image.toStr().strip()}
+      )
+      string visualType = visual.type.toStr().toLower().strip()
+      if !regex.match("^[a-z0-9_-]{1,40}$", itemId) or itemIds.contains(itemId) (
+        c.badRequest("portable item ids must be unique lowercase identifiers")
+        return
+      )
+      if itemName.len < 1 or itemName.len > 80 (
+        c.badRequest("invalid portable item definition")
+        return
+      )
+      object cleanVisual = {}
+      if visualType == "image" (
+        string itemImage = visual.url.toStr().strip()
+        if itemImage.startsWith("data:image/") (
+          if itemImage.toBytes().len > 100000 (
+            c.badRequest("portable item images must be smaller than 100KB")
+            return
+          )
+          cleanVisual = {type: "image", url: itemImage}
+        ) else (
+          if !itemImage.startsWith("https://") or itemImage.len > 500 (
+            c.badRequest("portable item images must use a short HTTPS URL")
+            return
+          )
+          cleanVisual = {type: "image", url: itemImage}
+        )
+      ) else if visualType == "costume" (
+        string assetId = visual.assetId.toStr().strip()
+        string dataFormat = visual.dataFormat.toStr().toLower().strip()
+        if !regex.match("^[A-Za-z0-9_-]{8,128}$", assetId) or (dataFormat != "png" and dataFormat != "jpg" and dataFormat != "jpeg" and dataFormat != "svg") (
+          c.badRequest("invalid portable item costume asset")
+          return
+        )
+        cleanVisual = {type: "costume", assetId: assetId, dataFormat: dataFormat}
+      ) else (
+        c.badRequest("portable items need an image or costume")
+        return
+      )
+      itemIds.append(itemId)
+      items.append({id: itemId, name: itemName, visual: cleanVisual, gameAwardable: incomingItem.gameAwardable != false})
+    )
+    project.gameItems = items
+  )
+  if body.contains("inventoryPolicy") (
+    object incomingPolicy = body.inventoryPolicy.assertElse(object, {})
+    string mode = incomingPolicy.mode.toStr().toLower().strip()
+    if mode != "none" and mode != "allowlist" and mode != "all" (
+      c.badRequest("inventory policy must be none, allowlist, or all")
+      return
+    )
+    array allowedItems = incomingPolicy.allowedItems.assertElse(array, [])
+    array allowedProjects = incomingPolicy.allowedProjects.assertElse(array, [])
+    if allowedItems.len > 100 or allowedProjects.len > 50 (
+      c.badRequest("portable item allowlist is too large")
+      return
+    )
+    array cleanItems = []
+    for i allowedItems.len (
+      string globalId = allowedItems[i].toStr().strip()
+      if !regex.match("^[A-Za-z0-9_-]{1,80}:[a-z0-9_-]{1,40}$", globalId) (
+        c.badRequest("invalid global portable item id")
+        return
+      )
+      if !cleanItems.contains(globalId) (
+        cleanItems.append(globalId)
+      )
+    )
+    array cleanProjects = []
+    for i allowedProjects.len (
+      string allowedProject = allowedProjects[i].toStr().strip()
+      if !isSafePathPart(allowedProject) (
+        c.badRequest("invalid portable item source project")
+        return
+      )
+      if !cleanProjects.contains(allowedProject) (
+        cleanProjects.append(allowedProject)
+      )
+    )
+    project.inventoryPolicy = {mode: mode, allowedItems: cleanItems, allowedProjects: cleanProjects}
+  )
+  if body.contains("gameProducts") or body.contains("gameItems") (
+    array configuredProducts = project.gameProducts.assertElse(array, [])
+    array configuredItems = project.gameItems.assertElse(array, [])
+    array configuredItemIds = []
+    for i configuredItems.len (
+      configuredItemIds.append(configuredItems[i].assert(object).id.toStr())
+    )
+    for i configuredProducts.len (
+      string grantedItem = configuredProducts[i].assert(object).grantsItem.toStr()
+      if grantedItem != "" and !configuredItemIds.contains(grantedItem) (
+        c.badRequest("a game product refers to an undefined portable item")
+        return
+      )
+    )
+  )
+  if body.contains("compatibility") and body.compatibility != null (
+    object compatibilityInfo = body.compatibility.assert(object)
+    project.compatibility = {
+      mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
+      keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
+      controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
+    }
+  )
+  if body.contains("collaborators") (
+    if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+      c.forbidden("only the owner can manage the project team")
+      return
+    )
+    array incoming = body.collaborators.assert(array)
+    array collaborators = []
+    number totalShare = 0
+    for i incoming.len (
+      if collaborators.len < 25 (
+        object entry = incoming[i].assert(object)
+        string username = normalizeUsername(entry.username.toStr())
+        string role = entry.role.toStr().toLower().strip()
+        boolean validRole = role == "editor" or role == "maintainer" or role == "contributor" or role == "tester"
+        number share = 0
+        if entry.contains("share") and entry.share != null (
+          share = entry.share.toNum()
+        )
+        if share < 0 or share > 50 (
+          c.badRequest("each teammate share must be between 0 and 50 percent")
+          return
+        )
+        if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
+          string teammateId = discoverUserIdentity(username)
+          if teammateId == "" (
+            c.badRequest("Rotur user not found: " ++ username)
+            return
+          )
+          for memberIndex collaborators.len (
+            if collaborators[memberIndex].username.toStr() == username (
+              c.badRequest("a person can only appear once in the project team")
+              return
+            )
+          )
+          totalShare += share
+          collaborators.append({username: username, userId: teammateId, role: role, share: share})
+        )
+      )
+    )
+    if totalShare > 70 (
+      c.badRequest("teammate revenue shares cannot exceed 70 percent")
+      return
+    )
+    project.collaborators = collaborators
+  )
+
+  // A project given to someone else counts against their storage from now.
+  object transferHold = noStorageHold()
+  string transferredToId = projectOwnerId(project)
+  if transferredFromId != "" and usesRoturStorage(transferredToId) (
+    object moving = {}
+    moving[project.id.toStr()] = projectStorageSummary(project, loadAssetsIndex().assets.assertElse(object, {}))
+    transferHold = storageHold(transferredToId, {projects: moving}, !contextBool(c, "isAdmin"))
+    if transferHold.ok != true (
+      object refusal = transferHold.refusal.assertElse(object, {})
+      c.json(413, {ok: false, code: "storage_full", error: "The new owner's Rotur storage doesn't have room for this project.", needed: (refusal.needed ?? 0).toNum()})
+      return
+    )
+  )
+  project.edited = timestamp
+  if !saveProject(project) (
+    storageHoldRelease(transferredToId, transferHold)
+    c.internalError("could not save project access")
+    return
+  )
+  upsertIndexEntry(project)
+  if transferredFromId != "" (
+    storageSettleSoon(transferredFromId)
+    if usesRoturStorage(transferredToId) (
+      thread.new(storageSettle, transferredToId, transferHold)
+    )
+  )
+  if body.contains("collaborators") (
+    array nextTeam = project.collaborators.assert(array)
+    for i nextTeam.len (
+      object member = nextTeam[i].assert(object)
+      boolean newlyShared = true
+      for j previousTeam.len (
+        object previousMember = previousTeam[j].assert(object)
+        if normalizeUsername(previousMember.username.toStr()) == normalizeUsername(member.username.toStr()) and previousMember.role == member.role (
+          newlyShared = false
+        )
+      )
+      if newlyShared (
+        addNotification(member.username.toStr(), contextString(c, "username"), "project_shared", {
+          projectId: project.id, projectTitle: project.title, role: member.role
+        })
+      )
+    )
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def collectAssetsUsedByOthers(string excludeId) object (
+  object used = {}
+  array directories = [projectsDir, trashDir]
+  for d directories.len (
+    string directory = directories[d].toStr()
+    array files = fs.readDir(directory).unwrapOr([])
+    for i files.len (
+      auto res = readFile(directory ++ files[i].toStr())
+      if res.ok (
+        object p = res.data.assert(object)
+        if p.id.toStr() != excludeId and p.contains("assets") and p.assets != null (
+          array a = p.assets.assert(array)
+          for j a.len (
+            used[a[j].toStr()] = true
+          )
+        )
+      )
+    )
+  )
+  array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
+  for i evidenceIds.len (
+    object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+    if evidence.id.toStr() != excludeId and evidence.contains("assets") and evidence.assets != null (
+      array assets = evidence.assets.assertElse(array, [])
+      for j assets.len (
+        used[assets[j].toStr()] = true
+      )
+    )
+  )
+  return used
+)
+
+def deleteOrphanedAssets(object project) (
+  if !project.contains("assets") or project.assets == null (
+    return
+  )
+  array myAssets = project.assets.assert(array)
+  if myAssets.len == 0 (
+    return
+  )
+  object usedByOthers = collectAssetsUsedByOthers(project.id.toStr())
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  boolean indexChanged = false
+  for i myAssets.len (
+    string name = myAssets[i].toStr()
+    if !usedByOthers.contains(name) (
+      r2Remove(assetObjectKey(name))
+      if knownAssets.contains(name) (
+        knownAssets.delete(name)
+        indexChanged = true
+      )
+    )
+  )
+  if indexChanged (
+    saveAssetsIndex(assetsIndex)
+  )
+)
+
+def purgeProjectStorage(object project, boolean cleanAssets) (
+  string id = project.id.toStr()
+  removeProjectExtensionUsage(id, storedProjectExtensions(project))
+  deleteProjectFile(id)
+  removeFromIndex(id)
+  void fs.remove(stagingJsonPath(id))
+  void fs.remove(thumbnailPath(id))
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
+  removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), id, false)
+  array workspaceKeys = projectWorkspaceKeys(project)
+  for i workspaceKeys.len (
+    removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), id, true)
+  )
+  purgeGameDataForProject(id)
+  if cleanAssets (
+    deleteOrphanedAssets(project)
+  )
+  storageSettleProject(project)
+)
+
+def purgeProject(object project) (
+  purgeProjectStorage(project, true)
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  deleteProjectCommunityRecords(project.id.toStr())
+  removeProjectFromSpaces(project.id.toStr())
+)
+
+def purgeProjects(array projects) (
+  array assets = []
+  for i projects.len (
+    object project = projects[i].assert(object)
+    if project.contains("assets") and project.assets != null (
+      array projectAssets = project.assets.assert(array)
+      for j projectAssets.len (
+        string asset = projectAssets[j].toStr()
+        if !assets.contains(asset) (
+          assets.append(asset)
+        )
+      )
+    )
+    purgeProjectStorage(project, false)
+  )
+  deleteOrphanedAssets({id: "", assets: assets})
+)
+
+def handleDeleteProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  if contextString(c, "sessionScope") == "editor" and !editorCanDeleteProject(project) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if project.shared == true and !contextBool(c, "isAdmin") (
+    c.badRequest("unshare the project before deleting it")
+    return
+  )
+
+  number recoveryDays = mistwarpBenefitsForProject(project).recoveryDays.toNum()
+  project.deletedAt = timestamp
+  project.purgeAt = timestamp + (recoveryDays * 86400000)
+  project.recoveryDays = recoveryDays
+  project.shared = false
+  project.visibility = "private"
+  if !writeFile(trashDir ++ project.id.toStr() ++ ".json", project) (
+    c.internalError("failed to move the project to trash")
+    return
+  )
+  deleteProjectFile(project.id.toStr())
+  removeFromIndex(project.id.toStr())
+  removeProjectFromSpaces(project.id.toStr())
+  object profile = loadProfile(project.owner.toStr())
+  if profile.featuredProject.toStr() == project.id.toStr() (
+    profile.featuredProject = ""
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true, recoverableUntil: project.purgeAt, recoveryDays: recoveryDays})
+)
+
+def loadTrashedProject(string id) object (
+  if !isSafePathPart(id) (
+    return {ok: false, error: "invalid project id"}
+  )
+  auto res = readFile(trashDir ++ id ++ ".json")
+  if !res.ok (
+    return {ok: false, error: "trashed project not found"}
+  )
+  return {ok: true, project: res.data.assert(object)}
+)
+
+def purgeExpiredTrash() (
+  array files = fs.readDir(trashDir).unwrapOr([])
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") (
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
+        if project.contains("purgeAt") and project.purgeAt.toNum() <= timestamp (
+          purgeProject(project)
+        )
+      )
+    )
+  )
+)
+
+def handleGetMyTrash(*serve.Context c) (
+  purgeExpiredTrash()
+  array projects = []
+  string userId = contextString(c, "userId")
+  string username = contextString(c, "username")
+  array files = fs.readDir(trashDir).unwrapOr([])
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") (
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
+        string ownerId = (project.ownerId ?? "").toStr()
+        if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+          projects.append({
+            id: project.id,
+            title: project.title,
+            deletedAt: project.deletedAt,
+            purgeAt: project.purgeAt,
+            recoveryDays: project.recoveryDays,
+            thumbUrl: keyedThumbUrlFor(project)
+          })
+        )
+      )
+    )
+  )
+  projects.sortBy("deletedAt", "descending")
+  c.json(200, {ok: true, projects: projects})
+)
+
+def handleRestoreProject(*serve.Context c) (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
+    c.notFound("trashed project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  if project.purgeAt.toNum() <= timestamp (
+    purgeProject(project)
+    c.notFound("the recovery period has ended")
+    return
+  )
+  if fs.exists(projectsDir ++ project.id.toStr() ++ ".json") (
+    c.json(409, {ok: false, error: "a project with this id already exists"})
+    return
+  )
+  project.delete("deletedAt")
+  project.delete("purgeAt")
+  project.delete("recoveryDays")
+  if !saveProject(project) (
+    c.internalError("failed to restore the project")
+    return
+  )
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  upsertIndexEntry(project)
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handlePurgeTrashedProject(*serve.Context c) (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
+    c.notFound("trashed project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  purgeProject(project)
+  c.json(200, {ok: true})
+)
+
+def handlePublishProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if projectMustStayPrivate(project) (
+    c.forbidden("classroom projects stay private")
+    return
+  )
+  if refuseIfHiddenByModerator(project, c) (
+    return
+  )
+  if project.shared == true and projectVisibility(project) == "public" (
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+
+  string blockedExtension = projectBlockedExtension(project)
+  if blockedExtension != "" (
+    c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
+    return
+  )
+
+  boolean everUploaded = project.lastUploadAt.toNum() > 0
+  everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
+  if !everUploaded (
+    c.badRequest("upload the project before publishing")
+    return
+  )
+
+  boolean firstShare = project.sharedAt.toNum() == 0
+  project.shared = true
+  project.visibility = "public"
+  if firstShare (
+    project.sharedAt = timestamp
+  )
+  project.edited = timestamp
+  saveProject(project)
+  upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
+  if firstShare (
+    projectFirstShared(project)
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleUnpublishProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if project.shared != true and projectVisibility(project) == "private" (
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+
+  project.shared = false
+  project.visibility = "private"
+  project.edited = timestamp
+  project.viewKey = randomString(16)
+  saveProject(project)
+  upsertIndexEntry(project)
+  object profile = loadProfile(project.owner.toStr())
+  if profile.featuredProject.toStr() == project.id.toStr() (
+    profile.featuredProject = ""
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleViewProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !projectIsViewable(project) (
+    c.json(200, {ok: true})
+    return
+  )
+  string viewer = normalizeUsername(contextString(c, "username"))
+  string dedupKey = project.id.toStr() ++ "|" ++ viewer
+  if viewer == "" (
+    dedupKey = project.id.toStr() ++ "|ip:" ++ c.ip()
+  )
+  if viewDedup.has(dedupKey) (
+    c.json(200, {ok: true})
+    return
+  )
+  viewDedup.set(dedupKey, true)
+  project.views = project.views.toNum() + 1
+  object history = {}
+  if project.contains("viewHistory") and project.viewHistory != null (
+    history = project.viewHistory.assert(object)
+  )
+  number today = (timestamp / 86400000).toInt()
+  string dayKey = today.toStr()
+  number dayCount = 0
+  if history.contains(dayKey) (
+    dayCount = history[dayKey].toNum()
+  )
+  object pruned = {}
+  array dayKeys = history.getKeys()
+  for i dayKeys.len (
+    string k = dayKeys[i].toStr()
+    if today - k.toNum() < 31 (
+      pruned[k] = history[k]
+    )
+  )
+  pruned[dayKey] = dayCount + 1
+  project.viewHistory = pruned
+  saveProject(project)
+  string flushKey = project.id.toStr()
+  if !viewIndexFlush.has(flushKey) (
+    viewIndexFlush.set(flushKey, true)
+    upsertIndexEntry(project)
+  )
+  c.json(200, {ok: true})
+)
+
+def handleReactProject(*serve.Context c) (
+  string lockName = "project-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleReactProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleReactProjectLocked(*serve.Context c) (
+  object body = requestJSON(c)
+  string reactionType = body.type.toStr()
+  if !isValidReaction(reactionType) (
+    c.badRequest("invalid reaction")
+    return
+  )
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+
+  string viewer = normalizeUsername(contextString(c, "username"))
+  array loves = project.loves.assert(array)
+  array broken = []
+  if project.contains("brokenhearts") (
+    broken = project.brokenhearts.assert(array)
+  )
+  number previousLikes = loves.len
+  // Projects from before everLoved count everyone who loves them now.
+  if !project.contains("everLoved") or project.everLoved == null (
+    project.everLoved = loves.clone()
+  )
+  boolean hadHeart = loves.contains(viewer)
+  boolean hadBroken = broken.contains(viewer)
+  loves = removeString(loves, viewer)
+  broken = removeString(broken, viewer)
+  boolean addedHeart = false
+  boolean firstLove = false
+  if reactionType == "heart" and !hadHeart (
+    loves.append(viewer)
+    addedHeart = true
+    // Badges count each person's love once, however often it's toggled.
+    array everLoved = (project.everLoved ?? []).assertElse(array, [])
+    if !everLoved.contains(viewer) (
+      everLoved.append(viewer)
+      project.everLoved = everLoved
+      firstLove = true
+    )
+  )
+  if reactionType == "brokenheart" and !hadBroken (
+    broken.append(viewer)
+  )
+  project.loves = loves
+  project.brokenhearts = broken
+  if !saveProject(project) (
+    c.internalError("could not save reaction")
+    return
+  )
+  upsertIndexEntry(project)
+
+  notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
+  if addedHeart (
+    addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
+    if firstLove and normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
+      roturBadgeEvent(project.owner.toStr(), "love_received", 0)
+    )
+    addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+  )
+
+  string myReaction = ""
+  if loves.contains(viewer) (
+    myReaction = "heart"
+  )
+  if broken.contains(viewer) (
+    myReaction = "brokenheart"
+  )
+  siteBroadcastStats(project.id.toStr(), contextString(c, "username"), {reaction: myReaction})
+  c.json(200, {
+    ok: true,
+    hearts: loves.len,
+    brokenHearts: broken.len,
+    myReaction: myReaction
+  })
+)
+
+def sharedIndexEntries() array (
+  if sharedProjectsCache.has("projects") (
+    return sharedProjectsCache.get("projects").assert(array)
+  )
+  array entries = []
+  array stored = projectSearchDocs.find({shared: true, visibility: "public"})
+  for i stored.len (
+    object entry = stored[i].assert(object)
+    if entry.shared == true (
+      entries.append(entry)
+    )
+  )
+  sharedProjectsCache.set("projects", entries)
+  return entries
+)
+
+def handleExplore(*serve.Context c) (
+  array entries = projectsVisibleTo(sharedIndexEntries(), c)
+
+  string q = (c.query("q") ?? "").toLower().strip()
+  string tag = (c.query("tag") ?? "").toLower().strip()
+  if q.startsWith("#") (
+    tag = normalizeTag(q)
+    q = ""
+  )
+  if tag != "" (
+    array filtered = []
+    for i entries.len (
+      object entry = entries[i]
+      array tags = []
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+      if tags.contains(tag) (
+        filtered.append(entry)
+      )
+    )
+    entries = filtered
+  ) else if q != "" (
+    array filtered = []
+    for i entries.len (
+      object entry = entries[i]
+      boolean matches = entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q)
+      if !matches and entry.contains("tags") and entry.tags != null (
+        array tags = entry.tags.assert(array)
+        for j tags.len (
+          if tags[j].toStr().contains(q) (
+            matches = true
+          )
+        )
+      )
+      if matches (
+        filtered.append(entry)
+      )
+    )
+    entries = filtered
+  )
+
+  string sort = if (c.query("sort") ?? "") == "" then "recent" else (c.query("sort") ?? "")
+  if q != "" and sort == "relevance" (
+    array ranked = []
+    for i entries.len (
+      object entry = entries[i]
+      array tags = []
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+      number score = projectSearchScore(entry.title.toStr(), entry.owner.toStr(), tags, q)
+      ranked.append({rank: searchRank(score, entry.weekViews.toNum()), entry: entry})
+    )
+    ranked.sortBy("rank", "descending")
+    array ordered = []
+    for i ranked.len (
+      object row = ranked[i].assert(object)
+      ordered.append(row.entry)
+    )
+    entries = ordered
+  ) else if sort == "loved" (
+    entries.sortBy("loveCount", "descending")
+  ) else if sort == "undiscovered" (
+    entries.sortBy("views", "ascending")
+  ) else if sort == "trending" (
+    entries.sortBy("weekViews", "descending")
+  ) else (
+    entries.sortBy("sharedAt", "descending")
+  )
+
+  number total = entries.len
+  number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+  number limit = clampNumber(c.queryInt("limit", 16), 1, 50)
+
+  c.json(200, {ok: true, total: total, projects: paginate(entries, offset, limit)})
+)
+
+def handleRandomProject(*serve.Context c) (
+  object project = randomProjectEntry(projectsVisibleToEveryone(sharedIndexEntries()), (c.query("exclude") ?? "").strip())
+  if !project.contains("id") (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  c.json(200, {ok: true, project: project})
+)
+
+def handleRelatedProjects(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
+  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), (c.query("exclude") ?? "").split(","), limit)})
+)
+
+def handleFeaturedProject(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  array pool = []
+  for i entries.len (
+    object entry = entries[i]
+    if pool.len < 14 and entry.thumbUrl != null and entry.thumbUrl.toStr() != "" (
+      pool.append(entry)
+    )
+  )
+  if pool.len == 0 (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  number today = (timestamp / 86400000).toInt()
+  number idx = (today % pool.len) + 1
+  c.setHeader("Cache-Control", "public, max-age=300")
+  c.json(200, {ok: true, day: today, project: pool[idx]})
+)
+
+def sitemapUrl(string path) string (
+  return "<url><loc>" ++ xmlEscape(editorOrigin ++ path) ++ "</loc></url>"
+)
+
+def handleSitemap(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("views", "descending")
+  array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
+  string sitemapXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+  for i staticPaths.len (
+    sitemapXml ++= sitemapUrl(staticPaths[i].toStr())
+  )
+  object owners = {}
+  number count = 0
+  for i entries.len (
+    object entry = entries[i]
+    if count < 20000 (
+      string path = "/project/" ++ entry.id.toStr()
+      if entry.contains("vanitySlug") and entry.vanitySlug != null and entry.vanitySlug.toStr() != "" (
+        path = "/p/" ++ entry.vanitySlug.toStr()
+      )
+      sitemapXml ++= sitemapUrl(path)
+      count += 1
+      string ownerKey = normalizeUsername(entry.owner.toStr())
+      if ownerKey != "" and !owners.contains(ownerKey) (
+        owners[ownerKey] = true
+        sitemapXml ++= sitemapUrl("/users/" ++ entry.owner.toStr())
+        count += 1
+      )
+    )
+  )
+  sitemapXml ++= "</urlset>"
+  c.setHeader("Content-Type", "application/xml; charset=utf-8")
+  c.setHeader("Cache-Control", "public, max-age=3600")
+  c.text(200, sitemapXml)
+)
+
+def handleLeaderboard(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  object totals = {}
+  for i entries.len (
+    object entry = entries[i]
+    string owner = normalizeUsername(entry.owner.toStr())
+    if owner != "" (
+      if !totals.contains(owner) (
+        totals[owner] = {username: entry.owner, loves: 0, views: 0, projects: 0}
+      )
+      object row = totals[owner]
+      row.loves = row.loves.toNum() + entry.loveCount.toNum()
+      row.views = row.views.toNum() + entry.views.toNum()
+      row.projects = row.projects.toNum() + 1
+    )
+  )
+  array rows = []
+  array keys = totals.getKeys()
+  for i keys.len (
+    rows.append(totals[keys[i].toStr()])
+  )
+  string by = if (c.query("by") ?? "") == "" then "loves" else (c.query("by") ?? "")
+  if by != "views" (
+    by = "loves"
+  )
+  rows.sortBy(by, "descending")
+  number limit = clampNumber(c.queryInt("limit", 15), 1, 50)
+  array visible = []
+  for i rows.len (
+    if visible.len < limit (
+      object row = rows[i].assert(object)
+      if !usernameIsMinor(row.username.toStr()) (
+        visible.append(row)
+      )
+    )
+  )
+  c.json(200, {ok: true, by: by, users: visible})
+)
+
+def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
+  if projectHiddenFrom(entry, c) (
+    return false
+  )
+  if projectsVisibleTo([entry], c).len == 0 (
+    return false
+  )
+  if entry.shared == true and projectVisibility(entry) == "public" (
+    return true
+  )
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  auto res = loadProject(entry.id.toStr())
+  if !res.ok (
+    return false
+  )
+  object project = res.project.assert(object)
+  return projectRole(project, contextString(c, "username")) != "" or canEditProject(project, c)
+)
+
+def handleGetRemixes(*serve.Context c) (
+  string id = c.param("id")
+  array entries = projectSearchDocs.where("remixParent", "==", id).sort("sharedAt", "desc").all()
+  array remixes = []
+  for i entries.len (
+    object entry = entries[i]
+    if remixEntryVisibleInList(entry, c) (
+      remixes.append(entry)
+    )
+  )
+  c.json(200, {ok: true, remixes: remixes})
+)
+
+def handleGetRemixTree(*serve.Context c) (
+  string id = c.param("id")
+  auto res = loadProject(id)
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+
+  string rootId = id
+  object current = indexEntryFromProject(project)
+  array ancestors = [current]
+  number hops = 0
+  boolean walking = true
+  while walking and hops < 100 (
+    string parent = current.remixParent.toStr()
+    if parent == "" or parent == rootId (
+      walking = false
+    ) else (
+      auto parentResult = loadProject(parent)
+      if parentResult.ok and canViewProject(parentResult.project.assert(object), c) (
+        rootId = parent
+        current = indexEntryFromProject(parentResult.project.assert(object))
+        ancestors.append(current)
+      ) else (
+        walking = false
+      )
+    )
+    hops += 1
+  )
+
+  array nodes = []
+  object seen = {}
+  object root = (projectSearchDocs.findById(rootId) ?? {})
+  if root.len > 0 (
+    nodes.append(root)
+    seen[rootId] = true
+  )
+  for i ancestors.len (
+    object ancestor = ancestors[i].assert(object)
+    string ancestorId = ancestor.id.toStr()
+    if ancestorId != "" and !seen.contains(ancestorId) (
+      nodes.append(ancestor)
+      seen[ancestorId] = true
+    )
+  )
+  array treeEntries = projectSearchDocs.where("remixRoot", "==", rootId).limit(499).all()
+  for i treeEntries.len (
+    object entry = treeEntries[i].assert(object)
+    string entryId = entry.id.toStr()
+    if !seen.contains(entryId) and remixEntryVisibleInList(entry, c) (
+      nodes.append(entry)
+      seen[entryId] = true
+    )
+  )
+  number scan = 1
+  while scan <= nodes.len and nodes.len < 500 (
+    object parentNode = nodes[scan].assert(object)
+    string parentId = parentNode.id.toStr()
+    array directChildren = projectSearchDocs.where("remixParent", "==", parentId).limit(500 - nodes.len).all()
+    for i directChildren.len (
+      object child = directChildren[i].assert(object)
+      string childId = child.id.toStr()
+      if !seen.contains(childId) and remixEntryVisibleInList(child, c) (
+        nodes.append(child)
+        seen[childId] = true
+      )
+    )
+    scan += 1
+  )
+  if !seen.contains(id) and nodes.len < 500 (
+    nodes.append(indexEntryFromProject(project))
+  )
+
+  c.json(200, {ok: true, root: rootId, nodes: nodes})
+)
+
+def handleRemixProject(*serve.Context c) (
+  string lockName = "project-history-" ++ c.param("id")
+  sync.lock(lockName)
+  handleRemixProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleRemixProjectLocked(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object parent = res.project.assert(object)
+  if !canViewProject(parent, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canRemixProject(parent, c) (
+    c.forbidden("this project cannot be remixed")
+    return
+  )
+  object body = requestJSON(c)
+  string forkTitle = parent.title.toStr() ++ " fork"
+  if body.contains("title") and body.title != null and body.title.toStr().strip() != "" (
+    forkTitle = body.title.toStr().strip().trim(1, 100)
+  )
+  string forkBranch = ""
+  if body.contains("branch") and body.branch != null (
+    forkBranch = body.branch.toStr().strip()
+  )
+  object forked = forkProjectFor(parent, contextString(c, "username"), contextString(c, "userId"), forkTitle, forkBranch, !contextBool(c, "isAdmin"))
+  if forked.ok != true (
+    forkFailureResponse(c, forked)
+    return
+  )
+  object project = forked.project.assert(object)
+  c.json(201, {
+    ok: true,
+    id: project.id,
+    projectJsonUrl: projectJsonUrlFor(project),
+    assetsBase: assetsBaseUrl()
+  })
+)
+
+def forkFailureResponse(*serve.Context c, object forked) (
+  if forked.code == "storage_full" and forked.contains("refusal") (
+    roturStorageFullResponse(c, forked.refusal.assertElse(object, {}))
+    return
+  )
+  if forked.code == "storage_full" (
+    object details = storageDetails(forked.username.toStr())
+    storageFullResponse(c, details, forked.bytes.toNum() - details.remaining.toNum())
+    return
+  )
+  c.json(forked.status.toNum().toInt(), {ok: false, code: forked.code, error: forked.error})
+)
+
+def forkProjectFor(object source, string username, string userId, string forkTitle, string requestedBranch, boolean enforceLimits) object (
+  object parent = source
+  number projectLimit = mistwarpBenefitsForUserId(userId).maxProjects.toNum()
+  if enforceLimits and ownedProjectSlotCount(userId, username) >= projectLimit (
+    return {ok: false, status: 413, code: "project_limit", error: "project limit reached; delete a trashed project permanently or upgrade your plan"}
+  )
+  string forkBranch = "main"
+  if parent.contains("gitBranch") and parent.gitBranch != null and parent.gitBranch.toStr() != "" (
+    forkBranch = parent.gitBranch.toStr()
+  )
+  if requestedBranch != "" (
+    forkBranch = requestedBranch
+  )
+  if forkBranch.len > 100 or forkBranch.contains(" ") or forkBranch.contains("\\") or forkBranch.contains("..") or forkBranch.startsWith("/") (
+    return {ok: false, status: 400, code: "invalid_branch", error: "invalid branch name"}
+  )
+
+  object jsonSnapshot = ensureProjectJsonSnapshot(parent)
+  if !jsonSnapshot.ok (
+    return {ok: false, status: 500, code: "copy_failed", error: "could not copy the original project, try again"}
+  )
+  parent = jsonSnapshot.project.assert(object)
+  object workspaceSnapshots = ensureProjectWorkspaceSnapshots(parent)
+  if !workspaceSnapshots.ok (
+    return {ok: false, status: 500, code: "history_failed", error: "could not prepare the original project history, try again"}
+  )
+  parent = workspaceSnapshots.project.assert(object)
+
+  if !projectHasWorkspace(parent) (
+    return {ok: false, status: 409, code: "history_unavailable", error: "prepare the original project's history before remixing"}
+  )
+  string id = generateId()
+  string sourcePath = cachedProjectWorkspacePath(parent)
+  string forkPath = tmpDir ++ id ++ ".fork.mwp"
+  string parentId = parent.id.toStr()
+  string forkJson = gitinspection.ForkHistoryArchiveJSON(sourcePath, forkPath, forkBranch, id, parentId)
+  auto parsedFork = json.parse(forkJson, {type: "object"})
+  if parsedFork.isErr() or parsedFork.unwrap().assert(object).ok != true (
+    void fs.remove(forkPath)
+    return {ok: false, status: 409, code: "history_unavailable", error: "requested branch history is unavailable"}
+  )
+  object forkHistory = parsedFork.unwrap().assert(object).manifest.assert(object)
+  byte[] forkBody = fs.readFileBytes(forkPath).unwrapOr("".toBytes())
+  void fs.remove(forkPath)
+  number forkBytes = projectSizeBytes(parent) + forkBody.len
+  object hold = noStorageHold()
+  if usesRoturStorage(userId) (
+    // The fork shares the original's project.json and assets, and brings
+    // its own history.
+    object forkSummary = projectStorageSummary(parent, loadAssetsIndex().assets.assertElse(object, {}))
+    object forkHistoryBlob = {}
+    forkHistoryBlob["incoming:" ++ id] = forkBody.len
+    forkSummary.history = forkHistoryBlob
+    object saving = {}
+    saving[id] = forkSummary
+    hold = storageHold(userId, {projects: saving}, enforceLimits)
+    if hold.ok != true (
+      return {ok: false, status: 413, code: "storage_full", error: "storage full", refusal: hold.refusal}
+    )
+  ) else if enforceLimits and storageAllowance(mistwarpBenefitsForUserId(userId).storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
+    return {ok: false, status: 413, code: "storage_full", error: "storage full", username: username, bytes: forkBytes}
+  )
+  string forkKey = projectWorkspaceSnapshotKey(contentHash(forkBody))
+  if !stageR2Blob(forkKey, forkBody, "application/x-mistwarp-project", "") (
+    storageHoldRelease(userId, hold)
+    return {ok: false, status: 500, code: "store_failed", error: "could not store fork history"}
+  )
+
+  object project = {
+    id: id,
+    owner: username,
+    ownerId: userId,
+    title: forkTitle,
+    description: "",
+    instructions: "",
+    repo: null,
+    workspaceKey: forkKey,
+    workspaceLayers: [forkKey],
+    jsonKey: parent.jsonKey,
+    viewKey: randomString(16),
+    created: timestamp,
+    edited: timestamp,
+    sharedAt: 0,
+    shared: false,
+    lastUploadAt: timestamp,
+    jsonGzip: true,
+    inheritedJson: true,
+    storedJsonBytes: parent.storedJsonBytes ?? 0,
+    remixParent: parent.id,
+    remixRoot: parent.id,
+    remixShare: 10,
+    remixNotified: false,
+    scratchOrigin: "",
+    views: 0,
+    loves: [],
+    brokenhearts: [],
+    assets: parent.assets,
+    sizeBytes: projectSizeBytes(parent),
+    historyBytes: forkBody.len,
+    gitHead: forkHistory.head,
+    remixBaseCommit: forkHistory.head,
+    gitBranch: forkHistory.branch,
+    gitCommits: forkHistory.commits,
+    gitGraph: forkHistory.graph,
+    collaborators: []
+  }
+  object parentEntry = (projectSearchDocs.findById(parentId) ?? {})
+  if parentEntry.len > 0 and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
+    project.remixRoot = parentEntry.remixRoot
+  )
+  array inheritedFields = ["jsonBytes", "assetBytes", "extensions", "extensionsIndexed"]
+  for i inheritedFields.len (
+    string field = inheritedFields[i].toStr()
+    if parent.contains(field) (
+      project[field] = parent[field]
+    )
+  )
+
+  if !storeProjectExtensions(id, [], storedProjectExtensions(project), {}) (
+    storageHoldRelease(userId, hold)
+    return {ok: false, status: 500, code: "extensions_failed", error: "could not index project extensions"}
+  )
+  if !saveProject(project) (
+    storageHoldRelease(userId, hold)
+    return {ok: false, status: 500, code: "save_failed", error: "could not save fork"}
+  )
+  upsertIndexEntry(project)
+  if usesRoturStorage(userId) (
+    thread.new(storageSettle, userId, hold)
+  )
+  return {ok: true, project: project}
+)
+
+def materializeWorktreeAssets(object project, byte[] body, string extractDir, boolean replaceHistory) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".refs.mwp"
+  string outputPath = workId ++ ".materialized.mwp"
+  string fetchDir = workId ++ ".assets"
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false}
+  )
+  string basePath = ""
+  if !replaceHistory and projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+  )
+  string assetDirs = extractDir ++ "\n" ++ localBlobsDir ++ "assets"
+  auto parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs), {type: "object"})
+  object res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  array missing = (res.missing ?? []).assertElse(array, [])
+  if !res.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
+    void fs.mkdir(fetchDir, {recursive: true})
+    for i missing.len (
+      string name = missing[i].toStr()
+      if isValidMd5Ext(name) (
+        void copyStorageKeyToPath(assetObjectKey(name), fetchDir ++ "/" ++ name)
+      )
+    )
+    parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs ++ "\n" ++ fetchDir), {type: "object"})
+    res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  )
+  void fs.remove(incomingPath)
+  void fs.remove(fetchDir)
+  if res.ok != true (
+    void fs.remove(outputPath)
+    return {ok: false}
+  )
+  number refs = (res.refs ?? 0).toNum()
+  if refs == 0 (
+    return {ok: true, refs: 0}
+  )
+  byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+  void fs.remove(outputPath)
+  return {ok: data.len > 0, refs: refs, data: data, size: data.len}
+)
+
+def validateUploadedHistory(object project, byte[] body, string metadata, string currentHead) object (
+  return validateUploadedHistoryMode(project, body, metadata, currentHead, false)
+)
+
+// Only the explicit maintainer upload path may discard the stored graph.
+// With no base archive, validation also rejects deltas and incomplete history.
+def validateUploadedHistoryMode(object project, byte[] body, string metadata, string currentHead, boolean replaceHistory) object (
+  string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
+  string incomingPath = workId ++ ".incoming.mwp"
+  string outputPath = workId ++ ".validated.mwp"
+  string basePath = ""
+  if !replaceHistory and projectHasWorkspace(project) (
+    basePath = cachedProjectWorkspacePath(project)
+    if basePath == "" (
+      return {ok: false, error: "stored history unavailable; retry later"}
+    )
+  )
+  if !fs.writeFileBytes(incomingPath, body) (
+    return {ok: false, error: "could not stage history"}
+  )
+  string forkBase = (project.remixBaseCommit ?? "").toStr()
+  if replaceHistory (
+    currentHead = ""
+    forkBase = ""
+  )
+  string projectId = project.id.toStr()
+  string remixParent = (project.remixParent ?? "").toStr()
+  string resultJson = gitinspection.ValidateHistoryArchiveJSON(basePath, incomingPath, outputPath, currentHead, forkBase, metadata, projectId, remixParent)
+  void fs.remove(incomingPath)
+  auto parsed = json.parse(resultJson, {type: "object"})
+  if parsed.isErr() (
+    void fs.remove(outputPath)
+    return {ok: false, error: "could not validate history"}
+  )
+  object res = parsed.unwrap().assert(object)
+  if res.ok (
+    byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
+    res.data = data
+    res.size = data.len
+  )
+  void fs.remove(outputPath)
+  return res
+)

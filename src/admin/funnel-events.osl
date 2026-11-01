@@ -1,0 +1,47 @@
+export {}
+
+def recordFunnelEvent(string key, number now) (
+  string id = "funnel:" ++ funnelDayKey(now)
+  sync.lock("funnel-events")
+  defer sync.unlock("funnel-events")
+  object doc = funnelDocs.findById(id) ?? {}
+  object counts = {}
+  if doc.contains("counts") and doc.counts != null (
+    counts = doc.counts.assert(object)
+  )
+  counts[key] = counts[key].toNum() + 1
+  void putDocument(funnelDocs, id, {day: funnelDayKey(now).toNum(), counts: counts})
+)
+
+def funnelEventsByDay(number since) object (
+  object byEvent = {}
+  array docs = funnelDocs.where("day", ">", funnelDayKey(since).toNum()).all()
+  for i docs.len (
+    object doc = docs[i].assert(object)
+    string day = doc.day.toNum().toInt().toStr()
+    object counts = (doc.counts ?? {}).assert(object)
+    array keys = counts.getKeys()
+    for k keys.len (
+      string key = keys[k].toStr()
+      object days = (byEvent[key] ?? {}).assert(object)
+      days[day] = days[day].toNum() + counts[key].toNum()
+      byEvent[key] = days
+    )
+  )
+  return byEvent
+)
+
+def handleRecordFunnelEvent(*serve.Context c) (
+  if !isFunnelOrigin(siteErrorOrigin((c.header("Origin") ?? ""), (c.header("Referer") ?? ""))) (
+    c.json(202, {ok: true, ignored: true})
+    return
+  )
+  object body = requestJSON(c)
+  string key = funnelEventKey((body.name ?? "").toStr(), (body.variant ?? "").toStr())
+  if key == "" (
+    c.badRequest("unknown event")
+    return
+  )
+  recordFunnelEvent(key, timestamp)
+  c.json(202, {ok: true})
+)

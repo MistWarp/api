@@ -1,0 +1,32 @@
+export {
+  publicReleaseRecord
+}
+
+def keyedJsonUrl(string url, object access) string (
+  if url == "" or access.allowed != true (
+    return ""
+  )
+  string key = (access.key ?? "").toStr()
+  if key == "" (
+    return url
+  )
+  return url ++ (if url.contains("?") then "&" else "?") ++ "k=" ++ key
+)
+
+def publicReleaseRecord(object release, object access) object (
+  object record = {}
+  array keys = release.getKeys()
+  for i keys.len (
+    string field = keys[i].toStr()
+    if field != "jsonKey" and field != "jsonGzip" (
+      record[field] = release[field]
+    )
+  )
+  string jsonUrl = keyedJsonUrl((release.jsonUrl ?? "").toStr(), access)
+  if jsonUrl == "" (
+    record.delete("jsonUrl")
+  ) else (
+    record.jsonUrl = jsonUrl
+  )
+  return record
+)

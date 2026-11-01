@@ -1,0 +1,108 @@
+export {
+  editorCanDeleteProject,
+  editorProjectUpdateAllowed,
+  escapedRequestPath,
+  scopedRequestAllowed
+}
+
+number editorSessionTtlMs = 7200000
+number editorSessionMintsPerHour = 60
+
+array editorSessionRoutes = [
+  "GET ^/me$",
+  "GET ^/me/settings$",
+  "PUT ^/me/settings$",
+  "GET ^/me/quota$",
+  "GET ^/notifications$",
+  "GET ^/perks$",
+  "POST ^/perks/(refresh|seen)$",
+  "GET ^/agreement$",
+  "POST ^/agreement/accept$",
+  "POST ^/errors$",
+  "GET ^/classroom/available$",
+  "GET ^/users/[^/]+/projects$",
+  "POST ^/projects$",
+  "GET ^/projects/[^/]+$",
+  "PUT ^/projects/[^/]+$",
+  "DELETE ^/projects/[^/]+$",
+  "GET ^/projects/[^/]+/(editor|commits|workspace\\.mwp|project\\.json|trusted-extensions|game-inventory-config|products)$",
+  "GET ^/projects/[^/]+/extensions/[^/]+/source$",
+  "GET ^/projects/[^/]+/releases/[^/]+/project\\.json$",
+  "POST ^/projects/[^/]+/(assets/check|upload|upload-parts|thumbnail|remix|live|data-capability|history/bootstrap)$",
+  "POST ^/projects/[^/]+/upload-parts/[^/]+/(chunk|complete)$",
+  "GET ^/projects/[^/]+/me/(save|inventory)$",
+  "PUT ^/projects/[^/]+/me/save$",
+  "POST ^/projects/[^/]+/me/inventory/grant$",
+  "GET ^/projects/[^/]+/products/[^/]+/owns$",
+  "POST ^/projects/[^/]+/products/[^/]+/(purchase/intent|purchase/confirm|grant|revoke|refund/intent)$"
+]
+
+array editorProjectFields = ["title", "gameItems", "gameProducts", "inventoryPolicy"]
+
+def escapedRequestPath(string fullUrl, string prefix) string (
+  if prefix == "" or !fullUrl.startsWith(prefix) or fullUrl.len <= prefix.len (
+    return ""
+  )
+  string target = fullUrl.trim(prefix.len + 1, fullUrl.len)
+  if !target.startsWith("/") (
+    return ""
+  )
+  return target.split("?")[1]
+)
+
+def editorRouteAllowed(string method, string escapedPath, string decodedPath) boolean (
+  string verb = method.toUpper()
+  if verb == "OPTIONS" (
+    return true
+  )
+  if verb == "HEAD" (
+    verb = "GET"
+  )
+  if decodedPath.contains("?") or decodedPath.contains("..") (
+    return false
+  )
+  if escapedPath == "" (
+    return false
+  )
+  string path = apiRoutePath(escapedPath)
+  string lowered = path.toLower()
+  if path.contains("..") or path.contains("//") or lowered.contains("%2e") or lowered.contains("%5c") or path.contains("\\") (
+    return false
+  )
+  for i editorSessionRoutes.len (
+    array parts = editorSessionRoutes[i].toStr().split(" ")
+    if parts[1].toStr() == verb and regex.match(parts[2].toStr(), path) (
+      return true
+    )
+  )
+  return false
+)
+
+def scopedRequestAllowed(string scope, string method, string escapedPath, string decodedPath) boolean (
+  if scope == "" (
+    return true
+  )
+  if scope != "editor" (
+    return false
+  )
+  return editorRouteAllowed(method, escapedPath, decodedPath)
+)
+
+def editorProjectUpdateAllowed(array keys) boolean (
+  for i keys.len (
+    if !editorProjectFields.contains(keys[i].toStr()) (
+      return false
+    )
+  )
+  return true
+)
+
+def editorCanDeleteProject(object project) boolean (
+  if projectHasStoredContent(project) (
+    return false
+  )
+  if (project.gitHead ?? "").toStr() != "" or (project.workspaceKey ?? "").toStr() != "" (
+    return false
+  )
+  return (project.assets ?? []).assertElse(array, []).len == 0
+)

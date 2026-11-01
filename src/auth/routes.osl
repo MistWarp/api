@@ -1,0 +1,32 @@
+export {
+  registerAuthRoutes
+}
+
+def registerAuthRoutes(*serve.Router api) (
+  api.GET("/health", handleHealth)
+  api.GET("/health/dependencies", handleDependencyHealth)
+
+  api.POST("/auth", handleRoturAuth)
+  api.POST("/auth/editor-session", serve.limitRequests(600, {window: 3600000}), requireAuth, handleCreateEditorSession)
+  api.GET("/me", handleGetMe)
+  api.POST("/logout", handleLogout)
+
+  api.GET("/me/settings", requireAuth, handleGetMySettings)
+  api.PUT("/me/settings", requireAuth, handlePutMySettings)
+
+  api.GET("/me/export", requireAuth, handleExportMyData)
+  api.DELETE("/me/data", requireAuth, handleDeleteMyData)
+
+  api.GET("/me/safety", requireAuth, handleGetMySafety)
+  api.POST("/me/blocks/:name", requireAuth, handleBlockUser)
+  api.DELETE("/me/blocks/:name", requireAuth, handleUnblockUser)
+  api.POST("/me/mutes/:name", requireAuth, handleMuteUser)
+  api.DELETE("/me/mutes/:name", requireAuth, handleUnmuteUser)
+
+  api.GET("/agreement", handleGetAgreement)
+  api.POST("/agreement/accept", requireAuth, handleAcceptAgreement)
+
+  api.GET("/admin/agreement", requireAdmin, handleAdminGetAgreement)
+  api.POST("/admin/agreement", requireAdmin, handleAdminUpdateAgreement)
+  api.POST("/admin/reconcile-deletions", requireAdmin, handleReconcileDeletions)
+)

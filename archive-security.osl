@@ -1,3 +1,0 @@
-def validateZipArchive(byte[] body, number maxCompressedBytes, number maxExpandedBytes, number maxFiles, boolean readContents) boolean (
-  return storagefs.ValidateZipArchive(body, maxCompressedBytes, maxExpandedBytes, maxFiles, readContents)
-)

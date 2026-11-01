@@ -1,0 +1,25 @@
+export {
+  registerGameRoutes
+}
+
+def registerGameRoutes(*serve.Router api) (
+  api.GET("/me/game-saves", requireAuth, handleListMyGameSaves)
+  api.GET("/me/game-inventory", requireAuth, handleGetMyGameInventory)
+
+  api.DELETE("/me/game-saves/:project", requireAuth, handleDeleteMyGameSave)
+
+  api.POST("/projects/:id/data-capability", requireAuth, handleCreateGameDataCapability)
+  api.POST("/projects/:id/multiplayer-ticket", requireAuth, handleCreateMultiplayerTicket)
+  api.GET("/projects/:id/products", handleListGameProducts)
+  api.GET("/projects/:id/products/:product/owns", requireAuth, handleOwnsGameProduct)
+  api.POST("/projects/:id/products/:product/purchase/intent", requireAuth, handleGameProductIntent)
+  api.POST("/projects/:id/products/:product/purchase/confirm", requireAuth, handleGameProductConfirm)
+  api.POST("/projects/:id/products/:product/grant", requireAuth, handleGrantGameProduct)
+  api.POST("/projects/:id/products/:product/revoke", requireAuth, handleRevokeGameProduct)
+  api.POST("/projects/:id/products/:product/refund/intent", requireAuth, handleGameProductRefundIntent)
+  api.GET("/projects/:id/game-inventory-config", requireAuth, handleGetGameInventoryConfig)
+  api.GET("/projects/:id/me/inventory", requireAuth, handleGetProjectInventory)
+  api.POST("/projects/:id/me/inventory/grant", requireAuth, handleGrantProjectItem)
+  api.GET("/projects/:id/me/save", requireAuth, handleGetMyProjectSave)
+  api.PUT("/projects/:id/me/save", requireAuth, handlePutMyProjectSave)
+)
