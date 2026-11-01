@@ -4,6 +4,7 @@ type OwnerTransfer (
   string fromId = ""
   string toId = ""
   object hold = {}
+  string holdKey = ""
 )
 
 def applyBranding(object project, object body, object creatorBenefits) Refusal (

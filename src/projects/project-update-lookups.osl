@@ -1,0 +1,110 @@
+export {}
+
+type UpdateLookups (
+  boolean replay = false
+  boolean missed = false
+  object answers = {}
+  array holds = []
+)
+
+def roturUnavailableRefusal(string username) Refusal (
+  return refuseWithBody(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ username ++ " couldn't be checked. Try again soon."})
+)
+
+def lookupKnown(UpdateLookups lookups, string key) boolean (
+  if lookups.answers.contains(key) (
+    return true
+  )
+  if lookups.replay (
+    lookups.missed = true
+  )
+  return false
+)
+
+def lookupIdentity(UpdateLookups lookups, string username) object (
+  string key = "identity:" ++ username
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return {id: "", outcome: "unavailable"}
+    )
+    lookups.answers[key] = discoverUserIdentityOutcome(username)
+  )
+  return lookups.answers[key].assertElse(object, {id: "", outcome: "unavailable"})
+)
+
+def lookupBenefits(UpdateLookups lookups, string userId) object (
+  string key = "benefits:" ++ userId
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return mistwarpBenefitsForTier("Free")
+    )
+    lookups.answers[key] = mistwarpBenefitsForUserId(userId)
+  )
+  return lookups.answers[key].assertElse(object, {})
+)
+
+def lookupProjectBenefits(UpdateLookups lookups, object project) object (
+  string ownerId = ""
+  if project.contains("ownerId") and project.ownerId != null (
+    ownerId = project.ownerId.toStr()
+  )
+  if ownerId == "" (
+    ownerId = userIdForUsername(project.owner.toStr())
+  )
+  return lookupBenefits(lookups, ownerId)
+)
+
+def lookupVanityEligibility(UpdateLookups lookups, object holder) string (
+  string key = "vanity:" ++ (holder.id ?? "").toStr() ++ ":" ++ (holder.ownerId ?? "").toStr() ++ ":" ++ (holder.owner ?? "").toStr()
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return "unknown"
+    )
+    lookups.answers[key] = vanityEligibility(holder)
+  )
+  return lookups.answers[key].toStr()
+)
+
+def lookupGroupManager(UpdateLookups lookups, *serve.Context c, string tag) boolean (
+  string key = "group:" ++ tag
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return false
+    )
+    lookups.answers[key] = canManageGroupTag(tag, c)
+  )
+  return lookups.answers[key] == true
+)
+
+def lookupGroupContentManager(UpdateLookups lookups, *serve.Context c, object project) boolean (
+  string tag = groupTagOf(project)
+  return tag != "" and lookupGroupManager(lookups, c, tag)
+)
+
+def storageHoldKey(string userId, object changes, boolean enforce) string (
+  return "hold:" ++ userId ++ ":" ++ enforce.toStr() ++ ":" ++ json.stringify(changes)
+)
+
+def lookupStorageHold(UpdateLookups lookups, string userId, object changes, boolean enforce) object (
+  string key = storageHoldKey(userId, changes, enforce)
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return noStorageHold()
+    )
+    lookups.answers[key] = storageHold(userId, changes, enforce)
+    array holds = lookups.holds
+    holds.append({userId: userId, key: key})
+    lookups.holds = holds
+  )
+  return lookups.answers[key].assertElse(object, noStorageHold())
+)
+
+def releaseStorageHolds(UpdateLookups lookups, string keptKey) (
+  for i lookups.holds.len (
+    object entry = lookups.holds[i].assertElse(object, {})
+    string key = (entry.key ?? "").toStr()
+    if key != keptKey (
+      storageHoldRelease((entry.userId ?? "").toStr(), lookups.answers[key].assertElse(object, {}))
+    )
+  )
+)

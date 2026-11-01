@@ -32,7 +32,10 @@ PROJECT_JSON = {
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
 GONE_USERS = {"gone_user"}
-EXPECTED_ERRORS = {"upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
+BUSY_USERS = {"busy_user"}
+SLOW_USERS = {"slow_user": "u_slow"}
+ROTUR_DELAY = 4
+EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -74,6 +77,13 @@ class FakeRotur(BaseHTTPRequestHandler):
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
         if name in GONE_USERS:
             self.answer(404, {"error": "User not found"})
+            return
+        if name in BUSY_USERS:
+            self.answer(503, {"error": "Service unavailable"})
+            return
+        if name in SLOW_USERS:
+            time.sleep(ROTUR_DELAY)
+            self.answer(200, {"id": SLOW_USERS[name], "username": name})
             return
         if name not in USERS:
             self.close_connection = True
@@ -725,6 +735,38 @@ def update_flow(server, step, ids):
         step(name, "PUT", path, "bob", body, timeout=5)
     patch("patch team deleted user", {"collaborators": [{"username": "gone_user", "role": "editor"}]}, who="bob")
     patch("patch transfer to deleted user", {"owner": "gone_user"}, who="bob")
+    patch("patch team rotur unavailable", {"collaborators": [{"username": "busy_user", "role": "editor"}]}, who="bob")
+    patch("patch transfer rotur unavailable", {"owner": "busy_user"}, who="bob")
+
+
+def slow_rotur_flow(server, step, steps, ids):
+    status, created = step("slow rotur create", "POST", "/v1/projects", "sam", {"title": "Slow Rotur smoke"})
+    project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+    ids[project_id] = "<slow-rotur>"
+    results = {}
+
+    def save_team():
+        results["teamSave"] = server.call("PUT", "/v1/projects/" + project_id, "sam", {"collaborators": [{"username": "slow_user", "role": "editor"}]})[0]
+
+    saving = threading.Thread(target=save_team)
+    saving.start()
+    time.sleep(0.5)
+    waited = {}
+
+    def read(name, path):
+        started = time.time()
+        results[name] = server.call("GET", path, "sam")[0]
+        waited[name] = time.time() - started >= ROTUR_DELAY / 2
+
+    readers = [threading.Thread(target=read, args=(name, path)) for name, path in (("view", "/v1/projects/" + project_id), ("editor", "/v1/projects/%s/editor" % project_id))]
+    for reader in readers:
+        reader.start()
+    for reader in readers + [saving]:
+        reader.join()
+    stored = server.read_project(project_id)
+    steps.append({"step": "reads during a slow Rotur lookup", "status": 0, "body": {
+        "statuses": results, "waitedForRotur": waited, "team": stored.get("collaborators"),
+    }})
 
 
 def volatile_key(key):
@@ -848,6 +890,7 @@ def run(binary, sb3, keep):
         upload_flow(server, step, ids, steps)
         update_flow(server, step, ids)
         concurrent_flow(server, step, steps, ids)
+        slow_rotur_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):

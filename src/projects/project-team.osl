@@ -1,6 +1,6 @@
 export {}
 
-def applyCollaborators(object project, array incoming) Refusal (
+def applyCollaborators(object project, array incoming, UpdateLookups lookups) Refusal (
   array collaborators = []
   number totalShare = 0
   for i incoming.len (
@@ -20,7 +20,11 @@ def applyCollaborators(object project, array incoming) Refusal (
         return refuse(400, "each teammate share must be between 0 and 50 percent")
       )
       if username != "" and validRole and normalizeUsername(username) != normalizeUsername(project.owner.toStr()) (
-        string teammateId = discoverUserIdentity(username)
+        object identity = lookupIdentity(lookups, username)
+        if identity.outcome == "unavailable" (
+          return roturUnavailableRefusal(username)
+        )
+        string teammateId = identity.id.toStr()
         if teammateId == "" (
           return refuse(400, "Rotur user not found: " ++ username)
         )

@@ -4,16 +4,49 @@ import "std:regex"
 import "std:fs"
 import "go:mistwarp.local/storagefs"
 import "../core/utils.osl"
+import "std:json"
+import "std:serve"
 import "./project-refusal.osl"
+import "./project-update-lookups.osl"
 import "./project-team.osl"
 
 array lookups = []
-def discoverUserIdentity(string username) string (
+def discoverUserIdentityOutcome(string username) object (
   lookups.append(username)
   if username == "alice" or username == "bob" (
-    return "u_" ++ username
+    return {id: "u_" ++ username, outcome: "found"}
   )
+  if username == "busy" (
+    return {id: "", outcome: "unavailable"}
+  )
+  return {id: "", outcome: "missing"}
+)
+def mistwarpBenefitsForTier(string tier) object (
+  return {}
+)
+def mistwarpBenefitsForUserId(string userId) object (
+  return {}
+)
+def userIdForUsername(string username) string (
   return ""
+)
+def vanityEligibility(object project) string (
+  return "unknown"
+)
+def canManageGroupTag(string tag, *serve.Context c) boolean (
+  return false
+)
+def groupTagOf(object value) string (
+  return ""
+)
+def noStorageHold() object (
+  return {ok: true, reservations: []}
+)
+def storageHold(string userId, object changes, boolean enforce) object (
+  return noStorageHold()
+)
+def storageHoldRelease(string userId, object hold) (
+  return
 )
 
 array sent = []
@@ -27,18 +60,20 @@ Refusal saved = applyCollaborators(project, [
   {username: "bob", role: "tester"},
   {username: "sam", role: "editor"},
   {username: "carol", role: "owner"}
-])
+], UpdateLookups())
 testing.assert(!isRefused(saved), "a valid team is saved")
 testing.assert(project.collaborators.len == 2 and project.collaborators[1].username == "alice" and project.collaborators[1].userId == "u_alice" and project.collaborators[1].role == "maintainer", "teammates are normalized and resolved")
 testing.assert(project.collaborators[2].share == 0, "missing shares are zero")
 testing.assert(!lookups.contains("sam") and !lookups.contains("carol"), "the owner and invalid roles are skipped before any lookup")
-testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 51}]).message == "each teammate share must be between 0 and 50 percent", "shares are capped per teammate")
-testing.assert(applyCollaborators(project, [{username: "ghost", role: "editor"}]).message == "Rotur user not found: ghost", "unknown users are refused")
-testing.assert(applyCollaborators(project, [{username: "alice", role: "editor"}, {username: "ALICE", role: "tester"}]).message == "a person can only appear once in the project team", "teammates appear once")
-testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 40}, {username: "bob", role: "editor", share: 40}]).message == "teammate revenue shares cannot exceed 70 percent", "total shares are capped")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 51}], UpdateLookups()).message == "each teammate share must be between 0 and 50 percent", "shares are capped per teammate")
+testing.assert(applyCollaborators(project, [{username: "ghost", role: "editor"}], UpdateLookups()).message == "Rotur user not found: ghost", "unknown users are refused")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor"}, {username: "ALICE", role: "tester"}], UpdateLookups()).message == "a person can only appear once in the project team", "teammates appear once")
+testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 40}, {username: "bob", role: "editor", share: 40}], UpdateLookups()).message == "teammate revenue shares cannot exceed 70 percent", "total shares are capped")
 object nullTeam = {id: "p2", title: "Team", owner: "Sam"}
-testing.assert(!isRefused(applyCollaborators(nullTeam, [{role: "editor"}, {username: null, role: "editor"}, {username: "bob"}])) and nullTeam.collaborators.len == 0 and !lookups.contains("null"), "teammates without a name or role are skipped without a lookup")
-testing.assert(applyCollaborators(project, ["alice"]).message == "each teammate must be an object", "teammates must be objects")
+testing.assert(!isRefused(applyCollaborators(nullTeam, [{role: "editor"}, {username: null, role: "editor"}, {username: "bob"}], UpdateLookups())) and nullTeam.collaborators.len == 0 and !lookups.contains("null"), "teammates without a name or role are skipped without a lookup")
+Refusal busy = applyCollaborators(project, [{username: "busy", role: "editor"}], UpdateLookups())
+testing.assert(busy.status == 503 and busy.body.code == "rotur_unavailable" and busy.body.error.toStr().contains("busy"), "a Rotur that can't answer is not reported as a missing user")
+testing.assert(applyCollaborators(project, ["alice"], UpdateLookups()).message == "each teammate must be an object", "teammates must be objects")
 testing.assert(project.collaborators.len == 2, "a refused team leaves the saved team alone")
 
 array previousTeam = [{username: "Alice", role: "maintainer"}, {username: "bob", role: "editor"}]
