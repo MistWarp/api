@@ -29,7 +29,9 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
+FULL_STORAGE = {"u_dee"}
+EXPECTED_ERRORS = {"upload extension store failure", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp")}
@@ -52,23 +54,53 @@ def default_sb3():
 
 
 class FakeRotur(BaseHTTPRequestHandler):
-    def do_GET(self):
-        name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
-        if name not in USERS:
-            self.close_connection = True
-            return
-        body = json.dumps({"id": USERS[name], "username": name}).encode()
-        self.send_response(200)
+    def answer(self, status, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        if self.path.startswith("/v2/storage-ledger/objects"):
+            self.answer(200, {"objects": []})
+            return
+        if self.path.startswith("/v2/storage-ledger/"):
+            self.answer(404, {"code": "not_found"})
+            return
+        name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
+        if name not in USERS:
+            self.close_connection = True
+            return
+        self.answer(200, {"id": USERS[name], "username": name})
+
     def do_POST(self):
-        self.close_connection = True
+        if not self.path.startswith("/v2/storage-ledger/"):
+            self.close_connection = True
+            return
+        request = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        if self.path == "/v2/storage-ledger/reservations" and request.get("user_id") in FULL_STORAGE:
+            self.answer(413, {"usage": 1000, "max": 1000, "available": 0, "needed": request.get("bytes", 0)})
+            return
+        self.answer(201 if self.path == "/v2/storage-ledger/reservations" else 200, {"ok": True})
+
+    def do_DELETE(self):
+        self.answer(200, {"ok": True})
 
     def log_message(self, *args):
         pass
+
+
+class Fault:
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        os.chmod(self.path, 0o555)
+
+    def __exit__(self, *args):
+        os.chmod(self.path, 0o755)
 
 
 class Server:
@@ -83,7 +115,8 @@ class Server:
         data = os.path.join(self.dir, "data")
         os.makedirs(os.path.join(data, "sessions"))
         with open(os.path.join(self.dir, ".env"), "w") as env:
-            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=http://127.0.0.1:%d\n" % (self.port, self.port, self.rotur.server_address[1]))
+            rotur = "http://127.0.0.1:%d" % self.rotur.server_address[1]
+            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=%s\nROTUR_LOCAL_API_URL=%s\nROTUR_SERVICE_SECRET=smoke\n" % (self.port, self.port, rotur, rotur))
         with open(os.path.join(data, "agreement.json"), "w") as handle:
             json.dump({"version": 1, "text": "", "updatedAt": 1700000000000}, handle)
         with open(os.path.join(data, "agreement.md"), "w") as handle:
@@ -156,6 +189,11 @@ class Server:
         body += ("--%s--\r\n" % boundary).encode()
         return self.call("POST", path, who, raw=body, content_type="multipart/form-data; boundary=" + boundary)
 
+    def faulty(self, folder):
+        path = os.path.join(self.dir, "data", folder)
+        os.makedirs(path, exist_ok=True)
+        return Fault(path)
+
     def read_project(self, project_id):
         with open(os.path.join(self.dir, "data", "projects", project_id + ".json")) as handle:
             return json.load(handle)
@@ -185,14 +223,20 @@ ACCESS_KEY = re.compile(r"([?&]k=)[A-Za-z0-9]+")
 EMBEDDED_TIME = re.compile(r"(?<![0-9])1[0-9]{12}(?![0-9])")
 
 
-def sb3_archive(project_json, files=None):
+def sb3_archive(project_json, files=None, compression=zipfile.ZIP_STORED):
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
         if project_json is not None:
             archive.writestr("project.json", json.dumps(project_json, ensure_ascii=False))
         for name, content in (files or {}).items():
             archive.writestr(name, content)
     return buffer.getvalue()
+
+
+def corrupt_zip(name, content):
+    data = bytearray(zip_files({name: content}))
+    data[30 + len(name) + 5] ^= 0xFF
+    return bytes(data)
 
 
 def zip_files(files):
@@ -286,10 +330,11 @@ class History:
         lines += [b"author " + SMOKE_AUTHOR, b"committer " + SMOKE_AUTHOR]
         return self.add("commit", b"\n".join(lines) + b"\n\n" + message.encode() + b"\n")
 
-    def archive(self, head, delta):
+    def archive(self, head, delta, extra=None):
         refs = dict(self.refs) if not delta else {}
         refs[self.branch] = head
         manifest = self.metadata(head, delta)
+        manifest.update(extra or {})
         manifest.update({"format": "mistwarp-project", "version": 1, "commits": [], "graph": {}})
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -355,6 +400,7 @@ def upload_flow(server, step, ids):
     upload("upload refused for stranger", who="alice")
     upload("upload missing project file", files={})
     upload("upload invalid sb3", files={"project": b"not a zip"})
+    upload("upload corrupt sb3", files={"project": corrupt_zip("project.json", json.dumps(project_with_costumes([])))})
     upload("upload without targets", files={"project": sb3_archive(project_with_costumes([], targets=False))})
     upload("upload missing asset", files={"project": sb3_archive(project_with_costumes([asset_name]))})
     upload("upload asset hash mismatch", files={"project": sb3_archive(project_with_costumes([asset_name]), {asset_name: other_content})})
@@ -373,6 +419,20 @@ def upload_flow(server, step, ids):
     wide_project = project_with_costumes([asset_name, other_name, wide_name])
     wide_project["targets"][0]["variables"] = {"wide": ["\u00e9\u2713", "\u00e9\u2713\U0001F600" * 3000]}
     upload("upload non-ascii project", files={"project": sb3_archive(wide_project, {wide_name: wide_content})})
+    big_content = b"\0" * (10 * 1024 * 1024 + 1)
+    big_name = hashlib.md5(big_content).hexdigest() + ".svg"
+    upload("upload oversized asset", files={"project": sb3_archive(project_with_costumes([big_name]), {big_name: big_content}, zipfile.ZIP_DEFLATED)})
+    with server.faulty("extensions"):
+        upload("upload extension store failure", {"extensions": json.dumps({"https://example.com/fault.js": "class FaultExtension {}"})},
+               {"project": sb3_archive(project_with_costumes([], {"ext": "https://example.com/fault.js"}))})
+    unpublished = project_with_costumes([])
+    unpublished["meta"]["agent"] = "unpublished"
+    with server.faulty(os.path.join("blobs", "project-json")):
+        upload("upload json store failure", files={"project": sb3_archive(unpublished)})
+    unsaved = project_with_costumes([])
+    unsaved["meta"]["agent"] = "unsaved"
+    with server.faulty("projects"):
+        upload("upload metadata save failure", files={"project": sb3_archive(unsaved)})
 
     head, edited = head_and_edited()
     upload("upload stale edited", {"expectedEdited": "1"})
@@ -386,6 +446,16 @@ def upload_flow(server, step, ids):
     upload("upload expired workspace token", {"workspaceToken": "abc123"})
     upload("upload invalid merge tree token", {"mergeTreeToken": "!!"})
     upload("upload unsafe workspace", files={"project": plain, "workspace": b"not a zip"})
+    missing = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<history>"), "sam"))
+    missing_head = missing.commit(missing.tree_of(missing.head()), [missing.head()], "Missing worktree asset")
+    upload("upload missing worktree asset", {"git": json.dumps(missing.metadata(missing_head, False))},
+           {"project": plain, "workspace": missing.archive(missing_head, False, {"worktreeAssets": {"costume.svg": "0" * 32 + ".svg"}})})
+    unrelated = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<history>"), "sam"))
+    unrelated_root = unrelated.commit(unrelated.add("tree", b"100644 other.txt\x00" + bytes.fromhex(unrelated.add("blob", b"other"))), [], "Unrelated history")
+    unrelated.objects = {}
+    unrelated.refs = {unrelated.branch: unrelated_root}
+    upload("upload unrelated history", {"git": json.dumps(unrelated.metadata(unrelated_root, False))},
+           {"project": plain, "workspace": unrelated.archive(unrelated_root, False)})
     upload("upload replace as editor session", {"replaceHistory": "true", "expectedHead": head}, who="sam_editor")
 
     unchanged = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<history>"), "sam"))
@@ -423,6 +493,7 @@ def upload_flow(server, step, ids):
     upload("upload branch merge stale", dict(branch_fields, mergeSourceHead=ZERO_HEAD), {"project": plain, "mergeTree": merge_tree})
     upload("upload branch merge same branch", dict(branch_fields, mergeSourceBranch="main", mergeSourceHead=heads.get("main", "")), {"project": plain, "mergeTree": merge_tree})
     upload("upload branch merge invalid tree", branch_fields, {"project": plain, "mergeTree": b"not a zip"})
+    upload("upload branch merge corrupt tree", branch_fields, {"project": plain, "mergeTree": corrupt_zip("smoke-merge.txt", "a corrupt merge tree")})
     upload("upload branch merge", branch_fields, {"project": plain, "mergeTree": merge_tree})
     upload("upload pull not open", {"pullId": "99"}, {"project": plain, "mergeTree": merge_tree})
     upload("upload merge tree without target", {}, {"project": plain, "mergeTree": merge_tree})
@@ -441,6 +512,18 @@ def upload_flow(server, step, ids):
     step("upload remix change", "POST", "/v1/projects/<history-remix>/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     status, pull = step("open pull", "POST", path + "/pulls", "alice", {"sourceProjectId": remix_id, "title": "Smoke pull", "body": "From the remix"})
     pull_index = str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    status, bob_remixed = step("remix history for bob", "POST", path + "/remix", "bob", {})
+    bob_remix_id = str(bob_remixed.get("id", "") or (bob_remixed.get("project") or {}).get("id", "")) if isinstance(bob_remixed, dict) else ""
+    ids[bob_remix_id] = "<history-remix-bob>"
+    archive, metadata = committed_workspace(server, ids, "<history-remix-bob>", "bob", "Bob change")
+    step("upload bob remix change", "POST", "/v1/projects/<history-remix-bob>/upload", "bob", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    status, bob_pull = step("open bob pull", "POST", path + "/pulls", "bob", {"sourceProjectId": bob_remix_id, "title": "Bob pull", "body": "From a deleted remix"})
+    bob_pull_index = str(((bob_pull.get("pull") or {}).get("index", "")) if isinstance(bob_pull, dict) else "")
+    bob_remix = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % bob_remix_id, "bob"))
+    bob_tree = zip_files(bob_remix.files(bob_remix.tree_of(bob_remix.head())))
+    step("delete bob remix", "DELETE", "/v1/projects/<history-remix-bob>", "bob")
+    head, edited = head_and_edited()
+    upload("upload pull merge from deleted remix", {"pullId": bob_pull_index, "expectedHead": head}, {"project": plain, "mergeTree": bob_tree})
     remix = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % remix_id, "alice"))
     pull_tree = zip_files(remix.files(remix.tree_of(remix.head())))
     head, edited = head_and_edited()
@@ -621,6 +704,11 @@ def run(binary, sb3, keep):
         step("me", "GET", "/v1/me", "sam")
         step("accept agreement", "POST", "/v1/agreement/accept", "sam", {})
         step("accept agreement alice", "POST", "/v1/agreement/accept", "alice", {})
+        step("accept agreement bob", "POST", "/v1/agreement/accept", "bob", {})
+        step("accept agreement dee", "POST", "/v1/agreement/accept", "dee", {})
+        status, full = step("create project on full storage", "POST", "/v1/projects", "dee", {"title": "Full storage"})
+        ids[str(full.get("id", "")) if isinstance(full, dict) else ""] = "<full-storage>"
+        step("upload on full storage", "POST", "", "dee", upload=str(full.get("id", "")) if isinstance(full, dict) else "")
         status, created = step("create project", "POST", "/v1/projects", "sam", {"title": "Smoke test"})
         project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
         if project_id:
@@ -683,7 +771,7 @@ def main():
             os.makedirs(args.out, exist_ok=True)
             with open(os.path.join(args.out, os.path.basename(binary) + ".json"), "w") as handle:
                 handle.write(text)
-        failures = [s for s in steps if s["status"] >= 500]
+        failures = [s for s in steps if s["status"] >= 500 and s["step"] not in EXPECTED_ERRORS]
         print("%s: %d steps, %d server errors" % (binary, len(steps), len(failures)))
         for record in steps:
             print("  %3d %s" % (record["status"], record["step"]))
