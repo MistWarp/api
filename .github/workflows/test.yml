@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install OSL
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://git.rotur.dev/osl/.go/raw/branch/main/install.sh -o /tmp/osl-install.sh
+          OSL_INSTALL_DIR="$HOME/.local/bin" sh /tmp/osl-install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: OSL version
+        run: osl version
+
+      - name: Type check
+        run: osl lsp check main.osl
+
+      - name: Test
+        run: osl test
+
+      - name: Compile
+        run: osl compile main.osl -o "$RUNNER_TEMP/mwapi"
+
+      - name: Smoke test
+        run: python3 scripts/e2e_smoke.py "$RUNNER_TEMP/mwapi"
