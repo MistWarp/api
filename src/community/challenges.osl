@@ -1,0 +1,485 @@
+def challengeArray(object space, string field) array (
+  if space.contains(field) and space[field] != null (
+    return space[field].assertElse(array, [])
+  )
+  return []
+)
+
+def challengeCriteria(object space) array (
+  array criteria = challengeArray(space, "criteria")
+  if criteria.len == 0 (
+    return [{id: "overall", name: "Overall", description: "How strong is the entry as a whole?", weight: 1}]
+  )
+  array normalized = []
+  for i criteria.len (
+    object criterion = criteria[i].assert(object)
+    criterion.weight = clampNumber(criterion.weight.toNum(), 1, 5)
+    normalized.append(criterion)
+  )
+  return normalized
+)
+
+def challengePhase(object space) string (
+  if space.contains("resultsPublishedAt") and space.resultsPublishedAt.toNum() > 0 (
+    return "results"
+  )
+  number startsAt = space.startsAt.toNum()
+  number endsAt = space.endsAt.toNum()
+  number judgingEndsAt = 0
+  if space.contains("judgingEndsAt") (
+    judgingEndsAt = space.judgingEndsAt.toNum()
+  )
+  if startsAt > 0 and timestamp < startsAt (
+    return "upcoming"
+  )
+  if endsAt == 0 or timestamp <= endsAt (
+    return "submissions"
+  )
+  if judgingEndsAt == 0 or timestamp <= judgingEndsAt (
+    return "judging"
+  )
+  return "awaiting-results"
+)
+
+def challengeVotingMode(object space) string (
+  if space.contains("votingMode") and space.votingMode.toStr() == "audience" (
+    return "audience"
+  )
+  return "judges"
+)
+
+def challengeAudienceJudged(object space) boolean (
+  return challengeVotingMode(space) == "audience"
+)
+
+def challengeAudienceVotingEnabled(object space) boolean (
+  return challengeAudienceJudged(space) or (space.contains("communityVoting") and space.communityVoting == true)
+)
+
+def challengeJudges(object space) array (
+  if challengeAudienceJudged(space) (
+    return []
+  )
+  array judges = challengeArray(space, "judges")
+  string tag = groupTagOf(space)
+  if tag != "" (
+    array members = groupMemberNames(roturGroupSnapshot(tag))
+    for i members.len (
+      string member = members[i].toStr()
+      if !stringArrayContainsUser(judges, member) (
+        judges.append(member)
+      )
+    )
+  )
+  return judges
+)
+
+def isChallengeJudge(object space, string username) boolean (
+  return stringArrayContainsUser(challengeJudges(space), username)
+)
+
+def isChallengeJudgeInvitee(object space, string username) boolean (
+  array invites = challengeArray(space, "judgeInvites")
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
+      return true
+    )
+  )
+  return false
+)
+
+def challengeScoreSummary(object space, string projectId, string viewer) object (
+  array criteria = challengeCriteria(space)
+  array scores = challengeArray(space, "scores")
+  number total = 0
+  number scoreCount = 0
+  object myScore = {}
+  array entryScores = []
+  for i scores.len (
+    object score = scores[i].assert(object)
+    if score.projectId.toStr() == projectId (
+      entryScores.append(score)
+      number weighted = 0
+      number weightTotal = 0
+      array ratings = score.ratings.assertElse(array, [])
+      for r ratings.len (
+        object rating = ratings[r].assert(object)
+        for k criteria.len (
+          object criterion = criteria[k].assert(object)
+          if criterion.id.toStr() == rating.criterionId.toStr() (
+            number weight = criterion.weight.toNum()
+            weighted += (clampNumber(rating.value.toNum(), 1, 10) * weight)
+            weightTotal += weight
+          )
+        )
+      )
+      if weightTotal > 0 (
+        total += (weighted / weightTotal)
+        scoreCount += 1
+      )
+      if normalizeUsername(score.judge.toStr()) == normalizeUsername(viewer) (
+        myScore = score
+      )
+    )
+  )
+  number audienceTotal = 0
+  number audienceCount = 0
+  number myVote = 0
+  array votes = challengeArray(space, "audienceVotes")
+  for i votes.len (
+    object vote = votes[i].assert(object)
+    if vote.projectId.toStr() == projectId (
+      audienceTotal += vote.value.toNum()
+      audienceCount += 1
+      if normalizeUsername(vote.username.toStr()) == normalizeUsername(viewer) (
+        myVote = vote.value.toNum()
+      )
+    )
+  )
+  number judgeScore = 0
+  number audienceScore = 0
+  if scoreCount > 0 (
+    judgeScore = total / scoreCount
+  )
+  if audienceCount > 0 (
+    audienceScore = audienceTotal / audienceCount
+  )
+  return {judgeScore: judgeScore, judgeScoreCount: scoreCount, audienceScore: audienceScore, audienceVoteCount: audienceCount, myScore: myScore, myVote: myVote, scores: entryScores}
+)
+
+def challengeProjects(object space,*serve.Context c) array (
+  array projects = []
+  array ids = spaceProjectIds(space)
+  boolean showResults = (space.contains("resultsPublishedAt") and space.resultsPublishedAt.toNum() > 0) or canManageSpace(space, c)
+  boolean audienceJudged = challengeAudienceJudged(space)
+  string phase = challengePhase(space)
+  boolean revealRatings = phase == "awaiting-results" or phase == "results" or canManageSpace(space, c)
+  for i ids.len (
+    auto loaded = loadProject(ids[i].toStr())
+    if loaded.ok == true (
+      object project = loaded.project.assert(object)
+      if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
+        object entry = indexEntryFromProject(project)
+        object summary = challengeScoreSummary(space, project.id.toStr(), contextString(c, "username"))
+        entry.judgeScore = if showResults then summary.judgeScore else 0
+        entry.judgeScoreCount = summary.judgeScoreCount
+        entry.audienceScore = if revealRatings then summary.audienceScore else 0
+        entry.audienceVoteCount = if revealRatings then summary.audienceVoteCount else 0
+        entry.rankScore = entry.judgeScore
+        if audienceJudged and showResults (
+          entry.rankScore = (((summary.audienceScore.toNum() * 100) + 0.5).toInt() * 1000000) + clampNumber(summary.audienceVoteCount.toNum(), 0, 999999)
+        )
+        entry.myVote = summary.myVote
+        entry.myScore = if isChallengeJudge(space, contextString(c, "username")) then summary.myScore else {}
+        entry.scoreBreakdown = if canManageSpace(space, c) then summary.scores else []
+        projects.append(entry)
+      )
+    )
+  )
+  projects = projectsVisibleTo(projects, c)
+  if showResults (
+    projects = rankChallengeEntries(projects)
+  )
+  return projects
+)
+
+def challengeWinner(object space, array projects) object (
+  if challengePhase(space) != "results" (
+    return {}
+  )
+  for i projects.len (
+    object entry = projects[i].assert(object)
+    if entry.contains("place") and entry.place.toNum() == 1 (
+      boolean audienceJudged = challengeAudienceJudged(space)
+      return {
+        id: entry.id,
+        title: entry.title,
+        owner: entry.owner,
+        thumbUrl: entry.thumbUrl,
+        vanitySlug: entry.vanitySlug,
+        score: if audienceJudged then entry.audienceScore else entry.judgeScore,
+        scoreOutOf: if audienceJudged then 5 else 10,
+        voteCount: entry.audienceVoteCount
+      }
+    )
+  )
+  return {}
+)
+
+def handleInviteChallengeJudge(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or space.kind.toStr() != "challenge" (
+    c.notFound("challenge not found")
+    return
+  )
+  if !canManageSpace(space, c) (
+    c.forbidden("you cannot manage this challenge")
+    return
+  )
+  if challengeAudienceJudged(space) (
+    c.badRequest("this challenge is decided by audience ratings")
+    return
+  )
+  string requested = requestJSON(c).username.toStr().strip()
+  string usernameKey = normalizeUsername(requested)
+  object profile = (profileSearchDocs.findById(usernameKey) ?? {})
+  if usernameKey == "" or profile.len == 0 (
+    c.notFound("user not found")
+    return
+  )
+  if normalizeUsername(space.owner.toStr()) == usernameKey or isChallengeJudge(space, requested) or isChallengeJudgeInvitee(space, requested) (
+    c.badRequest("this user is already on the challenge team")
+    return
+  )
+  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  array invites = challengeArray(space, "judgeInvites")
+  invites.append(invite)
+  space.judgeInvites = invites
+  space.edited = timestamp
+  putSpaceDocument(space)
+  addNotification(profile.username.toStr(), contextString(c, "username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def handleJoinChallenge(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or space.kind.toStr() != "challenge" or !canViewSpace(space, c) (
+    c.notFound("challenge not found")
+    return
+  )
+  string phase = challengePhase(space)
+  if phase != "upcoming" and phase != "submissions" (
+    c.badRequest("this challenge is no longer open to new participants")
+    return
+  )
+  array participants = challengeArray(space, "participants")
+  if !stringArrayContainsUser(participants, contextString(c, "username")) (
+    participants.append(contextString(c, "username"))
+    space.participants = participants
+    space.edited = timestamp
+    putSpaceDocument(space)
+    if !isSpaceOwner(space, c) (
+      addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+    )
+  )
+  c.json(200, {ok: true, joined: true, participantCount: participants.len})
+)
+
+def handleLeaveChallenge(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or space.kind.toStr() != "challenge" (
+    c.notFound("challenge not found")
+    return
+  )
+  if challengePhase(space) != "upcoming" and challengePhase(space) != "submissions" (
+    c.badRequest("participants are locked for this challenge")
+    return
+  )
+  string username = contextString(c, "username")
+  array participants = challengeArray(space, "participants")
+  if !stringArrayContainsUser(participants, username) (
+    c.json(200, {ok: true, joined: false, participantCount: participants.len})
+    return
+  )
+  array ids = spaceProjectIds(space)
+  for i ids.len (
+    object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
+    if project.len > 0 and searchEntryOwnedByContext(project, c) (
+      c.badRequest("remove your submission before leaving the challenge")
+      return
+    )
+  )
+  space.participants = removeUser(participants, username)
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, joined: false, participantCount: space.participants.len})
+)
+
+def handleRespondChallengeJudgeInvite(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !isChallengeJudgeInvitee(space, contextString(c, "username")) (
+    c.notFound("judge invitation not found")
+    return
+  )
+  array invites = challengeArray(space, "judgeInvites")
+  array nextInvites = []
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) != normalizeUsername(contextString(c, "username")) (
+      nextInvites.append(invite)
+    )
+  )
+  space.judgeInvites = nextInvites
+  if requestJSON(c).accepted == true (
+    array judges = challengeArray(space, "judges")
+    if !stringArrayContainsUser(judges, contextString(c, "username")) (
+      judges.append(contextString(c, "username"))
+    )
+    space.judges = judges
+    addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleRemoveChallengeJudge(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canManageSpace(space, c) (
+    c.forbidden("you cannot manage this challenge")
+    return
+  )
+  string username = c.param("username")
+  array judges = challengeArray(space, "judges")
+  boolean changed = stringArrayContainsUser(judges, username)
+  space.judges = removeUser(judges, username)
+  array scores = challengeArray(space, "scores")
+  array nextScores = []
+  for i scores.len (
+    object score = scores[i].assert(object)
+    if normalizeUsername(score.judge.toStr()) != normalizeUsername(username) (
+      nextScores.append(score)
+    )
+  )
+  if nextScores.len != scores.len (
+    changed = true
+  )
+  space.scores = nextScores
+  if changed (
+    space.edited = timestamp
+    putSpaceDocument(space)
+  )
+  c.json(200, {ok: true})
+)
+
+def validChallengeCriterion(object space, string criterionId) boolean (
+  array criteria = challengeCriteria(space)
+  for i criteria.len (
+    object criterion = criteria[i].assert(object)
+    if criterion.id.toStr() == criterionId (
+      return true
+    )
+  )
+  return false
+)
+
+def handleScoreChallengeEntry(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  string projectId = c.param("project")
+  if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
+    c.notFound("challenge entry not found")
+    return
+  )
+  if !isChallengeJudge(space, contextString(c, "username")) (
+    c.forbidden("only invited judges can score entries")
+    return
+  )
+  if challengePhase(space) != "judging" (
+    c.badRequest("judging is not open")
+    return
+  )
+  object project = (projectSearchDocs.findById(projectId) ?? {})
+  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+    c.forbidden("you cannot score your own entry")
+    return
+  )
+  object body = requestJSON(c)
+  array rawRatings = body.ratings.assertElse(array, [])
+  array ratings = []
+  array ratedCriteria = []
+  for i rawRatings.len (
+    object rawRating = rawRatings[i].assert(object)
+    string criterionId = rawRating.criterionId.toStr()
+    number value = rawRating.value.toNum()
+    if validChallengeCriterion(space, criterionId) and !ratedCriteria.contains(criterionId) and value >= 1 and value <= 10 (
+      ratings.append({criterionId: criterionId, value: value})
+      ratedCriteria.append(criterionId)
+    )
+  )
+  if ratings.len != challengeCriteria(space).len (
+    c.badRequest("score every criterion from 1 to 10")
+    return
+  )
+  string feedback = body.feedback.toStr().strip()
+  if feedback.len > 2000 (
+    c.badRequest("feedback is too long")
+    return
+  )
+  string judge = contextString(c, "username")
+  array scores = challengeArray(space, "scores")
+  array nextScores = []
+  for i scores.len (
+    object existing = scores[i].assert(object)
+    if existing.projectId.toStr() != projectId or normalizeUsername(existing.judge.toStr()) != normalizeUsername(judge) (
+      nextScores.append(existing)
+    )
+  )
+  object score = {projectId: projectId, judge: judge, ratings: ratings, feedback: feedback, edited: timestamp}
+  nextScores.append(score)
+  space.scores = nextScores
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, score: score})
+)
+
+def handleVoteChallengeEntry(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  string projectId = c.param("project")
+  if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
+    c.notFound("challenge entry not found")
+    return
+  )
+  if !challengeAudienceVotingEnabled(space) or challengePhase(space) != "judging" (
+    c.badRequest("community voting is not open")
+    return
+  )
+  object project = (projectSearchDocs.findById(projectId) ?? {})
+  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+    c.forbidden("you cannot vote for your own entry")
+    return
+  )
+  number value = requestJSON(c).value.toNum()
+  if value < 1 or value > 5 (
+    c.badRequest("rating must be between 1 and 5")
+    return
+  )
+  string username = contextString(c, "username")
+  array votes = challengeArray(space, "audienceVotes")
+  array nextVotes = []
+  for i votes.len (
+    object vote = votes[i].assert(object)
+    if vote.projectId.toStr() != projectId or normalizeUsername(vote.username.toStr()) != normalizeUsername(username) (
+      nextVotes.append(vote)
+    )
+  )
+  nextVotes.append({projectId: projectId, username: username, value: value, edited: timestamp})
+  space.audienceVotes = nextVotes
+  putSpaceDocument(space)
+  c.json(200, {ok: true, value: value})
+)
+
+def handlePublishChallengeResults(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or space.kind.toStr() != "challenge" or !canManageSpace(space, c) (
+    c.forbidden("you cannot manage this challenge")
+    return
+  )
+  if timestamp <= space.endsAt.toNum() (
+    c.badRequest("submissions must close before results can be published")
+    return
+  )
+  if challengeAudienceJudged(space) (
+    if challengeArray(space, "audienceVotes").len == 0 (
+      c.badRequest("at least one entry needs an audience rating")
+      return
+    )
+  ) else if challengeArray(space, "scores").len == 0 (
+    c.badRequest("at least one entry needs a judge score")
+    return
+  )
+  space.resultsPublishedAt = timestamp
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)

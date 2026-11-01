@@ -1,0 +1,737 @@
+def handleListSpaces(*serve.Context c) (
+  string kind = (c.query("kind") ?? "").toLower().strip()
+  string q = (c.query("q") ?? "").toLower().strip()
+  number limit = clampNumber(c.queryInt("limit", 24), 1, 100)
+  number offset = c.queryInt("offset", 0)
+  number startsBefore = c.queryInt("startsBefore", 0)
+  number endsAfter = c.queryInt("endsAfter", 0)
+  number resultsAfter = c.queryInt("resultsAfter", 0)
+  array stored = []
+
+  if q == "" and kind == "challenge" and resultsAfter > 0 (
+    stored = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).where("resultsPublishedAt", ">=", resultsAfter).sort("resultsPublishedAt", "desc").limit(limit).all()
+    array spaces = []
+    for i stored.len (
+      object published = stored[i].assert(object)
+      object listed = spaceListResponse(published, c)
+      listed.resultsPublishedAt = published.resultsPublishedAt
+      listed.winner = challengeWinner(published, challengeProjects(published, c))
+      if listed.winner.len > 0 (
+        spaces.append(listed)
+      )
+    )
+    c.json(200, {ok: true, total: spaces.len, spaces: spaces})
+    return
+  )
+
+  if q == "" and kind == "challenge" and startsBefore > 0 and endsAfter > 0 (
+    number total = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).where("startsAt", "<=", startsBefore).where("endsAt", ">=", endsAfter).count()
+    offset = clampNumber(offset, 0, total)
+    stored = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).where("startsAt", "<=", startsBefore).where("endsAt", ">=", endsAfter).sort("startsAt", "asc").limit(offset + limit).all()
+    array page = paginate(stored, offset, limit)
+    array spaces = []
+    for i page.len (
+      spaces.append(spaceListResponse(page[i].assert(object), c))
+    )
+    c.json(200, {ok: true, total: total, spaces: spaces})
+    return
+  )
+
+  if q == "" (
+    number total = 0
+    if kind != "" (
+      total = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).count()
+      offset = clampNumber(offset, 0, total)
+      stored = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).sort("edited", "desc").limit(offset + limit).all()
+    ) else (
+      total = spaceDocs.where("visibility", "==", "public").count()
+      offset = clampNumber(offset, 0, total)
+      stored = spaceDocs.where("visibility", "==", "public").sort("edited", "desc").limit(offset + limit).all()
+    )
+    array page = paginate(stored, offset, limit)
+    array spaces = []
+    for i page.len (
+      spaces.append(spaceListResponse(page[i].assert(object), c))
+    )
+    c.json(200, {ok: true, total: total, spaces: spaces})
+    return
+  )
+
+  if kind != "" (
+    stored = spaceDocs.where("visibility", "==", "public").where("kind", "==", kind).sort("edited", "desc").all()
+  ) else (
+    stored = spaceDocs.where("visibility", "==", "public").sort("edited", "desc").all()
+  )
+  array matches = []
+  for i stored.len (
+    object space = stored[i].assert(object)
+    boolean include = space.visibility.toStr() == "public"
+    if include and kind != "" (
+      include = space.kind.toStr() == kind
+    )
+    if include and q != "" (
+      include = space.title.toStr().toLower().contains(q) or space.description.toStr().toLower().contains(q)
+    )
+    if include (
+      number score = spaceSearchScore(space.title.toStr(), space.description.toStr(), space.owner.toStr(), q)
+      matches.append({rank: searchRank(score, spaceFollowers(space).len), space: space})
+    )
+  )
+  matches.sortBy("rank", "descending")
+  number total = matches.len
+  offset = clampNumber(offset, 0, total)
+  array page = paginate(matches, offset, limit)
+  array spaces = []
+  for i page.len (
+    object row = page[i].assert(object)
+    spaces.append(spaceListResponse(row.space.assert(object), c))
+  )
+  c.json(200, {ok: true, total: total, spaces: spaces})
+)
+
+def handleGetSpace(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleCreateSpace(*serve.Context c) (
+  object body = requestJSON(c)
+  number ownedSpaces = spaceDocs.where("ownerId", "==", contextString(c, "userId")).count()
+  if !contextBool(c, "isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(contextString(c, "userId")).maxSpaces.toNum() (
+    c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+    return
+  )
+  string groupTag = ""
+  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
+    groupTag = normalizeGroupTag(body.groupTag.toStr())
+    if groupTag == "" (
+      c.badRequest("invalid group tag")
+      return
+    )
+    if !canManageGroupTag(groupTag, c) (
+      c.forbidden("you cannot create spaces for this group")
+      return
+    )
+  )
+  string title = body.title.toStr().strip()
+  string kind = body.kind.toStr().toLower().strip()
+  if title == "" or title.len > 100 (
+    c.badRequest("title must be between 1 and 100 characters")
+    return
+  )
+  if !validSpaceKind(kind) (
+    c.badRequest("invalid space type")
+    return
+  )
+  string visibility = "public"
+  if body.contains("visibility") (
+    visibility = body.visibility.toStr().toLower()
+  )
+  if !validSpaceVisibility(visibility) (
+    c.badRequest("invalid visibility")
+    return
+  )
+  string description = ""
+  if body.contains("description") (
+    description = body.description.toStr().strip()
+  )
+  if description.len > 5000 (
+    c.badRequest("description is too long")
+    return
+  )
+  number startsAt = 0
+  number endsAt = 0
+  if body.contains("startsAt") (
+    startsAt = body.startsAt.toNum()
+  )
+  if body.contains("endsAt") (
+    endsAt = body.endsAt.toNum()
+  )
+  if kind == "challenge" and (startsAt <= 0 or endsAt <= startsAt) (
+    c.badRequest("challenge dates must be in order")
+    return
+  )
+  string votingMode = "judges"
+  if body.contains("votingMode") (
+    votingMode = body.votingMode.toStr().toLower().strip()
+  )
+  if votingMode != "judges" and votingMode != "audience" (
+    c.badRequest("invalid voting mode")
+    return
+  )
+  string id = "s" ++ randomString(12)
+  object space = {
+    _id: id,
+    title: title,
+    description: description,
+    kind: kind,
+    visibility: visibility,
+    owner: contextString(c, "username"),
+    ownerId: contextString(c, "userId"),
+    groupTag: groupTag,
+    managers: [],
+    curatorInvites: [],
+    projects: [],
+    followers: [],
+    likes: [],
+    brokenHearts: [],
+    openSubmissions: body.contains("openSubmissions") and body.openSubmissions == true,
+    startsAt: startsAt,
+    endsAt: endsAt,
+    judgingEndsAt: endsAt + 604800000,
+    theme: "",
+    rules: "",
+    criteria: [{id: "overall", name: "Overall", description: "How strong is the entry as a whole?", weight: 1}],
+    judges: [],
+    judgeInvites: [],
+    scores: [],
+    audienceVotes: [],
+    submissions: [],
+    participants: [],
+    commentCount: 0,
+    communityVoting: false,
+    votingMode: votingMode,
+    resultsPublishedAt: 0,
+    created: timestamp,
+    edited: timestamp
+  }
+  putSpaceDocument(space)
+  c.json(201, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleUpdateSpace(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !canManageSpace(space, c) (
+    c.forbidden("you cannot manage this space")
+    return
+  )
+  object body = requestJSON(c)
+  if body.contains("owner") (
+    boolean canTransfer = isSpaceOwner(space, c) or canManageGroupContent(space, c)
+    if !canTransfer (
+      c.forbidden("you cannot transfer this space")
+      return
+    )
+    string requestedOwner = body.owner.toStr().strip()
+    string nextOwnerId = discoverUserIdentity(requestedOwner)
+    if nextOwnerId == "" (
+      c.badRequest("Rotur user not found")
+      return
+    )
+    string nextOwner = usernameForId(nextOwnerId)
+    if nextOwner == "" (
+      c.badRequest("Rotur user not found")
+      return
+    )
+    number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxSpaces.toNum()
+    if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
+      c.badRequest("the new owner has reached their space limit")
+      return
+    )
+    space.owner = nextOwner
+    space.ownerId = nextOwnerId
+    if !body.contains("keepGroup") or body.keepGroup != true (
+      space.groupTag = ""
+    )
+  )
+  if body.contains("groupTag") (
+    string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
+    if body.groupTag.toStr().strip() == "" (
+      nextGroupTag = ""
+    ) else if nextGroupTag == "" (
+      c.badRequest("invalid group tag")
+      return
+    ) else if !canManageGroupTag(nextGroupTag, c) (
+      c.forbidden("you cannot move this space into that group")
+      return
+    )
+    space.groupTag = nextGroupTag
+  )
+  if body.contains("title") (
+    string title = body.title.toStr().strip()
+    if title == "" or title.len > 100 (
+      c.badRequest("invalid title")
+      return
+    )
+    space.title = title
+  )
+  if body.contains("description") (
+    string description = body.description.toStr().strip()
+    if description.len > 5000 (
+      c.badRequest("description is too long")
+      return
+    )
+    space.description = description
+  )
+  if body.contains("visibility") and validSpaceVisibility(body.visibility.toStr()) (
+    space.visibility = body.visibility
+  )
+  if body.contains("openSubmissions") (
+    space.openSubmissions = body.openSubmissions == true
+  )
+  if body.contains("startsAt") (
+    space.startsAt = body.startsAt.toNum()
+  )
+  if body.contains("endsAt") (
+    space.endsAt = body.endsAt.toNum()
+  )
+  if body.contains("judgingEndsAt") (
+    space.judgingEndsAt = body.judgingEndsAt.toNum()
+  )
+  if body.contains("theme") (
+    string theme = body.theme.toStr().strip()
+    if theme.len > 200 (
+      c.badRequest("theme is too long")
+      return
+    )
+    space.theme = theme
+  )
+  if body.contains("rules") (
+    string rules = body.rules.toStr().strip()
+    if rules.len > 10000 (
+      c.badRequest("rules are too long")
+      return
+    )
+    space.rules = rules
+  )
+  if body.contains("communityVoting") (
+    space.communityVoting = body.communityVoting == true
+  )
+  if body.contains("votingMode") and space.kind.toStr() == "challenge" (
+    string votingMode = body.votingMode.toStr().toLower().strip()
+    if votingMode != "judges" and votingMode != "audience" (
+      c.badRequest("invalid voting mode")
+      return
+    )
+    if votingMode != challengeVotingMode(space) and challengePhase(space) == "results" (
+      c.badRequest("the voting mode cannot change after results are published")
+      return
+    )
+    space.votingMode = votingMode
+  )
+  if body.contains("criteria") and space.kind.toStr() == "challenge" (
+    if challengeArray(space, "scores").len > 0 (
+      c.badRequest("judging criteria cannot change after scoring begins")
+      return
+    )
+    array rawCriteria = body.criteria.assertElse(array, [])
+    array criteria = []
+    for i rawCriteria.len (
+      object rawCriterion = rawCriteria[i].assert(object)
+      string name = rawCriterion.name.toStr().strip()
+      string description = rawCriterion.description.toStr().strip()
+      if name != "" and name.len <= 60 and description.len <= 300 and criteria.len < 8 (
+        string criterionId = rawCriterion.id.toStr().strip()
+        if criterionId == "" (
+          criterionId = "jc" ++ randomString(8)
+        )
+        criteria.append({id: criterionId, name: name, description: description, weight: clampNumber(rawCriterion.weight.toNum(), 1, 5)})
+      )
+    )
+    if criteria.len == 0 (
+      c.badRequest("add at least one judging criterion")
+      return
+    )
+    space.criteria = criteria
+  )
+  if space.kind.toStr() == "challenge" and (space.startsAt.toNum() <= 0 or space.endsAt.toNum() <= space.startsAt.toNum() or space.judgingEndsAt.toNum() <= space.endsAt.toNum()) (
+    c.badRequest("challenge dates must be in order")
+    return
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleDeleteSpace(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !isSpaceOwner(space, c) (
+    c.forbidden("only the owner can delete this space")
+    return
+  )
+  void spaceDocs.deleteOne({_id: space["_id"]})
+  deleteSpaceMemberships(space["_id"].toStr())
+  void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
+  void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
+  if fs.exists(spaceThumbnailPath(space["_id"].toStr())) (
+    void fs.remove(spaceThumbnailPath(space["_id"].toStr()))
+  )
+  c.json(200, {ok: true})
+)
+
+def handleSetSpaceThumbnail(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if space.kind.toStr() != "studio" or !canManageSpace(space, c) (
+    c.forbidden("you cannot change this studio thumbnail")
+    return
+  )
+  auto fileResult = c.formFile("thumbnail")
+  if fileResult.isErr() (
+    c.badRequest("missing thumbnail file")
+    return
+  )
+  object thumbnail = fileResult.unwrap()
+  if thumbnail.size.toNum() > maxThumbBytes (
+    c.badRequest("thumbnail too large")
+    return
+  )
+  if !fs.writeFileBytes(spaceThumbnailPath(space["_id"].toStr()), thumbnail.data) (
+    c.internalError("thumbnail save failed")
+    return
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
+)
+
+def handleAddSpaceProject(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
+  if space.len == 0 or project.len == 0 (
+    c.notFound("space or project not found")
+    return
+  )
+  boolean projectVisible = project.shared == true or project.visibility.toStr() == "unlisted"
+  if !projectVisible (
+    c.forbidden("only shared or unlisted projects can be added")
+    return
+  )
+  boolean allowed = canManageSpace(space, c)
+  boolean ownsProject = searchEntryOwnedByContext(project, c)
+  boolean participantCanSubmit = space.openSubmissions == true and ownsProject
+  if space.kind.toStr() == "challenge" (
+    participantCanSubmit = participantCanSubmit and challengePhase(space) == "submissions"
+  )
+  allowed = allowed or participantCanSubmit
+  if !allowed (
+    c.forbidden("submissions are closed")
+    return
+  )
+  array ids = spaceProjectIds(space)
+  if !ids.contains(project.id.toStr()) (
+    ids.append(project.id.toStr())
+    space.projects = ids
+    if space.kind.toStr() == "challenge" (
+      array submissions = challengeArray(space, "submissions")
+      submissions.append({projectId: project.id, owner: project.owner, submittedAt: timestamp})
+      space.submissions = submissions
+      array participants = challengeArray(space, "participants")
+      if !stringArrayContainsUser(participants, project.owner.toStr()) (
+        participants.append(project.owner)
+      )
+      space.participants = participants
+    )
+    space.edited = timestamp
+    putSpaceDocument(space)
+    addNotification(space.owner.toStr(), contextString(c, "username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
+  )
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleRemoveSpaceProject(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
+  boolean allowed = canManageSpace(space, c)
+  if project.len > 0 (
+    allowed = allowed or searchEntryOwnedByContext(project, c)
+  )
+  if !allowed (
+    c.forbidden("you cannot remove this project")
+    return
+  )
+  space.projects = removeString(spaceProjectIds(space), c.param("project"))
+  if space.kind.toStr() == "challenge" (
+    array submissions = challengeArray(space, "submissions")
+    array nextSubmissions = []
+    for i submissions.len (
+      object submission = submissions[i].assert(object)
+      if submission.projectId.toStr() != c.param("project") (
+        nextSubmissions.append(submission)
+      )
+    )
+    space.submissions = nextSubmissions
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  c.json(200, {ok: true, space: spaceResponse(space, c)})
+)
+
+def handleFollowSpace(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  array followers = spaceFollowers(space)
+  if !stringArrayContainsUser(followers, contextString(c, "username")) (
+    followers.append(contextString(c, "username"))
+    space.followers = followers
+    putSpaceDocument(space)
+  )
+  c.json(200, {ok: true, following: true, followers: followers.len})
+)
+
+def handleUnfollowSpace(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  array followers = spaceFollowers(space)
+  if stringArrayContainsUser(followers, contextString(c, "username")) (
+    followers = removeUser(followers, contextString(c, "username"))
+    space.followers = followers
+    putSpaceDocument(space)
+  )
+  c.json(200, {ok: true, following: false, followers: followers.len})
+)
+
+def handleMySpaces(*serve.Context c) (
+  string userKey = normalizeUsername(contextString(c, "username"))
+  array memberships = spaceMemberDocs.where("userKey", "==", userKey).all()
+  array stored = []
+  object seen = {}
+  for i memberships.len (
+    object membership = memberships[i].assert(object)
+    object space = (spaceDocs.findById(membership.spaceId.toStr()) ?? {})
+    if space.len > 0 (
+      seen[space["_id"].toStr()] = true
+      stored.append(space)
+    )
+  )
+  array allSpaces = spaceDocs.all()
+  for i allSpaces.len (
+    object space = allSpaces[i].assert(object)
+    string spaceId = space["_id"].toStr()
+    if !seen.contains(spaceId) (
+      boolean include = isSpaceOwner(space, c)
+      if !include and groupTagOf(space) != "" (
+        include = canManageGroupContent(space, c)
+      )
+      if include (
+        seen[spaceId] = true
+        stored.append(space)
+      )
+    )
+  )
+  stored.sortBy("edited", "descending")
+  array spaces = []
+  for i stored.len (
+    object space = stored[i].assert(object)
+    spaces.append(spaceListResponse(space, c))
+  )
+  c.json(200, {ok: true, spaces: spaces})
+)
+
+def handleGetSpaceManagement(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !canManageSpace(space, c) (
+    c.forbidden("you cannot manage this space")
+    return
+  )
+  c.json(200, {ok: true, space: spaceManagementResponse(space, c)})
+)
+
+def handleInviteSpaceCurator(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !isSpaceOwner(space, c) (
+    c.forbidden("only the owner can invite curators")
+    return
+  )
+  string username = requestJSON(c).username.toStr().strip()
+  string usernameKey = normalizeUsername(username)
+  if usernameKey == "" or username.len > 20 or usernameKey == normalizeUsername(space.owner.toStr()) (
+    c.badRequest("choose another user")
+    return
+  )
+  object profile = (profileSearchDocs.findById(usernameKey) ?? {})
+  if profile.len == 0 (
+    c.notFound("user not found")
+    return
+  )
+  if stringArrayContainsUser(spaceManagers(space), username) (
+    c.badRequest("this user is already a curator")
+    return
+  )
+  array invites = spaceCuratorInvites(space)
+  for i invites.len (
+    object existing = invites[i].assert(object)
+    if normalizeUsername(existing.username.toStr()) == usernameKey (
+      c.badRequest("this user already has an invitation")
+      return
+    )
+  )
+  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  invites.append(invite)
+  space.curatorInvites = invites
+  space.edited = timestamp
+  putSpaceDocument(space)
+  addNotification(profile.username.toStr(), contextString(c, "username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def handleRespondSpaceCuratorInvite(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  string username = contextString(c, "username")
+  array invites = spaceCuratorInvites(space)
+  array remaining = []
+  boolean found = false
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) == normalizeUsername(username) (
+      found = true
+    ) else (
+      remaining.append(invite)
+    )
+  )
+  if !found (
+    c.notFound("invitation not found")
+    return
+  )
+  boolean accepted = requestJSON(c).accepted == true
+  if accepted (
+    array managers = spaceManagers(space)
+    if !stringArrayContainsUser(managers, username) (
+      managers.append(username)
+    )
+    space.managers = managers
+  )
+  space.curatorInvites = remaining
+  space.edited = timestamp
+  putSpaceDocument(space)
+  string notificationType = "space_curator_declined"
+  if accepted (
+    notificationType = "space_curator_accepted"
+  )
+  addNotification(space.owner.toStr(), username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(200, {ok: true, accepted: accepted})
+)
+
+def handleRemoveSpaceCurator(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !isSpaceOwner(space, c) (
+    c.forbidden("only the owner can remove curators")
+    return
+  )
+  string username = c.param("username")
+  array managers = spaceManagers(space)
+  if stringArrayContainsUser(managers, username) (
+    space.managers = removeUser(managers, username)
+    space.edited = timestamp
+    putSpaceDocument(space)
+    addNotification(username, contextString(c, "username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
+  )
+  c.json(200, {ok: true})
+)
+
+def handleCancelSpaceCuratorInvite(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if !isSpaceOwner(space, c) (
+    c.forbidden("only the owner can cancel invitations")
+    return
+  )
+  string username = c.param("username")
+  array remaining = []
+  array invites = spaceCuratorInvites(space)
+  boolean found = false
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
+      remaining.append(invite)
+    ) else (
+      found = true
+    )
+  )
+  if found (
+    space.curatorInvites = remaining
+    space.edited = timestamp
+    putSpaceDocument(space)
+  )
+  c.json(200, {ok: true})
+)
+
+def handleReactSpace(*serve.Context c) (
+  string lockName = "space-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleReactSpaceLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleReactSpaceLocked(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  string reactionType = requestJSON(c).type.toStr()
+  if !isValidReaction(reactionType) (
+    c.badRequest("invalid reaction")
+    return
+  )
+  string username = contextString(c, "username")
+  array likes = spaceLikes(space)
+  array brokenHearts = spaceBrokenHearts(space)
+  number previousLikes = likes.len
+  boolean hadReaction = false
+  if reactionType == "heart" (
+    hadReaction = stringArrayContainsUser(likes, username)
+  ) else (
+    hadReaction = stringArrayContainsUser(brokenHearts, username)
+  )
+  likes = removeUser(likes, username)
+  brokenHearts = removeUser(brokenHearts, username)
+  if !hadReaction and reactionType == "heart" (
+    likes.append(username)
+  ) else if !hadReaction and reactionType == "brokenheart" (
+    brokenHearts.append(username)
+  )
+  space.likes = likes
+  space.brokenHearts = brokenHearts
+  space.edited = timestamp
+  if !putSpaceDocument(space) (
+    c.internalError("could not save reaction")
+    return
+  )
+  notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
+  c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: if hadReaction then "" else reactionType})
+)
