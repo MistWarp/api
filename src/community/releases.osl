@@ -1,0 +1,217 @@
+def handleCreatePreview(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if projectMustStayPrivate(project) (
+    c.forbidden("remixes of paid projects cannot create shareable preview links")
+    return
+  )
+  array previews = previewDocs.where("projectId", "==", project.id.toStr()).all()
+  number activePreviews = 0
+  for i previews.len (
+    object existing = previews[i].assert(object)
+    if existing.expiresAt.toNum() <= timestamp (
+      void previewDocs.deleteOne({_id: existing["_id"]})
+    ) else (
+      activePreviews += 1
+    )
+  )
+  if activePreviews >= 20 (
+    c.badRequest("a project can have at most 20 active previews")
+    return
+  )
+  object body = requestJSON(c)
+  number hours = 24
+  if body.contains("hours") (
+    hours = clampNumber(body.hours.toNum(), 1, 168)
+  )
+  string key = randomString(24)
+  string previewId = project.id.toStr() ++ ":" ++ key
+  object preview = {_id: previewId, projectId: project.id, key: key, owner: contextString(c, "username"), ownerId: contextString(c, "userId"), created: timestamp, expiresAt: timestamp + (hours * 3600000)}
+  void previewDocs.insertOne(preview)
+  c.json(201, {ok: true, key: key, expiresAt: preview.expiresAt})
+)
+
+def handleListReleases(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  boolean canEdit = canEditProject(project, c)
+  ensureViewKey(project)
+  object jsonAccess = projectJsonAccess(project, c)
+  array stored = releaseDocs.where("projectId", "==", c.param("id")).sort("created", "desc").limit(100).all()
+  array releases = []
+  for i stored.len (
+    object release = stored[i].assert(object)
+    if release.channel.toStr() != "checkpoint" or canEdit (
+      releases.append(publicReleaseRecord(release, jsonAccess))
+    )
+  )
+  c.json(200, {ok: true, releases: releases})
+)
+
+def handleCreateRelease(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object body = requestJSON(c)
+  string version = body.version.toStr().strip()
+  string releaseChannel = body.channel.toStr().toLower().strip()
+  if version == "" or version.len > 50 (
+    c.badRequest("invalid version")
+    return
+  )
+  if releaseChannel != "stable" and releaseChannel != "beta" and releaseChannel != "development" and releaseChannel != "checkpoint" (
+    c.badRequest("invalid release channel")
+    return
+  )
+  if releaseChannel == "checkpoint" and mistwarpBenefitsForProject(project).historyCheckpoints != true (
+    c.forbidden("named history checkpoints require Rotur Lite, Plus, or Pro")
+    return
+  )
+  number releaseLimit = mistwarpBenefitsForProject(project).maxProjectReleases.toNum()
+  if releaseDocs.where("projectId", "==", project.id.toStr()).limit(releaseLimit.toInt()).all().len >= releaseLimit (
+    c.badRequest("this project has reached its release limit")
+    return
+  )
+  string notes = ""
+  if body.contains("notes") (
+    notes = body.notes.toStr().strip()
+  )
+  if notes.len > 10000 (
+    c.badRequest("release notes are too long")
+    return
+  )
+  string releaseId = project.id.toStr() ++ ":" ++ randomString(12)
+  string commit = ""
+  if body.contains("commit") (
+    commit = body.commit.toStr()
+  )
+  object snapshot = ensureProjectJsonSnapshot(project)
+  if !snapshot.ok (
+    c.internalError("could not snapshot the current project")
+    return
+  )
+  project = snapshot.project.assert(object)
+  string jsonUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
+  // jsonBytes is the snapshot's size, which counts against the owner's
+  // storage for as long as the release keeps it.
+  object release = {_id: releaseId, projectId: project.id, version: version, channel: releaseChannel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonBytes: (project.storedJsonBytes ?? 0).toNum(), jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: contextString(c, "username"), creatorId: contextString(c, "userId")}
+  void releaseDocs.insertOne(release)
+  storageSettleProject(project)
+  if releaseChannel == "stable" (
+    project.publicRelease = releaseId
+    saveProject(project)
+  )
+  if releaseChannel != "checkpoint" (
+    addActivity(contextString(c, "username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
+  )
+  c.json(201, {ok: true, release: publicReleaseRecord(release, projectJsonAccess(project, c))})
+)
+
+def handleGetReleaseProjectJson(*serve.Context c) (
+  object release = (releaseDocs.findById(c.param("release")) ?? {})
+  if release.len == 0 or release.projectId.toStr() != c.param("id") (
+    c.notFound("release not found")
+    return
+  )
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProjectJson(res.project.assert(object), c) (
+    c.notFound("release not found")
+    return
+  )
+  string releaseEtag = "\"" ++ release["_id"].toStr() ++ "\""
+  c.setHeader("ETag", releaseEtag)
+  c.setHeader("Cache-Control", "no-cache")
+  if (c.header("If-None-Match") ?? "").contains(releaseEtag) (
+    c.status(304)
+    return
+  )
+  if release.contains("jsonKey") and release.jsonKey.toStr() != "" (
+    serveProjectJsonStorageKey(c, release.jsonKey.toStr(), release.contains("jsonGzip") and release.jsonGzip == true)
+    return
+  )
+  string releasePath = releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json"
+  if !fs.exists(releasePath) (
+    c.notFound("release snapshot not found")
+    return
+  )
+  c.setHeader("Content-Type", "application/json")
+  c.text(200, fs.readFile(releasePath).unwrapOr(""))
+)
+
+def handleDeleteRelease(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  object release = (releaseDocs.findById(c.param("release")) ?? {})
+  if release.len == 0 or release.projectId.toStr() != project.id.toStr() (
+    c.notFound("release not found")
+    return
+  )
+  string jsonKey = (release.jsonKey ?? "").toStr()
+  void releaseDocs.deleteOne({_id: release["_id"]})
+  void fs.remove(releasesDir ++ release["_id"].toStr().replace(":", "-") ++ ".json")
+  if jsonKey != "" (
+    removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+  )
+  storageSettleProject(project)
+  if project.publicRelease.toStr() == release["_id"].toStr() (
+    project.publicRelease = ""
+    saveProject(project)
+  )
+  c.json(200, {ok: true})
+)
+
+def handleCreateContribution(*serve.Context c) (
+  auto parentResult = loadProject(c.param("id"))
+  object body = requestJSON(c)
+  auto remixResult = loadProject(body.remixProjectId.toStr())
+  if !parentResult.ok or !remixResult.ok (
+    c.notFound("project not found")
+    return
+  )
+  object parent = parentResult.project.assert(object)
+  object remix = remixResult.project.assert(object)
+  string title = body.title.toStr().strip()
+  string description = ""
+  if body.contains("body") (
+    description = body.body.toStr()
+  )
+  string bountyId = ""
+  if body.contains("bountyId") and body.bountyId != null (
+    bountyId = body.bountyId.toStr().strip()
+  )
+  object created = createNativePull(c, parent, remix, title, description, bountyId)
+  if !created.ok (
+    c.json(created.status.toInt(), {ok: false, error: created.error})
+    return
+  )
+  c.json(201, created)
+)

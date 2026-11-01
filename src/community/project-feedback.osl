@@ -1,0 +1,174 @@
+def handleCreateProjectFeedback(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if feedbackDocs.where("projectId", "==", project.id.toStr()).limit(200).all().len >= 200 (
+    c.badRequest("this project has reached its feedback limit")
+    return
+  )
+  object body = requestJSON(c)
+  string feedbackType = body.type.toStr().toLower().strip()
+  if feedbackType != "bug" and feedbackType != "idea" and feedbackType != "confusing" and feedbackType != "other" (
+    c.badRequest("invalid feedback type")
+    return
+  )
+  string message = body.message.toStr().strip()
+  if message == "" or message.len > 2000 (
+    c.badRequest("feedback must be between 1 and 2000 characters")
+    return
+  )
+  string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
+  object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: contextString(c, "username"), authorId: contextString(c, "userId"), created: timestamp, edited: timestamp}
+  void feedbackDocs.insertOne(feedback)
+  addNotification(project.owner.toStr(), contextString(c, "username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
+  c.json(201, {ok: true})
+)
+
+def handleGetProjectFeedback(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
+    c.forbidden("not your project")
+    return
+  )
+  array feedback = feedbackDocs.where("projectId", "==", c.param("id")).sort("created", "desc").limit(200).all()
+  c.json(200, {ok: true, feedback: feedback})
+)
+
+def handleUpdateProjectFeedback(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
+    c.forbidden("not your project")
+    return
+  )
+  object feedback = (feedbackDocs.findById(c.param("feedback")) ?? {})
+  if feedback.len == 0 or feedback.projectId.toStr() != c.param("id") (
+    c.notFound("feedback not found")
+    return
+  )
+  string status = requestJSON(c).status.toStr().toLower()
+  if status != "open" and status != "working" and status != "done" and status != "dismissed" (
+    c.badRequest("invalid feedback status")
+    return
+  )
+  feedback.status = status
+  feedback.edited = timestamp
+  putDocument(feedbackDocs, feedback["_id"].toStr(), feedback)
+  c.json(200, {ok: true, feedback: feedback})
+)
+
+def handleListProjectReviews(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  array reviews = reviewsVisibleTo(reviewDocs.where("projectId", "==", c.param("id")).sort("edited", "desc").limit(200).all(), c)
+  number ratingTotal = 0
+  object myReview = {}
+  for i reviews.len (
+    object review = reviews[i].assert(object)
+    ratingTotal += review.rating.toNum()
+    review.playtimeMs = authorPublicPlaytime(c.param("id"), review.author.toStr())
+    string authorId = ""
+    if review.contains("authorId") and review.authorId != null (
+      authorId = review.authorId.toStr()
+    )
+    if identityMatches(authorId, review.author.toStr(), contextString(c, "userId"), contextString(c, "username")) (
+      myReview = review
+    )
+    reviews[i] = review
+  )
+  number average = 0
+  if reviews.len > 0 (
+    average = ratingTotal / reviews.len
+  )
+  c.json(200, {ok: true, reviews: reviews, count: reviews.len, average: average, myReview: myReview})
+)
+
+def handleListUserReviews(*serve.Context c) (
+  string name = normalizeUsername(c.param("name"))
+  string requestedId = userIdForUsername(name)
+  number limit = clampNumber(c.queryInt("limit", 20), 1, 50)
+  array allReviews = reviewDocs.sort("edited", "desc").limit(1000).all()
+  array reviews = []
+  for i allReviews.len (
+    object review = allReviews[i].assert(object)
+    string authorId = ""
+    if review.contains("authorId") and review.authorId != null (
+      authorId = review.authorId.toStr()
+    )
+    if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < limit and viewerSeesShadowBanned(review.author.toStr(), authorId, c) (
+      auto res = loadProject(review.projectId.toStr())
+      if res.ok and canViewProject(res.project.assert(object), c) (
+        object project = res.project.assert(object)
+        review.projectTitle = project.title
+        review.projectOwner = project.owner
+        review.playtimeMs = authorPublicPlaytime(review.projectId.toStr(), review.author.toStr())
+        reviews.append(review)
+      )
+    )
+  )
+  c.json(200, {ok: true, reviews: reviews})
+)
+
+def handleSaveProjectReview(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if projectRole(project, contextString(c, "username")) == "owner" (
+    c.badRequest("you cannot review your own project")
+    return
+  )
+  object body = requestJSON(c)
+  number rating = body.rating.toInt()
+  if rating < 1 or rating > 5 (
+    c.badRequest("rating must be between 1 and 5")
+    return
+  )
+  string message = ""
+  if body.contains("message") (
+    message = body.message.toStr().strip()
+  )
+  if message.len > 2000 (
+    c.badRequest("review is too long")
+    return
+  )
+  string reviewerId = contextString(c, "userId")
+  if reviewerId == "" (
+    reviewerId = normalizeUsername(contextString(c, "username"))
+  )
+  string reviewId = project.id.toStr() ++ ":" ++ reviewerId
+  object existing = (reviewDocs.findById(reviewId) ?? {})
+  number created = timestamp
+  if existing.len > 0 (
+    created = existing.created.toNum()
+  )
+  object review = {_id: reviewId, projectId: project.id, author: contextString(c, "username"), authorId: contextString(c, "userId"), authorKey: normalizeUsername(contextString(c, "username")), rating: rating, message: message, created: created, edited: timestamp}
+  putDocument(reviewDocs, reviewId, review)
+  if existing.len == 0 (
+    addNotification(project.owner.toStr(), contextString(c, "username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
+  )
+  review.playtimeMs = authorPublicPlaytime(project.id.toStr(), review.author.toStr())
+  c.json(200, {ok: true, review: review})
+)
+
+def handleDeleteProjectReview(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  string reviewerId = contextString(c, "userId")
+  if reviewerId == "" (
+    reviewerId = normalizeUsername(contextString(c, "username"))
+  )
+  string reviewId = c.param("id") ++ ":" ++ reviewerId
+  void reviewDocs.deleteOne({_id: reviewId})
+  c.json(200, {ok: true})
+)

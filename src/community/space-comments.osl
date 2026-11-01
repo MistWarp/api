@@ -1,0 +1,126 @@
+def handleGetSpaceComments(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  object page = commentPage(loadComments(spaceCommentKey(space["_id"].toStr())), c)
+  page.ok = true
+  c.json(200, page)
+)
+
+def handleCreateSpaceComment(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  object body = requestJSON(c)
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  string parentId = ""
+  if body.contains("parent") and body.parent != null (
+    parentId = body.parent.toStr()
+  )
+  object created = createComment(spaceCommentKey(space["_id"].toStr()), contextString(c, "username"), contextString(c, "userId"), body.content.toStr(), parentId, "comment", 0, "")
+  if !created.ok (
+    c.badRequest(created.error.toStr())
+    return
+  )
+  if space.contains("commentCount") (
+    space.commentCount = space.commentCount.toNum() + 1
+  ) else (
+    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+  )
+  putSpaceDocument(space)
+  string commenter = contextString(c, "username")
+  string parentAuthor = created.parentAuthor.toStr()
+  string newCommentId = created.comment.id.toStr()
+  object notificationData = {spaceId: space["_id"], spaceTitle: space.title, commentId: newCommentId, preview: created.comment.content.toStr()}
+  if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+    addNotification(parentAuthor, commenter, "reply", notificationData)
+  )
+  if normalizeUsername(space.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(space.owner.toStr()) != normalizeUsername(parentAuthor) (
+    addNotification(space.owner.toStr(), commenter, "space_comment", notificationData)
+  )
+  notifyMentions(created.comment.content.toStr(), commenter, [space.owner.toStr(), parentAuthor], notificationData)
+  c.json(201, created)
+)
+
+def handleDeleteSpaceComment(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  string moderator = space.owner.toStr()
+  if canManageSpace(space, c) (
+    moderator = contextString(c, "username")
+  )
+  object deleted = deleteComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), contextString(c, "username"), moderator, contextBool(c, "isAdmin"))
+  if !deleted.ok (
+    c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+    return
+  )
+  if space.contains("commentCount") (
+    space.commentCount = clampNumber(space.commentCount.toNum() - deleted.removed.toNum(), 0, space.commentCount.toNum())
+  ) else (
+    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+  )
+  putSpaceDocument(space)
+  c.json(200, {ok: true})
+)
+
+def handleEditSpaceComment(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  object body = requestJSON(c)
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  object edited = editComment(spaceCommentKey(space["_id"].toStr()), c.param("cid"), contextString(c, "username"), body.content.toStr())
+  if !edited.ok (
+    c.json(edited.status.toInt(), {ok: false, error: edited.error})
+    return
+  )
+  c.json(200, edited)
+)
+
+def handlePinSpaceComment(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  string moderator = space.owner.toStr()
+  if canManageSpace(space, c) (
+    moderator = contextString(c, "username")
+  )
+  object body = requestJSON(c)
+  boolean pinned = true
+  if body.contains("pinned") and body.pinned != null (
+    pinned = body.pinned == true
+  )
+  object updated = setCommentPin(spaceCommentKey(space["_id"].toStr()), c.param("cid"), contextString(c, "username"), moderator, contextBool(c, "isAdmin"), pinned)
+  if !updated.ok (
+    c.json(updated.status.toInt(), {ok: false, error: updated.error})
+    return
+  )
+  updated.comment = commentResponse(updated.comment.assert(object), contextString(c, "username"))
+  c.json(200, updated)
+)
+
+def handleReactSpaceComment(*serve.Context c) (
+  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  if space.len == 0 or !canViewSpace(space, c) (
+    c.notFound("space not found")
+    return
+  )
+  reactToComment(c, spaceCommentKey(space["_id"].toStr()), "/spaces/" ++ space["_id"].toStr())
+)
