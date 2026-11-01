@@ -306,21 +306,30 @@ def handleCreateClass(*serve.Context c) (
     return
   )
   string userId = contextString(c, "userId")
+  object classDoc = createClassLocked(c, userId, name, loginMode)
+  if classDoc.len == 0 (
+    return
+  )
+  string id = classDoc["_id"].toStr()
+  recordClassroomAudit(id, c, "class_created", {name: name})
+  c.json(201, {ok: true, class: classResponse(classDoc, c)})
+)
+
+def createClassLocked(*serve.Context c, string userId, string name, string loginMode) object (
   string lockName = classroomPlanLock(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object plan = classroomPlanFor(userId)
   if classesForPlanOwner(userId).len >= plan.maxClasses.toNum() (
-    sync.unlock(lockName)
     string classWord = if plan.maxClasses.toNum() == 1 then " class" else " classes"
     c.json(413, {ok: false, code: "class_limit", error: "Your plan allows " ++ plan.maxClasses.toStr() ++ classWord ++ ". Archive and delete a class or upgrade your plan."})
-    return
+    return {}
   )
   string code = generateClassCode()
   string slug = generateClassSlug()
   if code == "" or slug == "" (
-    sync.unlock(lockName)
     c.internalError("could not create a class code, try again")
-    return
+    return {}
   )
   string id = "cls" ++ randomString(10)
   object classDoc = {
@@ -336,9 +345,7 @@ def handleCreateClass(*serve.Context c) (
     createdAt: timestamp
   }
   void classDocs.insertOne(classDoc)
-  sync.unlock(lockName)
-  recordClassroomAudit(id, c, "class_created", {name: name})
-  c.json(201, {ok: true, class: classResponse(classDoc, c)})
+  return classDoc
 )
 
 def handleGetClass(*serve.Context c) (
@@ -506,15 +513,26 @@ def handleTransferClass(*serve.Context c) (
     return
   )
   string classId = classDoc["_id"].toStr()
+  if !transferClassLocked(c, classDoc, body, classId, nextOwnerId, previousOwnerId) (
+    return
+  )
+  invalidateClassroomPool(previousOwnerId)
+  invalidateClassroomPool(nextOwnerId)
+  recordClassroomAudit(classId, c, "class_transferred", {from: previousOwnerId, to: nextOwnerId})
+  addNotification(classDoc.owner.toStr(), contextString(c, "username"), "classroom_transferred", {classId: classId, className: classDoc.name})
+  c.json(200, {ok: true})
+)
+
+def transferClassLocked(*serve.Context c, object classDoc, object body, string classId, string nextOwnerId, string previousOwnerId) boolean (
   string lockName = classroomPlanLock(nextOwnerId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object plan = classroomPlanFor(nextOwnerId)
   object usage = classroomUsage(nextOwnerId)
   number incoming = studentDocs.where("classId", "==", classId).count()
   if usage.classes.toNum() >= plan.maxClasses.toNum() or usage.seats.toNum() + incoming > plan.seats.toNum() (
-    sync.unlock(lockName)
     c.json(413, {ok: false, code: "seat_limit", error: "The new owner's plan does not have room for this class and its students."})
-    return
+    return false
   )
   array kept = []
   array coTeachers = (classDoc.coTeachers ?? []).assertElse(array, [])
@@ -531,12 +549,7 @@ def handleTransferClass(*serve.Context c) (
   classDoc.ownerId = nextOwnerId
   classDoc.owner = usernameForId(nextOwnerId)
   putDocument(classDocs, classId, classDoc)
-  sync.unlock(lockName)
-  invalidateClassroomPool(previousOwnerId)
-  invalidateClassroomPool(nextOwnerId)
-  recordClassroomAudit(classId, c, "class_transferred", {from: previousOwnerId, to: nextOwnerId})
-  addNotification(classDoc.owner.toStr(), contextString(c, "username"), "classroom_transferred", {classId: classId, className: classDoc.name})
-  c.json(200, {ok: true})
+  return true
 )
 
 def teacherIdForUsername(string username) string (
@@ -552,14 +565,18 @@ def teacherIdForUsername(string username) string (
 )
 
 def registerStudentIdentity(string userId, string username) (
+  saveStudentIdentityLocked(userId, username)
+  userIdsCache.set(userId, username)
+  userIdsCache.set("username:" ++ normalizeUsername(username), userId)
+)
+
+def saveStudentIdentityLocked(string userId, string username) (
   sync.lock("user-ids")
+  defer sync.unlock("user-ids")
   object data = loadUserIds()
   object users = data.users
   users[userId] = username
   saveUserIds(data)
-  sync.unlock("user-ids")
-  userIdsCache.set(userId, username)
-  userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
 def uniqueStudentUsername(string handle, string slug) string (
@@ -610,18 +627,30 @@ def handleCreateStudents(*serve.Context c) (
     return
   )
   string ownerId = classDoc.ownerId.toStr()
+  object made = createStudentsLocked(c, classDoc, cleaned, ownerId)
+  if made.ok != true (
+    return
+  )
+  string classId = made.classId.toStr()
+  string loginMode = made.loginMode.toStr()
+  array created = made.created.assert(array)
+  recordClassroomAudit(classId, c, "students_created", {count: created.len})
+  c.json(201, {ok: true, class: classResponse(classDoc, c), loginMode: loginMode, students: created})
+)
+
+def createStudentsLocked(*serve.Context c, object classDoc, array cleaned, string ownerId) object (
   string lockName = classroomPlanLock(ownerId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object plan = classroomPlanFor(ownerId)
   number seatsUsed = studentsForPlanOwner(ownerId).len
   if seatsUsed + cleaned.len > plan.seats.toNum() (
-    sync.unlock(lockName)
     number free = plan.seats.toNum() - seatsUsed
     if free < 0 (
       free = 0
     )
     c.json(413, {ok: false, code: "seat_limit", error: "This plan has " ++ free.toStr() ++ " free student seats. Remove students or add seats to your plan.", seats: plan.seats, used: seatsUsed})
-    return
+    return {ok: false}
   )
   string classId = classDoc["_id"].toStr()
   string loginMode = classDoc.loginMode.toStr()
@@ -648,9 +677,7 @@ def handleCreateStudents(*serve.Context c) (
     void studentDocs.insertOne(student)
     created.append({id: studentId, displayName: displayName, username: username, credentials: credentials})
   )
-  sync.unlock(lockName)
-  recordClassroomAudit(classId, c, "students_created", {count: created.len})
-  c.json(201, {ok: true, class: classResponse(classDoc, c), loginMode: loginMode, students: created})
+  return {ok: true, classId: classId, loginMode: loginMode, created: created}
 )
 
 def handleGetClassStudent(*serve.Context c) (
@@ -829,28 +856,11 @@ def handleClassroomLogin(*serve.Context c) (
     return
   )
   string studentId = student["_id"].toStr()
-  string lockName = "classroom-login-" ++ studentId
-  sync.lock(lockName)
-  student = loadStudent(studentId)
-  if studentLoginLocked(student, timestamp) (
-    sync.unlock(lockName)
-    c.json(429, {ok: false, code: "login_locked", error: "Too many tries. Ask your teacher to unlock your account, or wait 15 minutes."})
+  object checked = checkStudentLoginLocked(c, studentId, body, failure)
+  if checked.ok != true (
     return
   )
-  if !studentCredentialsMatch(student, body) (
-    object next = studentLoginAfterFailure(student, timestamp)
-    student.failedLogins = next.failedLogins
-    student.lockedUntil = next.lockedUntil
-    putDocument(studentDocs, studentId, student)
-    sync.unlock(lockName)
-    c.json(401, {ok: false, error: failure})
-    return
-  )
-  student.failedLogins = 0
-  student.lockedUntil = 0
-  student.lastLoginAt = timestamp
-  putDocument(studentDocs, studentId, student)
-  sync.unlock(lockName)
+  student = checked.student.assert(object)
   string sessionId = createSession(student.username.toStr(), studentId, true)
   setAuthCookie(c, sessionId)
   c.json(200, {
@@ -860,6 +870,30 @@ def handleClassroomLogin(*serve.Context c) (
     displayName: student.displayName,
     isStudent: true
   })
+)
+
+def checkStudentLoginLocked(*serve.Context c, string studentId, object body, string failure) object (
+  string lockName = "classroom-login-" ++ studentId
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object student = loadStudent(studentId)
+  if studentLoginLocked(student, timestamp) (
+    c.json(429, {ok: false, code: "login_locked", error: "Too many tries. Ask your teacher to unlock your account, or wait 15 minutes."})
+    return {ok: false}
+  )
+  if !studentCredentialsMatch(student, body) (
+    object next = studentLoginAfterFailure(student, timestamp)
+    student.failedLogins = next.failedLogins
+    student.lockedUntil = next.lockedUntil
+    putDocument(studentDocs, studentId, student)
+    c.json(401, {ok: false, error: failure})
+    return {ok: false}
+  )
+  student.failedLogins = 0
+  student.lockedUntil = 0
+  student.lastLoginAt = timestamp
+  putDocument(studentDocs, studentId, student)
+  return {ok: true, student: student}
 )
 
 def assignmentSummary(object assignment, number studentCount) object (
@@ -1142,15 +1176,25 @@ def handleStartAssignment(*serve.Context c) (
   object student = found.student.assert(object)
   object assignment = found.assignment.assert(object)
   string submissionId = assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()
+  object started = startSubmissionLocked(c, student, assignment, submissionId)
+  if started.len == 0 (
+    return
+  )
+  object submission = started.submission.assert(object)
+  invalidateClassroomPool(classForStudentId(student["_id"].toStr()).ownerId.toStr())
+  c.json(201, {ok: true, submission: submission, projectId: started.projectId})
+)
+
+def startSubmissionLocked(*serve.Context c, object student, object assignment, string submissionId) object (
   string lockName = "classroom-submission-" ++ submissionId
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object existing = (submissionDocs.findById(submissionId) ?? {})
   if existing.len > 0 (
     auto loaded = loadProject(existing.projectId.toStr())
     if loaded.ok (
-      sync.unlock(lockName)
       c.json(200, {ok: true, submission: existing, projectId: existing.projectId})
-      return
+      return {}
     )
   )
   string title = assignment.title.toStr().trim(1, 100)
@@ -1159,13 +1203,12 @@ def handleStartAssignment(*serve.Context c) (
   if starterId != "" (
     auto starter = loadProject(starterId)
     if !starter.ok (
-      sync.unlock(lockName)
       c.json(409, {ok: false, code: "starter_missing", error: "The starter project for this assignment is missing. Ask your teacher."})
-      return
+      return {}
     )
     object starterProject = starter.project.assert(object)
     if projectHasWorkspace(starterProject) (
-      created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), title, "", true)
+      created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), mistwarpBenefitsForUserId(student["_id"].toStr()), title, "", true)
     ) else (
       created = createBlankStudentProject(student, title)
     )
@@ -1173,9 +1216,8 @@ def handleStartAssignment(*serve.Context c) (
     created = createBlankStudentProject(student, title)
   )
   if created.ok != true (
-    sync.unlock(lockName)
     forkFailureResponse(c, created)
-    return
+    return {}
   )
   object project = created.project.assert(object)
   object submission = {
@@ -1193,9 +1235,7 @@ def handleStartAssignment(*serve.Context c) (
     grade: ""
   }
   putDocument(submissionDocs, submissionId, submission)
-  sync.unlock(lockName)
-  invalidateClassroomPool(classForStudentId(student["_id"].toStr()).ownerId.toStr())
-  c.json(201, {ok: true, submission: submission, projectId: project.id})
+  return {submission: submission, projectId: project.id}
 )
 
 def handleTurnInAssignment(*serve.Context c) (

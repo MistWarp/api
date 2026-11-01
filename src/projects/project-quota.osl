@@ -142,15 +142,14 @@ def storageFullResponse(*serve.Context c, object details, number neededBytes) (
 def reservePendingUpload(string username, string name, number bytes, number limit, boolean enforceLimit) object (
   string lockName = "upload-quota-" ++ normalizeUsername(username)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array events = pendingUploadEvents(username)
   number used = ownerStorageBytes(username) + quotaTotalBytes(events, timestamp, quotaWindowMs)
   if enforceLimit and used + bytes > limit (
-    sync.unlock(lockName)
     return {ok: false, used: used}
   )
   events.append({t: timestamp, bytes: bytes, name: name})
   writeFile(quotaPath(username), {pending: events})
-  sync.unlock(lockName)
   return {ok: true, used: used}
 )
 
@@ -160,11 +159,11 @@ def releasePendingUploads(string username, array names) (
   )
   string lockName = "upload-quota-" ++ normalizeUsername(username)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array events = pendingUploadEvents(username)
   if events.len > 0 (
     writeFile(quotaPath(username), {pending: quotaWithoutNames(events, names, timestamp, quotaWindowMs)})
   )
-  sync.unlock(lockName)
 )
 
 // The most a student's project may occupy after a save, or -1 when the

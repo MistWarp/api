@@ -28,10 +28,10 @@ def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
   string cachePath = cacheDir ++ project.jsonKey.toStr().hashSHA256() ++ ".json.gz"
   string lockName = "history-migration-json-" ++ project.jsonKey.toStr().hashSHA256()
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   void fs.mkdir(cacheDir, {recursive: true})
   boolean ready = fs.exists(cachePath) or copyStoredProjectJsonToPath(project, cachePath)
   boolean copied = ready and copyFileReplacing(cachePath, outputPath)
-  sync.unlock(lockName)
   return copied
 )
 
@@ -40,10 +40,10 @@ def copyHistoryAssetToPath(string name, string outputPath) boolean (
   string cachePath = cacheDir ++ name
   string lockName = "history-migration-asset-" ++ name
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   void fs.mkdir(cacheDir, {recursive: true})
   boolean ready = fs.exists(cachePath) or copyStorageKeyToPath(assetObjectKey(name), cachePath)
   boolean copied = ready and copyFileReplacing(cachePath, outputPath)
-  sync.unlock(lockName)
   return copied
 )
 
@@ -258,7 +258,12 @@ def missingProjectHistoryFiles() array (
 )
 
 def logHistoryMigrationProgress(object stats, string name, object res) (
+  log countHistoryMigrationLocked(stats, name, res)
+)
+
+def countHistoryMigrationLocked(object stats, string name, object res) string (
   sync.lock("history-migration-progress")
+  defer sync.unlock("history-migration-progress")
   stats.processed = stats.processed.toNum() + 1
   string status = "skipped"
   if !res.ok (
@@ -270,9 +275,7 @@ def logHistoryMigrationProgress(object stats, string name, object res) (
   ) else (
     stats.skipped = stats.skipped.toNum() + 1
   )
-  string message = "MistWarp history migration " ++ stats.processed.toStr() ++ "/" ++ stats.total.toStr() ++ " (generated " ++ stats.generated.toStr() ++ ", skipped " ++ stats.skipped.toStr() ++ ", failed " ++ stats.failed.toStr() ++ "): " ++ name ++ " " ++ status
-  sync.unlock("history-migration-progress")
-  log message
+  return "MistWarp history migration " ++ stats.processed.toStr() ++ "/" ++ stats.total.toStr() ++ " (generated " ++ stats.generated.toStr() ++ ", skipped " ++ stats.skipped.toStr() ++ ", failed " ++ stats.failed.toStr() ++ "): " ++ name ++ " " ++ status
 )
 
 def generateMissingProjectHistoriesWorker(number workerIndex, number workerCount, array files, object stats,*sync.WaitGroup jobs) (

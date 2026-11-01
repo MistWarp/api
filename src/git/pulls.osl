@@ -150,8 +150,20 @@ def createNativePull(*serve.Context c, object target, object source, string titl
   if target.contains("nativePullSeq") and target.nativePullSeq != null (
     sequence = target.nativePullSeq.toNum()
   )
+  object inserted = insertNativePullLocked(target, source, title, description, bountyId, baseCommit, sequence, contextString(c, "username"), contextString(c, "userId"))
+  if inserted.ok != true (
+    return inserted
+  )
+  object pull = inserted.pull.assert(object)
+  sequence = pull.index.toNum()
+  addNotification(target.owner.toStr(), contextString(c, "username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
+  return {ok: true, pull: pullResponse(pull)}
+)
+
+def insertNativePullLocked(object target, object source, string title, string description, string bountyId, string baseCommit, number sequence, string author, string authorId) object (
   string sequenceLock = "native-pull-sequence:" ++ target.id.toStr()
   sync.lock(sequenceLock)
+  defer sync.unlock(sequenceLock)
   array latestPulls = pullDocs.where("targetProjectId", "==", target.id.toStr()).sort("index", "desc").limit(1).all()
   sequence = nextPullSequence(sequence, latestPulls)
 
@@ -170,8 +182,8 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     title: title,
     body: description.trim(1, 5000),
     state: "open",
-    author: contextString(c, "username"),
-    authorId: contextString(c, "userId"),
+    author: author,
+    authorId: authorId,
     sourceOwner: source.owner,
     sourceOwnerId: source.ownerId,
     sourceProjectId: source.id,
@@ -189,12 +201,9 @@ def createNativePull(*serve.Context c, object target, object source, string titl
     bountyId: bountyId
   }
   if pullDocs.insertOne(pull).isErr() (
-    sync.unlock(sequenceLock)
     return {ok: false, status: 409, error: "another pull request was created at the same time, try again"}
   )
-  sync.unlock(sequenceLock)
-  addNotification(target.owner.toStr(), contextString(c, "username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
-  return {ok: true, pull: pullResponse(pull)}
+  return {ok: true, pull: pull}
 )
 
 def handleGetCommits(*serve.Context c) (
@@ -275,19 +284,25 @@ def handleListProjectBranches(*serve.Context c) (
 )
 
 def handleProjectBranchMutation(*serve.Context c, string action) (
+  object response = mutateProjectBranchesLocked(c, action)
+  if response.len > 0 (
+    c.json(200, response)
+  )
+)
+
+def mutateProjectBranchesLocked(*serve.Context c, string action) object (
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   auto res = loadProject(c.param("id"))
   if !res.ok (
-    sync.unlock(lockName)
     c.notFound("project not found")
-    return
+    return {}
   )
   object project = res.project.assert(object)
   if !canEditProject(project, c) or !canSeeInsideProject(project, c) (
-    sync.unlock(lockName)
     c.forbidden("only project maintainers can manage branches")
-    return
+    return {}
   )
   object body = requestJSON(c)
   string branch = (body.branch ?? "").toStr().strip()
@@ -300,9 +315,8 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   string outputPath = tmpDir ++ project.id.toStr() ++ ".branches-output." ++ randomString(8) ++ ".mwp"
   if !copyProjectWorkspaceToPath(project, sourcePath) (
     void fs.remove(sourcePath)
-    sync.unlock(lockName)
     c.json(409, {ok: false, error: "save the project before managing its branches", code: "branch_history_unavailable"})
-    return
+    return {}
   )
   object history = projectVersionHistory(project)
   history.head = projectGitHead(project)
@@ -313,24 +327,21 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   if parsedRewrite.isErr() or parsedRewrite.unwrap().assert(object).ok != true or !fs.exists(outputPath) (
     string message = if parsedRewrite.isErr() then "could not update the branch" else (parsedRewrite.unwrap().assert(object).error ?? "could not update the branch").toStr()
     void fs.remove(outputPath)
-    sync.unlock(lockName)
     c.json(409, {ok: false, error: message, code: "branch_update_unavailable"})
-    return
+    return {}
   )
   object rewrite = parsedRewrite.unwrap().assert(object)
   object manifest = rewrite.manifest.assert(object)
   byte[] workspaceBody = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
   void fs.remove(outputPath)
   if workspaceBody.len > maxWorkspaceBytes (
-    sync.unlock(lockName)
     c.json(413, {ok: false, error: "MistWarp project history exceeds the 512 MB limit", code: "workspace_too_large"})
-    return
+    return {}
   )
   string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
   if !stageR2Blob(workspaceKey, workspaceBody, "application/x-mistwarp-project", "") (
-    sync.unlock(lockName)
     c.internalError("could not store the updated branch history")
-    return
+    return {}
   )
   array previousWorkspaceKeys = projectWorkspaceKeys(project)
   project.workspaceKey = workspaceKey
@@ -345,9 +356,8 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
   project.edited = timestamp
   if !saveProject(project) (
     removeProjectStorageKeyIfOrphaned(workspaceKey, project.id.toStr(), true)
-    sync.unlock(lockName)
     c.internalError("could not save the updated branches")
-    return
+    return {}
   )
   for i previousWorkspaceKeys.len (
     string previousKey = previousWorkspaceKeys[i].toStr()
@@ -360,8 +370,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
     current: project.gitBranch,
     branches: projectBranchResponse(project)
   }
-  sync.unlock(lockName)
-  c.json(200, response)
+  return response
 )
 
 def handleCreateProjectBranch(*serve.Context c) (
@@ -536,18 +545,7 @@ def handleCreatePullComment(*serve.Context c) (
     c.badRequest(created.error.toStr())
     return
   )
-  sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
-  object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
-  if latestPull.len > 0 (
-    number storedCount = storedPullCommentCount(latestPull)
-    number actualCount = 0
-    if storedCount < 0 (
-      actualCount = loadComments(pullCommentKey(latestPull)).len
-    )
-    latestPull.commentCount = pullCommentCountAfterCreate(latestPull, actualCount)
-    putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
-  )
-  sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
+  countCreatedPullCommentLocked(pull)
   string commenter = contextString(c, "username")
   object notificationData = {projectId: project.id, projectTitle: project.title, pull: pull.index, commentId: created.comment.id, preview: created.comment.content.toStr()}
   if normalizeUsername(pull.author.toStr()) != normalizeUsername(commenter) (
@@ -578,7 +576,14 @@ def handleDeletePullComment(*serve.Context c) (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
   )
-  sync.lock("pull-comment-count:" ++ pull["_id"].toStr())
+  countDeletedPullCommentLocked(pull, deleted.removed.toNum())
+  c.json(200, {ok: true})
+)
+
+def countCreatedPullCommentLocked(object pull) (
+  string lockName = "pull-comment-count:" ++ pull["_id"].toStr()
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
   object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
   if latestPull.len > 0 (
     number storedCount = storedPullCommentCount(latestPull)
@@ -586,11 +591,25 @@ def handleDeletePullComment(*serve.Context c) (
     if storedCount < 0 (
       actualCount = loadComments(pullCommentKey(latestPull)).len
     )
-    latestPull.commentCount = pullCommentCountAfterDelete(latestPull, deleted.removed.toNum(), actualCount)
+    latestPull.commentCount = pullCommentCountAfterCreate(latestPull, actualCount)
     putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
   )
-  sync.unlock("pull-comment-count:" ++ pull["_id"].toStr())
-  c.json(200, {ok: true})
+)
+
+def countDeletedPullCommentLocked(object pull, number removed) (
+  string lockName = "pull-comment-count:" ++ pull["_id"].toStr()
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object latestPull = pullDocument(pull.targetProjectId.toStr(), pull.index.toStr())
+  if latestPull.len > 0 (
+    number storedCount = storedPullCommentCount(latestPull)
+    number actualCount = 0
+    if storedCount < 0 (
+      actualCount = loadComments(pullCommentKey(latestPull)).len
+    )
+    latestPull.commentCount = pullCommentCountAfterDelete(latestPull, removed, actualCount)
+    putDocument(pullDocs, latestPull["_id"].toStr(), latestPull)
+  )
 )
 
 def handleEditPullComment(*serve.Context c) (
@@ -757,115 +776,13 @@ def handleMergePull(*serve.Context c) (
       c.json(409, {ok: false, error: "the pull request history is unavailable", code: "pull_history_unavailable"})
       return
     )
-    sync.lock("project-history-" ++ target.id.toStr())
-    auto latestTargetResult = loadProject(target.id.toStr())
-    auto latestSourceResult = loadProject(source.id.toStr())
-    if !latestTargetResult.ok or !latestSourceResult.ok or projectGitHead(latestTargetResult.project.assert(object)) != currentTargetHead or projectGitHead(latestSourceResult.project.assert(object)) != currentSourceHead (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.json(409, {ok: false, error: "a project changed while this merge was processing", code: "head_changed"})
+    object merged = fastForwardPullLocked(c, pull, target, source, targetWorkspacePath, sourceWorkspacePath, currentTargetHead, currentSourceHead)
+    if merged.ok != true (
       return
     )
-    target = latestTargetResult.project.assert(object)
-    source = latestSourceResult.project.assert(object)
-    object sourceJsonSnapshot = ensureProjectJsonSnapshot(source)
-    if !sourceJsonSnapshot.ok (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("could not prepare the source project")
-      return
-    )
-    source = sourceJsonSnapshot.project.assert(object)
-    object sourceWorkspaceSnapshots = ensureProjectWorkspaceSnapshots(source)
-    if !sourceWorkspaceSnapshots.ok (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("could not prepare the source project history")
-      return
-    )
-    source = sourceWorkspaceSnapshots.project.assert(object)
-    string mergeArchivePath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".pull-merge.mwp"
-    string targetBranch = if target.contains("gitBranch") and target.gitBranch != null then target.gitBranch.toStr() else "main"
-    string targetRemixParent = if target.contains("remixParent") and target.remixParent != null then target.remixParent.toStr() else ""
-    string targetBaseCommit = if target.contains("remixBaseCommit") and target.remixBaseCommit != null then target.remixBaseCommit.toStr() else ""
-    string targetId = target.id.toStr()
-    string mergeAuthor = normalizeUsername(contextString(c, "username"))
-    string mergeMessage = "Merge pull request #" ++ pull.index.toStr()
-    number mergeTimestamp = timestamp
-    string mergeArchiveJson = gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, mergeTimestamp / 1000)
-    auto parsedMergeArchive = json.parse(mergeArchiveJson, {type: "object"})
-    if parsedMergeArchive.isErr() or parsedMergeArchive.unwrap().assert(object).ok != true or !fs.exists(mergeArchivePath) (
-      void fs.remove(mergeArchivePath)
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("could not create the pull request merge commit")
-      return
-    )
-    object mergeArchiveResult = parsedMergeArchive.unwrap().assert(object)
-    object mergeArchiveGit = mergeArchiveResult.manifest.assert(object)
-    byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath).unwrapOr("".toBytes())
-    void fs.remove(mergeArchivePath)
-    object checkedHistory = validateUploadedHistory(target, mergeArchiveBody, json.stringify(mergeArchiveGit), currentTargetHead)
-    if !checkedHistory.ok (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.json(409, {ok: false, code: "invalid_workspace", error: checkedHistory.error})
-      return
-    )
-    mergeArchiveBody = checkedHistory.data.assert(byte[])
-    mergeArchiveGit = checkedHistory.manifest.assert(object)
-    if mergeArchiveBody.len > maxWorkspaceBytes (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit", code: "workspace_too_large"})
-      return
-    )
-    string mergeArchiveKey = projectWorkspaceSnapshotKey(contentHash(mergeArchiveBody))
-    if !stageR2Blob(mergeArchiveKey, mergeArchiveBody, "application/x-mistwarp-project", "") (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("could not store the pull request merge history")
-      return
-    )
-    string previousJsonKey = target.jsonKey.toStr()
-    array previousWorkspaceKeys = projectWorkspaceKeys(target)
-    array previousExtensions = storedProjectExtensions(target)
-    target.jsonKey = source.jsonKey
-    target.jsonGzip = true
-    target.inheritedJson = true
-    target.pendingJson = false
-    target.workspaceKey = mergeArchiveKey
-    target.workspaceLayers = [mergeArchiveKey]
-    target.historyBytes = mergeArchiveBody.len
-    target.gitHead = mergeArchiveGit.head
-    target.gitBranch = mergeArchiveGit.branch
-    target.gitCommits = mergeArchiveGit.commits
-    target.gitGraph = mergeArchiveGit.graph
-    target.assets = source.assets
-    target.sizeBytes = projectSizeBytes(source)
-    target.edited = timestamp
-    if source.contains("jsonBytes") (
-      target.jsonBytes = source.jsonBytes
-    )
-    if source.contains("storedJsonBytes") (
-      target.storedJsonBytes = source.storedJsonBytes
-    )
-    if source.contains("assetBytes") (
-      target.assetBytes = source.assetBytes
-    )
-    if source.contains("extensions") (
-      target.extensions = source.extensions
-    ) else (
-      target.extensions = []
-    )
-    target.extensionsIndexed = source.contains("extensionsIndexed") and source.extensionsIndexed == true
-    if !storeProjectExtensions(target.id.toStr(), previousExtensions, storedProjectExtensions(target), {}) or !saveProject(target) (
-      removeProjectStorageKeyIfOrphaned(mergeArchiveKey, target.id.toStr(), true)
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("could not save the merged project")
-      return
-    )
-    upsertIndexEntry(target)
-    storageSettleProject(target)
-    if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
-      sync.unlock("project-history-" ++ target.id.toStr())
-      c.internalError("the project merged, but the pull request could not be closed")
-      return
-    )
-    sync.unlock("project-history-" ++ target.id.toStr())
+    target = merged.target.assert(object)
+    string previousJsonKey = merged.previousJsonKey.toStr()
+    array previousWorkspaceKeys = merged.previousWorkspaceKeys.assert(array)
     if previousJsonKey != target.jsonKey.toStr() (
       removeProjectStorageKeyIfOrphaned(previousJsonKey, target.id.toStr(), false)
     )
@@ -902,6 +819,111 @@ def handleMergePull(*serve.Context c) (
     targetProjectId: target.id,
     sourceProjectId: source.id
   })
+)
+
+def fastForwardPullLocked(*serve.Context c, object pull, object target, object source, string targetWorkspacePath, string sourceWorkspacePath, string currentTargetHead, string currentSourceHead) object (
+  string lockName = "project-history-" ++ target.id.toStr()
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  auto latestTargetResult = loadProject(target.id.toStr())
+  auto latestSourceResult = loadProject(source.id.toStr())
+  if !latestTargetResult.ok or !latestSourceResult.ok or projectGitHead(latestTargetResult.project.assert(object)) != currentTargetHead or projectGitHead(latestSourceResult.project.assert(object)) != currentSourceHead (
+    c.json(409, {ok: false, error: "a project changed while this merge was processing", code: "head_changed"})
+    return {ok: false}
+  )
+  target = latestTargetResult.project.assert(object)
+  source = latestSourceResult.project.assert(object)
+  object sourceJsonSnapshot = ensureProjectJsonSnapshot(source)
+  if !sourceJsonSnapshot.ok (
+    c.internalError("could not prepare the source project")
+    return {ok: false}
+  )
+  source = sourceJsonSnapshot.project.assert(object)
+  object sourceWorkspaceSnapshots = ensureProjectWorkspaceSnapshots(source)
+  if !sourceWorkspaceSnapshots.ok (
+    c.internalError("could not prepare the source project history")
+    return {ok: false}
+  )
+  source = sourceWorkspaceSnapshots.project.assert(object)
+  string mergeArchivePath = tmpDir ++ target.id.toStr() ++ "." ++ randomString(8) ++ ".pull-merge.mwp"
+  string targetBranch = if target.contains("gitBranch") and target.gitBranch != null then target.gitBranch.toStr() else "main"
+  string targetRemixParent = if target.contains("remixParent") and target.remixParent != null then target.remixParent.toStr() else ""
+  string targetBaseCommit = if target.contains("remixBaseCommit") and target.remixBaseCommit != null then target.remixBaseCommit.toStr() else ""
+  string targetId = target.id.toStr()
+  string mergeAuthor = normalizeUsername(contextString(c, "username"))
+  string mergeMessage = "Merge pull request #" ++ pull.index.toStr()
+  number mergeTimestamp = timestamp
+  string mergeArchiveJson = gitinspection.CreateFastForwardMergeArchiveJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, currentSourceHead, mergeArchivePath, targetId, targetRemixParent, targetBaseCommit, targetBranch, mergeAuthor, mergeMessage, mergeTimestamp / 1000)
+  auto parsedMergeArchive = json.parse(mergeArchiveJson, {type: "object"})
+  if parsedMergeArchive.isErr() or parsedMergeArchive.unwrap().assert(object).ok != true or !fs.exists(mergeArchivePath) (
+    void fs.remove(mergeArchivePath)
+    c.internalError("could not create the pull request merge commit")
+    return {ok: false}
+  )
+  object mergeArchiveResult = parsedMergeArchive.unwrap().assert(object)
+  object mergeArchiveGit = mergeArchiveResult.manifest.assert(object)
+  byte[] mergeArchiveBody = fs.readFileBytes(mergeArchivePath).unwrapOr("".toBytes())
+  void fs.remove(mergeArchivePath)
+  object checkedHistory = validateUploadedHistory(target, mergeArchiveBody, json.stringify(mergeArchiveGit), currentTargetHead)
+  if !checkedHistory.ok (
+    c.json(409, {ok: false, code: "invalid_workspace", error: checkedHistory.error})
+    return {ok: false}
+  )
+  mergeArchiveBody = checkedHistory.data.assert(byte[])
+  mergeArchiveGit = checkedHistory.manifest.assert(object)
+  if mergeArchiveBody.len > maxWorkspaceBytes (
+    c.json(413, {ok: false, error: "MistWarp project history exceeds the 90 MB limit", code: "workspace_too_large"})
+    return {ok: false}
+  )
+  string mergeArchiveKey = projectWorkspaceSnapshotKey(contentHash(mergeArchiveBody))
+  if !stageR2Blob(mergeArchiveKey, mergeArchiveBody, "application/x-mistwarp-project", "") (
+    c.internalError("could not store the pull request merge history")
+    return {ok: false}
+  )
+  string previousJsonKey = target.jsonKey.toStr()
+  array previousWorkspaceKeys = projectWorkspaceKeys(target)
+  array previousExtensions = storedProjectExtensions(target)
+  target.jsonKey = source.jsonKey
+  target.jsonGzip = true
+  target.inheritedJson = true
+  target.pendingJson = false
+  target.workspaceKey = mergeArchiveKey
+  target.workspaceLayers = [mergeArchiveKey]
+  target.historyBytes = mergeArchiveBody.len
+  target.gitHead = mergeArchiveGit.head
+  target.gitBranch = mergeArchiveGit.branch
+  target.gitCommits = mergeArchiveGit.commits
+  target.gitGraph = mergeArchiveGit.graph
+  target.assets = source.assets
+  target.sizeBytes = projectSizeBytes(source)
+  target.edited = timestamp
+  if source.contains("jsonBytes") (
+    target.jsonBytes = source.jsonBytes
+  )
+  if source.contains("storedJsonBytes") (
+    target.storedJsonBytes = source.storedJsonBytes
+  )
+  if source.contains("assetBytes") (
+    target.assetBytes = source.assetBytes
+  )
+  if source.contains("extensions") (
+    target.extensions = source.extensions
+  ) else (
+    target.extensions = []
+  )
+  target.extensionsIndexed = source.contains("extensionsIndexed") and source.extensionsIndexed == true
+  if !storeProjectExtensions(target.id.toStr(), previousExtensions, storedProjectExtensions(target), {}) or !saveProject(target) (
+    removeProjectStorageKeyIfOrphaned(mergeArchiveKey, target.id.toStr(), true)
+    c.internalError("could not save the merged project")
+    return {ok: false}
+  )
+  upsertIndexEntry(target)
+  storageSettleProject(target)
+  if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
+    c.internalError("the project merged, but the pull request could not be closed")
+    return {ok: false}
+  )
+  return {ok: true, target: target, previousJsonKey: previousJsonKey, previousWorkspaceKeys: previousWorkspaceKeys}
 )
 
 def handleClosePull(*serve.Context c) (

@@ -119,13 +119,13 @@ def handleGetRemixTree(*serve.Context c) (
 )
 
 def handleRemixProject(*serve.Context c) (
-  string lockName = "project-history-" ++ c.param("id")
-  sync.lock(lockName)
-  handleRemixProjectLocked(c)
-  sync.unlock(lockName)
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    handleRemixProjectLocked(c, benefits)
+  ))
 )
 
-def handleRemixProjectLocked(*serve.Context c) (
+def handleRemixProjectLocked(*serve.Context c, object benefits) (
   auto res = loadProject(c.param("id"))
   if !res.ok (
     c.notFound("project not found")
@@ -149,7 +149,7 @@ def handleRemixProjectLocked(*serve.Context c) (
   if body.contains("branch") and body.branch != null (
     forkBranch = body.branch.toStr().strip()
   )
-  object forked = forkProjectFor(parent, contextString(c, "username"), contextString(c, "userId"), forkTitle, forkBranch, !contextBool(c, "isAdmin"))
+  object forked = forkProjectFor(parent, contextString(c, "username"), contextString(c, "userId"), benefits, forkTitle, forkBranch, !contextBool(c, "isAdmin"))
   if forked.ok != true (
     forkFailureResponse(c, forked)
     return
@@ -176,9 +176,9 @@ def forkFailureResponse(*serve.Context c, object forked) (
   c.json(forked.status.toNum().toInt(), {ok: false, code: forked.code, error: forked.error})
 )
 
-def forkProjectFor(object source, string username, string userId, string forkTitle, string requestedBranch, boolean enforceLimits) object (
+def forkProjectFor(object source, string username, string userId, object benefits, string forkTitle, string requestedBranch, boolean enforceLimits) object (
   object parent = source
-  number projectLimit = mistwarpBenefitsForUserId(userId).maxProjects.toNum()
+  number projectLimit = benefits.maxProjects.toNum()
   if enforceLimits and ownedProjectSlotCount(userId, username) >= projectLimit (
     return {ok: false, status: 413, code: "project_limit", error: "project limit reached; delete a trashed project permanently or upgrade your plan"}
   )
@@ -235,7 +235,7 @@ def forkProjectFor(object source, string username, string userId, string forkTit
     if hold.ok != true (
       return {ok: false, status: 413, code: "storage_full", error: "storage full", refusal: hold.refusal}
     )
-  ) else if enforceLimits and storageAllowance(mistwarpBenefitsForUserId(userId).storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
+  ) else if enforceLimits and storageAllowance(benefits.storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
     return {ok: false, status: 413, code: "storage_full", error: "storage full", username: username, bytes: forkBytes}
   )
   string forkKey = projectWorkspaceSnapshotKey(contentHash(forkBody))

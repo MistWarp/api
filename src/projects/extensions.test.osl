@@ -107,4 +107,12 @@ testing.assert(migrateExtensionUsage() and json.stringify(readExtensionRecord(st
 array sharedProjects = readExtensionRecord(hash).projects.assert(array)
 testing.assert(sharedProjects.contains("p2") and sharedProjects.contains("p5"), "the backfill keeps projects the record already listed")
 
+object urlPolicy = loadExtensionPolicy()
+setExtensionUrlBlocked(urlPolicy, "https://example.com/bad.js", true)
+setExtensionUrlBlocked(urlPolicy, "https://example.com/bad.js", true)
+testing.assert(saveExtensionPolicy(urlPolicy) and loadExtensionPolicy().blockedUrls == ["https://example.com/bad.js"], "blocking a URL saves it once")
+object reloadedPolicy = loadExtensionPolicy()
+setExtensionUrlBlocked(reloadedPolicy, "https://example.com/bad.js", false)
+testing.assert(saveExtensionPolicy(reloadedPolicy) and loadExtensionPolicy().blockedUrls.len == 0, "unblocking a URL removes it")
+
 void fs.remove(tmpDir)

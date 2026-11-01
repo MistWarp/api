@@ -19,11 +19,20 @@ def createComment(string key, string author, string authorId, string content, st
     return {ok: false, error: refusal}
   )
 
+  object res = storeCommentLocked(key, author, authorId, trimmed, parentId, kind, donationAmount, donationPaymentId)
+  if res.ok == true and !res.contains("duplicate") (
+    roturBadgeEvent(author, "comment_posted", 0)
+    indexComment(key, res.comment.assert(object))
+  )
+  return res
+)
+
+def storeCommentLocked(string key, string author, string authorId, string trimmed, string parentId, string kind, number donationAmount, string donationPaymentId) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   string commentsPath = commentsDir ++ key ++ ".jsonl"
   if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).toBytes().len > 8388608 (
-    sync.unlock(lockName)
     return {ok: false, error: "this comment thread is full"}
   )
   boolean hasJsonLines = fs.exists(commentsPath)
@@ -36,7 +45,6 @@ def createComment(string key, string author, string authorId, string content, st
     for i comments.len (
       object existing = comments[i]
       if existing.contains("donationPaymentId") and existing.donationPaymentId.toStr() == donationPaymentId (
-        sync.unlock(lockName)
         return {ok: true, comment: existing, parentAuthor: "", duplicate: true}
       )
     )
@@ -53,7 +61,6 @@ def createComment(string key, string author, string authorId, string content, st
       )
     )
     if !parentOk (
-      sync.unlock(lockName)
       return {ok: false, error: "invalid parent comment"}
     )
   )
@@ -78,12 +85,9 @@ def createComment(string key, string author, string authorId, string content, st
     comments.append(comment)
     saved = saveComments(key, comments)
   )
-  sync.unlock(lockName)
   if !saved (
     return {ok: false, error: "could not save comment"}
   )
-  roturBadgeEvent(author, "comment_posted", 0)
-  indexComment(key, comment)
   return {ok: true, comment: comment, parentAuthor: parentAuthor}
 )
 
@@ -127,6 +131,7 @@ def commentPinnedAt(object comment) number (
 def setCommentPin(string key, string cid, string requester, string moderator, boolean isAdmin, boolean pinned) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array comments = loadComments(key)
   object target = {}
   boolean found = false
@@ -138,11 +143,9 @@ def setCommentPin(string key, string cid, string requester, string moderator, bo
     )
   )
   if !found (
-    sync.unlock(lockName)
     return {ok: false, error: "comment not found", status: 404}
   )
   if commentParentId(target) != "" (
-    sync.unlock(lockName)
     return {ok: false, error: "only top-level comments can be pinned", status: 400}
   )
 
@@ -150,7 +153,6 @@ def setCommentPin(string key, string cid, string requester, string moderator, bo
   boolean allowed = isAdmin
   allowed = allowed or requesterKey == normalizeUsername(moderator)
   if !allowed (
-    sync.unlock(lockName)
     return {ok: false, error: "not allowed", status: 403}
   )
 
@@ -171,7 +173,6 @@ def setCommentPin(string key, string cid, string requester, string moderator, bo
     )
   )
   boolean saved = saveComments(key, comments)
-  sync.unlock(lockName)
   if !saved (
     return {ok: false, error: "could not save comment", status: 500}
   )
@@ -181,6 +182,7 @@ def setCommentPin(string key, string cid, string requester, string moderator, bo
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array comments = loadComments(key)
   object target = {}
   boolean found = false
@@ -192,7 +194,6 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
     )
   )
   if !found (
-    sync.unlock(lockName)
     return {ok: false, error: "comment not found", status: 404}
   )
 
@@ -201,7 +202,6 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
   allowed = allowed or requesterKey == normalizeUsername(target.author.toStr())
   allowed = allowed or requesterKey == normalizeUsername(moderator)
   if !allowed (
-    sync.unlock(lockName)
     return {ok: false, error: "not allowed", status: 403}
   )
 
@@ -215,7 +215,6 @@ def deleteComment(string key, string cid, string requester, string moderator, bo
     )
   )
   boolean saved = saveComments(key, next)
-  sync.unlock(lockName)
   if !saved (
     return {ok: false, error: "could not delete comment", status: 500}
   )
@@ -231,8 +230,17 @@ def editComment(string key, string cid, string requester, string content) object
     return {ok: false, error: "comment too long", status: 400}
   )
 
+  object res = editCommentLocked(key, cid, requester, trimmed)
+  if res.ok == true (
+    indexComment(key, res.comment.assert(object))
+  )
+  return res
+)
+
+def editCommentLocked(string key, string cid, string requester, string trimmed) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array comments = loadComments(key)
   object target = {}
   boolean found = false
@@ -244,11 +252,9 @@ def editComment(string key, string cid, string requester, string content) object
     )
   )
   if !found (
-    sync.unlock(lockName)
     return {ok: false, error: "comment not found", status: 404}
   )
   if normalizeUsername(requester) != normalizeUsername(target.author.toStr()) (
-    sync.unlock(lockName)
     return {ok: false, error: "not allowed", status: 403}
   )
   for i comments.len (
@@ -261,11 +267,9 @@ def editComment(string key, string cid, string requester, string content) object
     )
   )
   boolean saved = saveComments(key, comments)
-  sync.unlock(lockName)
   if !saved (
     return {ok: false, error: "could not edit comment", status: 500}
   )
-  indexComment(key, target)
   return {ok: true, comment: target}
 )
 
@@ -774,8 +778,37 @@ def reactToComment(*serve.Context c, string key, string path) (
   )
   string username = normalizeUsername(contextString(c, "username"))
   string cid = c.param("cid")
+  object reaction = saveCommentReactionLocked(c, key, cid, username, reactionType)
+  if reaction.found != true (
+    return
+  )
+  boolean saved = reaction.saved == true
+  object summary = reaction.summary.assert(object)
+  number previousLikes = reaction.previousLikes.toNum()
+  string author = reaction.author.toStr()
+  string preview = reaction.preview.toStr()
+  if !saved (
+    c.internalError("could not save reaction")
+    return
+  )
+  notifyLikeMilestones(author, "comment", key ++ ":" ++ cid, previousLikes, summary.counts.heart.toNum(), path ++ "#comment-id-" ++ cid, {commentId: cid, preview: preview})
+  if key.startsWith("project-") (
+    siteBroadcastProject(c.param("id"), {
+      type: "comment_reaction",
+      projectId: c.param("id"),
+      commentId: cid,
+      reactionCounts: summary.counts,
+      actor: contextString(c, "username"),
+      reaction: summary.myReaction
+    })
+  )
+  c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
+)
+
+def saveCommentReactionLocked(*serve.Context c, string key, string cid, string username, string reactionType) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array comments = loadComments(key)
   boolean found = false
   object summary = {counts: {heart: 0, brokenheart: 0}, myReaction: ""}
@@ -799,28 +832,11 @@ def reactToComment(*serve.Context c, string key, string path) (
     )
   )
   if !found (
-    sync.unlock(lockName)
     c.notFound("comment not found")
-    return
+    return {found: false}
   )
   boolean saved = saveComments(key, comments)
-  sync.unlock(lockName)
-  if !saved (
-    c.internalError("could not save reaction")
-    return
-  )
-  notifyLikeMilestones(author, "comment", key ++ ":" ++ cid, previousLikes, summary.counts.heart.toNum(), path ++ "#comment-id-" ++ cid, {commentId: cid, preview: preview})
-  if key.startsWith("project-") (
-    siteBroadcastProject(c.param("id"), {
-      type: "comment_reaction",
-      projectId: c.param("id"),
-      commentId: cid,
-      reactionCounts: summary.counts,
-      actor: contextString(c, "username"),
-      reaction: summary.myReaction
-    })
-  )
-  c.json(200, {ok: true, reactionCounts: summary.counts, myReaction: summary.myReaction})
+  return {found: true, saved: saved, summary: summary, previousLikes: previousLikes, author: author, preview: preview}
 )
 
 def handleReactProjectComment(*serve.Context c) (

@@ -134,10 +134,9 @@ def handleViewProject(*serve.Context c) (
 )
 
 def handleReactProject(*serve.Context c) (
-  string lockName = "project-reactions:" ++ c.param("id")
-  sync.lock(lockName)
-  handleReactProjectLocked(c)
-  sync.unlock(lockName)
+  runLocked("project-reactions:" ++ c.param("id"), def() -> (
+    handleReactProjectLocked(c)
+  ))
 )
 
 def handleReactProjectLocked(*serve.Context c) (

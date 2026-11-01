@@ -1,0 +1,154 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:regex"
+import "std:requests"
+import "std:serve"
+import "std:sync"
+import "std:thread"
+import "./backpack-policy.osl"
+
+string backpackDir = "/tmp/mistwarp-backpack-test/"
+number maxBackpackItems = 10
+number maxBackpackBodyBytes = 1000
+number maxBackpackThumbnailBytes = 1000
+
+boolean failing = false
+object written = {}
+def readFile(string path) object (
+  if failing (
+    throw "IOError: disk gone"
+  )
+  if written.contains(path) (
+    return {ok: true, data: written[path]}
+  )
+  return {ok: false}
+)
+def writeFile(string path, object data) boolean (
+  written[path] = data
+  return true
+)
+def normalizeUsername(string username) string (
+  return username.toLower().strip()
+)
+def contextString(*serve.Context c, string key) string (
+  if key == "username" (
+    return "sam"
+  )
+  if key == "userId" (
+    return "u_sam"
+  )
+  return ""
+)
+def contextBool(*serve.Context c, string key) boolean (
+  return false
+)
+def usesRoturStorage(string userId) boolean (
+  return false
+)
+def storageDetails(string username) object (
+  return {used: 0, pending: 0, limit: 1000000}
+)
+def r2Put(string key, any body, string contentType) boolean (
+  return true
+)
+
+def contentTypeForExt(string ext) string (
+  return ""
+)
+def noStorageHold() object (
+  return {}
+)
+def paginate(array items, number offset, number limit) array (
+  return []
+)
+def publicUrl(string key) string (
+  return ""
+)
+def r2Remove(string key) boolean (
+  return false
+)
+def randomString(number length) string (
+  return ""
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def roturStorageFullResponse(*serve.Context c, object refusal) (
+  return
+)
+def storageFullResponse(*serve.Context c, object details, number neededBytes) (
+  return
+)
+def storageHold(string userId, object changes, boolean enforce) object (
+  return {}
+)
+def storageHoldRelease(string userId, object hold) (
+  return
+)
+def storageSettleSoon(string userId) (
+  return
+)
+def serveBlobKey(*serve.Context c, string key) (
+  return
+)
+def storageSettle(string userId, object hold) (
+  return
+)
+def lockIsFree(string lockName) boolean (
+  boolean free = thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+  return free
+)
+
+import "./backpack.osl"
+
+string backpackLock = backpackLockName("u_sam")
+void saveBackpackItems("u_sam", [{id: "b1", type: "costume", name: "Cat", bodyKey: "backpack/x/body.svg", bodyBytes: 5, thumbnailKey: "", thumbnailBytes: 0}])
+testing.assert(renameBackpackItemLocked("u_sam", "b1", "Dog").saved == true and loadBackpackItems("u_sam")[1].name == "Dog" and lockIsFree(backpackLock), "an item is renamed and the backpack lock released")
+failing = true
+testing.assert(try(renameBackpackItemLocked("u_sam", "b1", "Fox")).isErr() and lockIsFree(backpackLock), "the backpack lock is released when renaming throws")
+testing.assert(try(deleteBackpackItems("u_sam", ["b1"])).isErr() and lockIsFree(backpackLock), "the backpack lock is released when deleting throws")
+def purgeThrows() boolean (
+  purgeBackpackForUser("u_sam")
+  return true
+)
+testing.assert(try(purgeThrows()).isErr() and lockIsFree(backpackLock), "the backpack lock is released when purging throws")
+failing = false
+testing.assert(deleteBackpackItems("u_sam", ["b1"]).deleted == 1 and loadBackpackItems("u_sam").len == 0 and lockIsFree(backpackLock), "the backpack works again after a failure")
+
+*serve.Router app = serve.new()
+app.POST("/backpack", handleCreateBackpackItem)
+app.GET("/ready", def(*serve.Context c) -> (
+  c.json(200, {ok: true})
+))
+def runApp() (
+  app.run(":18354")
+)
+thread.new(runApp)
+string base = "http://127.0.0.1:18354"
+for i 50 (
+  if requests.get(base ++ "/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+string boundary = "smokeboundary"
+def formPart(string name, string value) string (
+  return "--" ++ boundary ++ "\r\nContent-Disposition: form-data; name=\"" ++ name ++ "\"\r\n\r\n" ++ value ++ "\r\n"
+)
+string form = formPart("type", "costume") ++ formPart("mime", "image/svg+xml") ++ formPart("name", "Cat") ++ "--" ++ boundary ++ "\r\nContent-Disposition: form-data; name=\"body\"; filename=\"body.svg\"\r\nContent-Type: image/svg+xml\r\n\r\n<svg/>\r\n--" ++ boundary ++ "--\r\n"
+object formOptions = {body: form, headers: {"Content-Type": "multipart/form-data; boundary=" ++ boundary}}
+
+failing = true
+number failedStatus = requests.post(base ++ "/backpack", formOptions).unwrapOr({status: 0}).status.toNum()
+testing.assert(failedStatus >= 500, "a failure while adding an item is a server error")
+testing.assert(lockIsFree("upload-quota-sam") and lockIsFree(backpackLock), "the quota and backpack locks are both released when adding an item throws")
+failing = false
+number addedStatus = requests.post(base ++ "/backpack", formOptions).unwrapOr({status: 0}).status.toNum()
+testing.assert(addedStatus == 200 and loadBackpackItems("u_sam").len == 1 and lockIsFree("upload-quota-sam") and lockIsFree(backpackLock), "items can be added again after a failure")

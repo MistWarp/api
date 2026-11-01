@@ -1,0 +1,107 @@
+import "std:testing"
+import "std:fs"
+import "std:json"
+import "std:serve"
+import "std:sync"
+import "std:thread"
+import "../storage/quota-policy.osl"
+
+string quotaDir = "/tmp/mistwarp-quota-test/"
+string trashDir = "/tmp/mistwarp-quota-test-trash/"
+number quotaWindowMs = 3600000
+string roturBase = "http://127.0.0.1:9"
+
+boolean failing = false
+object written = {}
+def readFile(string path) object (
+  if failing (
+    throw "IOError: disk gone"
+  )
+  if written.contains(path) (
+    return {ok: true, data: written[path]}
+  )
+  return {ok: false}
+)
+def writeFile(string path, object data) boolean (
+  written[path] = data
+  return true
+)
+def normalizeUsername(string username) string (
+  return username.toLower().strip()
+)
+
+def backpackStoredBytes(string userId) number (
+  return 0
+)
+def contextBool(*serve.Context c, string key) boolean (
+  return false
+)
+def contextString(*serve.Context c, string key) string (
+  return ""
+)
+def identityMatches(string storedId, string storedUsername, string userId, string username) boolean (
+  return false
+)
+def ledgerAllowance(string userId) object (
+  return {}
+)
+def mistwarpBenefitsForProject(object project) object (
+  return {}
+)
+def mistwarpBenefitsForUsername(string username) object (
+  return {}
+)
+def ownerIndexEntries(string owner, boolean includeUnshared) array (
+  return []
+)
+def paginate(array items, number offset, number limit) array (
+  return []
+)
+def projectOwnerId(object project) string (
+  return ""
+)
+def projectStorageBytes(object project) number (
+  return 0
+)
+def userIdForUsername(string username) string (
+  return ""
+)
+def usesRoturStorage(string userId) boolean (
+  return false
+)
+def mistwarpBenefitsForUserId(string userId) object (
+  return {}
+)
+def pendingAssetHold(string ownerId, string username, string name, number bytes, boolean enforce) object (
+  return {}
+)
+def releasePendingAssetHolds(string ownerId, string username, array names) (
+  return
+)
+def lockIsFree(string lockName) boolean (
+  boolean free = thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+  return free
+)
+
+import "./project-quota.osl"
+
+object reserved = reservePendingUpload("Sam", "a.svg", 10, 100, true)
+testing.assert(reserved.ok == true and pendingUploadEvents("sam").len == 1 and lockIsFree("upload-quota-sam"), "an upload is reserved and the quota lock released")
+testing.assert(reservePendingUpload("sam", "b.svg", 95, 100, true).ok == false and lockIsFree("upload-quota-sam"), "a refused reservation releases the quota lock")
+failing = true
+testing.assert(try(reservePendingUpload("sam", "c.svg", 1, 100, true)).isErr(), "a failure while reserving reaches the caller")
+testing.assert(lockIsFree("upload-quota-sam"), "the quota lock is released when reserving throws")
+def releaseThrows() boolean (
+  releasePendingUploads("sam", ["a.svg"])
+  return true
+)
+testing.assert(try(releaseThrows()).isErr() and lockIsFree("upload-quota-sam"), "the quota lock is released when releasing throws")
+failing = false
+releasePendingUploads("sam", ["a.svg"])
+testing.assert(pendingUploadEvents("sam").len == 0 and lockIsFree("upload-quota-sam"), "the quota can be used again after a failure")

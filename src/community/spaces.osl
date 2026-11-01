@@ -693,8 +693,8 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
 def handleReactSpace(*serve.Context c) (
   string lockName = "space-reactions:" ++ c.param("id")
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   handleReactSpaceLocked(c)
-  sync.unlock(lockName)
 )
 
 def handleReactSpaceLocked(*serve.Context c) (

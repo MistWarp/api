@@ -30,19 +30,17 @@ def measuredHistoryBytes(object project, object inventory) number (
 def backfillLiveProjectHistoryBytes(string id, object inventory) boolean (
   string lockName = "project-history-" ++ id
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   auto loaded = loadProject(id)
   if !loaded.ok (
-    sync.unlock(lockName)
     return true
   )
   object project = loaded.project.assert(object)
   if project.contains("historyBytes") (
-    sync.unlock(lockName)
     return true
   )
   number bytes = measuredHistoryBytes(project, inventory)
   if bytes < 0 (
-    sync.unlock(lockName)
     return false
   )
   project.historyBytes = bytes
@@ -50,7 +48,6 @@ def backfillLiveProjectHistoryBytes(string id, object inventory) boolean (
   if saved (
     upsertIndexEntry(project)
   )
-  sync.unlock(lockName)
   return saved
 )
 

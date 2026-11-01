@@ -78,13 +78,13 @@ def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean wor
 def cleanupReplacedProjectStorage(string id, string jsonKey, array workspaceKeys) (
   string lockName = "project-history-" ++ id
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   if jsonKey != "" (
     removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
   )
   for i workspaceKeys.len (
     removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), "", true)
   )
-  sync.unlock(lockName)
 )
 
 def ensureProjectJsonSnapshot(object project) object (
@@ -140,11 +140,11 @@ def ensureProjectWorkspaceSnapshots(object project) object (
 def maybeFlushProject(object project) (
   string lockName = "project-history-" ++ project.id.toStr()
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   auto latest = loadProject(project.id.toStr())
   if latest.ok (
     flushProjectLocked(latest.project.assert(object))
   )
-  sync.unlock(lockName)
 )
 
 def flushProjectLocked(object project) (

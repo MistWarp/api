@@ -54,24 +54,21 @@ def cachedProjectWorkspacePath(object project) string (
   )
   string lockName = "git-inspection-workspace-" ++ cacheName
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   if fs.exists(cachedPath) (
-    sync.unlock(lockName)
     return cachedPath
   )
   string temporaryPath = cachedPath ++ ".tmp." ++ randomString(8)
   if !copyProjectWorkspaceToPath(project, temporaryPath) (
     void fs.remove(temporaryPath)
-    sync.unlock(lockName)
     return ""
   )
   if !fs.rename(temporaryPath, cachedPath) (
     void fs.remove(temporaryPath)
     if !fs.exists(cachedPath) (
-      sync.unlock(lockName)
       return ""
     )
   )
-  sync.unlock(lockName)
   return cachedPath
 )
 

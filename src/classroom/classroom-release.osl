@@ -134,7 +134,7 @@ def archiveSubmittedWork(object student, object classDoc) (
       auto loaded = loadProject(submission.projectId.toStr())
       if loaded.ok and projectHasWorkspace(loaded.project.assert(object)) (
         object project = loaded.project.assert(object)
-        object copy = forkProjectFor(project, teacherName, teacherId, (project.title.toStr() ++ " (" ++ student.displayName.toStr() ++ ")").trim(1, 100), "", false)
+        object copy = forkProjectFor(project, teacherName, teacherId, mistwarpBenefitsForUserId(teacherId), (project.title.toStr() ++ " (" ++ student.displayName.toStr() ++ ")").trim(1, 100), "", false)
         if copy.ok == true (
           submission.projectId = copy.project.id
         )
@@ -159,7 +159,7 @@ def handOverGroupProject(object project, object student, string claimantName, st
     )
   )
   if projectHasWorkspace(project) (
-    forkProjectFor(project, claimantName, claimantId, project.title.toStr(), "", false)
+    forkProjectFor(project, claimantName, claimantId, mistwarpBenefitsForUserId(claimantId), project.title.toStr(), "", false)
   )
   project.collaborators = rest
   moveProjectOwner(project, next.username.toStr(), next.userId.toStr())
@@ -198,12 +198,29 @@ def handleRedeemClaim(*serve.Context c) (
   string studentName = student.username.toStr()
   string claimantId = contextString(c, "userId")
   string claimantName = contextString(c, "username")
+  object released = releaseStudentLocked(c, student, classDoc, studentId, studentName, claimantName, claimantId)
+  if released.ok != true (
+    return
+  )
+  array moved = released.moved.assert(array)
+  array trashed = released.trashed.assert(array)
+  invalidateClassroomPool(classDoc.ownerId.toStr())
+  storageSettleSoon(claimantId)
+  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_released", {studentId: studentId, displayName: student.displayName, to: claimantName, projects: moved.len})
+  array teachers = classTeacherIds(classDoc)
+  for i teachers.len (
+    addNotification(usernameForId(teachers[i].toStr()), claimantName, "classroom_released", {classId: classDoc["_id"], className: classDoc.name, studentName: student.displayName})
+  )
+  c.json(200, {ok: true, projects: moved, trashed: trashed.len})
+)
+
+def releaseStudentLocked(*serve.Context c, object student, object classDoc, string studentId, string studentName, string claimantName, string claimantId) object (
   string lockName = "classroom-release-" ++ studentId
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   if loadStudent(studentId).len == 0 (
-    sync.unlock(lockName)
     c.notFound("This link has expired or was already used. Ask your teacher for a new one.")
-    return
+    return {ok: false}
   )
   archiveSubmittedWork(student, classDoc)
   array moved = []
@@ -230,13 +247,5 @@ def handleRedeemClaim(*serve.Context c) (
   purgeUser(studentId, studentName)
   deleteDocumentsByField(classroomClaimDocs, "studentId", studentId)
   void studentDocs.deleteOne({_id: studentId})
-  sync.unlock(lockName)
-  invalidateClassroomPool(classDoc.ownerId.toStr())
-  storageSettleSoon(claimantId)
-  recordClassroomAudit(classDoc["_id"].toStr(), c, "student_released", {studentId: studentId, displayName: student.displayName, to: claimantName, projects: moved.len})
-  array teachers = classTeacherIds(classDoc)
-  for i teachers.len (
-    addNotification(usernameForId(teachers[i].toStr()), claimantName, "classroom_released", {classId: classDoc["_id"], className: classDoc.name, studentName: student.displayName})
-  )
-  c.json(200, {ok: true, projects: moved, trashed: trashed.len})
+  return {ok: true, moved: moved, trashed: trashed}
 )

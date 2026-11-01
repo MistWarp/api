@@ -235,7 +235,17 @@ def handleSetAdminNote(*serve.Context c) (
     c.badRequest("note is too long")
     return
   )
+  boolean saved = saveAdminNoteLocked(c, key, text)
+  if !saved (
+    c.internalError("could not save the note")
+    return
+  )
+  c.json(200, {ok: true, note: adminNoteFor(key)})
+)
+
+def saveAdminNoteLocked(*serve.Context c, string key, string text) boolean (
   sync.lock("admin-notes")
+  defer sync.unlock("admin-notes")
   object data = loadAdminNotes()
   object notes = data.notes.assertElse(object, {})
   if text == "" (
@@ -245,12 +255,7 @@ def handleSetAdminNote(*serve.Context c) (
   )
   data.notes = notes
   boolean saved = writeFile(adminNotesFile(), data)
-  sync.unlock("admin-notes")
-  if !saved (
-    c.internalError("could not save the note")
-    return
-  )
-  c.json(200, {ok: true, note: adminNoteFor(key)})
+  return saved
 )
 
 def handleListUsers(*serve.Context c) (

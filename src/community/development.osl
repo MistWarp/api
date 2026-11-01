@@ -137,8 +137,8 @@ def refreshDevelopmentPullsLocked() object (
 
 def refreshDevelopmentPulls() object (
   sync.lock("development-refresh")
+  defer sync.unlock("development-refresh")
   object snapshot = refreshDevelopmentPullsLocked()
-  sync.unlock("development-refresh")
   return snapshot
 )
 

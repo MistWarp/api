@@ -300,19 +300,27 @@ def handlePutMyProjectSave(*serve.Context c) (
   string projectId = c.param("id")
   string userId = contextString(c, "userId")
   string context = capability.context.toStr()
+  object stored = storeGameSaveLocked(c, body, value, requestId, projectId, userId, context)
+  if stored.stored != true (
+    return
+  )
+  object current = stored.save.assert(object)
+  c.json(200, {ok: true, save: gameSaveResponse(current)})
+)
+
+def storeGameSaveLocked(*serve.Context c, object body, object value, string requestId, string projectId, string userId, string context) object (
   string lockName = "game-save-storage-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object current = loadGameSave(projectId, userId, context)
   if current.lastRequestId.toStr() == requestId (
-    sync.unlock(lockName)
     c.json(200, {ok: true, replayed: true, save: gameSaveResponse(current)})
-    return
+    return {stored: false}
   )
   number revision = body.revision.toNum().toInt()
   if revision != current.revision.toNum().toInt() (
-    sync.unlock(lockName)
     c.json(409, {ok: false, error: "save revision is stale", save: gameSaveResponse(current)})
-    return
+    return {stored: false}
   )
 
   current.value = value
@@ -326,24 +334,20 @@ def handlePutMyProjectSave(*serve.Context c) (
   number projectedBytes = (usedBytes - previousBytes) + nextBytes
   number storageLimit = mistwarpBenefitsForUserId(userId).gameSaveStorageBytes.toNum()
   if projectedBytes > storageLimit and !contextBool(c, "isAdmin") (
-    sync.unlock(lockName)
     c.json(413, {ok: false, error: "account save storage limit reached", used: usedBytes, limit: storageLimit})
-    return
+    return {stored: false}
   )
   if !saveGameSaveUsage(userId, projectedBytes) (
-    sync.unlock(lockName)
     c.internalError("failed to reserve account save storage")
-    return
+    return {stored: false}
   )
   void fs.mkdir(gameSaveProjectDir(projectId, context), {recursive: true})
   if !writeFile(path, current) (
     saveGameSaveUsage(userId, usedBytes)
-    sync.unlock(lockName)
     c.internalError("failed to store project save")
-    return
+    return {stored: false}
   )
-  sync.unlock(lockName)
-  c.json(200, {ok: true, save: gameSaveResponse(current)})
+  return {stored: true, save: current}
 )
 
 def handleListMyGameSaves(*serve.Context c) (
@@ -379,8 +383,14 @@ def handleDeleteMyGameSave(*serve.Context c) (
     return
   )
   string userId = contextString(c, "userId")
+  boolean deleted = deleteGameSavesLocked(projectId, userId)
+  c.json(200, {ok: true, deleted: deleted})
+)
+
+def deleteGameSavesLocked(string projectId, string userId) boolean (
   string lockName = "game-save-storage-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   string playPath = gameSavePath(projectId, userId, "play")
   string testPath = gameSavePath(projectId, userId, "editor")
   number removedBytes = 0
@@ -398,8 +408,7 @@ def handleDeleteMyGameSave(*serve.Context c) (
     number nextBytes = if usedBytes > removedBytes then usedBytes - removedBytes else 0
     saveGameSaveUsage(userId, nextBytes)
   )
-  sync.unlock(lockName)
-  c.json(200, {ok: true, deleted: deleted})
+  return deleted
 )
 
 def collectGameDataForUser(string userId) object (

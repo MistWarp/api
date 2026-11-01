@@ -150,6 +150,7 @@ def reportedContent(object report) object (
 
 def setReportRotur(string id, string state, string roturReportId) object (
   sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
   array reports = loadReports()
   object found = {}
   for i reports.len (
@@ -165,7 +166,6 @@ def setReportRotur(string id, string state, string roturReportId) object (
     )
   )
   saveReports(reports)
-  sync.unlock("reports-storage")
   return found
 )
 
@@ -297,17 +297,11 @@ def handleCreateReport(*serve.Context c) (
   if roturAppReady() (
     report.rotur = "pending"
   )
-  sync.lock("reports-storage")
-  array reports = loadReports()
-  if !canAppendPendingReport(reports, report.sourceKey.toStr()) (
-    sync.unlock("reports-storage")
-    c.json(429, {ok: false, error: "too many pending reports"})
+  string appended = appendPendingReportLocked(c, report, "too many pending reports")
+  if appended == "full" (
     return
   )
-  reports.append(report)
-  boolean saved = saveReports(reports)
-  sync.unlock("reports-storage")
-  if !saved (
+  if appended != "saved" (
     c.internalError("could not save report")
     return
   )
@@ -347,25 +341,32 @@ def handleCreateSupportRequest(*serve.Context c) (
     created: timestamp,
     resolved: false
   }
-  sync.lock("reports-storage")
-  array reports = loadReports()
-  if !canAppendPendingReport(reports, report.sourceKey.toStr()) (
-    sync.unlock("reports-storage")
-    c.json(429, {ok: false, error: "too many pending support requests"})
+  string appended = appendPendingReportLocked(c, report, "too many pending support requests")
+  if appended == "full" (
     return
   )
-  reports.append(report)
-  boolean saved = saveReports(reports)
-  sync.unlock("reports-storage")
-  if !saved (
+  if appended != "saved" (
     c.internalError("could not save support request")
     return
   )
   c.json(201, {ok: true, id: report.id})
 )
 
+def appendPendingReportLocked(*serve.Context c, object report, string fullMessage) string (
+  sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
+  array reports = loadReports()
+  if !canAppendPendingReport(reports, report.sourceKey.toStr()) (
+    c.json(429, {ok: false, error: fullMessage})
+    return "full"
+  )
+  reports.append(report)
+  return if saveReports(reports) then "saved" else "unsaved"
+)
+
 def updateReport(string id, object fields) boolean (
   sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
   array reports = loadReports()
   boolean changed = false
   array keys = fields.getKeys()
@@ -380,7 +381,6 @@ def updateReport(string id, object fields) boolean (
     )
   )
   boolean saved = changed and saveReports(reports)
-  sync.unlock("reports-storage")
   return saved
 )
 
@@ -475,7 +475,25 @@ def handleGetReports(*serve.Context c) (
 def handleResolveReport(*serve.Context c) (
   object body = requestJSON(c)
   string id = body.id.toStr()
+  object res = resolveReportLocked(c, id)
+  if res.found != true (
+    return
+  )
+  if res.saved != true (
+    c.internalError("could not update report")
+    return
+  )
+  string projectTarget = res.projectTarget.toStr()
+  if projectTarget != "" (
+    maybeClearProjectEvidence(projectTarget)
+  )
+  closeRoturReport(res.resolved.assert(object), "resolved")
+  c.json(200, {ok: true})
+)
+
+def resolveReportLocked(*serve.Context c, string id) object (
   sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
   array reports = loadReports()
   boolean found = false
   string projectTarget = ""
@@ -492,21 +510,11 @@ def handleResolveReport(*serve.Context c) (
     )
   )
   if !found (
-    sync.unlock("reports-storage")
     c.notFound("report not found")
-    return
+    return {found: false}
   )
   boolean saved = saveReports(reports)
-  sync.unlock("reports-storage")
-  if !saved (
-    c.internalError("could not update report")
-    return
-  )
-  if projectTarget != "" (
-    maybeClearProjectEvidence(projectTarget)
-  )
-  closeRoturReport(resolved, "resolved")
-  c.json(200, {ok: true})
+  return {found: true, saved: saved, projectTarget: projectTarget, resolved: resolved}
 )
 
 // Reports someone filed stay for moderation, without saying who filed them.
@@ -514,6 +522,7 @@ def anonymiseReportsBy(string username, string userId) (
   string key = normalizeUsername(username)
   string sourceKey = "user:" ++ userId
   sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
   array reports = loadReports()
   boolean changed = false
   for i reports.len (
@@ -528,5 +537,4 @@ def anonymiseReportsBy(string username, string userId) (
   if changed (
     saveReports(reports)
   )
-  sync.unlock("reports-storage")
 )

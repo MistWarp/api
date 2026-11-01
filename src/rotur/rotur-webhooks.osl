@@ -56,10 +56,10 @@ def queueRoturWebhook(object event) boolean (
     data = event.data.assert(object)
   )
   sync.lock("rotur-webhooks")
+  defer sync.unlock("rotur-webhooks")
   object store = loadRoturWebhooks()
   object events = store.events.assert(object)
   if events.contains(id) (
-    sync.unlock("rotur-webhooks")
     return false
   )
   object kept = {}
@@ -82,12 +82,12 @@ def queueRoturWebhook(object event) boolean (
   }
   store.events = kept
   writeFile(roturWebhooksFile, store)
-  sync.unlock("rotur-webhooks")
   return true
 )
 
 def markRoturWebhookDone(string id) (
   sync.lock("rotur-webhooks")
+  defer sync.unlock("rotur-webhooks")
   object store = loadRoturWebhooks()
   object events = store.events.assert(object)
   if events.contains(id) (
@@ -97,7 +97,6 @@ def markRoturWebhookDone(string id) (
     store.events = events
     writeFile(roturWebhooksFile, store)
   )
-  sync.unlock("rotur-webhooks")
 )
 
 def handleRoturEvent(object event) (
@@ -125,6 +124,7 @@ def handleRoturEvent(object event) (
 // Handles every saved event that hasn't been handled yet, one at a time.
 def processRoturWebhooks() (
   sync.lock("rotur-webhooks-worker")
+  defer sync.unlock("rotur-webhooks-worker")
   object store = loadRoturWebhooks()
   object events = store.events.assert(object)
   array ids = events.getKeys()
@@ -136,7 +136,6 @@ def processRoturWebhooks() (
       markRoturWebhookDone(id)
     )
   )
-  sync.unlock("rotur-webhooks-worker")
 )
 
 def handleRoturWebhook(*serve.Context c) (

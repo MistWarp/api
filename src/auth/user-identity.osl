@@ -429,6 +429,13 @@ def renameUser(string userId, string oldName, string newName) (
   if admins.contains(oldKey) (
     saveAdmins(replaceUserInArray(admins, oldKey, newKey))
   )
+  renameBannedUserLocked(oldKey, newKey)
+  renameShadowBannedUser(oldKey, newKey)
+)
+
+def renameBannedUserLocked(string oldKey, string newKey) (
+  sync.lock("bans")
+  defer sync.unlock("bans")
   object banData = loadBans()
   object bans = banData.bans
   if bans.contains(oldKey) (
@@ -436,7 +443,17 @@ def renameUser(string userId, string oldName, string newName) (
     bans.delete(oldKey)
     saveBans(banData)
   )
-  renameShadowBannedUser(oldKey, newKey)
+)
+
+def removeBannedUserLocked(string key) (
+  sync.lock("bans")
+  defer sync.unlock("bans")
+  object banData = loadBans()
+  object bans = banData.bans
+  if bans.contains(key) (
+    bans.delete(key)
+    saveBans(banData)
+  )
 )
 
 def backfillOwnerIdForUserProjects(string userId, string username) (
@@ -811,12 +828,7 @@ def purgeUser(string userId, string username) (
   if admins.contains(key) (
     saveAdmins(removeUserFromArray(admins, key))
   )
-  object banData = loadBans()
-  object bans = banData.bans
-  if bans.contains(key) (
-    bans.delete(key)
-    saveBans(banData)
-  )
+  removeBannedUserLocked(key)
   removeShadowBannedUser(key)
   purgeUserSessions(userId)
   object idData = loadUserIds()

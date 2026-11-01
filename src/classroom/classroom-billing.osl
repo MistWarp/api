@@ -52,21 +52,27 @@ def handleStartClassroomTrial(*serve.Context c) (
     c.json(409, {ok: false, code: "school_managed", error: "Your school manages your Classroom plan."})
     return
   )
+  if !startClassroomTrialLocked(c, userId) (
+    return
+  )
+  c.json(200, {ok: true, plan: classroomPlanFor(userId), billing: classroomBillingInfo(userId)})
+)
+
+def startClassroomTrialLocked(*serve.Context c, string userId) boolean (
   string lockName = "classroom-plan-" ++ userId
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object stored = (classroomPlanDocs.findById(userId) ?? {})
   if !classroomTrialAvailable(stored, false, timestamp) (
-    sync.unlock(lockName)
     c.json(409, {ok: false, code: "trial_unavailable", error: "The free trial is for teachers who have not had a Classroom plan before."})
-    return
+    return false
   )
   object next = classroomTrialPlan(stored, timestamp)
   next._id = userId
   next.updatedAt = timestamp
   putDocument(classroomPlanDocs, userId, next)
   invalidateClassroomPool(userId)
-  sync.unlock(lockName)
-  c.json(200, {ok: true, plan: classroomPlanFor(userId), billing: classroomBillingInfo(userId)})
+  return true
 )
 
 def handleClassroomCheckout(*serve.Context c) (
@@ -139,6 +145,7 @@ def handleClassroomBillingPortal(*serve.Context c) (
 def storeStripePlan(string userId, object update, number eventCreated) (
   string lockName = "classroom-plan-" ++ userId
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object stored = (classroomPlanDocs.findById(userId) ?? {})
   if stored.len == 0 (
     stored = {_id: userId}
@@ -152,7 +159,6 @@ def storeStripePlan(string userId, object update, number eventCreated) (
     putDocument(classroomPlanDocs, userId, merged)
     invalidateClassroomPool(userId)
   )
-  sync.unlock(lockName)
 )
 
 def applyStripeSubscription(object subscription, number eventCreated, boolean deleted) (

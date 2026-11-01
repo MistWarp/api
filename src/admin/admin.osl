@@ -72,9 +72,9 @@ def bannedOwners() object (
   )
   // One rebuild at a time; the rest wait for it and use its result.
   sync.lock("banned-owners")
+  defer sync.unlock("banned-owners")
   if bansCache.has("owners") (
     object built = bansCache.get("owners").assert(object)
-    sync.unlock("banned-owners")
     return built
   )
   object bans = cachedBans().bans.assertElse(object, {})
@@ -90,7 +90,6 @@ def bannedOwners() object (
   )
   object banned = bannedOwnerSet(bans, idsByKey)
   bansCache.set("owners", banned)
-  sync.unlock("banned-owners")
   return banned
 )
 
@@ -173,19 +172,16 @@ def liftRoturBan(string username) boolean (
   return res.ok or res.status == 404
 )
 
-// The bans file is changed between these two, after any calls to Rotur, and
-// re-read so nothing written meanwhile is lost.
-def lockBans() object (
-  sync.lock("bans")
+def bansForUpdate() object (
   object data = loadBans()
   data.unbans = (data.unbans ?? {}).assertElse(object, {})
   return data
 )
 
-def saveAndUnlockBans(object data) boolean (
-  boolean saved = saveBans(data)
-  sync.unlock("bans")
-  return saved
+def bansSnapshotLocked() object (
+  sync.lock("bans")
+  defer sync.unlock("bans")
+  return bansForUpdate()
 )
 
 def banUser(string username, string reason, string actor) boolean (
@@ -194,12 +190,14 @@ def banUser(string username, string reason, string actor) boolean (
     return false
   )
   string rotur = pushRoturBan(username, reason)
-  object data = lockBans()
+  sync.lock("bans")
+  defer sync.unlock("bans")
+  object data = bansForUpdate()
   object bans = data.bans
   object unbans = data.unbans
   bans[key] = {reason: reason, by: actor, created: timestamp, rotur: rotur}
   unbans.delete(key)
-  return saveAndUnlockBans(data)
+  return saveBans(data)
 )
 
 def unbanUser(string username) boolean (
@@ -210,12 +208,14 @@ def unbanUser(string username) boolean (
   // Remembered until a sync has seen Rotur without it, so the sync keeps
   // trying if Rotur couldn't be told, and never brings the ban back.
   boolean lifted = liftRoturBan(username)
-  object data = lockBans()
+  sync.lock("bans")
+  defer sync.unlock("bans")
+  object data = bansForUpdate()
   object bans = data.bans
   object unbans = data.unbans
   bans.delete(key)
   unbans[key] = {at: timestamp, lifted: lifted}
-  return saveAndUnlockBans(data)
+  return saveBans(data)
 )
 
 // Keeps MistWarp's bans and the Rotur App's in step, every few minutes: bans
@@ -223,8 +223,7 @@ def unbanUser(string username) boolean (
 // Rotur couldn't be told about yet are sent again.
 def syncRoturBans() (
   number started = timestamp
-  object snapshot = lockBans()
-  sync.unlock("bans")
+  object snapshot = bansSnapshotLocked()
   object snapshotBans = snapshot.bans.assertElse(object, {})
   object snapshotUnbans = snapshot.unbans
   // Unbans first, so the list read next already reflects them.
@@ -266,7 +265,9 @@ def syncRoturBans() (
     )
   )
 
-  object data = lockBans()
+  sync.lock("bans")
+  defer sync.unlock("bans")
+  object data = bansForUpdate()
   object bans = data.bans
   object unbans = data.unbans
   boolean changed = false
@@ -344,7 +345,6 @@ def syncRoturBans() (
   if changed (
     saveBans(data)
   )
-  sync.unlock("bans")
 )
 
 def isSuperAdmin(string username) boolean (
@@ -938,19 +938,7 @@ def handleReportAction(*serve.Context c) (
     )
   )
 
-  sync.lock("reports-storage")
-  array currentReports = loadReports()
-  for i currentReports.len (
-    object currentReport = currentReports[i].assert(object)
-    if currentReport.id.toStr() == id (
-      currentReport.resolved = true
-      currentReport.resolvedBy = contextString(c, "username")
-      currentReport.action = action
-      currentReport.resolvedAt = timestamp
-    )
-  )
-  boolean reportsSaved = saveReports(currentReports)
-  sync.unlock("reports-storage")
+  boolean reportsSaved = markReportActionLocked(id, contextString(c, "username"), action)
   if !reportsSaved (
     c.internalError("could not update report")
     return
@@ -961,4 +949,20 @@ def handleReportAction(*serve.Context c) (
   closeRoturReport(found, if action == "dismiss" then "dismissed" else "resolved")
   addNotification(found.reporter.toStr(), contextString(c, "username"), "report_update", {action: action, reportType: found.type})
   c.json(200, {ok: true})
+)
+
+def markReportActionLocked(string id, string resolvedBy, string action) boolean (
+  sync.lock("reports-storage")
+  defer sync.unlock("reports-storage")
+  array currentReports = loadReports()
+  for i currentReports.len (
+    object currentReport = currentReports[i].assert(object)
+    if currentReport.id.toStr() == id (
+      currentReport.resolved = true
+      currentReport.resolvedBy = resolvedBy
+      currentReport.action = action
+      currentReport.resolvedAt = timestamp
+    )
+  )
+  return saveReports(currentReports)
 )
