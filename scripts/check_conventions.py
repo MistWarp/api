@@ -1,7 +1,9 @@
 import argparse
+import io
 import re
 import subprocess
 import sys
+import tokenize
 
 EM_DASH = "\u2014"
 TEXT_FILE = re.compile(r"\.(osl|go|py|md|json|yml|yaml|sh|txt)$")
@@ -33,12 +35,12 @@ def parse_diff(text):
     return files, removed
 
 
-def osl_comment_lines(text):
-    lines, line, index, quote = set(), 1, 0, None
+def c_style_comments(text):
+    found, line, index, quote = [], 1, 0, None
     while index < len(text):
         char = text[index]
         if quote:
-            if char == "\\":
+            if char == "\\" and quote != "`":
                 index += 1
             elif char == quote:
                 quote = None
@@ -49,32 +51,35 @@ def osl_comment_lines(text):
         elif text.startswith("//", index):
             end = text.find("\n", index)
             end = len(text) if end == -1 else end
-            if not DIRECTIVE.match(text[index:end]):
-                lines.add(line)
+            found.append((line, text[index:end]))
             index = end
             continue
         elif text.startswith("/*", index):
             end = text.find("*/", index + 2)
             end = len(text) if end == -1 else end + 2
-            span = text[index:end]
-            for offset in range(span.count("\n") + 1):
-                lines.add(line + offset)
-            line += span.count("\n")
+            for offset, part in enumerate(text[index:end].split("\n")):
+                found.append((line + offset, part))
+            line += text[index:end].count("\n")
             index = end
             continue
         elif char == "\n":
             line += 1
         index += 1
-    return lines
-
-
-def python_comment_lines(text):
-    found = set()
-    for number, row in enumerate(text.split("\n"), start=1):
-        stripped = row.strip()
-        if stripped.startswith("#") and not stripped.startswith("#!") and not DIRECTIVE.match(stripped):
-            found.add(number)
     return found
+
+
+def python_comments(text):
+    found = []
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.COMMENT and not (token.start[0] == 1 and token.string.startswith("#!")):
+                found.append((token.start[0], token.string))
+    except (tokenize.TokenError, SyntaxError):
+        return found
+    return found
+
+
+SCANNERS = {".osl": c_style_comments, ".go": c_style_comments, ".py": python_comments}
 
 
 def main():
@@ -83,25 +88,28 @@ def main():
     parser.add_argument("--staged", action="store_true")
     options = parser.parse_args()
     diff_args = ["diff", "--cached"] if options.staged else ["diff", git("merge-base", options.base, "HEAD").strip()]
-    files, removed = parse_diff(git(*diff_args, "--unified=0", "--no-color", "--diff-filter=ACMR"))
+    files, removed = parse_diff(git(*diff_args, "--unified=0", "--no-color", "--diff-filter=ACMRD"))
+    removed_text = "\n".join(removed)
     problems = []
     for path, added in files.items():
         if not TEXT_FILE.search(path) or any(pattern.search(path) for pattern in SKIPPED):
             continue
         for line, content in added.items():
-            if EM_DASH in content:
+            if EM_DASH in content and content.strip() not in removed:
                 problems.append(f'{path}:{line}  em dash: use a comma, parentheses or "to"')
-        if path.endswith(".osl"):
-            scan = osl_comment_lines
-        elif path.endswith(".py"):
-            scan = python_comment_lines
-        else:
+        scan = next((scanner for suffix, scanner in SCANNERS.items() if path.endswith(suffix)), None)
+        if scan is None:
             continue
         text = git("show", f":{path}") if options.staged else open(path, encoding="utf-8").read()
-        for line in sorted(scan(text)):
-            content = added.get(line)
-            if content is not None and content.strip() and content.strip() not in removed:
-                problems.append(f"{path}:{line}  code comment: name things so the code explains itself")
+        flagged = set()
+        for line, comment in scan(text):
+            portion = comment.strip()
+            if line in flagged or line not in added or DIRECTIVE.match(portion):
+                continue
+            if not re.search(r"[A-Za-z0-9]", portion) or portion in removed_text:
+                continue
+            flagged.add(line)
+            problems.append(f"{path}:{line}  code comment: name things so the code explains itself")
     if problems:
         print("\n".join(problems), file=sys.stderr)
         print(f"\n{len(problems)} convention problem{'' if len(problems) == 1 else 's'} in the changed lines.", file=sys.stderr)
