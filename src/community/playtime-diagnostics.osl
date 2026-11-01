@@ -1,0 +1,187 @@
+export {
+  creditPlaytimeSession,
+  recordProjectDiagnostic
+}
+
+def playtimeIdentity(string username) string (
+  string userId = userIdForUsername(username)
+  if userId != "" (
+    return userId
+  )
+  return normalizeUsername(username)
+)
+
+def beginPlaytimeSession(string projectId, string username, string sessionId) boolean (
+  string userId = userIdForUsername(username)
+  string identityKey = playtimeIdentity(username)
+  object session = (playtimeSessionDocs.findById(sessionId) ?? {})
+  if session.len == 0 or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
+    putDocument(playtimeSessionDocs, sessionId, {
+      _id: sessionId,
+      projectId: projectId,
+      username: username,
+      userId: userId,
+      identityKey: identityKey,
+      lastCredit: timestamp,
+      lastSeen: timestamp
+    })
+  )
+  return true
+)
+
+def touchRecentProjectActivity(string projectId, string username) boolean (
+  string userId = userIdForUsername(username)
+  string identityKey = userId
+  if identityKey == "" (
+    identityKey = normalizeUsername(username)
+  )
+  string playtimeId = projectId ++ ":" ++ identityKey
+  string playtimeLock = "playtime:" ++ playtimeId
+  sync.lock(playtimeLock)
+  object playtime = (playtimeDocs.findById(playtimeId) ?? {})
+  if playtime.len == 0 (
+    playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
+  ) else (
+    playtime.username = username
+    playtime.userId = userId
+    playtime.updated = timestamp
+  )
+  playtime.projectId = projectId
+  boolean saved = putDocument(playtimeDocs, playtimeId, playtime)
+  sync.unlock(playtimeLock)
+  return saved
+)
+
+def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
+  string userId = userIdForUsername(username)
+  object session = (playtimeSessionDocs.findById(sessionId) ?? {})
+  if session.len == 0 or session.projectId.toStr() != projectId (
+    return 0
+  )
+  number credited = clampNumber(timestamp - session.lastCredit.toNum(), 0, 60000)
+  if credited > 0 (
+    string identityKey = session.identityKey.assertElse(string, playtimeIdentity(username))
+    string playtimeId = projectId ++ ":" ++ identityKey
+    string playtimeLock = "playtime:" ++ playtimeId
+    sync.lock(playtimeLock)
+    object playtime = (playtimeDocs.findById(playtimeId) ?? {})
+    if playtime.len == 0 (
+      playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
+    )
+    playtime.duration = playtime.duration.toNum() + credited
+    playtime.updated = timestamp
+    playtime.projectId = projectId
+    putDocument(playtimeDocs, playtimeId, playtime)
+    sync.unlock(playtimeLock)
+  )
+  if finished (
+    void playtimeSessionDocs.deleteOne({_id: sessionId})
+  ) else (
+    session.lastCredit = timestamp
+    session.lastSeen = timestamp
+    putDocument(playtimeSessionDocs, sessionId, session)
+  )
+  return credited
+)
+
+def recordProjectDiagnostic(string projectId, boolean authenticated, string username, string sessionId, object body) object (
+  string eventType = body.type.toStr().toLower().strip()
+  if eventType != "load" and eventType != "start" and eventType != "crash" and eventType != "exit" and eventType != "playtime" and eventType != "playtime_start" and eventType != "playtime_ping" and eventType != "playtime_finish" (
+    return {ok: false, error: "invalid diagnostic type"}
+  )
+  string diagnosticId = projectId ++ ":" ++ randomString(16)
+  number duration = 0
+  number loadMs = 0
+  string errorText = ""
+  string device = ""
+  if body.contains("duration") (
+    duration = clampNumber(body.duration.toNum(), 0, 86400000)
+  )
+  if body.contains("loadMs") (
+    loadMs = clampNumber(body.loadMs.toNum(), 0, 600000)
+  )
+  if body.contains("error") (
+    errorText = body.error.toStr().trim(1, 500)
+  )
+  if body.contains("device") (
+    device = body.device.toStr().trim(1, 40)
+  )
+  if eventType == "playtime_start" or eventType == "playtime_ping" or eventType == "playtime_finish" or eventType == "playtime" (
+    if !authenticated (
+      return {ok: true}
+    )
+    if eventType == "playtime_start" (
+      beginPlaytimeSession(projectId, username, sessionId)
+    ) else if eventType == "playtime_finish" (
+      creditPlaytimeSession(projectId, username, sessionId, true)
+    ) else (
+      creditPlaytimeSession(projectId, username, sessionId, false)
+    )
+    return {ok: true}
+  )
+  if eventType == "start" and authenticated (
+    beginPlaytimeSession(projectId, username, sessionId)
+  )
+  if eventType == "load" and authenticated (
+    touchRecentProjectActivity(projectId, username)
+  )
+  object item = {_id: diagnosticId, projectId: projectId, type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
+  string diagnosticLock = "project-diagnostics-" ++ projectId
+  sync.lock(diagnosticLock)
+  void diagnosticDocs.insertOne(item)
+  array storedDiagnostics = diagnosticDocs.where("projectId", "==", projectId).sort("created", "desc").limit(550).all()
+  for i storedDiagnostics.len (
+    if i > 500 (
+      void diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
+    )
+  )
+  sync.unlock(diagnosticLock)
+  return {ok: true}
+)
+
+def handleRecordDiagnostic(*serve.Context c) (
+  auto projectResult = loadProject(c.param("id"))
+  if !projectResult.ok or !projectIsViewable(projectResult.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  string sessionId = playtimeIdentity(contextString(c, "username"))
+  object res = recordProjectDiagnostic(
+    c.param("id"),
+    contextBool(c, "authenticated"),
+    contextString(c, "username"),
+    sessionId,
+    requestJSON(c)
+  )
+  if !res.ok (
+    c.badRequest(res.error.toStr())
+    return
+  )
+  c.json(201, {ok: true})
+)
+
+def handleGetDiagnostics(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
+    c.forbidden("not your project")
+    return
+  )
+  array items = diagnosticDocs.where("projectId", "==", c.param("id")).sort("created", "desc").limit(500).all()
+  object counts = {load: 0, start: 0, crash: 0, exit: 0}
+  number totalLoadMs = 0
+  number loadSamples = 0
+  for i items.len (
+    object item = items[i].assert(object)
+    string kind = item.type.toStr()
+    counts[kind] = counts[kind].toNum() + 1
+    if item.loadMs.toNum() > 0 (
+      totalLoadMs += item.loadMs.toNum()
+      loadSamples += 1
+    )
+  )
+  number averageLoadMs = 0
+  if loadSamples > 0 (
+    averageLoadMs = totalLoadMs / loadSamples
+  )
+  c.json(200, {ok: true, counts: counts, averageLoadMs: averageLoadMs, recent: paginate(items, 0, 50)})
+)

@@ -1,0 +1,152 @@
+def spaceTotalPlaytime(array ids) number (
+  number total = 0
+  for i ids.len (
+    total += projectTotalPlaytime(ids[i].toStr())
+  )
+  return total
+)
+
+def spaceResponse(object space,*serve.Context c) object (
+  if !space.contains("commentCount") (
+    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    putSpaceDocument(space)
+  )
+  array projects = []
+  array ids = spaceProjectIds(space)
+  if space.kind.toStr() == "challenge" (
+    projects = challengeProjects(space, c)
+  ) else (
+    for i ids.len (
+      auto loaded = loadProject(ids[i].toStr())
+      if loaded.ok == true (
+        object project = loaded.project.assert(object)
+        if project.shared == true or projectVisibility(project) == "unlisted" or canManageSpace(space, c) (
+          projects.append(indexEntryFromProject(project))
+        )
+      )
+    )
+    projects = projectsVisibleTo(projects, c)
+  )
+  object response = space
+  response.projects = projects
+  array visibleIds = []
+  for i projects.len (
+    object visibleProject = projects[i].assert(object)
+    visibleIds.append(visibleProject.id)
+  )
+  response.projectIds = if canManageSpace(space, c) then ids else visibleIds
+  response.canManage = canManageSpace(space, c)
+  response.isOwner = isSpaceOwner(space, c)
+  response.following = stringArrayContainsUser(spaceFollowers(space), contextString(c, "username"))
+  response.followerCount = spaceFollowers(space).len
+  response.invited = isSpaceInvitee(space, c)
+  array likes = spaceLikes(space)
+  array brokenHearts = spaceBrokenHearts(space)
+  response.likeCount = likes.len
+  response.brokenHeartCount = brokenHearts.len
+  response.commentCount = space.commentCount
+  response.myReaction = ""
+  if stringArrayContainsUser(likes, contextString(c, "username")) (
+    response.myReaction = "heart"
+  ) else if stringArrayContainsUser(brokenHearts, contextString(c, "username")) (
+    response.myReaction = "brokenheart"
+  )
+  response.likes = []
+  response.brokenHearts = []
+  response.curatorInvites = []
+  response.thumbnailUrl = spaceThumbnailUrl(space)
+  if space.kind.toStr() != "challenge" (
+    response.totalPlaytimeMs = spaceTotalPlaytime(ids)
+  )
+  if space.kind.toStr() == "challenge" (
+    if !response.contains("theme") (
+      response.theme = ""
+    )
+    if !response.contains("rules") (
+      response.rules = ""
+    )
+    if !response.contains("judgingEndsAt") (
+      response.judgingEndsAt = space.endsAt.toNum() + 604800000
+    )
+    response.criteria = challengeCriteria(space)
+    if !response.contains("communityVoting") (
+      response.communityVoting = false
+    )
+    response.votingMode = challengeVotingMode(space)
+    response.winner = challengeWinner(space, projects)
+    if !response.contains("resultsPublishedAt") (
+      response.resultsPublishedAt = 0
+    )
+    response.phase = challengePhase(space)
+    response.isJudge = isChallengeJudge(space, contextString(c, "username"))
+    response.judgeInvited = isChallengeJudgeInvitee(space, contextString(c, "username"))
+    response.judgeCount = challengeJudges(space).len
+    response.participantCount = challengeArray(space, "participants").len
+    response.joined = stringArrayContainsUser(challengeArray(space, "participants"), contextString(c, "username"))
+    response.judges = challengeJudges(space)
+    response.judgeInvites = []
+    response.scores = []
+    response.audienceVotes = []
+    response.participants = []
+  )
+  return response
+)
+
+def spaceListResponse(object space,*serve.Context c) object (
+  array ids = spaceProjectIds(space)
+  array followers = spaceFollowers(space)
+  string thumbnailURL = spaceThumbnailUrl(space)
+  number projectCount = 0
+  boolean canManage = canManageSpace(space, c)
+  for i ids.len (
+    object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
+    boolean hidden = projectHiddenFrom(project, c)
+    if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
+      projectCount += 1
+      if thumbnailURL == "" and project.contains("thumbUrl") and thumbnailIsPublic(projectVisibility(project), false) (
+        thumbnailURL = project.thumbUrl.toStr()
+      )
+    )
+  )
+  object response = {
+    _id: space["_id"],
+    title: space.title,
+    description: space.description,
+    kind: space.kind,
+    visibility: space.visibility,
+    owner: space.owner,
+    groupTag: groupTagOf(space),
+    edited: space.edited,
+    startsAt: space.startsAt,
+    endsAt: space.endsAt,
+    openSubmissions: space.openSubmissions,
+    projects: [],
+    projectCount: projectCount,
+    followers: [],
+    followerCount: followers.len,
+    thumbnailUrl: thumbnailURL,
+    canManage: canManage,
+    isOwner: isSpaceOwner(space, c),
+    following: stringArrayContainsUser(followers, contextString(c, "username")),
+    invited: isSpaceInvitee(space, c)
+  }
+  if space.kind.toStr() == "challenge" (
+    response.participantCount = challengeArray(space, "participants").len
+  ) else (
+    response.totalPlaytimeMs = spaceTotalPlaytime(ids)
+  )
+  return response
+)
+
+def spaceManagementResponse(object space,*serve.Context c) object (
+  array invites = spaceCuratorInvites(space)
+  array judgeInvites = challengeArray(space, "judgeInvites")
+  array participants = challengeArray(space, "participants")
+  object response = spaceResponse(space, c)
+  response.curatorInvites = invites
+  if space.kind.toStr() == "challenge" (
+    response.judgeInvites = judgeInvites
+    response.participants = participants
+  )
+  return response
+)
