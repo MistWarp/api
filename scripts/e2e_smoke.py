@@ -31,7 +31,7 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
-EXPECTED_ERRORS = {"upload extension store failure", "upload json store failure", "upload metadata save failure"}
+EXPECTED_ERRORS = {"upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -450,6 +450,14 @@ def upload_flow(server, step, ids, steps):
     with server.faulty("extensions"):
         upload("upload extension store failure", {"extensions": json.dumps({"https://example.com/fault.js": "class FaultExtension {}"})},
                {"project": sb3_archive(project_with_costumes([], {"ext": "https://example.com/fault.js"}))})
+    workspaces_before = server.blob_inventory().get("project-workspaces", 0)
+    archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Extension store failure")
+    with server.faulty("extensions"):
+        upload("upload extension store failure with history", {"git": metadata, "extensions": json.dumps({"https://example.com/fault.js": "class FaultExtension {}"})},
+               {"project": sb3_archive(project_with_costumes([], {"ext": "https://example.com/fault.js"})), "workspace": archive})
+    steps.append({"step": "history left by the extension store failure", "status": 0, "body": {
+        "newWorkspaceBlobs": server.blob_inventory().get("project-workspaces", 0) - workspaces_before,
+    }})
     unpublished = project_with_costumes([])
     unpublished["meta"]["agent"] = "unpublished"
     with server.faulty(os.path.join("blobs", "project-json")):
