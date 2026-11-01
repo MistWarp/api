@@ -81,7 +81,7 @@ def vanityLapseLoop() (
       boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
       // Nothing changes while Rotur can't be reached, or for a URL in use.
       if eligibility == "no" or (eligibility == "yes" and lapsed) (
-        string lockName = "project-upload:" ++ entry.id.toStr()
+        string lockName = projectSaveLock(entry.id.toStr())
         sync.lock(lockName)
         applyVanityLapseLocked(entry.id.toStr(), slug, eligibility)
         sync.unlock(lockName)

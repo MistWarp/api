@@ -1,7 +1,7 @@
 export {}
 
 def handleUpdateProject(*serve.Context c) (
-  runLocked("project-upload:" ++ c.param("id"), def() -> (
+  runLocked(projectSaveLock(c.param("id")), def() -> (
     handleUpdateProjectLocked(c)
   ))
 )
@@ -122,7 +122,7 @@ def vanitySlugHeldElsewhere(object project, string slug) boolean (
     string holderId = holder.id.toStr()
     if holderId != project.id.toStr() (
       string holderEligibility = vanityEligibility(holder)
-      string holderLock = "project-upload:" ++ holderId
+      string holderLock = projectSaveLock(holderId)
       boolean held = true
       if sync.tryLock(holderLock) (
         held = applyVanityLapseLocked(holderId, slug, holderEligibility) == slug

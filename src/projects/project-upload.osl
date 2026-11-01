@@ -38,7 +38,7 @@ def handleCheckProjectAssets(*serve.Context c) (
 )
 
 def handleUploadProject(*serve.Context c) (
-  runLocked("project-history-" ++ c.param("id"), def() -> (
+  runLocked(projectSaveLock(c.param("id")), def() -> (
     handleUploadProjectLocked(c)
   ))
 )

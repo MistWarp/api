@@ -1,5 +1,9 @@
 export {}
 
+def projectSaveLock(string id) string (
+  return "project-history-" ++ id
+)
+
 def runLocked(string lockName, function work) (
   sync.lock(lockName)
   defer sync.unlock(lockName)

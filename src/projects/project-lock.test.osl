@@ -14,6 +14,8 @@ def lockIsFree(string lockName) boolean (
   return free
 )
 
+testing.assert(projectSaveLock("p1") == "project-history-p1", "saves share the lock the history writers take")
+
 boolean heldInside = true
 runLocked("save-lock-test", def() -> (
   heldInside = !lockIsFree("save-lock-test")

@@ -667,6 +667,29 @@ def volatile_key(key):
     return key in VOLATILE_NAMES
 
 
+def concurrent_flow(server, step, steps, ids):
+    status, created = step("concurrent create", "POST", "/v1/projects", "sam", {"title": "Concurrent smoke"})
+    project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+    ids[project_id] = "<concurrent>"
+    content = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>" + b" " * (9 * 1024 * 1024)
+    name = hashlib.md5(content).hexdigest() + ".svg"
+    sb3 = sb3_archive(project_with_costumes([name]), {name: content})
+    results = {}
+
+    def upload():
+        results["upload"] = server.form("/v1/projects/%s/upload" % project_id, "sam", {}, {"project": sb3})[0]
+
+    uploading = threading.Thread(target=upload)
+    uploading.start()
+    time.sleep(0.05)
+    results["update"] = server.call("PUT", "/v1/projects/" + project_id, "sam", {"title": "Renamed during upload"})[0]
+    uploading.join()
+    stored = server.read_project(project_id)
+    steps.append({"step": "concurrent update and upload", "status": 0, "body": {
+        "statuses": results, "title": stored.get("title"), "assets": stored.get("assets"),
+    }})
+
+
 def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
         return {k: normalize(v, ids, k, key) for k, v in sorted(value.items())}
@@ -760,6 +783,7 @@ def run(binary, sb3, keep):
         step("health", "GET", "/v1/health")
         upload_flow(server, step, ids)
         update_flow(server, step, ids)
+        concurrent_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
