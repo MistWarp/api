@@ -12,6 +12,39 @@ osl run main.osl
 
 The server loads `.env` automatically. Configuration is read in this order: `MISTWARP_<NAME>` in the real environment, then `.env`, then `<NAME>` in the real environment. Put per-process overrides in `MISTWARP_<NAME>` (for example `MISTWARP_PORT`) so a shared shell that exports another project's variables can't replace this API's configuration.
 
+The API needs OSL 3.0. `opal.json` lists the usual commands:
+
+| Command | Does |
+| --- | --- |
+| `osl test` | Runs every `*.test.osl` |
+| `osl lsp check main.osl` | Type checks the whole program |
+| `osl compile main.osl -o main` | Builds the server binary |
+| `python3 scripts/route_dump.py .` | Prints every registered route with its middleware |
+| `python3 scripts/e2e_smoke.py <binary> [<other binary>]` | Runs an offline end to end smoke test, and diffs the responses of two builds |
+
+## Source layout
+
+`main.osl` only composes the app: it imports each domain directory, runs startup and migrations, builds the router and starts it. Everything else lives in `src/<domain>/`:
+
+| Directory | Owns |
+| --- | --- |
+| `config` | Reading `.env` and the environment, data paths, size limits, the R2 client |
+| `core` | Shared helpers and the community database |
+| `http` | Request body helpers, request size limits, auth and admin middleware, cache headers |
+| `auth` | Sessions, user identity, editor sessions, the agreement, blocks and mutes, settings, privacy |
+| `storage` | Blob storage on R2 or disk, the upload queue, thumbnails, quotas, the Rotur storage ledger, the backpack |
+| `projects` | Projects, sharing, remixes, releases, extensions, live collaboration, monetisation |
+| `history` | Project history, deltas, history backfill and commit metadata |
+| `git` | Git inspection, pull requests and Rotur Git |
+| `games` | Game saves, inventories and marketplace products |
+| `realtime` | The multiplayer and site WebSockets |
+| `community` | Spaces, roadmap, comments, bounties, profiles, news, notifications, milestones, standing, reports, groups |
+| `admin` | Admin tools, bans and shadow bans, moderation, error reports, funnel events |
+| `classroom` | MistWarp Classroom |
+| `rotur` | The Rotur App, plans and perks, payments, signals, badges and webhooks |
+
+Each directory registers its routes in its own `routes.osl` (`registerProjectRoutes(api)` and so on), and `main.osl` calls them in order under `/v1` and `/api`. Each file lists what other directories may use in an `export {...}` block at the top; anything not exported is private to its directory. Global caches live next to the code that uses them. Tests sit beside the file they test as `<name>.test.osl`.
+
 ## Environment
 
 | Variable | Default | Purpose |
