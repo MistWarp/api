@@ -1,0 +1,223 @@
+auto viewDedup = cache.new({capacity: 100000, ttl: 21600000})
+auto viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
+def handlePublishProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if projectMustStayPrivate(project) (
+    c.forbidden("classroom projects stay private")
+    return
+  )
+  if refuseIfHiddenByModerator(project, c) (
+    return
+  )
+  if project.shared == true and projectVisibility(project) == "public" (
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+
+  string blockedExtension = projectBlockedExtension(project)
+  if blockedExtension != "" (
+    c.badRequest("remove the blocked extension before sharing: " ++ blockedExtension)
+    return
+  )
+
+  boolean everUploaded = project.lastUploadAt.toNum() > 0
+  everUploaded = everUploaded or (project.contains("pendingJson") and project.pendingJson == true)
+  if !everUploaded (
+    c.badRequest("upload the project before publishing")
+    return
+  )
+
+  boolean firstShare = project.sharedAt.toNum() == 0
+  project.shared = true
+  project.visibility = "public"
+  if firstShare (
+    project.sharedAt = timestamp
+  )
+  project.edited = timestamp
+  saveProject(project)
+  upsertIndexEntry(project)
+  thread.new(warmShareCard, project.id.toStr())
+  if firstShare (
+    projectFirstShared(project)
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleUnpublishProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canEditProject(project, c) (
+    c.forbidden("not your project")
+    return
+  )
+  if project.shared != true and projectVisibility(project) == "private" (
+    c.json(200, {ok: true, project: projectResponse(project, c)})
+    return
+  )
+
+  project.shared = false
+  project.visibility = "private"
+  project.edited = timestamp
+  project.viewKey = randomString(16)
+  saveProject(project)
+  upsertIndexEntry(project)
+  object profile = loadProfile(project.owner.toStr())
+  if profile.featuredProject.toStr() == project.id.toStr() (
+    profile.featuredProject = ""
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleViewProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !projectIsViewable(project) (
+    c.json(200, {ok: true})
+    return
+  )
+  string viewer = normalizeUsername(contextString(c, "username"))
+  string dedupKey = project.id.toStr() ++ "|" ++ viewer
+  if viewer == "" (
+    dedupKey = project.id.toStr() ++ "|ip:" ++ c.ip()
+  )
+  if viewDedup.has(dedupKey) (
+    c.json(200, {ok: true})
+    return
+  )
+  viewDedup.set(dedupKey, true)
+  project.views = project.views.toNum() + 1
+  object history = {}
+  if project.contains("viewHistory") and project.viewHistory != null (
+    history = project.viewHistory.assert(object)
+  )
+  number today = (timestamp / 86400000).toInt()
+  string dayKey = today.toStr()
+  number dayCount = 0
+  if history.contains(dayKey) (
+    dayCount = history[dayKey].toNum()
+  )
+  object pruned = {}
+  array dayKeys = history.getKeys()
+  for i dayKeys.len (
+    string k = dayKeys[i].toStr()
+    if today - k.toNum() < 31 (
+      pruned[k] = history[k]
+    )
+  )
+  pruned[dayKey] = dayCount + 1
+  project.viewHistory = pruned
+  saveProject(project)
+  string flushKey = project.id.toStr()
+  if !viewIndexFlush.has(flushKey) (
+    viewIndexFlush.set(flushKey, true)
+    upsertIndexEntry(project)
+  )
+  c.json(200, {ok: true})
+)
+
+def handleReactProject(*serve.Context c) (
+  string lockName = "project-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleReactProjectLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleReactProjectLocked(*serve.Context c) (
+  object body = requestJSON(c)
+  string reactionType = body.type.toStr()
+  if !isValidReaction(reactionType) (
+    c.badRequest("invalid reaction")
+    return
+  )
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+
+  string viewer = normalizeUsername(contextString(c, "username"))
+  array loves = project.loves.assert(array)
+  array broken = []
+  if project.contains("brokenhearts") (
+    broken = project.brokenhearts.assert(array)
+  )
+  number previousLikes = loves.len
+  // Projects from before everLoved count everyone who loves them now.
+  if !project.contains("everLoved") or project.everLoved == null (
+    project.everLoved = loves.clone()
+  )
+  boolean hadHeart = loves.contains(viewer)
+  boolean hadBroken = broken.contains(viewer)
+  loves = removeString(loves, viewer)
+  broken = removeString(broken, viewer)
+  boolean addedHeart = false
+  boolean firstLove = false
+  if reactionType == "heart" and !hadHeart (
+    loves.append(viewer)
+    addedHeart = true
+    // Badges count each person's love once, however often it's toggled.
+    array everLoved = (project.everLoved ?? []).assertElse(array, [])
+    if !everLoved.contains(viewer) (
+      everLoved.append(viewer)
+      project.everLoved = everLoved
+      firstLove = true
+    )
+  )
+  if reactionType == "brokenheart" and !hadBroken (
+    broken.append(viewer)
+  )
+  project.loves = loves
+  project.brokenhearts = broken
+  if !saveProject(project) (
+    c.internalError("could not save reaction")
+    return
+  )
+  upsertIndexEntry(project)
+
+  notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
+  if addedHeart (
+    addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
+    if firstLove and normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
+      roturBadgeEvent(project.owner.toStr(), "love_received", 0)
+    )
+    addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})
+  )
+
+  string myReaction = ""
+  if loves.contains(viewer) (
+    myReaction = "heart"
+  )
+  if broken.contains(viewer) (
+    myReaction = "brokenheart"
+  )
+  siteBroadcastStats(project.id.toStr(), contextString(c, "username"), {reaction: myReaction})
+  c.json(200, {
+    ok: true,
+    hearts: loves.len,
+    brokenHearts: broken.len,
+    myReaction: myReaction
+  })
+)

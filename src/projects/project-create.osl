@@ -1,0 +1,123 @@
+def handleCreateProject(*serve.Context c) (
+  object body = requestJSON(c)
+  string username = contextString(c, "username")
+  number projectLimit = mistwarpBenefitsForUserId(contextString(c, "userId")).maxProjects.toNum()
+  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(contextString(c, "userId"), username) >= projectLimit (
+    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+    return
+  )
+  string groupTag = ""
+  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
+    groupTag = normalizeGroupTag(body.groupTag.toStr())
+    if groupTag == "" (
+      c.badRequest("invalid group tag")
+      return
+    )
+    if !canManageGroupTag(groupTag, c) (
+      c.forbidden("you cannot create projects for this group")
+      return
+    )
+  )
+
+  string title = body.title.toStr().strip()
+  if title == "" (
+    c.badRequest("title is required")
+    return
+  )
+  if title.len > 100 (
+    c.badRequest("title too long")
+    return
+  )
+
+  string remixParent = ""
+  if body.contains("remixParent") and body.remixParent != null (
+    remixParent = body.remixParent.toStr()
+    auto parentResult = loadProject(remixParent)
+    if !parentResult.ok (
+      c.badRequest("remix parent not found")
+      return
+    )
+    if !canRemixProject(parentResult.project.assert(object), c) (
+      c.forbidden("this project cannot be remixed")
+      return
+    )
+  )
+
+  string scratchOrigin = ""
+  if body.contains("scratchOrigin") and body.scratchOrigin != null (
+    scratchOrigin = body.scratchOrigin.toStr()
+  )
+
+  string id = generateId()
+  object project = {
+    id: id,
+    owner: username,
+    ownerId: contextString(c, "userId"),
+    groupTag: groupTag,
+    branding: {},
+    vanitySlug: "",
+    title: title,
+    description: "",
+    instructions: "",
+    repo: null,
+    jsonKey: projectJsonKey(id),
+    workspaceKey: "",
+    gitHead: "",
+    gitBranch: "main",
+    gitCommits: [],
+    gitGraph: {branches: [], branchLogs: [], nodes: []},
+    viewKey: randomString(16),
+    created: timestamp,
+    edited: timestamp,
+    sharedAt: 0,
+    shared: false,
+    lastUploadAt: 0,
+    remixParent: remixParent,
+    remixShare: if remixParent == "" then 0 else 10,
+    remixNotified: false,
+    scratchOrigin: scratchOrigin,
+    views: 0,
+    loves: [],
+    brokenhearts: [],
+    assets: [],
+    tags: [],
+    collaborators: []
+  }
+
+  if !saveProject(project) (
+    c.internalError("failed to save project")
+    return
+  )
+  upsertIndexEntry(project)
+
+  c.json(201, {ok: true, id: id})
+)
+
+def ownedProjectSlotCount(string userId, string username) number (
+  return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
+)
+
+// A project is shared for the first time, from either way of sharing it.
+def projectFirstShared(object project) (
+  addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+  notifyPublishedRemix(project)
+  roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
+)
+
+def notifyPublishedRemix(object project) (
+  if !project.contains("remixNotified") or project.remixNotified != false or !project.contains("remixParent") or project.remixParent.toStr() == "" (
+    return
+  )
+  auto parentResult = loadProject(project.remixParent.toStr())
+  if !parentResult.ok (
+    return
+  )
+  object parent = parentResult.project.assert(object)
+  addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) (
+    roturBadgeEvent(parent.owner.toStr(), "remixed", 0)
+  )
+  addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  project.remixNotified = true
+  saveProject(project)
+)

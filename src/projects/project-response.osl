@@ -1,0 +1,285 @@
+export {
+  projectResponse,
+  projectVersionHistory
+}
+
+def projectVersionHistory(object project) object (
+  string branch = "main"
+  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+    branch = project.gitBranch.toStr()
+  )
+  array commits = []
+  if project.contains("gitCommits") and project.gitCommits != null (
+    commits = project.gitCommits.assert(array)
+  )
+  object graph = {branches: [], branchLogs: [], nodes: []}
+  if project.contains("gitGraph") and project.gitGraph != null (
+    graph = project.gitGraph.assert(object)
+  )
+  boolean virtual = commits.len == 0
+  if virtual (
+    string sha = "virtual-" ++ project.id.toStr()
+    object first = {
+      sha: sha,
+      message: "Initial version",
+      author: project.owner,
+      date: project.created,
+      virtual: true
+    }
+    commits = [first]
+    graph = {
+      branches: [branch],
+      branchLogs: [{branch: branch, oids: [sha]}],
+      nodes: [{
+        sha: sha,
+        message: "Initial version",
+        author: project.owner,
+        date: project.created,
+        parents: [],
+        branches: [branch],
+        virtual: true
+      }]
+    }
+  )
+  return {branch: branch, commits: commits, graph: graph, virtual: virtual}
+)
+
+def projectCommentDonationAnalytics(object project) object (
+  array comments = loadComments("project-" ++ project.id.toStr())
+  array donors = []
+  array recent = []
+  number total = 0
+  number count = 0
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    if comment.contains("donationAmount") and comment.donationAmount != null and comment.donationAmount.toNum() > 0 (
+      number amount = comment.donationAmount.toNum()
+      number donatedAt = comment.created.toNum()
+      string username = comment.author.toStr()
+      string donorKey = normalizeUsername(username)
+      number donorIndex = -1
+      for d donors.len (
+        object existingDonor = donors[d].assert(object)
+        if normalizeUsername(existingDonor.username.toStr()) == donorKey (
+          donorIndex = d
+        )
+      )
+      if donorIndex >= 0 (
+        object donor = donors[donorIndex].assert(object)
+        donor.amount = donor.amount.toNum() + amount
+        donor.count = donor.count.toNum() + 1
+        if donatedAt > donor.lastDonatedAt.toNum() (
+          donor.lastDonatedAt = donatedAt
+          donor.username = username
+        )
+        donors[donorIndex] = donor
+      ) else (
+        donors.append({username: username, amount: amount, count: 1, lastDonatedAt: donatedAt})
+      )
+      recent.append({
+        commentId: comment.id,
+        username: username,
+        amount: amount,
+        at: donatedAt
+      })
+      total += amount
+      count += 1
+    )
+  )
+  donors.sortBy("amount", "descending")
+  recent.sortBy("at", "descending")
+  return {
+    total: (total * 100).toInt() / 100,
+    count: count,
+    uniqueDonors: donors.len,
+    donors: paginate(donors, 0, 25),
+    recent: paginate(recent, 0, 50)
+  }
+)
+
+def projectResponse(object project,*serve.Context c) object (
+  array loves = project.loves.assert(array)
+  array broken = []
+  if project.contains("brokenhearts") (
+    broken = project.brokenhearts.assert(array)
+  )
+  string viewer = normalizeUsername(contextString(c, "username"))
+  string myReaction = ""
+  if loves.contains(viewer) (
+    myReaction = "heart"
+  )
+  if broken.contains(viewer) (
+    myReaction = "brokenheart"
+  )
+  string notes = ""
+  if project.contains("notes") and project.notes != null (
+    notes = project.notes.toStr()
+  )
+  array credits = []
+  if project.contains("credits") and project.credits != null (
+    credits = project.credits.assert(array)
+  )
+  boolean commentsOff = false
+  if project.contains("commentsOff") and project.commentsOff == true (
+    commentsOff = true
+  )
+  array tags = []
+  if project.contains("tags") and project.tags != null (
+    tags = project.tags.assert(array)
+  )
+  object compatibility = {mobile: false, keyboard: false, controller: false}
+  if project.contains("compatibility") and project.compatibility != null (
+    compatibility = project.compatibility.assert(object)
+  )
+  boolean isOwner = canEditProject(project, c)
+  array collaborators = []
+  if project.contains("collaborators") and project.collaborators != null (
+    collaborators = project.collaborators.assert(array)
+  )
+  boolean hasContent = project.lastUploadAt.toNum() > 0
+  hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
+  object activeVanity = vanityState(project)
+  string jsonBase = projectJsonBaseUrl(project)
+  object jsonAccess = projectJsonAccess(project, c)
+  string jsonUrl = keyedJsonUrl(jsonBase, jsonAccess)
+  boolean ownerBanned = projectOwnerBanned(project)
+  if !hasContent (
+    jsonUrl = ""
+  )
+  number myPlaytimeMs = 0
+  number myLastPlayed = 0
+  if contextBool(c, "authenticated") (
+    myPlaytimeMs = projectPlaytime(project.id.toStr(), contextString(c, "username"))
+    myLastPlayed = projectLastPlayed(project.id.toStr(), contextString(c, "username"))
+  )
+  object response = {
+    id: project.id,
+    owner: project.owner,
+    groupTag: groupTagOf(project),
+    branding: if project.contains("branding") then project.branding else {},
+    vanitySlug: activeVanity.slug.toStr(),
+    title: project.title,
+    tags: tags,
+    compatibility: compatibility,
+    description: project.description,
+    instructions: project.instructions,
+    notes: notes,
+    credits: credits,
+    repo: project.repo,
+    projectJsonUrl: jsonUrl,
+    assetsBase: assetsBaseUrl(),
+    thumbUrl: viewerThumbUrlFor(project),
+    cardUrl: appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/card.svg",
+    created: project.created,
+    edited: project.edited,
+    sharedAt: project.sharedAt,
+    shared: project.shared,
+    visibility: projectVisibility(project),
+    remixShare: if project.contains("remixShare") then project.remixShare else 0,
+    saved: isInLibrary(viewer, project.id.toStr()),
+    saveCount: projectSaves(project),
+    myPlaytimeMs: myPlaytimeMs,
+    myLastPlayed: myLastPlayed,
+    hasContent: hasContent,
+    remixable: projectRemixable(project),
+    canRemix: canRemixProject(project, c),
+    seeInside: projectSeeInside(project),
+    canSeeInside: canSeeInsideProject(project, c),
+    lastUploadAt: project.lastUploadAt,
+    remixParent: project.remixParent,
+    contributionOnly: projectMustStayPrivate(project),
+    scratchOrigin: project.scratchOrigin,
+    views: project.views,
+    loveCount: loves.len,
+    brokenHeartCount: broken.len,
+    myReaction: myReaction,
+    commentsOff: commentsOff,
+    sizeBytes: projectSizeBytes(project),
+    isOwner: isOwner
+  }
+  // Owners see a lapsed vanity URL, so they can keep it or clear it.
+  if isOwner and activeVanity.lapsed == true (
+    response.vanityReserved = project.vanitySlug
+    response.vanityLapsed = true
+  )
+  if ownerBanned (
+    response.ownerBanned = true
+  )
+  if isOwner and projectHiddenByModerator(project) (
+    response.moderationHidden = moderationHoldResponse(project, c)
+  )
+  if contextBool(c, "isAdmin") (
+    object shadowed = shadowBannedSet()
+    object projectShadow = projectShadowBanEntry(project.id.toStr())
+    response.shadowBan = {
+      project: projectShadow.len > 0,
+      projectReason: (projectShadow.reason ?? "").toStr(),
+      owner: entryOwnerBanned(shadowed, {owner: project.owner, ownerId: project.ownerId ?? ""})
+    }
+  )
+  response.workspaceUrl = ""
+  response.canViewSource = canSeeInsideProject(project, c)
+  if response.canViewSource == true and project.contains("workspaceKey") and project.workspaceKey.toStr() != "" (
+    response.workspaceUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/workspace.mwp"
+  )
+  response.gitHead = projectGitHead(project)
+  response.uploadFeatures = ["worktreeAssets"]
+  response.gitBranch = "main"
+  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+    response.gitBranch = project.gitBranch
+  )
+  response.commitCount = projectVersionHistory(project).commits.assert(array).len
+  response.remixBaseCommit = ""
+  if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
+    response.remixBaseCommit = project.remixBaseCommit
+  )
+  response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
+  object searchEntry = indexEntryFromProject(project)
+  response.collaboration = {
+    teamSize: searchEntry.teamSize,
+    contributors: searchEntry.contributors,
+    acceptedChanges: searchEntry.acceptedChanges
+  }
+  response.myRole = projectRole(project, viewer)
+  response.canSaveDirectly = canSaveLiveProject(project, c)
+  if isOwner (
+    response.collaborators = collaborators
+  )
+  if project.contains("jsonBytes") (
+    response.jsonBytes = project.jsonBytes
+  )
+  if project.contains("storedJsonBytes") (
+    response.storedJsonBytes = project.storedJsonBytes
+  )
+  if project.contains("assetBytes") (
+    response.assetBytes = project.assetBytes
+  )
+  if hasContent (
+    array trustedExtensions = projectTrustedExtensions(project)
+    if trustedExtensions.len > 0 (
+      response.trustedExtensions = trustedExtensions
+    )
+  )
+  if isOwner (
+    number analyticsDays = mistwarpBenefitsForProject(project).analyticsDays.toNum()
+    object viewHistory = {}
+    if project.contains("viewHistory") and project.viewHistory != null (
+      viewHistory = project.viewHistory.assert(object)
+    )
+    object saleHistory = {}
+    if project.contains("saleHistory") and project.saleHistory != null (
+      saleHistory = project.saleHistory.assert(object)
+    )
+    response.analytics = {
+      revenue: projectRevenue(project),
+      buyers: trimTimedEntries(projectBuyers(project), analyticsDays),
+      donations: projectCommentDonationAnalytics(project),
+      saves: projectSaves(project),
+      totalPlaytimeMs: projectTotalPlaytime(project.id.toStr()),
+      viewHistory: trimDayHistory(viewHistory, analyticsDays),
+      saleHistory: trimDayHistory(saleHistory, analyticsDays),
+      historyDays: analyticsDays
+    }
+  )
+  return response
+)
