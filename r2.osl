@@ -512,7 +512,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     return false
   )
   if projectJsonIsGzip(project) (
-    if fetched.body.len > maxStoredProjectJsonBytes (
+    if fetched.body.toStr().toBytes().len > maxStoredProjectJsonBytes (
       return false
     )
     return fs.writeFileBytes(outputPath, fetched.body)

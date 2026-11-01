@@ -254,7 +254,7 @@ def siteOnConnect(*ws.Connection conn) (
 )
 
 def siteOnMessage(*ws.Connection conn, string raw) (
-  if raw.len > 16384 (
+  if raw.toBytes().len > 16384 (
     siteError(conn, "message is too large")
     return
   )

@@ -128,7 +128,7 @@ def realtimeOnConnect(*ws.Connection conn) (
 )
 
 def realtimeOnMessage(*ws.Connection conn, string raw) (
-  if raw.len > 16384 (
+  if raw.toBytes().len > 16384 (
     realtimeError(conn, "message is too large")
     return
   )
@@ -158,7 +158,7 @@ def realtimeOnMessage(*ws.Connection conn, string raw) (
   )
   if messageType == "state" (
     object state = message.value.assertElse(object, {})
-    if typeof(message.value) != "object" or !realtimeSafeState(state) or json.stringify(state).len > 8192 (
+    if typeof(message.value) != "object" or !realtimeSafeState(state) or json.stringify(state).toBytes().len > 8192 (
       realtimeError(conn, "state must be a safe JSON object no larger than 8 KiB")
       return
     )
@@ -172,7 +172,7 @@ def realtimeOnMessage(*ws.Connection conn, string raw) (
       realtimeError(conn, "event name must be 1 to 64 letters, numbers, dots, colons, underscores, or dashes")
       return
     )
-    if !message.contains("value") or json.stringify(message.value).len > 4096 (
+    if !message.contains("value") or json.stringify(message.value).toBytes().len > 4096 (
       realtimeError(conn, "event value must be safe JSON no larger than 4 KiB")
       return
     )

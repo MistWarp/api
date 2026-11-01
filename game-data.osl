@@ -278,7 +278,7 @@ def handlePutMyProjectSave(*serve.Context c) (
     return
   )
   string serialized = json.stringify(value)
-  if serialized.len > gameSaveMaxBytes (
+  if serialized.toBytes().len > gameSaveMaxBytes (
     c.badRequest("project save exceeds 64 KiB")
     return
   )
@@ -313,7 +313,7 @@ def handlePutMyProjectSave(*serve.Context c) (
   current.lastRequestId = requestId
   string path = gameSavePath(projectId, userId, context)
   number previousBytes = if fs.exists(path) then fs.size(path).unwrapOr(0) else 0
-  number nextBytes = json.stringify(current).len
+  number nextBytes = json.stringify(current).toBytes().len
   number usedBytes = storedGameSaveBytes(userId)
   number projectedBytes = (usedBytes - previousBytes) + nextBytes
   number storageLimit = mistwarpBenefitsForUserId(userId).gameSaveStorageBytes.toNum()
@@ -357,7 +357,7 @@ def handleListMyGameSaves(*serve.Context c) (
           title = project.project.assert(object).title.toStr()
           owner = project.project.assert(object).owner.toStr()
         )
-        saves.append({projectId: projectId, title: title, owner: owner, revision: record.revision, updatedAt: record.updatedAt, bytes: json.stringify(record.value).len})
+        saves.append({projectId: projectId, title: title, owner: owner, revision: record.revision, updatedAt: record.updatedAt, bytes: json.stringify(record.value).toBytes().len})
       )
     )
   )

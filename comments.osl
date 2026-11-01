@@ -14,7 +14,7 @@ def createComment(string key, string author, string authorId, string content, st
   string lockName = "comments:" ++ key
   sync.lock(lockName)
   string commentsPath = commentsDir ++ key ++ ".jsonl"
-  if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).len > 8388608 (
+  if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).toBytes().len > 8388608 (
     sync.unlock(lockName)
     return {ok: false, error: "this comment thread is full"}
   )

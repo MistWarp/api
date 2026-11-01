@@ -242,10 +242,10 @@ def collectProjectExtensions(string jsonPath, string rawSources) object (
     if typeof(source) != "string" (
       return {ok: false, error: "invalid custom extension source: " ++ extensionUrl}
     )
-    if source == "" or source.len > maxExtensionSourceBytes (
+    if source == "" or source.toBytes().len > maxExtensionSourceBytes (
       return {ok: false, error: "custom extension source is empty or exceeds 2 MB: " ++ extensionUrl}
     )
-    totalBytes += source.len
+    totalBytes += source.toBytes().len
     if totalBytes > maxProjectExtensionBytes (
       return {ok: false, error: "custom extensions exceed the 10 MB total limit"}
     )

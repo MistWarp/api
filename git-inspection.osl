@@ -2,7 +2,7 @@ def projectWorkspaceFingerprint(object project) string (
   array keys = projectWorkspaceKeys(project)
   string identity = ""
   for i keys.len (
-    identity ++= keys[i].toStr().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
+    identity ++= keys[i].toStr().toBytes().len.toStr() ++ ":" ++ keys[i].toStr() ++ ";"
   )
   return identity.hashSHA256()
 )
@@ -161,7 +161,7 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
     return fs.readFile(cachePath).unwrapOr("")
   )
   string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
-  if resultJson.len <= 33554432 (
+  if resultJson.toBytes().len <= 33554432 (
     auto parsed = json.parse(resultJson, {type: "object"})
     if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
       string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)

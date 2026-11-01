@@ -1259,7 +1259,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
         if needsUpload and !pendingNames.contains(name) (
           pendingUploads.append({path: assetPath, name: name})
           pendingNames[name] = true
-          knownAssets[name] = content.len
+          knownAssets[name] = content.toBytes().len
         )
       )
     )
@@ -1340,7 +1340,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
       storageHoldRelease(ownerId, hold)
       return {ok: false, error: "asset upload failed", status: 502}
     )
-    knownAssets[name] = content.len
+    knownAssets[name] = content.toBytes().len
     uploaded += 1
   )
   if uploaded > 0 (
@@ -2663,7 +2663,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
         c.badRequest("game product prices must be between 0 and 1000 credits")
         return
       )
-      if productIcon != "" and productIcon.len > 100000 (
+      if productIcon != "" and productIcon.toBytes().len > 100000 (
         c.badRequest("game product icons must be smaller than 100KB")
         return
       )
@@ -2709,7 +2709,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
       if visualType == "image" (
         string itemImage = visual.url.toStr().strip()
         if itemImage.startsWith("data:image/") (
-          if itemImage.len > 100000 (
+          if itemImage.toBytes().len > 100000 (
             c.badRequest("portable item images must be smaller than 100KB")
             return
           )

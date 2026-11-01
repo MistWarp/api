@@ -25,7 +25,7 @@ def handlePutMySettings(*serve.Context c) (
     return
   )
   string body = c.body()
-  if body.len > 131072 (
+  if body.toBytes().len > 131072 (
     c.badRequest("settings too large")
     return
   )
