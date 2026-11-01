@@ -1,0 +1,255 @@
+export {
+  deleteOrphanedAssets,
+  purgeProject,
+  purgeProjects
+}
+
+def collectAssetsUsedByOthers(string excludeId) object (
+  object used = {}
+  array directories = [projectsDir, trashDir]
+  for d directories.len (
+    string directory = directories[d].toStr()
+    array files = fs.readDir(directory).unwrapOr([])
+    for i files.len (
+      auto res = readFile(directory ++ files[i].toStr())
+      if res.ok (
+        object p = res.data.assert(object)
+        if p.id.toStr() != excludeId and p.contains("assets") and p.assets != null (
+          array a = p.assets.assert(array)
+          for j a.len (
+            used[a[j].toStr()] = true
+          )
+        )
+      )
+    )
+  )
+  array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
+  for i evidenceIds.len (
+    object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+    if evidence.id.toStr() != excludeId and evidence.contains("assets") and evidence.assets != null (
+      array assets = evidence.assets.assertElse(array, [])
+      for j assets.len (
+        used[assets[j].toStr()] = true
+      )
+    )
+  )
+  return used
+)
+
+def deleteOrphanedAssets(object project) (
+  if !project.contains("assets") or project.assets == null (
+    return
+  )
+  array myAssets = project.assets.assert(array)
+  if myAssets.len == 0 (
+    return
+  )
+  object usedByOthers = collectAssetsUsedByOthers(project.id.toStr())
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  boolean indexChanged = false
+  for i myAssets.len (
+    string name = myAssets[i].toStr()
+    if !usedByOthers.contains(name) (
+      r2Remove(assetObjectKey(name))
+      if knownAssets.contains(name) (
+        knownAssets.delete(name)
+        indexChanged = true
+      )
+    )
+  )
+  if indexChanged (
+    saveAssetsIndex(assetsIndex)
+  )
+)
+
+def purgeProjectStorage(object project, boolean cleanAssets) (
+  string id = project.id.toStr()
+  removeProjectExtensionUsage(id, storedProjectExtensions(project))
+  deleteProjectFile(id)
+  removeFromIndex(id)
+  void fs.remove(stagingJsonPath(id))
+  void fs.remove(thumbnailPath(id))
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".json")
+  void fs.remove(commentsDir ++ "project-" ++ id ++ ".jsonl")
+  removeProjectStorageKeyIfOrphaned(project.jsonKey.toStr(), id, false)
+  array workspaceKeys = projectWorkspaceKeys(project)
+  for i workspaceKeys.len (
+    removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), id, true)
+  )
+  purgeGameDataForProject(id)
+  if cleanAssets (
+    deleteOrphanedAssets(project)
+  )
+  storageSettleProject(project)
+)
+
+def purgeProject(object project) (
+  purgeProjectStorage(project, true)
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  deleteProjectCommunityRecords(project.id.toStr())
+  removeProjectFromSpaces(project.id.toStr())
+)
+
+def purgeProjects(array projects) (
+  array assets = []
+  for i projects.len (
+    object project = projects[i].assert(object)
+    if project.contains("assets") and project.assets != null (
+      array projectAssets = project.assets.assert(array)
+      for j projectAssets.len (
+        string asset = projectAssets[j].toStr()
+        if !assets.contains(asset) (
+          assets.append(asset)
+        )
+      )
+    )
+    purgeProjectStorage(project, false)
+  )
+  deleteOrphanedAssets({id: "", assets: assets})
+)
+
+def handleDeleteProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  if contextString(c, "sessionScope") == "editor" and !editorCanDeleteProject(project) (
+    c.json(403, {ok: false, code: "editor_scope", error: "Open MistWarp to do this."})
+    return
+  )
+  if project.shared == true and !contextBool(c, "isAdmin") (
+    c.badRequest("unshare the project before deleting it")
+    return
+  )
+
+  number recoveryDays = mistwarpBenefitsForProject(project).recoveryDays.toNum()
+  project.deletedAt = timestamp
+  project.purgeAt = timestamp + (recoveryDays * 86400000)
+  project.recoveryDays = recoveryDays
+  project.shared = false
+  project.visibility = "private"
+  if !writeFile(trashDir ++ project.id.toStr() ++ ".json", project) (
+    c.internalError("failed to move the project to trash")
+    return
+  )
+  deleteProjectFile(project.id.toStr())
+  removeFromIndex(project.id.toStr())
+  removeProjectFromSpaces(project.id.toStr())
+  object profile = loadProfile(project.owner.toStr())
+  if profile.featuredProject.toStr() == project.id.toStr() (
+    profile.featuredProject = ""
+    saveProfile(profile)
+  )
+  c.json(200, {ok: true, recoverableUntil: project.purgeAt, recoveryDays: recoveryDays})
+)
+
+def loadTrashedProject(string id) object (
+  if !isSafePathPart(id) (
+    return {ok: false, error: "invalid project id"}
+  )
+  auto res = readFile(trashDir ++ id ++ ".json")
+  if !res.ok (
+    return {ok: false, error: "trashed project not found"}
+  )
+  return {ok: true, project: res.data.assert(object)}
+)
+
+def purgeExpiredTrash() (
+  array files = fs.readDir(trashDir).unwrapOr([])
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") (
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
+        if project.contains("purgeAt") and project.purgeAt.toNum() <= timestamp (
+          purgeProject(project)
+        )
+      )
+    )
+  )
+)
+
+def handleGetMyTrash(*serve.Context c) (
+  purgeExpiredTrash()
+  array projects = []
+  string userId = contextString(c, "userId")
+  string username = contextString(c, "username")
+  array files = fs.readDir(trashDir).unwrapOr([])
+  for i files.len (
+    string file = files[i].toStr()
+    if file.endsWith(".json") (
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
+        string ownerId = (project.ownerId ?? "").toStr()
+        if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+          projects.append({
+            id: project.id,
+            title: project.title,
+            deletedAt: project.deletedAt,
+            purgeAt: project.purgeAt,
+            recoveryDays: project.recoveryDays,
+            thumbUrl: keyedThumbUrlFor(project)
+          })
+        )
+      )
+    )
+  )
+  projects.sortBy("deletedAt", "descending")
+  c.json(200, {ok: true, projects: projects})
+)
+
+def handleRestoreProject(*serve.Context c) (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
+    c.notFound("trashed project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  if project.purgeAt.toNum() <= timestamp (
+    purgeProject(project)
+    c.notFound("the recovery period has ended")
+    return
+  )
+  if fs.exists(projectsDir ++ project.id.toStr() ++ ".json") (
+    c.json(409, {ok: false, error: "a project with this id already exists"})
+    return
+  )
+  project.delete("deletedAt")
+  project.delete("purgeAt")
+  project.delete("recoveryDays")
+  if !saveProject(project) (
+    c.internalError("failed to restore the project")
+    return
+  )
+  void fs.remove(trashDir ++ project.id.toStr() ++ ".json")
+  upsertIndexEntry(project)
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handlePurgeTrashedProject(*serve.Context c) (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
+    c.notFound("trashed project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+    c.forbidden("not your project")
+    return
+  )
+  purgeProject(project)
+  c.json(200, {ok: true})
+)

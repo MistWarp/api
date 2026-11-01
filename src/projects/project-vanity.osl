@@ -1,0 +1,112 @@
+export {
+  vanityLapseLoop
+}
+
+// The vanity URL that works for a project right now (slug, or "" while the
+// owner's plan doesn't include one), and whether one is held but lapsed.
+def vanityState(object project) object (
+  string slug = (project.vanitySlug ?? "").toStr()
+  if slug == "" (
+    return {slug: "", lapsed: false}
+  )
+  object after = vanityAfter(slug, (project.vanityLapsedAt ?? 0).toNum(), vanityEligibility(project), timestamp)
+  if after.active == true (
+    return {slug: slug, lapsed: false}
+  )
+  return {slug: "", lapsed: after.slug.toStr() != ""}
+)
+
+def activeVanitySlug(object project) string (
+  return vanityState(project).slug.toStr()
+)
+
+// Projects holding a vanity URL, including lapsed ones. Entries indexed before
+// vanityClaim existed only have vanitySlug.
+def vanityClaimEntries(string slug) array (
+  return vanityEntriesWhere("==", slug)
+)
+
+def vanityEntriesWhere(string op, string value) array (
+  array found = projectSearchDocs.where("vanityClaim", op, value).all()
+  object seen = {}
+  for i found.len (
+    seen[found[i].assert(object).id.toStr()] = true
+  )
+  array legacy = projectSearchDocs.where("vanitySlug", op, value).all()
+  for i legacy.len (
+    object entry = legacy[i].assert(object)
+    if !seen.contains(entry.id.toStr()) (
+      found.append(entry)
+    )
+  )
+  return found
+)
+
+// Records when the project's vanity URL lapsed, clears that once the owner's
+// plan includes vanity URLs again, and releases the URL after 30 days lapsed.
+// Call with the project's upload lock held, and its owner's eligibility looked
+// up beforehand, so a slow Rotur never holds the lock. Returns the URL it
+// still holds.
+def applyVanityLapseLocked(string id, string slug, string eligibility) string (
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    return if loaded.missing == true then "" else slug
+  )
+  object project = loaded.project.assert(object)
+  string current = (project.vanitySlug ?? "").toStr()
+  number lapsedAt = (project.vanityLapsedAt ?? 0).toNum()
+  object after = vanityAfter(current, lapsedAt, eligibility, timestamp)
+  if after.slug.toStr() != current or after.lapsedAt.toNum() != lapsedAt (
+    project.vanitySlug = after.slug
+    if after.lapsedAt.toNum() > 0 (
+      project.vanityLapsedAt = after.lapsedAt
+    ) else (
+      project.delete("vanityLapsedAt")
+    )
+    saveProject(project)
+    upsertIndexEntry(project)
+  )
+  return after.slug.toStr()
+)
+
+// Notices lapsed vanity URLs and releases them on time, even if nobody visits.
+def vanityLapseLoop() (
+  while true (
+    wait 900
+    array entries = vanityEntriesWhere(">", "")
+    for i entries.len (
+      object entry = entries[i].assert(object)
+      string slug = (entry.vanityClaim ?? entry.vanitySlug ?? "").toStr()
+      string eligibility = if slug == "" then "unknown" else vanityEligibility(entry)
+      boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
+      // Nothing changes while Rotur can't be reached, or for a URL in use.
+      if eligibility == "no" or (eligibility == "yes" and lapsed) (
+        string lockName = "project-upload:" ++ entry.id.toStr()
+        sync.lock(lockName)
+        applyVanityLapseLocked(entry.id.toStr(), slug, eligibility)
+        sync.unlock(lockName)
+      )
+    )
+  )
+)
+
+def handleResolveVanityProject(*serve.Context c) (
+  string slug = c.param("slug").toLower().strip()
+  array matches = vanityClaimEntries(slug)
+  if matches.len == 0 (
+    c.notFound("vanity project not found")
+    return
+  )
+  object entry = matches[1].assert(object)
+  auto res = loadProject(entry.id.toStr())
+  if !res.ok (
+    c.notFound("vanity project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) or activeVanitySlug(project) != slug (
+    c.notFound("vanity project not found")
+    return
+  )
+  c.json(200, {ok: true, id: entry.id})
+)

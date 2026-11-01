@@ -1,0 +1,186 @@
+export {
+  ensureProjectJsonSnapshot,
+  ensureProjectWorkspaceSnapshots,
+  removeProjectStorageKeyIfOrphaned,
+  sweepStagedProjects
+}
+
+def pushProjectJsonToR2(object project, string gzipPath) boolean (
+  if !r2PutEncoded(project.jsonKey.toStr(), fs.readFileBytes(gzipPath).unwrapOr("".toBytes()), "application/json", "gzip") (
+    return false
+  )
+  void fs.remove(stagingJsonPath(project.id.toStr()))
+  return true
+)
+
+def stageProjectJson(object project, string gzipPath) boolean (
+  string path = stagingJsonPath(project.id.toStr())
+  string tmpPath = path ++ ".tmp." ++ randomString(8)
+  if !copyFileReplacing(gzipPath, tmpPath) (
+    return false
+  )
+  if !fs.rename(tmpPath, path) (
+    void fs.remove(tmpPath)
+    return false
+  )
+  return true
+)
+
+def projectReferencesWorkspaceKey(object project, string key) boolean (
+  array keys = projectWorkspaceKeys(project)
+  return keys.contains(key)
+)
+
+def projectStorageKeyUsedByAnotherProject(string key, string excludedId, boolean workspace) boolean (
+  if key == "" (
+    return false
+  )
+  array directories = [projectsDir, trashDir]
+  for d directories.len (
+    string directory = directories[d].toStr()
+    array files = fs.readDir(directory).unwrapOr([])
+    for i files.len (
+      auto loaded = readFile(directory ++ files[i].toStr())
+      if loaded.ok (
+        object candidate = loaded.data.assert(object)
+        if candidate.id.toStr() != excludedId (
+          if workspace and projectReferencesWorkspaceKey(candidate, key) (
+            return true
+          )
+          if !workspace and candidate.jsonKey.toStr() == key (
+            return true
+          )
+        )
+      )
+    )
+  )
+  if !workspace and releaseDocs.where("jsonKey", "==", key).limit(1).all().len > 0 (
+    return true
+  )
+  if !workspace (
+    array evidenceIds = fs.readDir(reportEvidenceDir).unwrapOr([])
+    for i evidenceIds.len (
+      object evidence = loadEvidenceMeta(evidenceIds[i].toStr())
+      if (evidence.evidenceJsonKey ?? "").toStr() == key (
+        return true
+      )
+    )
+  )
+  return false
+)
+
+def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean workspace) (
+  if key != "" and !projectStorageKeyUsedByAnotherProject(key, excludedId, workspace) (
+    r2Remove(key)
+  )
+)
+
+def cleanupReplacedProjectStorage(string id, string jsonKey, array workspaceKeys) (
+  string lockName = "project-history-" ++ id
+  sync.lock(lockName)
+  if jsonKey != "" (
+    removeProjectStorageKeyIfOrphaned(jsonKey, "", false)
+  )
+  for i workspaceKeys.len (
+    removeProjectStorageKeyIfOrphaned(workspaceKeys[i].toStr(), "", true)
+  )
+  sync.unlock(lockName)
+)
+
+def ensureProjectJsonSnapshot(object project) object (
+  if project.jsonKey.toStr().startsWith("project-json/") and (!project.contains("pendingJson") or project.pendingJson != true) (
+    return {ok: true, project: project}
+  )
+  string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".json.gz"
+  if !copyStoredProjectJsonToPath(project, tempPath) (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  byte[] snapshotBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
+  string key = projectJsonSnapshotKey(contentHash(snapshotBody))
+  if !stageR2Blob(key, snapshotBody, "application/json", "gzip") (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  project.jsonKey = key
+  project.jsonGzip = true
+  project.pendingJson = false
+  void fs.remove(tempPath)
+  // Return an immutable snapshot to the caller without rewriting the source
+  // record. Another save may have advanced that record while storage was read.
+  return {ok: true, project: project}
+)
+
+def ensureProjectWorkspaceSnapshots(object project) object (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null and project.workspaceLayers.assertElse(array, []).len > 0 (
+    return {ok: true, project: project}
+  )
+  array previousKeys = projectWorkspaceKeys(project)
+  if previousKeys.len == 0 (
+    return {ok: true, project: project}
+  )
+  string tempPath = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8) ++ ".mwp"
+  if !copyProjectWorkspaceToPath(project, tempPath) (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  byte[] workspaceBody = fs.readFileBytes(tempPath).unwrapOr("".toBytes())
+  string key = projectWorkspaceSnapshotKey(contentHash(workspaceBody))
+  if !stageR2Blob(key, workspaceBody, "application/x-mistwarp-project", "") (
+    void fs.remove(tempPath)
+    return {ok: false}
+  )
+  void fs.remove(tempPath)
+  project.workspaceKey = key
+  project.workspaceLayers = [key]
+  project.historyBytes = workspaceBody.len
+  return {ok: true, project: project}
+)
+
+def maybeFlushProject(object project) (
+  string lockName = "project-history-" ++ project.id.toStr()
+  sync.lock(lockName)
+  auto latest = loadProject(project.id.toStr())
+  if latest.ok (
+    flushProjectLocked(latest.project.assert(object))
+  )
+  sync.unlock(lockName)
+)
+
+def flushProjectLocked(object project) (
+  if project.contains("pendingJson") and project.pendingJson == true (
+    if timestamp - projectStorageActivityAt(project) >= uploadDebounceMs (
+      string path = stagingJsonPath(project.id.toStr())
+      if fs.exists(path) (
+        string gzipPath = path
+        if !projectJsonIsGzip(project) (
+          gzipPath = path ++ ".gz"
+          if !zip.gzip(path, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+            return
+          )
+        )
+        if pushProjectJsonToR2(project, gzipPath) (
+          project.lastUploadAt = timestamp
+          project.pendingJson = false
+          project.jsonGzip = true
+          saveProject(project)
+        )
+        if gzipPath != path (
+          void fs.remove(gzipPath)
+        )
+      )
+    )
+  )
+)
+
+def sweepStagedProjects() (
+  array files = fs.readDir(stagingDir).unwrapOr([])
+  for i files.len (
+    array parts = files[i].toStr().split(".")
+    string id = parts[1].toStr()
+    auto res = loadProject(id)
+    if res.ok (
+      maybeFlushProject(res.project.assert(object))
+    )
+  )
+)
