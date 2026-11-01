@@ -10,23 +10,34 @@ type UpdateOutcome (
 
 def handleUpdateProject(*serve.Context c) (
   object body = requestJSON(c)
+  object knownIdentities = {}
   for attempt 3 (
-    object? snapshot = loadRequestedProject(c)
-    if snapshot == null return
-    UpdateLookups lookups = UpdateLookups()
-    void applyProjectUpdate(c, snapshot, body, lookups, OwnerTransfer())
-    lookups.replay = true
-    UpdateOutcome outcome = UpdateOutcome()
-    runLocked(projectSaveLock(c.param("id")), def() -> (
-      saveProjectUpdate(c, body, lookups, outcome)
-    ))
-    releaseStorageHolds(lookups, if outcome.saved then outcome.transfer.holdKey else "")
-    if !lookups.missed (
-      finishProjectUpdate(c, body, outcome)
+    if !updateProjectOnce(c, body, knownIdentities) (
       return
     )
   )
   c.json(409, {ok: false, code: "project_changed", error: "The project changed while it was saving. Try again."})
+)
+
+def updateProjectOnce(*serve.Context c, object body, object knownIdentities) boolean (
+  object? snapshot = loadRequestedProject(c)
+  if snapshot == null return false
+  UpdateLookups lookups = lookupsKnowing(knownIdentities)
+  UpdateOutcome outcome = UpdateOutcome()
+  defer (
+    releaseStorageHolds(lookups, if outcome.saved then outcome.transfer.holdKey else "")
+    rememberIdentities(lookups, knownIdentities)
+  )
+  void applyProjectUpdate(c, snapshot, body, lookups, OwnerTransfer())
+  lookups.replay = true
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    saveProjectUpdate(c, body, lookups, outcome)
+  ))
+  if lookups.missed (
+    return true
+  )
+  finishProjectUpdate(c, body, outcome)
+  return false
 )
 
 def saveProjectUpdate(*serve.Context c, object body, UpdateLookups lookups, UpdateOutcome outcome) (

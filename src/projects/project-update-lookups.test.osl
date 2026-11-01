@@ -78,3 +78,18 @@ releaseStorageHolds(holds, "")
 testing.assert(released == ["u_a", "u_b"], "an unsaved update releases every hold")
 
 testing.assert(roturUnavailableRefusal("alice").status == 503 and roturUnavailableRefusal("alice").body.code == "rotur_unavailable", "an unreachable Rotur is a 503")
+
+object knownIdentities = {}
+UpdateLookups firstTry = lookupsKnowing(knownIdentities)
+void lookupIdentity(firstTry, "alice")
+void lookupIdentity(firstTry, "busy")
+void lookupProjectBenefits(firstTry, {owner: "sam"})
+rememberIdentities(firstTry, knownIdentities)
+testing.assert(knownIdentities.getKeys() == ["identity:alice"], "only settled identity answers are kept between tries")
+number askedBefore = asked.len
+UpdateLookups secondTry = lookupsKnowing(knownIdentities)
+testing.assert(lookupIdentity(secondTry, "alice").id == "u_alice" and asked.len == askedBefore, "a later try reuses the teammate answers")
+void lookupProjectBenefits(secondTry, {owner: "sam"})
+testing.assert(asked.len == askedBefore + 1, "a later try asks for plan benefits again")
+secondTry.replay = true
+testing.assert(lookupIdentity(secondTry, "alice").id == "u_alice" and !secondTry.missed, "a carried answer replays under the lock")

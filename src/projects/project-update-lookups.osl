@@ -108,3 +108,28 @@ def releaseStorageHolds(UpdateLookups lookups, string keptKey) (
     )
   )
 )
+
+def lookupsKnowing(object knownIdentities) UpdateLookups (
+  UpdateLookups lookups = UpdateLookups()
+  object answers = {}
+  array keys = knownIdentities.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    answers[key] = knownIdentities[key]
+  )
+  lookups.answers = answers
+  return lookups
+)
+
+def rememberIdentities(UpdateLookups lookups, object knownIdentities) (
+  array keys = lookups.answers.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    if key.startsWith("identity:") (
+      object answer = lookups.answers[key].assertElse(object, {})
+      if answer.outcome == "found" or answer.outcome == "missing" (
+        knownIdentities[key] = answer
+      )
+    )
+  )
+)
