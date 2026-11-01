@@ -1,3 +1,5 @@
+auto sessionCache = cache.new({capacity: 10000, ttl: 3600000})
+
 def setAuthCookie(*serve.Context c, string sessionId) (
   c.setCookie("auth_token", sessionId, {maxAge: 604800000, path: "/", domain: "", secure: appURL.startsWith("https://"), httpOnly: true})
 )

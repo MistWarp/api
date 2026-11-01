@@ -8,7 +8,7 @@ import "std:serve"
 import "std:sync"
 import "std:thread"
 import "std:url"
-import "./request-body.osl"
+import "../http/request-body.osl"
 import "./classroom-policy.osl"
 import "./classroom-switch-policy.osl"
 

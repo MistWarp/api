@@ -1,6 +1,6 @@
 import "std:testing"
 import "std:regex"
-import "./classroom-policy.osl"
+import "../classroom/classroom-policy.osl"
 import "./editor-session-policy.osl"
 
 def projectHasStoredContent(object project) boolean (

@@ -96,7 +96,7 @@ class Dump:
                 for param, arg in zip(params, args):
                     if arg in routers:
                         scope[param] = routers[arg]
-                if any(re.search(r"\b(%s)\.\w+\(" % "|".join(map(re.escape, scope)), l) for l in body):
+                if any(arg in routers for arg in args) or any(re.search(r"\b(%s)\.\w+\(" % "|".join(map(re.escape, scope)), l) for l in body):
                     self.run(body, scope, depth + 1)
 
 

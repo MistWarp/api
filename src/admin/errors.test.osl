@@ -4,7 +4,7 @@ import "std:sync"
 import "std:serve"
 import "std:fs"
 import "std:regex"
-import "./request-body.osl"
+import "../http/request-body.osl"
 
 string path = "/tmp/mistwarp-errors-" ++ timestamp.toStr() ++ ".db"
 auto testDb = db.open(path)

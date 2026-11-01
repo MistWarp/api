@@ -102,7 +102,7 @@ def pendingUploadEvents(string username) array (
   return quotaPruneEvents((res.data.assertElse(object, {}).pending ?? []).assertElse(array, []), timestamp, quotaWindowMs)
 )
 
-import "./utils.osl"
+import "../core/utils.osl"
 import "./storage-addressing.osl"
 import "./quota-policy.osl"
 import "./storage-ledger-policy.osl"

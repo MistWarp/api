@@ -1,3 +1,7 @@
+auto paidPerksCache = cache.new({capacity: 10000, ttl: 300000})
+auto lastKnownTiers = cache.new({capacity: 10000, ttl: 2592000000})
+auto roturTierUnreachable = cache.new({capacity: 10000, ttl: 60000})
+
 def roturTierForUser(string userId) string (
   return roturTierLookup(userId).tier.toStr()
 )
