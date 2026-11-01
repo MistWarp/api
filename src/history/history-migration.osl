@@ -1,0 +1,314 @@
+export {
+  ensureGeneratedProjectHistory,
+  ensureUploadedProjectHistory,
+  generateMissingProjectHistories,
+  projectHasStoredContent
+}
+
+def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead, string parentId) string (
+  return gitinspection.GenerateHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, createdAt, parentArchivePath, parentHead, parentId)
+)
+
+def projectHasStoredContent(object project) boolean (
+  boolean hasContent = project.lastUploadAt.toNum() > 0
+  hasContent = hasContent or (project.contains("pendingJson") and project.pendingJson == true)
+  return hasContent and project.jsonKey.toStr() != ""
+)
+
+def projectHistorySourceVersion(object project) string (
+  array assets = if project.contains("assets") then project.assets.assertElse(array, []) else []
+  return project.jsonKey.toStr() ++ "\n" ++ project.lastUploadAt.toStr() ++ "\n" ++ project.pendingJson.toStr() ++ "\n" ++ project.remixParent.toStr() ++ "\n" ++ project.remixBaseCommit.toStr() ++ "\n" ++ project.edited.toStr() ++ "\n" ++ json.stringify(assets)
+)
+
+def copyHistoryProjectJsonToPath(object project, string outputPath) boolean (
+  if project.contains("pendingJson") and project.pendingJson == true (
+    return copyStoredProjectJsonToPath(project, outputPath)
+  )
+  string cacheDir = tmpDir ++ "history-migration-json/"
+  string cachePath = cacheDir ++ project.jsonKey.toStr().hashSHA256() ++ ".json.gz"
+  string lockName = "history-migration-json-" ++ project.jsonKey.toStr().hashSHA256()
+  sync.lock(lockName)
+  void fs.mkdir(cacheDir, {recursive: true})
+  boolean ready = fs.exists(cachePath) or copyStoredProjectJsonToPath(project, cachePath)
+  boolean copied = ready and copyFileReplacing(cachePath, outputPath)
+  sync.unlock(lockName)
+  return copied
+)
+
+def copyHistoryAssetToPath(string name, string outputPath) boolean (
+  string cacheDir = tmpDir ++ "history-migration-assets/"
+  string cachePath = cacheDir ++ name
+  string lockName = "history-migration-asset-" ++ name
+  sync.lock(lockName)
+  void fs.mkdir(cacheDir, {recursive: true})
+  boolean ready = fs.exists(cachePath) or copyStorageKeyToPath(assetObjectKey(name), cachePath)
+  boolean copied = ready and copyFileReplacing(cachePath, outputPath)
+  sync.unlock(lockName)
+  return copied
+)
+
+def generateProjectHistory(object project, string parentPath, string parentHead, boolean allowMissingAssets) object (
+  string id = project.id.toStr()
+  string sourceVersion = projectHistorySourceVersion(project)
+  string workId = id ++ "." ++ randomString(8)
+  string jsonPath = tmpDir ++ workId ++ ".json.gz"
+  string assetsPath = tmpDir ++ workId ++ ".assets"
+  string workspacePath = tmpDir ++ workId ++ ".mwp"
+  void fs.mkdir(assetsPath, {recursive: true})
+  if !copyHistoryProjectJsonToPath(project, jsonPath) (
+    void fs.remove(assetsPath)
+    return {ok: false, error: "could not read project JSON"}
+  )
+  array assets = if project.contains("assets") then project.assets.assertElse(array, []) else []
+  boolean assetsReady = true
+  number missingAssets = 0
+  for i assets.len (
+    string name = assets[i].toStr()
+    if !isValidMd5Ext(name) (
+      assetsReady = false
+    ) else if !copyHistoryAssetToPath(name, assetsPath ++ "/" ++ name) (
+      missingAssets += 1
+    )
+  )
+  if !assetsReady or (missingAssets > 0 and !allowMissingAssets) (
+    void fs.remove(jsonPath)
+    void fs.remove(assetsPath)
+    return {ok: false, error: "could not read project assets"}
+  )
+  if missingAssets > 0 (
+    log "WARNING: salvaging MistWarp history for " ++ id ++ " without " ++ missingAssets.toStr() ++ " missing legacy assets"
+  )
+
+  string generatedJson = writeGeneratedHistoryArchive(jsonPath, assetsPath, workspacePath, id, project.owner.toStr(), project.created.toNum(), parentPath, parentHead, (project.remixParent ?? "").toStr())
+  void fs.remove(jsonPath)
+  void fs.remove(assetsPath)
+  auto parsedGeneratedHistory = json.parse(generatedJson, {type: "object"})
+  if parsedGeneratedHistory.isErr() or parsedGeneratedHistory.unwrap().assert(object).ok != true or !fs.exists(workspacePath) (
+    void fs.remove(workspacePath)
+    return {ok: false, error: "could not generate history archive"}
+  )
+
+  object history = parsedGeneratedHistory.unwrap().assert(object).manifest.assert(object)
+  string head = history.head.toStr()
+  auto currentResult = loadProject(id)
+  if !currentResult.ok (
+    void fs.remove(workspacePath)
+    return {ok: false, error: "project disappeared during migration"}
+  )
+  object current = currentResult.project.assert(object)
+  if projectHasWorkspace(current) (
+    void fs.remove(workspacePath)
+    return {ok: true, project: current, generated: false}
+  )
+  if projectHistorySourceVersion(current) != sourceVersion (
+    void fs.remove(workspacePath)
+    return {ok: false, error: "project changed during migration; will retry later"}
+  )
+
+  byte[] workspace = fs.readFileBytes(workspacePath).unwrapOr("".toBytes())
+  void fs.remove(workspacePath)
+  string workspaceKey = projectWorkspaceSnapshotKey(contentHash(workspace))
+  if !stageR2Blob(workspaceKey, workspace, "application/x-mistwarp-project", "") (
+    return {ok: false, error: "could not store generated history"}
+  )
+
+  currentResult = loadProject(id)
+  if !currentResult.ok (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "project disappeared during migration"}
+  )
+  current = currentResult.project.assert(object)
+  if projectHasWorkspace(current) (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: true, project: current, generated: false}
+  )
+  if projectHistorySourceVersion(current) != sourceVersion (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "project changed during migration; will retry later"}
+  )
+
+  current.workspaceKey = workspaceKey
+  current.workspaceLayers = [workspaceKey]
+  current.historyBytes = workspace.len
+  current.gitHead = head
+  current.gitBranch = "main"
+  current.gitCommits = history.commits
+  current.gitGraph = history.graph
+  if parentHead != "" (
+    current.remixBaseCommit = parentHead
+  )
+  if !saveProject(current) (
+    removeProjectStorageKeyIfOrphaned(workspaceKey, id, true)
+    return {ok: false, error: "could not save generated history"}
+  )
+  upsertIndexEntry(current)
+  storageSettleProject(current)
+  return {ok: true, project: current, generated: true}
+)
+
+// Upload callers hold the publication lock. History preparation takes that
+// lock itself after resolving ancestors and revalidates the saved source.
+// Drop it during preparation to avoid both self-deadlock and nested locks
+// across remix ancestors, then restore the caller's lock ownership.
+def ensureUploadedProjectHistory(object project) object (
+  string lockName = "project-history-" ++ project.id.toStr()
+  sync.unlock(lockName)
+  object res = ensureGeneratedProjectHistory(project, {}, false)
+  sync.lock(lockName)
+  return res
+)
+
+def ensureGeneratedProjectHistory(object project, object visiting, boolean allowMissingAssets) object (
+  if projectHasWorkspace(project) (
+    return {ok: true, project: project, generated: false}
+  )
+  if !projectHasStoredContent(project) (
+    return {ok: true, project: project, generated: false}
+  )
+  string recordedHead = projectGitHead(project)
+  string recordedBase = (project.remixBaseCommit ?? "").toStr()
+  if recordedHead != "" and recordedHead != recordedBase (
+    return {ok: false, error: "recorded edits require the original repository; bootstrap cannot reset history"}
+  )
+  string id = project.id.toStr()
+  if visiting.contains(id) (
+    return {ok: false, error: "remix cycle"}
+  )
+  visiting[id] = true
+
+  string parentPath = ""
+  string parentHead = ""
+  string parentId = (project.remixParent ?? "").toStr()
+  if parentId != "" (
+    // Absence never authorizes inventing a root or using today's parent HEAD.
+    // Keep the record retryable until its recorded base can be materialized.
+    auto parentResult = loadProject(parentId)
+    for attempt 2 (
+      if !parentResult.ok and parentResult.missing != true (
+        parentResult = loadProject(parentId)
+      )
+    )
+    if !parentResult.ok (
+      if parentResult.missing == true (
+        return {ok: false, code: "parent_missing", error: "parent deleted or missing; original history or external backup required"}
+      )
+      return {ok: false, code: "parent_read_failed", retryable: true, error: "could not read parent; retry later"}
+    )
+    object ensuredParent = ensureGeneratedProjectHistory(parentResult.project.assert(object), visiting, allowMissingAssets)
+    if !ensuredParent.ok (
+      return ensuredParent
+    )
+    object parent = ensuredParent.project.assert(object)
+    parentHead = (project.remixBaseCommit ?? "").toStr()
+    if parentHead == "" (
+      return {ok: false, error: "historical remix base unknown; original history required"}
+    )
+    if !projectHasWorkspace(parent) (
+      return {ok: false, error: "parent history unavailable; retry later"}
+    )
+    parentPath = tmpDir ++ id ++ "." ++ randomString(8) ++ ".parent.mwp"
+    boolean parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
+    for attempt 2 (
+      if !parentCopied (
+        void fs.remove(parentPath)
+        parentCopied = copyProjectWorkspaceToPath(parent, parentPath)
+      )
+    )
+    if !parentCopied (
+      void fs.remove(parentPath)
+      return {ok: false, retryable: true, error: "could not read parent history; retry later"}
+    )
+  )
+
+  sync.lock("project-history-" ++ id)
+  auto currentResult = loadProject(id)
+  object res = {ok: false, error: "project disappeared during migration"}
+  if currentResult.ok (
+    object current = currentResult.project.assert(object)
+    if projectHasWorkspace(current) (
+      res = {ok: true, project: current, generated: false}
+    ) else if projectHistorySourceVersion(current) != projectHistorySourceVersion(project) or projectGitHead(current) != recordedHead (
+      res = {ok: false, error: "project changed during migration; will retry later"}
+    ) else (
+      res = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
+    )
+  )
+  sync.unlock("project-history-" ++ id)
+  void fs.remove(parentPath)
+  return res
+)
+
+def missingProjectHistoryFiles() array (
+  array missing = []
+  array files = fs.readDir(projectsDir).unwrapOr([])
+  for i files.len (
+    string name = files[i].toStr()
+    if name.endsWith(".json") (
+      auto loaded = readFile(projectsDir ++ name)
+      if loaded.ok (
+        object project = loaded.data.assert(object)
+        if !projectHasWorkspace(project) and projectHasStoredContent(project) (
+          missing.append(name)
+        )
+      )
+    )
+  )
+  return missing
+)
+
+def logHistoryMigrationProgress(object stats, string name, object res) (
+  sync.lock("history-migration-progress")
+  stats.processed = stats.processed.toNum() + 1
+  string status = "skipped"
+  if !res.ok (
+    stats.failed = stats.failed.toNum() + 1
+    status = "failed: " ++ res.error.toStr()
+  ) else if res.generated == true (
+    stats.generated = stats.generated.toNum() + 1
+    status = "generated"
+  ) else (
+    stats.skipped = stats.skipped.toNum() + 1
+  )
+  string message = "MistWarp history migration " ++ stats.processed.toStr() ++ "/" ++ stats.total.toStr() ++ " (generated " ++ stats.generated.toStr() ++ ", skipped " ++ stats.skipped.toStr() ++ ", failed " ++ stats.failed.toStr() ++ "): " ++ name ++ " " ++ status
+  sync.unlock("history-migration-progress")
+  log message
+)
+
+def generateMissingProjectHistoriesWorker(number workerIndex, number workerCount, array files, object stats,*sync.WaitGroup jobs) (
+  for i files.len (
+    if ((i - 1) % workerCount) == workerIndex (
+      string name = files[i].toStr()
+      auto loaded = loadProject(name.replace(".json", ""))
+      object res = {ok: false, error: "project disappeared during migration"}
+      if loaded.ok (
+        res = ensureGeneratedProjectHistory(loaded.project.assert(object), {}, true)
+      )
+      logHistoryMigrationProgress(stats, name, res)
+    )
+  )
+  jobs.done()
+)
+
+def generateMissingProjectHistories() object (
+  array files = missingProjectHistoryFiles()
+  object stats = {total: files.len, processed: 0, generated: 0, skipped: 0, failed: 0}
+  if files.len == 0 (
+    log "MistWarp history migration: no projects require backfill"
+    return stats
+  )
+  number workerCount = historyMigrationWorkers
+  if workerCount > files.len (
+    workerCount = files.len
+  )
+  log "MistWarp history migration starting asynchronously: " ++ files.len.toStr() ++ " projects with " ++ workerCount.toStr() ++ " workers"
+  *sync.WaitGroup jobs = sync.waitGroup()
+  for i workerCount (
+    jobs.add()
+    thread.new(generateMissingProjectHistoriesWorker, i - 1, workerCount, files, stats, jobs)
+  )
+  jobs.wait()
+  void fs.remove(tmpDir ++ "history-migration-json/")
+  void fs.remove(tmpDir ++ "history-migration-assets/")
+  log "MistWarp history migration complete: " ++ stats.generated.toStr() ++ " generated, " ++ stats.skipped.toStr() ++ " skipped, " ++ stats.failed.toStr() ++ " failed out of " ++ stats.total.toStr()
+  return stats
+)

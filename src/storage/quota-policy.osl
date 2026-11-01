@@ -1,0 +1,54 @@
+export {
+  quotaPruneEvents,
+  quotaTotalBytes,
+  quotaWithoutNames,
+  storageAllowance
+}
+
+def quotaPruneEvents(array events, number nowMs, number windowMs) array (
+  array kept = []
+  for i events.len (
+    object event = events[i].assert(object)
+    if nowMs - event.t.toNum() < windowMs (
+      kept.append(event)
+    )
+  )
+  return kept
+)
+
+def quotaTotalBytes(array events, number nowMs, number windowMs) number (
+  number total = 0
+  array kept = quotaPruneEvents(events, nowMs, windowMs)
+  for i kept.len (
+    total += kept[i].assert(object).bytes.toNum()
+  )
+  return total
+)
+
+// Drop pending uploads that a saved project now references, so their bytes
+// are counted once, as part of that project.
+def quotaWithoutNames(array events, array names, number nowMs, number windowMs) array (
+  object saved = {}
+  for i names.len (
+    saved[names[i].toStr()] = true
+  )
+  array kept = []
+  array fresh = quotaPruneEvents(events, nowMs, windowMs)
+  for i fresh.len (
+    object event = fresh[i].assert(object)
+    if !saved.contains((event.name ?? "").toStr()) (
+      kept.append(event)
+    )
+  )
+  return kept
+)
+
+// The most a project may occupy after a save. A user over their limit can
+// still save a project at its current size or smaller.
+def storageAllowance(number limit, number used, number currentBytes) number (
+  number allowance = limit - (used - currentBytes)
+  if allowance < currentBytes (
+    return currentBytes
+  )
+  return allowance
+)

@@ -1,0 +1,73 @@
+import "std:testing"
+import "std:regex"
+import "../classroom/classroom-policy.osl"
+import "./editor-session-policy.osl"
+
+def projectHasStoredContent(object project) boolean (
+  return (project.lastUploadAt ?? 0).toNum() > 0
+)
+
+def editorRouteAllowedTest(string method, string url) boolean (
+  string full = "https://api.mistwarp.org" ++ url
+  return editorRouteAllowed(method, escapedRequestPath(full, "https://api.mistwarp.org"), url.split("?")[1])
+)
+
+testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/upload"), "editor tokens can save their project")
+testing.assert(editorRouteAllowedTest("GET", "/v1/projects/p1/commits?k=abc"), "query strings don't affect matching")
+testing.assert(editorRouteAllowedTest("HEAD", "/v1/projects/p1/project.json"), "HEAD is checked like GET")
+testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/upload-parts/t1/chunk"), "chunked uploads are allowed")
+testing.assert(editorRouteAllowedTest("GET", "/v1/projects/p1/extensions/abc/source"), "extension sources are allowed")
+testing.assert(editorRouteAllowedTest("GET", "/v1/projects/p1/trusted-extensions"), "the embed and player can read a project's trusted extensions")
+testing.assert(!scopedRequestAllowed("other", "GET", "/v1/me", "/v1/me"), "an unknown session scope is refused everywhere")
+testing.assert(scopedRequestAllowed("", "GET", "/v1/me/export", "/v1/me/export"), "full sessions are not limited")
+testing.assert(!scopedRequestAllowed("editor", "GET", "/v1/me/export", "/v1/me/export"), "editor sessions keep their route list")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/projects/p1/publish"), "sharing needs the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/logout"), "signing out goes through MistWarp")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/auth/editor-session"), "editor tokens can't mint more tokens")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/admin/reports"), "admin routes need the full session")
+testing.assert(!editorRouteAllowedTest("DELETE", "/v1/me/data"), "account deletion needs the full session")
+testing.assert(!editorRouteAllowedTest("PUT", "/v1/me/profile"), "profile edits need the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/projects/p1/comments"), "commenting needs the full session")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/p1/upload/../../admin/reports"), "path tricks don't match")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/projects/p1/releases"), "releases need the full session")
+testing.assert(editorProjectUpdateAllowed(["title", "gameItems"]), "the editor can rename and set game data")
+testing.assert(!editorProjectUpdateAllowed(["title", "shared"]), "sharing changes need the full session")
+testing.assert(!editorProjectUpdateAllowed(["visibility"]), "visibility changes need the full session")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/.."), "dot segments are refused")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/p1%2F..%2Fadmin"), "encoded slashes are refused")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/projects/%2E%2E"), "encoded dots are refused")
+testing.assert(editorRouteAllowedTest("GET", "/v1/users/A%20name/projects"), "encoded spaces in names still match")
+testing.assert(escapedRequestPath("https://api.mistwarp.org/v1/projects/a%2Fb/commits?k=1", "https://api.mistwarp.org") == "/v1/projects/a%2Fb/commits", "the escaped path keeps encoded slashes")
+testing.assert(escapedRequestPath("http://localhost:5770/", "http://localhost:5770") == "/", "the root path is kept")
+testing.assert(escapedRequestPath("x://h/v1/me://api.mistwarp.org/v1/me/export", "x://h/v1/me://api.mistwarp.org") == "/v1/me/export", "a forged scheme can't replace the path")
+testing.assert(!editorRouteAllowed("GET", escapedRequestPath("x://h/v1/me://api.mistwarp.org/v1/me/export", "x://h/v1/me://api.mistwarp.org"), "/v1/me/export"), "a forged scheme can't reach other routes")
+testing.assert(escapedRequestPath("https://other/v1/me", "https://api.mistwarp.org") == "", "an unexpected prefix is refused")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/a%2Fextensions/commits/source", "/v1/projects/a/extensions/commits/source"), "an encoded slash can't pose as an extension source")
+testing.assert(!editorRouteAllowed("GET", "/v1/projects/p1%3Fx", "/v1/projects/p1?x"), "a decoded question mark is refused")
+testing.assert(editorRouteAllowedTest("POST", "/v1/projects/p1/history/bootstrap"), "history bootstrap is allowed")
+testing.assert(!editorCanDeleteProject({lastUploadAt: 0, gitHead: "abc", assets: []}), "projects with history can't be deleted by the editor")
+testing.assert(!editorCanDeleteProject({lastUploadAt: 0, assets: ["a.png"]}), "projects with assets can't be deleted by the editor")
+testing.assert(editorCanDeleteProject({lastUploadAt: 0, assets: []}), "an empty project can be cleaned up")
+testing.assert(editorRouteAllowedTest("GET", "/v1/classroom/available"), "the editor can ask whether to show Classroom")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/classroom"), "class lists need the full session")
+testing.assert(!editorRouteAllowedTest("GET", "/v1/classroom/available/extra"), "only the availability check is open to the editor")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/assignments/a1/turn-in"), "turning work in happens on MistWarp")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/classes/c1/present"), "starting a presentation needs the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/terms/accept"), "Classroom terms need the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/billing/checkout"), "billing needs the full session")
+testing.assert(!editorRouteAllowedTest("POST", "/v1/classroom/claim/ABC"), "release links need the full session")
+testing.assert(studentRouteAllowed("POST", "/v1/auth/editor-session"), "class students can open the editor")
+array studentEditorRoutes = [
+  ["GET", "/v1/me"],
+  ["GET", "/v1/projects/p1"],
+  ["GET", "/v1/projects/p1/project.json"],
+  ["GET", "/v1/projects/p1/trusted-extensions"],
+  ["POST", "/v1/projects/p1/live"],
+  ["POST", "/v1/projects/p1/upload"],
+  ["PUT", "/v1/projects/p1"],
+  ["GET", "/v1/classroom/available"]
+]
+for i studentEditorRoutes.len (
+  array route = studentEditorRoutes[i].assert(array)
+  testing.assert(editorRouteAllowedTest(route[1].toStr(), route[2].toStr()) and studentRouteAllowed(route[1].toStr(), route[2].toStr()), "a student's editor session can use " ++ route[1].toStr() ++ " " ++ route[2].toStr())
+)

@@ -1,0 +1,10 @@
+export {
+  projectSourcePolicyAllows
+}
+
+def projectSourcePolicyAllows(object project, boolean isOwner) boolean (
+  if isOwner (
+    return true
+  )
+  return !(project.contains("seeInside") and project.seeInside == false)
+)

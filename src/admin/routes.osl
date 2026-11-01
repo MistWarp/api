@@ -1,0 +1,39 @@
+export {
+  registerAdminRoutes
+}
+
+def registerAdminRoutes(*serve.Router api) (
+  api.POST("/errors", serve.limitRequests(20, {window: 60000}), handleRecordSiteError)
+  api.GET("/stats", handlePublicStats)
+  api.POST("/events", serve.limitRequests(120, {window: 60000}), handleRecordFunnelEvent)
+
+  api.POST("/admin/reports/action", requireAdmin, handleReportAction)
+
+  api.GET("/admin/admins", requireAdmin, handleListAdmins)
+  api.POST("/admin/admins", requireAdmin, handleAddAdmin)
+  api.POST("/admin/admins/remove", requireAdmin, handleRemoveAdmin)
+  api.GET("/admin/bans", requireAdmin, handleListBans)
+  api.POST("/admin/ban", requireAdmin, handleBanUser)
+  api.POST("/admin/unban", requireAdmin, handleUnbanUser)
+  api.GET("/admin/shadowbans", requireAdmin, handleListShadowBans)
+  api.POST("/admin/shadowban", requireAdmin, handleShadowBanUser)
+  api.POST("/admin/unshadowban", requireAdmin, handleLiftShadowBan)
+  api.POST("/admin/projects/:id/hide", requireAdmin, handleHideProject)
+  api.POST("/admin/projects/:id/restore", requireAdmin, handleRestoreHiddenProject)
+  api.POST("/admin/projects/:id/shadowban", requireAdmin, handleShadowBanProject)
+  api.POST("/admin/projects/:id/unshadowban", requireAdmin, handleLiftProjectShadowBan)
+
+  api.GET("/admin/user", requireAdmin, handleGetUserAdmin)
+
+  api.POST("/admin/user/note", requireAdmin, handleSetAdminNote)
+  api.GET("/admin/projects", requireAdmin, handleAdminSearchProjects)
+  api.GET("/admin/stats", requireAdmin, handleAdminStats)
+  api.GET("/admin/storage", requireAdmin, handleAdminStorageStats)
+  api.POST("/admin/storage/sync", requireAdmin, handleAdminSyncR2StorageStats)
+  api.GET("/admin/users", requireAdmin, handleListUsers)
+
+  api.GET("/admin/errors", requireAdmin, handleAdminGetErrors)
+  api.POST("/admin/errors/resolve", requireAdmin, handleAdminResolveSiteError)
+  api.POST("/admin/errors/delete", requireAdmin, handleAdminDeleteSiteError)
+  api.POST("/admin/errors/delete-all", requireAdmin, handleAdminDeleteAllSiteErrors)
+)

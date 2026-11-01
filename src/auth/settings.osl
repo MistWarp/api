@@ -1,0 +1,65 @@
+export {}
+
+def settingsPath(string username) string (
+  return userSettingsDir ++ normalizeUsername(username) ++ ".json"
+)
+
+def handleGetMySettings(*serve.Context c) (
+  string username = contextString(c, "username")
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    c.badRequest("invalid username")
+    return
+  )
+  auto res = readFile(settingsPath(username))
+  if !res.ok (
+    c.json(200, {ok: true, settings: {}})
+    return
+  )
+  c.json(200, {ok: true, settings: res.data})
+)
+
+def handlePutMySettings(*serve.Context c) (
+  string username = contextString(c, "username")
+  string key = normalizeUsername(username)
+  if !isSafePathPart(key) (
+    c.badRequest("invalid username")
+    return
+  )
+  string body = c.body()
+  if body.toBytes().len > 131072 (
+    c.badRequest("settings too large")
+    return
+  )
+  auto parsed = json.parse(body, {type: "object"})
+  if parsed.isErr() (
+    c.badRequest("settings must be a JSON object")
+    return
+  )
+  object settings = parsed.unwrap().assert(object)
+  if !settings.contains("settings") or settings.settings == null (
+    settings.settings = {}
+  )
+  object inner = settings.settings
+  boolean editorScope = contextString(c, "sessionScope") == "editor"
+  if editorScope (
+    auto storedResult = readFile(settingsPath(username))
+    object stored = if storedResult.ok then storedResult.data.assertElse(object, {}) else {}
+    object storedInner = (stored.settings ?? {}).assertElse(object, {})
+    if storedInner.contains("rotur") (
+      inner.rotur = storedInner.rotur
+    ) else (
+      inner.delete("rotur")
+    )
+  )
+  inner.updatedAt = timestamp
+  if !writeFile(settingsPath(username), settings) (
+    c.internalError("failed to save settings")
+    return
+  )
+  object reply = {ok: true, updatedAt: inner.updatedAt}
+  if editorScope (
+    reply.rotur = inner.rotur
+  )
+  c.json(200, reply)
+)
