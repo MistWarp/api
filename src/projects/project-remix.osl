@@ -279,8 +279,6 @@ def forkRefused(number status, string code, string message) PreparedFork (
 )
 
 def forkStorageChanges(object parent, string forkId, number historyBytes) object (
-  // The fork shares the original's project.json and assets, and brings
-  // its own history.
   object forkSummary = projectStorageSummary(parent, loadAssetsIndex().assets.assertElse(object, {}))
   object forkHistoryBlob = {}
   forkHistoryBlob["incoming:" ++ forkId] = historyBytes

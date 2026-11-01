@@ -31,6 +31,8 @@ def lockIsFree(string lockName) boolean (
 number parentBytes = 100
 number loads = 0
 number growOnLoad = 0
+number revokeViewOnLoad = 0
+number revokeRemixOnLoad = 0
 boolean growEveryLoad = false
 boolean roturStorage = true
 boolean storageFull = false
@@ -46,6 +48,8 @@ def resetScenario() (
   parentBytes = 100
   loads = 0
   growOnLoad = 0
+  revokeViewOnLoad = 0
+  revokeRemixOnLoad = 0
   growEveryLoad = false
   roturStorage = true
   storageFull = false
@@ -69,7 +73,10 @@ def loadProject(string id) object (
   if id != "p1" (
     return {ok: false}
   )
-  return {ok: true, project: parentProject()}
+  object project = parentProject()
+  project.viewRevoked = revokeViewOnLoad > 0 and loads >= revokeViewOnLoad
+  project.remixRevoked = revokeRemixOnLoad > 0 and loads >= revokeRemixOnLoad
+  return {ok: true, project: project}
 )
 
 def contextString(*serve.Context c, string key) string (
@@ -88,10 +95,10 @@ def requestJSON(*serve.Context c) object (
   return {}
 )
 def canViewProject(object project,*serve.Context c) boolean (
-  return true
+  return project.viewRevoked != true
 )
 def canRemixProject(object project,*serve.Context c) boolean (
-  return true
+  return project.remixRevoked != true
 )
 def canEditProject(object project,*serve.Context c) boolean (
   return true
@@ -303,6 +310,18 @@ resetScenario()
 roturStorage = false
 made = remix("p1")
 testing.assert(made.status == 201 and holdsAsked == 0 and loads == 1, "accounts outside Rotur storage remix in one pass without a hold")
+
+resetScenario()
+revokeViewOnLoad = 2
+made = remix("p1")
+testing.assert(made.status == 404 and holdsAsked == 1, "a parent made private before the lock is not remixed")
+testing.assert(released == ["hold1"] and settled.len == 0, "the hold for a parent made private is released")
+
+resetScenario()
+revokeRemixOnLoad = 2
+made = remix("p1")
+testing.assert(made.status == 403 and holdsAsked == 1, "a parent closed to remixes before the lock is not remixed")
+testing.assert(released == ["hold1"] and settled.len == 0, "the hold for a parent closed to remixes is released")
 
 resetScenario()
 made = remix("missing")
