@@ -140,3 +140,36 @@ def uploadResponse(object project, object uploadResult) object (
     thumbUrl: viewerThumbUrlFor(project)
   }
 )
+
+def storedWorkspaceLayers(object project) array (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null (
+    return project.workspaceLayers.assertElse(array, [])
+  )
+  return []
+)
+
+def keysNotIn(array keys, array kept) array (
+  array missing = []
+  for i keys.len (
+    string key = keys[i].toStr()
+    if !kept.contains(key) (
+      missing.append(key)
+    )
+  )
+  return missing
+)
+
+def replacedWorkspaceKeys(object project, array previousWorkspaceKeys) array (
+  if project.contains("workspaceLayers") and project.workspaceLayers != null (
+    return keysNotIn(previousWorkspaceKeys, project.workspaceLayers.assertElse(array, []))
+  )
+  return []
+)
+
+def projectFilesErrorBody(object uploadResult) object (
+  object errorBody = {ok: false, error: uploadResult.error}
+  if uploadResult.contains("code") (
+    errorBody.code = uploadResult.code
+  )
+  return errorBody
+)

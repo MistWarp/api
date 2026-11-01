@@ -188,3 +188,28 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
 
   return {ok: true, assets: projectAssets, uploaded: uploaded, skipped: projectAssets.len - uploaded, gzipPath: gzipPath, jsonBytes: projectJsonBytes, storedJsonBytes: fs.size(gzipPath).unwrapOr(0), assetBytes: assetBytes, hold: hold}
 )
+
+def megabytes(number bytes) number (
+  return (bytes / 1048576).toInt()
+)
+
+def assetSizeFailure(string name, number size, number limit) object (
+  if size > limit (
+    return {ok: false, error: "an asset exceeds your " ++ megabytes(limit).toStr() ++ " MB limit: " ++ name, code: "project_too_large", status: 413}
+  )
+  return {}
+)
+
+def projectAssetsFailure(number assetBytes, number limit) object (
+  if assetBytes > limit (
+    return {ok: false, error: "project assets exceed your " ++ megabytes(limit).toStr() ++ " MB limit", code: "project_too_large", status: 413}
+  )
+  return {}
+)
+
+def storageAllowanceFailure(number projectBytes, number allowanceBytes) object (
+  if allowanceBytes >= 0 and projectBytes > allowanceBytes (
+    return {ok: false, error: "storage full", code: "storage_full", status: 413, overBytes: projectBytes - allowanceBytes}
+  )
+  return {}
+)

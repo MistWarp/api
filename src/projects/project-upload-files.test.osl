@@ -1,0 +1,74 @@
+import "std:testing"
+import "std:json"
+import "std:fs"
+import "std:zip"
+import "./project-upload-files.osl"
+
+boolean r2Local = true
+number maxAssetCount = 10
+number maxProjectJsonBytes = 268435456
+number maxStoredProjectJsonBytes = 20971520
+def isValidMd5Ext(string name) boolean (
+  return true
+)
+def md5PartOf(string name) string (
+  return name
+)
+def assetObjectKey(string name) string (
+  return "assets/" ++ name
+)
+def localBlobPath(string key) string (
+  return "/tmp/" ++ key
+)
+def assetNeedsUpload(boolean known, boolean localExists, boolean remoteConfigured) boolean (
+  return false
+)
+def loadAssetsIndex() object (
+  return {assets: {}}
+)
+def saveAssetsIndex(object index) boolean (
+  return true
+)
+def contentTypeForExt(string ext) string (
+  return ""
+)
+def extPartOf(string name) string (
+  return ""
+)
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+  return true
+)
+def noStorageHold() object (
+  return {}
+)
+def storageHold(string userId, object changes, boolean enforce) object (
+  return {ok: true}
+)
+def storageHoldRelease(string userId, object hold) (
+  return
+)
+def releasePendingAssetHolds(string ownerId, string username, array names) (
+  return
+)
+def projectHistoryBytes(object project) number (
+  return 0
+)
+def projectOwnerId(object project) string (
+  return ""
+)
+def projectStorageSummary(object project, object assetSizes) object (
+  return {}
+)
+def usesRoturStorage(string userId) boolean (
+  return false
+)
+
+testing.assert(megabytes(10485760) == 10 and megabytes(1572864) == 1, "limits are whole megabytes")
+testing.assert(assetSizeFailure("a.svg", 10, 10).len == 0, "an asset at the limit is accepted")
+object bigAsset = assetSizeFailure("a.svg", 10485761, 10485760)
+testing.assert(bigAsset.status == 413 and bigAsset.error == "an asset exceeds your 10 MB limit: a.svg", "an oversized asset names the limit and file")
+testing.assert(projectAssetsFailure(5, 5).len == 0 and projectAssetsFailure(6, 5).code == "project_too_large", "project assets are capped")
+testing.assert(storageAllowanceFailure(100, -1).len == 0, "a negative allowance means storage is counted elsewhere")
+testing.assert(storageAllowanceFailure(100, 100).len == 0, "a project that exactly fits is accepted")
+object full = storageAllowanceFailure(150, 100)
+testing.assert(full.code == "storage_full" and full.overBytes == 50 and full.status == 413, "a full allowance reports the overflow")
