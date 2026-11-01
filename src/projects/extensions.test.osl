@@ -77,4 +77,15 @@ void fs.writeFile(tmpDir ++ "project.json", json.stringify({targets: [], extensi
 object collected = collectProjectExtensions(tmpDir ++ "project.json", json.stringify({"https://example.com/ext.js": "class Ext {}"}))
 testing.assert(collected.ok == true and collected.extensions.len == 1 and collected.extensions[1].url == "https://example.com/ext.js", "extension URLs are collected from project.json")
 
+object stored = collected.extensions[1].assert(object)
+string hash = stored.hash.toStr()
+testing.assert(storeProjectExtensions("p1", [], [stored], collected.sources.assert(object)), "extensions are stored")
+testing.assert(storeProjectExtensions("p2", [], [stored], {}), "a second project using the extension is stored")
+object record = readExtensionRecord(hash)
+testing.assert(record.urls == ["https://example.com/ext.js"] and record.projects == ["p1", "p2"], "the record lists the extension's URL and every project using it")
+testing.assert(fs.exists(extensionSourcePath(hash)), "the source is kept")
+testing.assert(storeProjectExtensions("p1", [stored], [], {}) and readExtensionRecord(hash).projects == ["p2"], "a project that drops the extension leaves the record")
+object gallery = {url: "https://extensions.turbowarp.org/a.js", hash: "https://extensions.turbowarp.org/a.js".hashSHA256()}
+testing.assert(storeProjectExtensions("p3", [], [gallery], {}) and readExtensionRecord(gallery.hash.toStr()).projects == ["p3"] and readExtensionRecord(gallery.hash.toStr()).gallery == true, "gallery extensions are recorded too")
+
 void fs.remove(tmpDir)

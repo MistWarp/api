@@ -201,6 +201,15 @@ class Server:
         with open(os.path.join(self.dir, "data", "projects", project_id + ".json")) as handle:
             return json.load(handle)
 
+    def extension_records(self):
+        folder = os.path.join(self.dir, "data", "extensions")
+        records = {}
+        for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+            if name.endswith(".json") and name != "index.json":
+                with open(os.path.join(folder, name)) as handle:
+                    records[name] = json.load(handle)
+        return records
+
     def blob_inventory(self):
         inventory = {}
         root = os.path.join(self.dir, "data", "blobs")
@@ -392,7 +401,7 @@ def complete_part(step, path, who, token, name):
     step(name, "POST", path + "/upload-parts/%s/complete" % token, who, {})
 
 
-def upload_flow(server, step, ids):
+def upload_flow(server, step, ids, steps):
     status, bare = step("create project for an sb3 without project.json", "POST", "/v1/projects", "sam", {"title": "No project.json"})
     ids[str(bare.get("id", "")) if isinstance(bare, dict) else ""] = "<no-json>"
     for name, sb3 in (("upload sb3 without project.json", sb3_archive(None, {"readme.txt": "no project here"})), ("upload after an sb3 without project.json", sb3_archive(project_with_costumes([])))):
@@ -424,6 +433,7 @@ def upload_flow(server, step, ids):
     with_asset = sb3_archive(project_with_costumes([asset_name], {"ext": "https://example.com/ext.js"}), {asset_name: asset_content})
     upload("upload with asset and extension", {"extensions": json.dumps({"https://example.com/ext.js": "class SmokeExtension {}"})},
            {"project": with_asset, "thumbnail": b"\x89PNG smoke thumbnail"})
+    steps.append({"step": "extension records after an upload", "status": 0, "body": server.extension_records()})
     step("check assets", "POST", path + "/assets/check", "sam", {"assets": [asset_name, other_name]})
     step("check invalid asset name", "POST", path + "/assets/check", "sam", {"assets": ["nope"]})
     step("check assets not a list", "POST", path + "/assets/check", "sam", {"assets": "x"})
@@ -799,13 +809,14 @@ def run(binary, sb3, keep):
         step("wrong method", "PATCH", "/v1/projects/<project>", "sam", {}, headers=("Allow",))
         step("legacy prefix", "GET", "/api/agreement")
         step("health", "GET", "/v1/health")
-        upload_flow(server, step, ids)
+        upload_flow(server, step, ids, steps)
         update_flow(server, step, ids)
         concurrent_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
                 steps.append({"step": "stored " + alias, "status": 0, "body": server.read_project(real)})
+        steps.append({"step": "extension records", "status": 0, "body": server.extension_records()})
         steps.append({"step": "blob inventory", "status": 0, "body": server.blob_inventory()})
     finally:
         server.stop()

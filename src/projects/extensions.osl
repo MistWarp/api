@@ -342,6 +342,8 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
     if !projects.contains(projectId) (
       projects.append(projectId)
     )
+    record.urls = recordUrls
+    record.projects = projects
     if !writeFile(extensionRecordPath(hash), record) (
       sync.unlock(lockName)
       return false
