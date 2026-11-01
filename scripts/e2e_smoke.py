@@ -31,7 +31,7 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee"}
 FULL_STORAGE = {"u_dee"}
-EXPECTED_ERRORS = {"upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
+EXPECTED_ERRORS = {"upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -196,6 +196,20 @@ class Server:
         path = os.path.join(self.dir, "data", folder)
         os.makedirs(path, exist_ok=True)
         return Fault(path)
+
+    def thumbnail(self, project_id):
+        path = os.path.join(self.dir, "data", "thumbnails", project_id + ".png")
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read().decode("latin-1")
+
+    def profile(self, username):
+        path = os.path.join(self.dir, "data", "users", username + ".json")
+        if not os.path.exists(path):
+            return {}
+        with open(path) as handle:
+            return json.load(handle)
 
     def read_project(self, project_id):
         with open(os.path.join(self.dir, "data", "projects", project_id + ".json")) as handle:
@@ -461,11 +475,12 @@ def upload_flow(server, step, ids, steps):
     unpublished = project_with_costumes([])
     unpublished["meta"]["agent"] = "unpublished"
     with server.faulty(os.path.join("blobs", "project-json")):
-        upload("upload json store failure", files={"project": sb3_archive(unpublished)})
+        upload("upload json store failure", files={"project": sb3_archive(unpublished), "thumbnail": b"\x89PNG unpublished thumbnail"})
     unsaved = project_with_costumes([])
     unsaved["meta"]["agent"] = "unsaved"
     with server.faulty("projects"):
-        upload("upload metadata save failure", files={"project": sb3_archive(unsaved)})
+        upload("upload metadata save failure", files={"project": sb3_archive(unsaved), "thumbnail": b"\x89PNG unsaved thumbnail"})
+    steps.append({"step": "thumbnail after failed uploads", "status": 0, "body": server.thumbnail(real_id(ids, "<history>"))})
 
     head, edited = head_and_edited()
     upload("upload stale edited", {"expectedEdited": "1"})
@@ -547,6 +562,13 @@ def upload_flow(server, step, ids, steps):
     step("upload remix change", "POST", "/v1/projects/<history-remix>/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     status, pull = step("open pull", "POST", path + "/pulls", "alice", {"sourceProjectId": remix_id, "title": "Smoke pull", "body": "From the remix"})
     pull_index = str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    status, bob_project = step("bob create", "POST", "/v1/projects", "bob", {"title": "Bob smoke"})
+    ids[str(bob_project.get("id", "")) if isinstance(bob_project, dict) else ""] = "<bob>"
+    with server.faulty("projects"):
+        step("upload unsaved first save of the day", "POST", "/v1/projects/<bob>/upload", "bob", form=({}, {"project": sb3_archive(unsaved), "thumbnail": b"\x89PNG bob thumbnail"}))
+    steps.append({"step": "after an unsaved first save of the day", "status": 0, "body": {
+        "thumbnail": server.thumbnail(real_id(ids, "<bob>")), "creatingStreak": server.profile("bob").get("creatingStreak"),
+    }})
     status, bob_remixed = step("remix history for bob", "POST", path + "/remix", "bob", {})
     bob_remix_id = str(bob_remixed.get("id", "") or (bob_remixed.get("project") or {}).get("id", "")) if isinstance(bob_remixed, dict) else ""
     ids[bob_remix_id] = "<history-remix-bob>"

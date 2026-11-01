@@ -87,18 +87,18 @@ def handleUploadProjectLocked(*serve.Context c) (
     return
   )
   if refused(c, archive.discardOn(storeUploadExtensions(project, extensionResult, rollback))) return
-  saveUploadThumbnail(c, project.id.toStr())
 
   applyUploadedFiles(project, uploadResult, extensionResult, rollback)
   if !publishProjectJson(project, uploadResult) (
     abandonUnpublishedUpload(c, project, rollback, archive)
     return
   )
-  recordCreatingDay(contextString(c, "username"))
   if !saveProject(project) (
     abandonUnsavedUpload(c, project, rollback, archive)
     return
   )
+  saveUploadThumbnail(c, project.id.toStr())
+  recordCreatingDay(contextString(c, "username"))
   settleSavedUpload(project, rollback, uploader)
   archive.discard()
 
