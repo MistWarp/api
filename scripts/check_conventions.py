@@ -79,7 +79,7 @@ def python_comments(text):
     return found
 
 
-SCANNERS = {".osl": c_style_comments, ".go": c_style_comments, ".py": python_comments}
+SCANNERS = {".go": c_style_comments, ".py": python_comments}
 
 
 def main():

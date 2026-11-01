@@ -22,7 +22,9 @@ The editor and site depend on every path, method, middleware order, body limit a
 
 ## Checks
 
-`osl test`, `osl lsp check main.osl`, `osl compile main.osl -o main`, and `python3 scripts/check_conventions.py`. The last one rejects code comments and em dashes in the lines you add. CI (`.github/workflows/test.yml`) runs all of them plus the smoke test, with OSL pinned to a commit.
+`osl test`, `osl lsp check main.osl`, `osl compile main.osl -o main`, and `python3 scripts/check_conventions.py`. CI (`.github/workflows/test.yml`) runs all of them plus the smoke test, with OSL pinned to a commit.
+
+OSL style is enforced by the `lint` section of `opal.json`, which OSL's own linter applies in every check, test and compile. It makes comments (`OSL-COMMENT`) and top-level variables without a declared type (`OSL-UNTYPED-GLOBAL`) errors. `OSL-OBJECT-PARAM` and `OSL-LONG-FUNCTION` are warnings for now. The only comments allowed are the `// osl-disable-next-line` and `// osl-disable-file` directives, which can name the codes they turn off. `scripts/check_conventions.py` covers everything else: it rejects code comments in the Go and Python lines you add, and em dashes in the added lines of every text file, OSL included.
 
 ## Working here
 

@@ -10,5 +10,13 @@
     "routes": ["python3", "scripts/route_dump.py", "."],
     "smoke": ["python3", "scripts/e2e_smoke.py"],
     "conventions": ["python3", "scripts/check_conventions.py"]
+  },
+  "lint": {
+    "rules": {
+      "OSL-COMMENT": "error",
+      "OSL-UNTYPED-GLOBAL": "error",
+      "OSL-OBJECT-PARAM": "warning",
+      "OSL-LONG-FUNCTION": "warning"
+    }
   }
 }
