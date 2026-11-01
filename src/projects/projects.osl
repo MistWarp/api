@@ -1,3 +1,7 @@
+auto viewDedup = cache.new({capacity: 100000, ttl: 21600000})
+auto viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
+auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
+
 def removeString(array items, string value) array (
   array next = []
   for i items.len (

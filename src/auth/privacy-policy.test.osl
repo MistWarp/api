@@ -1,6 +1,6 @@
 import "std:testing"
 import "std:regex"
-import "./classroom-policy.osl"
+import "../classroom/classroom-policy.osl"
 import "./privacy-policy.osl"
 
 testing.assert(roturReportsMinor({valid: true, minor: true}), "rotur can report a minor")

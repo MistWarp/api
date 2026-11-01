@@ -1,0 +1,24 @@
+def registerBlobRoutes(*serve.Router app) (
+  app.GET("/thumbnails/:file", handleGetThumbnail)
+  app.GET("/blobs/assets/:name", handleGetAssetBlob)
+  app.GET("/blobs/backpack/:folder/:file", handleGetBackpackBlob)
+  app.GET("/blobs/projects/:id/project.json", handleGetProjectBlob)
+  app.GET("/blobs/evidence/:id/project.json", handleGetEvidenceJson)
+  app.GET("/blobs/evidence/:id/assets/:name", handleGetEvidenceAsset)
+  if r2Local (
+    app.static("/blobs", "./data/blobs")
+  )
+)
+
+def registerStorageUploadRoutes(*serve.Router uploads) (
+  uploads.POST("/me/backpack", serve.maxBodySize(maxBackpackRequestBytes), requireAuth, requireCurrentAgreement, handleCreateBackpackItem)
+)
+
+def registerStorageRoutes(*serve.Router api) (
+  api.GET("/me/backpack", requireAuth, handleGetMyBackpack)
+  api.PATCH("/me/backpack/:id", requireAuth, handleUpdateBackpackItem)
+  api.DELETE("/me/backpack/:id", requireAuth, handleDeleteBackpackItem)
+  api.POST("/me/backpack/delete", requireAuth, handleDeleteBackpackItems)
+
+  api.GET("/projects/:id/workspace.mwp", handleGetProjectWorkspace)
+)

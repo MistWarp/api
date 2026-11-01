@@ -1,3 +1,5 @@
+auto groupSnapshotCache = cache.new({capacity: 10000, ttl: 60000})
+
 def normalizeGroupTag(string value) string (
   string tag = value.toLower().strip()
   if tag.len < 1 or tag.len > 10 or !regex.match("^[a-z0-9]+$", tag) (

@@ -1,3 +1,6 @@
+auto userIdsCache = cache.new({capacity: 10000, ttl: 300000})
+auto identityRefreshCache = cache.new({capacity: 10000, ttl: 300000})
+
 def loadUserIds() object (
   auto res = readFile(userIdsFile)
   if !res.ok (

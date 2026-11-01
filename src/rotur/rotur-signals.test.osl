@@ -2,7 +2,6 @@ import "std:testing"
 import "std:json"
 import "std:cache"
 
-auto roturMessageSignals = cache.new({capacity: 100, ttl: 60000})
 
 def normalizeUsername(string name) string (
   return name.toLower().strip()

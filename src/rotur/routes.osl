@@ -1,0 +1,7 @@
+def registerRoturRoutes(*serve.Router api) (
+  api.GET("/perks", handleGetPerks)
+  api.POST("/perks/refresh", requireAuth, handleRefreshPerks)
+  api.POST("/perks/seen", requireAuth, handlePerksSeen)
+
+  api.POST("/rotur/webhook", handleRoturWebhook)
+)

@@ -1,0 +1,160 @@
+def dotenvValue(string name) string (
+  if !fs.exists(".env") (
+    return ""
+  )
+  string contents = fs.readFile(".env") catch (err) (
+    log "WARNING: could not read .env: " ++ err.toStr()
+    return ""
+  )
+  array lines = contents.split("\n")
+  for i lines.len (
+    string line = lines[i].toStr().strip()
+    if line.startsWith("export ") (
+      line = line.replace("export ", "").strip()
+    )
+    if line != "" and !line.startsWith("#") and line.contains("=") (
+      array parts = line.split("=")
+      string key = parts[1].toStr().strip()
+      if key == name (
+        string value = parts[2].toStr().strip()
+        for p parts.len (
+          if p > 2 (
+            value ++= "=" ++ parts[p].toStr()
+          )
+        )
+        return value.replace("\"", "").replace("'", "")
+      )
+    )
+  )
+  return ""
+)
+
+def envValue(string name) string (
+  string value = env.get(name, "") catch (err) (
+    log "WARNING: could not read " ++ name ++ " from the environment: " ++ err.toStr()
+    return ""
+  )
+  return value
+)
+
+// Configuration is looked up in this order:
+//   1. MISTWARP_<NAME> in the real environment (an explicit, app-specific override)
+//   2. this app's .env
+//   3. <NAME> in the real environment (for deployments that don't ship a .env)
+//
+// Inherited variables come last on purpose. The API is often started from a
+// shared shell that exports another project's variables (for example Rotur's
+// R2_ACCESS_KEY_ID and R2_PUBLIC_BASE), and those must not silently replace
+// this service's own configuration.
+def configValue(string name, string defaultValue) string (
+  string value = envValue("MISTWARP_" ++ name)
+  if value != "" (
+    return value
+  )
+  value = dotenvValue(name)
+  if value != "" (
+    return value
+  )
+  value = envValue(name)
+  if value != "" (
+    return value
+  )
+  return defaultValue
+)
+
+string projectsDir = "data/projects/"
+string indexFile = "data/projects-index.json"
+string assetsIndexFile = "data/assets-index.json"
+string usersDir = "data/users/"
+string sessionsDir = "data/sessions/"
+string commentsDir = "data/comments/"
+string reportsDir = "data/reports/"
+string reportsFile = reportsDir ++ "reports.json"
+string reportEvidenceDir = "data/report-evidence/"
+string newsFile = "data/news.json"
+string notificationsDir = "data/notifications/"
+string activityDir = "data/activity/"
+string userSettingsDir = "data/usersettings/"
+string tmpDir = "data/tmp/"
+string stagingDir = "data/staging/"
+string thumbnailsDir = "data/thumbnails/"
+string cardsDir = "data/cards/"
+string thumbnailSecretFile = "data/thumbnail-secret"
+string quotaDir = "data/quota/"
+string userIdsFile = "data/userids.json"
+string adminsFile = "data/admins.json"
+string bansFile = "data/bans.json"
+string shadowBansFile = "data/shadowbans.json"
+string agreementAcceptDir = "data/agreement-acceptances/"
+string extensionsDir = "data/extensions/"
+string releasesDir = "data/releases/"
+string extensionsFile = "data/extensions.json"
+string safetyDir = "data/safety/"
+string trashDir = "data/trash/"
+string gameSavesDir = "data/game-saves/"
+string gameSaveUsageDir = "data/game-save-usage/"
+string legacyAccountGameDataDir = "data/account-game-data/"
+string gameEntitlementsDir = "data/game-entitlements/"
+string gameInventoryDir = "data/game-inventory/"
+string backpackDir = "data/backpack/"
+
+number maxWorkspaceBytes = 536870912
+number maxWorkspaceFiles = 1000000
+number maxUploadChunkBytes = 8388608
+
+number maxProjectJsonBytes = 268435456
+number maxStoredProjectJsonBytes = 20971520
+number maxThumbBytes = 1048576
+number maxAssetCount = 2000
+number quotaWindowMs = 604800000
+number uploadDebounceMs = 604800000
+number maxProjectExtensions = 100
+number maxExtensionSourceBytes = 2097152
+number maxProjectExtensionBytes = 10485760
+
+string appURL = configValue("APP_URL", "https://api.mistwarp.org")
+string port = configValue("PORT", "5627")
+string roturAppKey = configValue("ROTUR_APP_KEY", "mistwarp")
+string r2Endpoint = configValue("R2_ENDPOINT", "")
+string r2Bucket = configValue("R2_BUCKET", "mistwarp")
+string r2AccessKeyId = configValue("R2_ACCESS_KEY_ID", "")
+string r2SecretAccessKey = configValue("R2_SECRET_ACCESS_KEY", "")
+string r2PublicBase = configValue("R2_PUBLIC_BASE", "")
+string giteaURL = configValue("GITEA_URL", "https://git.rotur.dev")
+string giteaAdminToken = configValue("GITEA_ADMIN_TOKEN", "")
+string githubOrg = configValue("GITHUB_ORG", "MistWarp")
+string githubToken = configValue("GITHUB_TOKEN", "")
+string editorOrigin = configValue("EDITOR_ORIGIN", "https://mistwarp.org")
+array adminUsers = configValue("ADMIN_USERS", "mist").toLower().split(",")
+string mistwarpRoturToken = configValue("MISTWARP_ROTUR_TOKEN", "")
+string mistwarpRoturUser = configValue("MISTWARP_ROTUR_USER", "")
+string roturBase = configValue("ROTUR_BASE", "https://api.rotur.dev")
+string commerceServiceKey = configValue("COMMERCE_SERVICE_KEY", "")
+string stripeSecretKey = configValue("STRIPE_SECRET_KEY", "")
+string stripeWebhookSecret = configValue("STRIPE_WEBHOOK_SECRET", "")
+string stripeClassroomPrice = configValue("STRIPE_CLASSROOM_PRICE", "")
+string stripeSeatPackPrice = configValue("STRIPE_SEAT_PACK_PRICE", "")
+string stripeClassroomPriceYearly = configValue("STRIPE_CLASSROOM_PRICE_YEARLY", "")
+string stripeSeatPackPriceYearly = configValue("STRIPE_SEAT_PACK_PRICE_YEARLY", "")
+string realtimeURL = configValue("REALTIME_URL", "wss://api.mistwarp.org/v1/connect")
+number historyMigrationWorkers = configValue("HISTORY_MIGRATION_WORKERS", "4").toNum().toInt()
+if historyMigrationWorkers < 1 (
+  historyMigrationWorkers = 1
+)
+if historyMigrationWorkers > 8 (
+  historyMigrationWorkers = 8
+)
+string purchaseKeysFile = "data/purchase-keys.json"
+
+boolean r2Local = r2Endpoint == "" or r2AccessKeyId == ""
+string localBlobsDir = "data/blobs/"
+
+*s3.Client r2Client = s3.new({
+  "endpoint": if r2Local then "http://127.0.0.1:9" else r2Endpoint,
+  "bucket": r2Bucket,
+  "access_key_id": r2AccessKeyId,
+  "secret_access_key": r2SecretAccessKey,
+  "region": "auto"
+})
+
+void fs.mkdir("data/", {recursive: true})

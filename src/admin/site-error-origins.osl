@@ -1,0 +1,7 @@
+array errorReportOrigins = []
+for entry in (editorOrigin ++ "," ++ configValue("ERROR_REPORT_ORIGINS", "")).split(",") (
+  string normalized = siteErrorOrigin(entry, "")
+  if normalized != "" (
+    errorReportOrigins.append(normalized)
+  )
+)

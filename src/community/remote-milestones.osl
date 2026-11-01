@@ -1,3 +1,5 @@
+auto remoteMilestoneChecks = cache.new({capacity: 10000, ttl: 10000})
+
 // Use existing public Rotur APIs. Counts, recipients and links never come
 // from the caller. This records milestones observed through MistWarp.
 def remoteMilestoneData(string path) object (

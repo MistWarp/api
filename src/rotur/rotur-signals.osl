@@ -1,3 +1,5 @@
+auto roturMessageSignals = cache.new({capacity: 10000, ttl: 60000})
+
 // Rotur's safety signals: https://docs.rotur.dev/build-an-app/safety
 //
 // MistWarp declares that people can talk to each other and can spend credits,

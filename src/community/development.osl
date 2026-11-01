@@ -1,3 +1,5 @@
+auto developmentCache = cache.new({capacity: 4, ttl: 300000})
+
 // MistWarp's own source lives in public GitHub repositories, so the work in
 // flight there is invisible from inside the site. This pulls the org's open
 // and recently merged pull requests into the community API and links them to
