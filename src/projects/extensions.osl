@@ -740,6 +740,14 @@ def setExtensionUrlBlocked(object policy, string extensionUrl, boolean blocked) 
   policy.blockedUrls = blockedUrls
 )
 
+def saveExtensionUrlPolicyLocked(string extensionUrl, boolean blocked) boolean (
+  sync.lock("extension-policy")
+  defer sync.unlock("extension-policy")
+  object policy = loadExtensionPolicy()
+  setExtensionUrlBlocked(policy, extensionUrl, blocked)
+  return saveExtensionPolicy(policy)
+)
+
 def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
   object body = requestJSON(c)
   if !body.contains("url") or !body.contains("blocked") (
@@ -756,9 +764,7 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
     c.badRequest("gallery extensions are always allowed")
     return
   )
-  object policy = loadExtensionPolicy()
-  setExtensionUrlBlocked(policy, extensionUrl, blocked)
-  if !saveExtensionPolicy(policy) (
+  if !saveExtensionUrlPolicyLocked(extensionUrl, blocked) (
     c.internalError("could not save URL policy")
     return
   )
