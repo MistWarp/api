@@ -49,7 +49,7 @@ def validGameSaveRequestId(string requestId) boolean (
   return true
 )
 
-def rejectGameDataCapability(*serve.Context c, object result) boolean (
+def rejectGameDataCapability(*serve.Context c, object res) boolean (
   return true
 )
 string gameInventoryDir = "data/game-inventory/"

@@ -1,9 +1,9 @@
 def loadReports() array (
-  auto result = readFile(reportsFile)
-  if !result.ok (
+  auto res = readFile(reportsFile)
+  if !res.ok (
     return []
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.reports.assert(array)
 )
 
@@ -188,23 +188,23 @@ def fileRoturReport(object report) boolean (
   if reporter != "" (
     request.reporter = roturUserRef(reporter)
   )
-  object result = roturApp("POST", "/reports", request)
-  if !result.ok and result.status == 400 and request.contains("reporter") (
+  object res = roturApp("POST", "/reports", request)
+  if !res.ok and res.status == 400 and request.contains("reporter") (
     // Only people who have used MistWarp through Rotur can be named.
     request.delete("reporter")
-    result = roturApp("POST", "/reports", request)
+    res = roturApp("POST", "/reports", request)
   )
   string state = "pending"
-  if result.ok (
+  if res.ok (
     state = "filed"
-  ) else if result.status == 400 or result.status == 404 or result.status == 409 (
+  ) else if res.status == 400 or res.status == 404 or res.status == 409 (
     state = "unfiled"
   )
   if state == "pending" (
-    return result.status != 0 and result.status < 500
+    return res.status != 0 and res.status < 500
   )
-  object stored = setReportRotur(report.id.toStr(), state, (result.data.report_id ?? "").toStr())
-  if state == "filed" and (result.data.escalated ?? false) == true (
+  object stored = setReportRotur(report.id.toStr(), state, (res.data.report_id ?? "").toStr())
+  if state == "filed" and (res.data.escalated ?? false) == true (
     void updateReport(report.id.toStr(), {roturEscalated: true, roturEscalatedAt: timestamp, roturEscalatedBy: ""})
   )
   // A moderator may have closed it while it was being filed.
@@ -411,10 +411,10 @@ def handleEscalateReport(*serve.Context c) (
   if note != "" (
     request.note = note
   )
-  object result = roturApp("POST", "/reports/" ++ url.escape(roturReportId) ++ "/escalate", request)
-  if !result.ok and !(result.status == 409 and (result.data.error ?? "").toStr().contains("already with Rotur")) (
-    string error = (result.data.error ?? "").toStr()
-    c.json(if result.status == 0 or result.status >= 500 then 502 else 409, {ok: false, error: if error == "" then "Rotur could not take this report" else error})
+  object res = roturApp("POST", "/reports/" ++ url.escape(roturReportId) ++ "/escalate", request)
+  if !res.ok and !(res.status == 409 and (res.data.error ?? "").toStr().contains("already with Rotur")) (
+    string roturError = (res.data.error ?? "").toStr()
+    c.json(if res.status == 0 or res.status >= 500 then 502 else 409, {ok: false, error: if roturError == "" then "Rotur could not take this report" else roturError})
     return
   )
   object fields = {roturEscalated: true, roturEscalatedAt: timestamp, roturEscalatedBy: contextString(c, "username")}
@@ -443,11 +443,11 @@ def syncEscalatedRoturReports() (
   if waiting.getKeys().len == 0 (
     return
   )
-  object result = roturApp("GET", "/reports?status=escalated", {})
-  if !result.ok (
+  object res = roturApp("GET", "/reports?status=escalated", {})
+  if !res.ok (
     return
   )
-  array remote = (result.data.reports ?? []).assertElse(array, [])
+  array remote = (res.data.reports ?? []).assertElse(array, [])
   for i remote.len (
     object entry = remote[i].assertElse(object, {})
     string remoteId = (entry.id ?? "").toStr()

@@ -46,11 +46,11 @@ def userHasAcceptedVersion(string username, number version) boolean (
   if !isSafePathPart(key) (
     return false
   )
-  auto result = readFile(acceptancePath(username))
-  if !result.ok (
+  auto res = readFile(acceptancePath(username))
+  if !res.ok (
     return false
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.version == version
 )
 
@@ -137,9 +137,9 @@ def handleAdminGetAgreement(*serve.Context c) (
     string name = files[i].toStr()
     if name.endsWith(".json") (
       totalUsers += 1
-      auto result = readFile(agreementAcceptDir ++ name)
-      if result.ok (
-        object acc = result.data.assert(object)
+      auto res = readFile(agreementAcceptDir ++ name)
+      if res.ok (
+        object acc = res.data.assert(object)
         if acc.version == version (
           acceptedCount += 1
         )

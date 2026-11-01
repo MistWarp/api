@@ -18,9 +18,9 @@ def handleGetSharedProjects(*serve.Context c) (
       )
     )
     if candidate (
-      auto result = loadProject(entry.id.toStr())
-      if result.ok (
-        object project = result.project.assert(object)
+      auto res = loadProject(entry.id.toStr())
+      if res.ok (
+        object project = res.project.assert(object)
         string role = projectRole(project, username)
         if role != "" and role != "owner" and role != "viewer" and canViewProject(project, c) (
           projects.append(projectResponse(project, c))
@@ -64,12 +64,12 @@ def canSaveLiveProject(object project,*serve.Context c) boolean (
 )
 
 def handleLiveCollaboration(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string username = normalizeUsername(contextString(c, "username"))
   string role = projectRole(project, username)
   if role == "" (

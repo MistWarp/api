@@ -3,11 +3,11 @@ def adminNotesFile() string (
 )
 
 def loadAdminNotes() object (
-  auto result = readFile(adminNotesFile())
-  if !result.ok (
+  auto res = readFile(adminNotesFile())
+  if !res.ok (
     return {notes: {}}
   )
-  object data = result.data.assertElse(object, {})
+  object data = res.data.assertElse(object, {})
   if !data.contains("notes") (
     data.notes = {}
   )

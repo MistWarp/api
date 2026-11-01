@@ -3,11 +3,11 @@ def safetyPath(string username) string (
 )
 
 def loadSafety(string username) object (
-  auto result = readFile(safetyPath(username))
-  if !result.ok (
+  auto res = readFile(safetyPath(username))
+  if !res.ok (
     return {blocked: [], muted: []}
   )
-  object safety = result.data.assert(object)
+  object safety = res.data.assert(object)
   if !safety.contains("blocked") or safety.blocked == null (
     safety.blocked = []
   )
@@ -85,9 +85,9 @@ def removeUserFromSafetyLists(string username) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") and name != key ++ ".json" (
-      auto result = readFile(safetyDir ++ name)
-      if result.ok (
-        object safety = result.data.assert(object)
+      auto res = readFile(safetyDir ++ name)
+      if res.ok (
+        object safety = res.data.assert(object)
         safety.blocked = removeString(safety.blocked.assert(array), key)
         safety.muted = removeString(safety.muted.assert(array), key)
         writeFile(safetyDir ++ name, safety)
@@ -102,9 +102,9 @@ def renameUserSafety(string oldKey, string newKey) boolean (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = readFile(safetyDir ++ name)
-      if result.ok (
-        object safety = result.data.assert(object)
+      auto res = readFile(safetyDir ++ name)
+      if res.ok (
+        object safety = res.data.assert(object)
         safety.blocked = replaceUserInArray(safety.blocked.assertElse(array, []), oldKey, newKey)
         safety.muted = replaceUserInArray(safety.muted.assertElse(array, []), oldKey, newKey)
         writeFile(safetyDir ++ name, safety)

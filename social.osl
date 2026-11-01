@@ -376,12 +376,12 @@ def handleUpdateProfile(*serve.Context c) (
   if body.contains("featuredProject") (
     string featured = body.featuredProject.toStr()
     if featured != profile.featuredProject.toStr() and featured != "" (
-      auto result = loadProject(featured)
-      if !result.ok (
+      auto res = loadProject(featured)
+      if !res.ok (
         c.badRequest("project not found")
         return
       )
-      object project = result.project.assert(object)
+      object project = res.project.assert(object)
       if projectRole(project, username) != "owner" (
         c.forbidden("not your project")
         return
@@ -563,12 +563,12 @@ def bumpProjectSaves(string projectId, number delta) number (
 )
 
 def handleSaveProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return
@@ -593,9 +593,9 @@ def handleUnsaveProject(*serve.Context c) (
   string pid = c.param("id")
   boolean had = lib.contains(pid)
   number saves = 0
-  auto result = loadProject(pid)
-  if result.ok (
-    saves = projectSaves(result.project.assert(object))
+  auto res = loadProject(pid)
+  if res.ok (
+    saves = projectSaves(res.project.assert(object))
   )
   if had (
     profile.library = removeString(lib, pid)

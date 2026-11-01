@@ -3,11 +3,11 @@ def loadNotifications(string username) array (
   if !isSafePathPart(key) (
     return []
   )
-  auto result = readFile(notificationsDir ++ key ++ ".json")
-  if !result.ok (
+  auto res = readFile(notificationsDir ++ key ++ ".json")
+  if !res.ok (
     return []
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.items.assert(array)
 )
 

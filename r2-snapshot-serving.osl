@@ -39,7 +39,7 @@ def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
   )
   // HTTP responses contain a raw binary string; asserting byte[] would decode it as base64.
   string snapshotBody = fetched.body ?? ""
-  if snapshotBody.len == 0 or snapshotBody.len > maxStoredProjectJsonBytes (
+  if snapshotBody.len == 0 or snapshotBody.toBytes().len > maxStoredProjectJsonBytes (
     log "WARNING: project snapshot fetch for " ++ key ++ " returned an empty or oversized body"
     c.json(502, {ok: false, error: "project snapshot unavailable"})
     return

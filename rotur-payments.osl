@@ -21,10 +21,10 @@ def mistwarpFeeAccount() string (
   if roturAppOwnerCache.has("owner") (
     return roturAppOwnerCache.get("owner").toStr()
   )
-  object result = roturApp("GET", "", {})
+  object res = roturApp("GET", "", {})
   string owner = ""
-  if result.ok (
-    owner = (result.data.owner.username ?? "").toStr()
+  if res.ok (
+    owner = (res.data.owner.username ?? "").toStr()
   )
   if owner != "" (
     roturAppOwnerCache.set("owner", owner)
@@ -48,22 +48,22 @@ def requestRoturPayment(string payer, string payee, array splits, number amount,
   if returnUrl != "" (
     body.return_url = returnUrl
   )
-  object result = roturApp("POST", "/payment-requests", body)
-  if !result.ok and (result.data.code ?? "").toStr() == "invalid_return_url" (
+  object res = roturApp("POST", "/payment-requests", body)
+  if !res.ok and (res.data.code ?? "").toStr() == "invalid_return_url" (
     // The editor's page isn't on one of the app's origins: no way back, but
     // the editor still sees the window close.
     body.delete("return_url")
-    result = roturApp("POST", "/payment-requests", body)
+    res = roturApp("POST", "/payment-requests", body)
   )
-  if !result.ok (
-    return {ok: false, error: (result.data.error ?? "payments are not available right now").toStr()}
+  if !res.ok (
+    return {ok: false, error: (res.data.error ?? "payments are not available right now").toStr()}
   )
-  number expiresAt = (result.data.expires_at ?? 0).toNum()
+  number expiresAt = (res.data.expires_at ?? 0).toNum()
   if expiresAt <= 0 (
     // Rotur's requests last 15 minutes.
     expiresAt = timestamp + 900000
   )
-  return {ok: true, id: result.data.id.toStr(), approveUrl: result.data.approve_url.toStr(), expiresAt: expiresAt}
+  return {ok: true, id: res.data.id.toStr(), approveUrl: res.data.approve_url.toStr(), expiresAt: expiresAt}
 )
 
 // Rotur refuses splits that pay the payer, as when someone buys a remix of
@@ -109,19 +109,19 @@ def samePurchase(object stored, object entry, string prefix, string key) boolean
 // Rotur's status for a payment request: "pending", "paid", "declined",
 // "cancelled" or "expired", or "" if it couldn't be read.
 def roturPaymentStatus(string requestId) string (
-  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
-  if !result.ok (
+  object res = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  if !res.ok (
     return ""
   )
-  return (result.data.status ?? "").toStr()
+  return (res.data.status ?? "").toStr()
 )
 
 def roturPaymentPaid(string requestId, string reference) boolean (
   if requestId == "" (
     return false
   )
-  object result = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
-  return result.ok and result.data.status == "paid" and (result.data.reference ?? "").toStr() == reference
+  object res = roturApp("GET", "/payment-requests/" ++ url.escape(requestId), {})
+  return res.ok and res.data.status == "paid" and (res.data.reference ?? "").toStr() == reference
 )
 
 // Starts a purchase: saves its key and asks Rotur for the payment. Returns what

@@ -1,9 +1,9 @@
 def loadAdmins() array (
-  auto result = readFile(adminsFile)
-  if !result.ok (
+  auto res = readFile(adminsFile)
+  if !res.ok (
     return []
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.admins.assert(array)
 )
 
@@ -22,11 +22,11 @@ def cachedAdmins() array (
 )
 
 def loadBans() object (
-  auto result = readFile(bansFile)
-  if !result.ok (
+  auto res = readFile(bansFile)
+  if !res.ok (
     return {bans: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def saveBans(object data) boolean (
@@ -137,11 +137,11 @@ def pushRoturBan(string username, string reason) string (
   if shown == "" or regex.match("^report r[A-Za-z0-9_-]+$", shown) (
     shown = "You broke MistWarp's community guidelines."
   )
-  object result = roturApp("PUT", roturBanPath(username), {reason: shown.trim(1, 300), note: "Banned in MistWarp"})
-  if result.ok (
+  object res = roturApp("PUT", roturBanPath(username), {reason: shown.trim(1, 300), note: "Banned in MistWarp"})
+  if res.ok (
     return "yes"
   )
-  if result.status == 400 or result.status == 404 (
+  if res.status == 400 or res.status == 404 (
     return "refused"
   )
   return ""
@@ -149,8 +149,8 @@ def pushRoturBan(string username, string reason) string (
 
 // Lifts the ban on Rotur. True once Rotur no longer has it.
 def liftRoturBan(string username) boolean (
-  object result = roturApp("DELETE", roturBanPath(username), {})
-  return result.ok or result.status == 404
+  object res = roturApp("DELETE", roturBanPath(username), {})
+  return res.ok or res.status == 404
 )
 
 // The bans file is changed between these two, after any calls to Rotur, and
@@ -216,15 +216,15 @@ def syncRoturBans() (
       liftedNow[key] = true
     )
   )
-  object result = roturApp("GET", "/bans", {})
-  if !result.ok (
+  object res = roturApp("GET", "/bans", {})
+  if !res.ok (
     return
   )
   // Rotur lists accounts it has banned itself with no username, so match on
   // the ID too.
   object remote = {}
   object remoteIds = {}
-  array listed = (result.data.bans ?? []).assertElse(array, [])
+  array listed = (res.data.bans ?? []).assertElse(array, [])
   for i listed.len (
     object ban = listed[i].assert(object)
     string userId = (ban.id ?? "").toStr()
@@ -476,9 +476,9 @@ def handleAdminStorageStats(*serve.Context c) (
 )
 
 def handleAdminSyncR2StorageStats(*serve.Context c) (
-  object result = syncR2StorageInventory(true)
-  if !result.ok (
-    c.json(502, {ok: false, error: result.error})
+  object res = syncR2StorageInventory(true)
+  if !res.ok (
+    c.json(502, {ok: false, error: res.error})
     return
   )
   c.json(200, {ok: true, storage: adminStorageStats()})
@@ -850,12 +850,12 @@ def handleReportAction(*serve.Context c) (
     hideProjectForModeration(hideResult.project.assert(object), hideReason, contextString(c, "username"))
   )
   if action == "unshare_project" (
-    auto result = loadProject(found.target.toStr())
-    if !result.ok (
+    auto res = loadProject(found.target.toStr())
+    if !res.ok (
       c.notFound("project not found")
       return
     )
-    object project = result.project.assert(object)
+    object project = res.project.assert(object)
     project.shared = false
     project.visibility = "private"
     project.viewKey = randomString(16)
