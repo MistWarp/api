@@ -15,7 +15,8 @@ export {
   unbanUser
 }
 
-*cache.Cache bansCache = cache.new({capacity: 2, ttl: 300000})
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
+auto bansCache = cache.new({capacity: 2, ttl: 300000})
 *cache.Cache adminsCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadAdmins() array (

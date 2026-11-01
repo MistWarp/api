@@ -3,7 +3,8 @@ export {
   nowSeconds
 }
 
-*cache.Cache developmentCache = cache.new({capacity: 4, ttl: 300000})
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
+auto developmentCache = cache.new({capacity: 4, ttl: 300000})
 
 number developmentOpenLimit = 100
 number developmentMergedLimit = 40
