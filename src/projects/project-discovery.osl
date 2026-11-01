@@ -1,0 +1,211 @@
+export {
+  sharedProjectsCache
+}
+
+auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
+
+def sharedIndexEntries() array (
+  if sharedProjectsCache.has("projects") (
+    return sharedProjectsCache.get("projects").assert(array)
+  )
+  array entries = []
+  array stored = projectSearchDocs.find({shared: true, visibility: "public"})
+  for i stored.len (
+    object entry = stored[i].assert(object)
+    if entry.shared == true (
+      entries.append(entry)
+    )
+  )
+  sharedProjectsCache.set("projects", entries)
+  return entries
+)
+
+def handleExplore(*serve.Context c) (
+  array entries = projectsVisibleTo(sharedIndexEntries(), c)
+
+  string q = (c.query("q") ?? "").toLower().strip()
+  string tag = (c.query("tag") ?? "").toLower().strip()
+  if q.startsWith("#") (
+    tag = normalizeTag(q)
+    q = ""
+  )
+  if tag != "" (
+    array filtered = []
+    for i entries.len (
+      object entry = entries[i]
+      array tags = []
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+      if tags.contains(tag) (
+        filtered.append(entry)
+      )
+    )
+    entries = filtered
+  ) else if q != "" (
+    array filtered = []
+    for i entries.len (
+      object entry = entries[i]
+      boolean matches = entry.title.toStr().toLower().contains(q) or entry.owner.toStr().toLower().contains(q)
+      if !matches and entry.contains("tags") and entry.tags != null (
+        array tags = entry.tags.assert(array)
+        for j tags.len (
+          if tags[j].toStr().contains(q) (
+            matches = true
+          )
+        )
+      )
+      if matches (
+        filtered.append(entry)
+      )
+    )
+    entries = filtered
+  )
+
+  string sort = if (c.query("sort") ?? "") == "" then "recent" else (c.query("sort") ?? "")
+  if q != "" and sort == "relevance" (
+    array ranked = []
+    for i entries.len (
+      object entry = entries[i]
+      array tags = []
+      if entry.contains("tags") and entry.tags != null (
+        tags = entry.tags.assert(array)
+      )
+      number score = projectSearchScore(entry.title.toStr(), entry.owner.toStr(), tags, q)
+      ranked.append({rank: searchRank(score, entry.weekViews.toNum()), entry: entry})
+    )
+    ranked.sortBy("rank", "descending")
+    array ordered = []
+    for i ranked.len (
+      object row = ranked[i].assert(object)
+      ordered.append(row.entry)
+    )
+    entries = ordered
+  ) else if sort == "loved" (
+    entries.sortBy("loveCount", "descending")
+  ) else if sort == "undiscovered" (
+    entries.sortBy("views", "ascending")
+  ) else if sort == "trending" (
+    entries.sortBy("weekViews", "descending")
+  ) else (
+    entries.sortBy("sharedAt", "descending")
+  )
+
+  number total = entries.len
+  number offset = clampNumber(c.queryInt("offset", 0), 0, total)
+  number limit = clampNumber(c.queryInt("limit", 16), 1, 50)
+
+  c.json(200, {ok: true, total: total, projects: paginate(entries, offset, limit)})
+)
+
+def handleRandomProject(*serve.Context c) (
+  object project = randomProjectEntry(projectsVisibleToEveryone(sharedIndexEntries()), (c.query("exclude") ?? "").strip())
+  if !project.contains("id") (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  c.json(200, {ok: true, project: project})
+)
+
+def handleRelatedProjects(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
+  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), (c.query("exclude") ?? "").split(","), limit)})
+)
+
+def handleFeaturedProject(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("weekViews", "descending")
+  array pool = []
+  for i entries.len (
+    object entry = entries[i]
+    if pool.len < 14 and entry.thumbUrl != null and entry.thumbUrl.toStr() != "" (
+      pool.append(entry)
+    )
+  )
+  if pool.len == 0 (
+    c.json(404, {ok: false, error: "no shared projects yet"})
+    return
+  )
+  number today = (timestamp / 86400000).toInt()
+  number idx = (today % pool.len) + 1
+  c.setHeader("Cache-Control", "public, max-age=300")
+  c.json(200, {ok: true, day: today, project: pool[idx]})
+)
+
+def sitemapUrl(string path) string (
+  return "<url><loc>" ++ xmlEscape(editorOrigin ++ path) ++ "</loc></url>"
+)
+
+def handleSitemap(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  entries.sortBy("views", "descending")
+  array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
+  string sitemapXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+  for i staticPaths.len (
+    sitemapXml ++= sitemapUrl(staticPaths[i].toStr())
+  )
+  object owners = {}
+  number count = 0
+  for i entries.len (
+    object entry = entries[i]
+    if count < 20000 (
+      string path = "/project/" ++ entry.id.toStr()
+      if entry.contains("vanitySlug") and entry.vanitySlug != null and entry.vanitySlug.toStr() != "" (
+        path = "/p/" ++ entry.vanitySlug.toStr()
+      )
+      sitemapXml ++= sitemapUrl(path)
+      count += 1
+      string ownerKey = normalizeUsername(entry.owner.toStr())
+      if ownerKey != "" and !owners.contains(ownerKey) (
+        owners[ownerKey] = true
+        sitemapXml ++= sitemapUrl("/users/" ++ entry.owner.toStr())
+        count += 1
+      )
+    )
+  )
+  sitemapXml ++= "</urlset>"
+  c.setHeader("Content-Type", "application/xml; charset=utf-8")
+  c.setHeader("Cache-Control", "public, max-age=3600")
+  c.text(200, sitemapXml)
+)
+
+def handleLeaderboard(*serve.Context c) (
+  array entries = projectsVisibleToEveryone(sharedIndexEntries())
+  object totals = {}
+  for i entries.len (
+    object entry = entries[i]
+    string owner = normalizeUsername(entry.owner.toStr())
+    if owner != "" (
+      if !totals.contains(owner) (
+        totals[owner] = {username: entry.owner, loves: 0, views: 0, projects: 0}
+      )
+      object row = totals[owner]
+      row.loves = row.loves.toNum() + entry.loveCount.toNum()
+      row.views = row.views.toNum() + entry.views.toNum()
+      row.projects = row.projects.toNum() + 1
+    )
+  )
+  array rows = []
+  array keys = totals.getKeys()
+  for i keys.len (
+    rows.append(totals[keys[i].toStr()])
+  )
+  string by = if (c.query("by") ?? "") == "" then "loves" else (c.query("by") ?? "")
+  if by != "views" (
+    by = "loves"
+  )
+  rows.sortBy(by, "descending")
+  number limit = clampNumber(c.queryInt("limit", 15), 1, 50)
+  array visible = []
+  for i rows.len (
+    if visible.len < limit (
+      object row = rows[i].assert(object)
+      if !usernameIsMinor(row.username.toStr()) (
+        visible.append(row)
+      )
+    )
+  )
+  c.json(200, {ok: true, by: by, users: visible})
+)
