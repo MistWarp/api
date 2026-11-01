@@ -1,0 +1,342 @@
+import "std:testing"
+import "std:db"
+import "std:fs"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:sync"
+import "std:thread"
+import "./project-refusal.osl"
+import "./project-request.osl"
+import "./project-lock.osl"
+import "./project-update-lookups.osl"
+
+string work = "/tmp/mistwarp-remix-test-" ++ timestamp.toStr()
+void fs.mkdir(work, {recursive: true})
+string tmpDir = work ++ "/"
+auto testDb = db.open(work ++ "/community.db")
+*db.Collection projectSearchDocs = testDb.collection("project_search")
+
+def lockIsFree(string lockName) boolean (
+  boolean free = thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+  return free
+)
+
+number parentBytes = 100
+number loads = 0
+number growOnLoad = 0
+number revokeViewOnLoad = 0
+number revokeRemixOnLoad = 0
+boolean growEveryLoad = false
+boolean roturStorage = true
+boolean storageFull = false
+boolean saveWorks = true
+boolean failing = false
+number holdsAsked = 0
+number ids = 0
+array holdLockFree = []
+array released = []
+array settled = []
+
+def resetScenario() (
+  parentBytes = 100
+  loads = 0
+  growOnLoad = 0
+  revokeViewOnLoad = 0
+  revokeRemixOnLoad = 0
+  growEveryLoad = false
+  roturStorage = true
+  storageFull = false
+  saveWorks = true
+  failing = false
+  holdsAsked = 0
+  holdLockFree = []
+  released = []
+  settled = []
+)
+
+def parentProject() object (
+  return {id: "p1", title: "Parent", jsonKey: "project-json/parent", storedJsonBytes: parentBytes, assets: [], gitBranch: "main"}
+)
+
+def loadProject(string id) object (
+  loads += 1
+  if growEveryLoad or loads == growOnLoad (
+    parentBytes += 1
+  )
+  if id != "p1" (
+    return {ok: false}
+  )
+  object project = parentProject()
+  project.viewRevoked = revokeViewOnLoad > 0 and loads >= revokeViewOnLoad
+  project.remixRevoked = revokeRemixOnLoad > 0 and loads >= revokeRemixOnLoad
+  return {ok: true, project: project}
+)
+
+def contextString(*serve.Context c, string key) string (
+  if key == "userId" (
+    return "u_ana"
+  )
+  if key == "username" (
+    return "ana"
+  )
+  return ""
+)
+def contextBool(*serve.Context c, string key) boolean (
+  return false
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def canViewProject(object project,*serve.Context c) boolean (
+  return project.viewRevoked != true
+)
+def canRemixProject(object project,*serve.Context c) boolean (
+  return project.remixRevoked != true
+)
+def canEditProject(object project,*serve.Context c) boolean (
+  return true
+)
+def projectRole(object project, string username) string (
+  return ""
+)
+def projectHiddenFrom(object project,*serve.Context c) boolean (
+  return false
+)
+def projectsVisibleTo(array entries,*serve.Context c) array (
+  return entries
+)
+def projectVisibility(object project) string (
+  return "public"
+)
+def indexEntryFromProject(object project) object (
+  return project
+)
+def mistwarpBenefitsForUserId(string userId) object (
+  return {maxProjects: 100, storageBytes: 1000000}
+)
+def mistwarpBenefitsForTier(string tier) object (
+  return {maxProjects: 100}
+)
+def discoverUserIdentityOutcome(string username) object (
+  return {id: "", outcome: "unavailable"}
+)
+def userIdForUsername(string username) string (
+  return ""
+)
+def vanityEligibility(object project) string (
+  return "unknown"
+)
+def canManageGroupTag(string tag,*serve.Context c) boolean (
+  return false
+)
+def groupTagOf(object value) string (
+  return ""
+)
+def generateId() string (
+  ids += 1
+  return "fork" ++ ids.toStr()
+)
+def randomString(number length) string (
+  return "r"
+)
+def ownedProjectSlotCount(string userId, string username) number (
+  return 0
+)
+def ensureProjectJsonSnapshot(object project) object (
+  return {ok: true, project: project}
+)
+def ensureProjectWorkspaceSnapshots(object project) object (
+  return {ok: true, project: project}
+)
+def projectHasWorkspace(object project) boolean (
+  return true
+)
+def writeForkHistoryArchive(object project, string branch, string forkId, string outputPath) object (
+  void fs.writeFile(outputPath, "history")
+  return {ok: true, manifest: {head: "h", branch: branch, commits: [], graph: {}}}
+)
+def projectSizeBytes(object project) number (
+  return 10
+)
+def loadAssetsIndex() object (
+  return {assets: {}}
+)
+def projectStorageSummary(object project, object assetSizes) object (
+  object jsonBlobs = {}
+  jsonBlobs[project.jsonKey.toStr()] = project.storedJsonBytes.toNum()
+  return {json: jsonBlobs, history: {}, assets: []}
+)
+def storageAllowance(number limit, number used, number currentBytes) number (
+  return limit - used
+)
+def ownerStorageBytes(string username) number (
+  return 0
+)
+def usesRoturStorage(string userId) boolean (
+  return roturStorage and userId != ""
+)
+def noStorageHold() object (
+  return {ok: true, reservations: []}
+)
+def storageHold(string userId, object changes, boolean enforce) object (
+  holdsAsked += 1
+  holdLockFree.append(lockIsFree("project-history-p1"))
+  if storageFull (
+    return {ok: false, refusal: {needed: 5}}
+  )
+  return {ok: true, reservations: [{id: "hold" ++ holdsAsked.toStr()}]}
+)
+def storageHoldRelease(string userId, object hold) (
+  array reservations = (hold.reservations ?? []).assertElse(array, [])
+  for i reservations.len (
+    released.append(reservations[i].assertElse(object, {}).id.toStr())
+  )
+)
+def storageSettle(string userId, object hold) (
+  array reservations = (hold.reservations ?? []).assertElse(array, [])
+  for i reservations.len (
+    settled.append(reservations[i].assertElse(object, {}).id.toStr())
+  )
+)
+def projectWorkspaceSnapshotKey(string hash) string (
+  return "project-workspaces/" ++ hash
+)
+def contentHash(any body) string (
+  return "hash"
+)
+def stageR2Blob(string key, any body, string contentType, string contentEncoding) boolean (
+  if failing (
+    throw "IOError: staging failed"
+  )
+  return true
+)
+def storedProjectExtensions(object project) array (
+  return []
+)
+def storeProjectExtensions(string projectId, array previousExtensions, array extensions, object sources) boolean (
+  return true
+)
+def saveProject(object project) boolean (
+  return saveWorks
+)
+def upsertIndexEntry(object project) boolean (
+  return true
+)
+def projectJsonUrlFor(object project) string (
+  return ""
+)
+def assetsBaseUrl() string (
+  return ""
+)
+def storageDetails(string username) object (
+  return {remaining: 0}
+)
+def storageFullResponse(*serve.Context c, object details, number neededBytes) (
+  c.json(413, {ok: false, code: "storage_full"})
+)
+def roturStorageFullResponse(*serve.Context c, object refusal) (
+  c.json(413, {ok: false, code: "storage_full", needed: refusal.needed})
+)
+
+import "./project-remix.osl"
+
+*serve.Router app = serve.new()
+app.POST("/projects/:id/remix", handleRemixProject)
+app.GET("/ready", def(*serve.Context c) -> (
+  c.json(200, {ok: true})
+))
+def runApp() (
+  app.run(":18362")
+)
+thread.new(runApp)
+string base = "http://127.0.0.1:18362"
+for i 50 (
+  if requests.get(base ++ "/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+
+def remix(string id) object (
+  object resp = requests.post(base ++ "/projects/" ++ id ++ "/remix", {body: "{}"}).unwrapOr({status: 0, body: "{}"})
+  object body = json.parse((resp.body ?? "{}").toStr(), {type: "object"}).unwrapOr({})
+  wait 0.2
+  return {status: resp.status.toNum(), body: body}
+)
+
+object made = remix("p1")
+testing.assert(made.status == 201 and made.body.id == "fork1", "a remix of an unchanged project is created")
+testing.assert(holdsAsked == 1 and holdLockFree == [true], "the storage hold is taken once, with the save lock free")
+testing.assert(released.len == 0 and settled == ["hold1"], "a successful remix keeps its hold and settles it")
+
+resetScenario()
+growOnLoad = 2
+made = remix("p1")
+testing.assert(made.status == 201 and holdsAsked == 2 and holdLockFree == [true, true], "a project that changed before the lock is held again on the next try")
+testing.assert(released == ["hold1"] and settled == ["hold2"], "the stale hold is released and the fresh one kept")
+
+resetScenario()
+growEveryLoad = true
+made = remix("p1")
+testing.assert(made.status == 409 and made.body.code == "project_changed", "a project that keeps changing is refused after three tries")
+testing.assert(holdsAsked == 3 and released == ["hold1", "hold2", "hold3"] and settled.len == 0, "every try's hold is released")
+
+resetScenario()
+storageFull = true
+made = remix("p1")
+testing.assert(made.status == 413 and made.body.code == "storage_full" and made.body.needed == 5, "full Rotur storage refuses the remix")
+testing.assert(holdsAsked == 1 and settled.len == 0, "the refusal is not asked for again under the lock")
+
+resetScenario()
+saveWorks = false
+made = remix("p1")
+testing.assert(made.status == 500 and made.body.code == "save_failed", "a fork that can't be saved fails")
+testing.assert(released == ["hold1"] and settled.len == 0, "a failed save releases the hold")
+
+resetScenario()
+failing = true
+made = remix("p1")
+testing.assert(made.status >= 500 and released == ["hold1"] and settled.len == 0, "a remix that throws releases its hold")
+testing.assert(lockIsFree("project-history-p1"), "a remix that throws releases the save lock")
+
+resetScenario()
+roturStorage = false
+made = remix("p1")
+testing.assert(made.status == 201 and holdsAsked == 0 and loads == 1, "accounts outside Rotur storage remix in one pass without a hold")
+
+resetScenario()
+revokeViewOnLoad = 2
+made = remix("p1")
+testing.assert(made.status == 404 and holdsAsked == 1, "a parent made private before the lock is not remixed")
+testing.assert(released == ["hold1"] and settled.len == 0, "the hold for a parent made private is released")
+
+resetScenario()
+revokeRemixOnLoad = 2
+made = remix("p1")
+testing.assert(made.status == 403 and holdsAsked == 1, "a parent closed to remixes before the lock is not remixed")
+testing.assert(released == ["hold1"] and settled.len == 0, "the hold for a parent closed to remixes is released")
+
+resetScenario()
+made = remix("missing")
+testing.assert(made.status == 404 and holdsAsked == 0, "a missing project is not found")
+
+resetScenario()
+object copied = forkProjectFor(parentProject(), "teacher", "u_teacher", mistwarpBenefitsForUserId("u_teacher"), "Copy", "", false)
+wait 0.2
+testing.assert(copied.ok == true and copied.project.title == "Copy" and copied.project.owner == "teacher", "a classroom copy is forked directly")
+testing.assert(holdsAsked == 1 and released.len == 0 and settled == ["hold1"], "a classroom copy keeps and settles its hold")
+
+resetScenario()
+saveWorks = false
+copied = forkProjectFor(parentProject(), "teacher", "u_teacher", mistwarpBenefitsForUserId("u_teacher"), "Copy", "", false)
+testing.assert(copied.code == "save_failed" and released == ["hold1"], "a classroom copy that can't be saved releases its hold")
+
+testDb.close()
+void fs.remove(work, {force: true})
