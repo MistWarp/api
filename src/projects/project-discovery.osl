@@ -2,7 +2,7 @@ export {
   sharedProjectsCache
 }
 
-auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
+*cache.Cache sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
 
 def sharedIndexEntries() array (
   if sharedProjectsCache.has("projects") (

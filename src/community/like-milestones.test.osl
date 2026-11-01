@@ -13,7 +13,7 @@ import "./like-milestone-policy.osl"
 import "./like-milestones.osl"
 
 string path = "/tmp/mistwarp-milestones-" ++ timestamp.toStr() ++ ".db"
-auto milestoneDb = db.open(path)
+*db.DB milestoneDb = db.open(path)
 *db.Collection likeMilestoneDocs = milestoneDb.collection("milestones")
 string roturBase = "http://127.0.0.1:18342"
 array sent = []

@@ -42,8 +42,8 @@ export {
 string ledgerSecret = configValue("ROTUR_SERVICE_SECRET", "")
 string ledgerBaseSetting = configValue("ROTUR_LOCAL_API_URL", "")
 number ledgerPendingTtlSeconds = 604800
-auto projectStorageSummaries = cache.new({capacity: 200000, ttl: 86400000})
-auto storageSettleQueued = cache.new({capacity: 100000, ttl: 60000})
+*cache.Cache projectStorageSummaries = cache.new({capacity: 200000, ttl: 86400000})
+*cache.Cache storageSettleQueued = cache.new({capacity: 100000, ttl: 60000})
 
 def ledgerBase() string (
   string base = ledgerBaseSetting.strip()

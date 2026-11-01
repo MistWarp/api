@@ -1,5 +1,5 @@
-auto viewDedup = cache.new({capacity: 100000, ttl: 21600000})
-auto viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
+*cache.Cache viewDedup = cache.new({capacity: 100000, ttl: 21600000})
+*cache.Cache viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
 def handlePublishProject(*serve.Context c) (
   auto res = loadProject(c.param("id"))
   if !res.ok (

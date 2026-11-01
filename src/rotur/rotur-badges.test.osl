@@ -38,7 +38,7 @@ def readFile(string path) object (
 import "./rotur-badges.osl"
 
 // Days in a row count up; a missed day starts again; the same day counts once.
-timestamp = (86400000 * 100) + 5000
+number timestamp = (86400000 * 100) + 5000
 recordCreatingDay("sam")
 recordCreatingDay("sam")
 timestamp = (86400000 * 101) + 5000

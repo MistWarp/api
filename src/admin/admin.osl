@@ -15,8 +15,8 @@ export {
   unbanUser
 }
 
-auto bansCache = cache.new({capacity: 2, ttl: 300000})
-auto adminsCache = cache.new({capacity: 2, ttl: 300000})
+*cache.Cache bansCache = cache.new({capacity: 2, ttl: 300000})
+*cache.Cache adminsCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadAdmins() array (
   auto res = readFile(adminsFile)

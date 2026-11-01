@@ -14,7 +14,7 @@ import "./project-update-lookups.osl"
 string work = "/tmp/mistwarp-remix-test-" ++ timestamp.toStr()
 void fs.mkdir(work, {recursive: true})
 string tmpDir = work ++ "/"
-auto testDb = db.open(work ++ "/community.db")
+*db.DB testDb = db.open(work ++ "/community.db")
 *db.Collection projectSearchDocs = testDb.collection("project_search")
 
 def lockIsFree(string lockName) boolean (

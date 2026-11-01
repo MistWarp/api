@@ -24,7 +24,7 @@ void fs.mkdir(trashDir, {recursive: true})
 void fs.mkdir(quotaDir, {recursive: true})
 number quotaWindowMs = 604800000
 
-auto testDb = db.open(work ++ "/community.db")
+*db.DB testDb = db.open(work ++ "/community.db")
 *db.Collection projectSearchDocs = testDb.collection("project_search")
 *db.Collection releaseDocs = testDb.collection("releases")
 
@@ -239,8 +239,8 @@ thread.new(def() -> (
   fakeLedger.run("127.0.0.1:18761")
 ))
 wait 0.3
-ledgerSecret = secret
-ledgerBaseSetting = "http://127.0.0.1:18761/"
+string ledgerSecret = secret
+string ledgerBaseSetting = "http://127.0.0.1:18761/"
 testing.assert(ledgerReady(), "with the secret and a loopback address, storage counts")
 
 def countedFor(string userId) object (

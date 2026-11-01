@@ -56,7 +56,7 @@ def completeRoturPayment(string reference, string requestId) (
 )
 
 import "./rotur-webhooks.osl"
-roturWebhooksFile = dir ++ "rotur-webhooks.json"
+string roturWebhooksFile = dir ++ "rotur-webhooks.json"
 
 // Signatures are checked the way Rotur makes them.
 string body = "{\"id\":\"evt_1\",\"type\":\"user.left\",\"data\":{\"user_id\":\"u-sam\"}}"

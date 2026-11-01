@@ -13,7 +13,7 @@ import "./classroom-policy.osl"
 import "./classroom-switch-policy.osl"
 
 string dbPath = "/tmp/mistwarp-classroom-switch-" ++ timestamp.toStr() ++ ".db"
-auto testDb = db.open(dbPath)
+*db.DB testDb = db.open(dbPath)
 *db.Collection classDocs = testDb.collection("classes")
 number maxStandardRequestBytes = 200
 
@@ -227,7 +227,7 @@ testing.assert(!classroomSessionAllowed("mwc_other"), "sessions of other student
 testing.assert(!classroomSessionAllowed("mwc_off"), "sessions of disabled students are refused")
 testing.assert(!classroomSessionAllowed("mwc_missing"), "sessions of deleted students are refused")
 
-classroomEnabled = true
+boolean classroomEnabled = true
 testing.assert(call("GET", "/v1/classroom", "teen", "").status == 200, "with the flag on, every teacher can use Classroom")
 testing.assert(call("GET", "/v1/classroom/join/OTHER234", "", "").status == 200, "with the flag on, every join code works")
 testing.assert(call("POST", "/v1/classroom/login", "", "{\"studentId\":\"mwc_other\"}").status == 200, "with the flag on, every student can sign in")

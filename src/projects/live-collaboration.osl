@@ -4,8 +4,8 @@ export {}
 
 
 // Temporary approvals are leases; explicitly shared Editor access persists.
-auto liveEditorSessions = cache.new({capacity: 10000, ttl: 90000})
-auto projectEditorPresence = cache.new({capacity: 10000, ttl: 90000})
+*cache.Cache liveEditorSessions = cache.new({capacity: 10000, ttl: 90000})
+*cache.Cache projectEditorPresence = cache.new({capacity: 10000, ttl: 90000})
 
 def handleGetSharedProjects(*serve.Context c) (
   string username = normalizeUsername(contextString(c, "username"))

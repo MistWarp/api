@@ -12,7 +12,7 @@ export {
   viewerSeesShadowBanned
 }
 
-auto shadowBansCache = cache.new({capacity: 2, ttl: 300000})
+*cache.Cache shadowBansCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadShadowBans() object (
   auto res = readFile(shadowBansFile)
