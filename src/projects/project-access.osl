@@ -1,0 +1,179 @@
+export {
+  bannedKeyMatches,
+  canEditProject,
+  canViewProject,
+  canViewProjectJson,
+  ensureViewKey,
+  projectJsonAccess,
+  projectMustStayPrivate,
+  projectRole,
+  removeString
+}
+
+def removeString(array items, string value) array (
+  array next = []
+  for i items.len (
+    if items[i].toStr() != value (
+      next.append(items[i])
+    )
+  )
+  return next
+)
+
+def projectRole(object project, string username) string (
+  string userId = userIdForUsername(username)
+  string ownerId = ""
+  if project.contains("ownerId") and project.ownerId != null (
+    ownerId = project.ownerId.toStr()
+  )
+  if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+    return "owner"
+  )
+  if project.contains("collaborators") and project.collaborators != null (
+    array collaborators = project.collaborators.assert(array)
+    for i collaborators.len (
+      object collaborator = collaborators[i].assert(object)
+      string collaboratorId = ""
+      if collaborator.contains("userId") and collaborator.userId != null (
+        collaboratorId = collaborator.userId.toStr()
+      )
+      if identityMatches(collaboratorId, collaborator.username.toStr(), userId, username) (
+        return collaborator.role.toStr()
+      )
+    )
+  )
+  string teacherRole = classTeacherRoleForProject(project, userId)
+  if teacherRole != "" (
+    return teacherRole
+  )
+  return presentationViewerRole(project, userId)
+)
+
+def canEditProject(object project,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  if contextBool(c, "isAdmin") (
+    return true
+  )
+  if canManageGroupContent(project, c) (
+    return true
+  )
+  string role = projectRole(project, contextString(c, "username"))
+  return role == "owner" or role == "maintainer"
+)
+
+def canViewForkProject(object project,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  if project.contains("remixParent") and project.remixParent != null and project.remixParent.toStr() != "" (
+    auto parentResult = loadProject(project.remixParent.toStr())
+    if parentResult.ok and canEditProject(parentResult.project.assert(object), c) (
+      return true
+    )
+  )
+  if project.contains("remixRoot") and project.remixRoot != null and project.remixRoot.toStr() != "" (
+    string rootId = project.remixRoot.toStr()
+    if !project.contains("remixParent") or project.remixParent.toStr() != rootId (
+      auto rootResult = loadProject(rootId)
+      if rootResult.ok and canEditProject(rootResult.project.assert(object), c) (
+        return true
+      )
+    )
+  )
+  return false
+)
+
+def canViewProject(object project,*serve.Context c) boolean (
+  if projectHiddenFrom(project, c) (
+    return false
+  )
+  if projectIsViewable(project) (
+    return true
+  )
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+    return true
+  )
+  if projectRole(project, contextString(c, "username")) != "" (
+    return true
+  )
+  if canViewForkProject(project, c) (
+    return true
+  )
+  return canEditProject(project, c)
+)
+
+def canViewProjectJson(object project,*serve.Context c) boolean (
+  if projectHiddenFrom(project, c) (
+    return bannedKeyMatches(project, (c.query("k") ?? ""))
+  )
+  if contextBool(c, "authenticated") and projectRole(project, contextString(c, "username")) == "viewer" (
+    return true
+  )
+  if canSaveLiveProject(project, c) return true
+  if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+    return true
+  )
+  if canViewForkProject(project, c) (
+    return true
+  )
+  if project.shared == true or projectVisibility(project) == "unlisted" (
+    return true
+  )
+  string k = projectViewKey(project)
+  if k != "" and (c.query("k") ?? "") == k (
+    return true
+  )
+  return canEditProject(project, c)
+)
+
+def ensureViewKey(object project) (
+  if project.shared != true and projectViewKey(project) == "" (
+    project.viewKey = randomString(16)
+    saveProject(project)
+  )
+  boolean ownerBanned = projectOwnerBanned(project)
+  if ownerBanned and bannedViewKey(project) == "" (
+    project.bannedViewKey = randomString(16)
+    saveProject(project)
+  ) else if !ownerBanned and bannedViewKey(project) != "" (
+    // A later ban gets a new key.
+    project.delete("bannedViewKey")
+    saveProject(project)
+  )
+)
+
+// While the owner is banned, a project's JSON is only served with this key,
+// which only admins are handed (the player fetches the JSON signed out).
+// Older view keys stop working until the ban is lifted.
+def bannedViewKey(object project) string (
+  return (project.bannedViewKey ?? "").toStr()
+)
+
+def bannedKeyMatches(object project, string key) boolean (
+  return bannedViewKey(project) != "" and key == bannedViewKey(project)
+)
+
+def projectMustStayPrivate(object project) boolean (
+  return isStudentUserId((project.ownerId ?? "").toStr())
+)
+
+def projectJsonAccess(object project,*serve.Context c) object (
+  string key = ""
+  if project.shared != true and projectViewKey(project) != "" (
+    key = projectViewKey(project)
+    if validPreviewKey(project.id.toStr(), (c.query("k") ?? "")) (
+      key = (c.query("k") ?? "")
+    )
+  )
+  boolean allowed = true
+  if projectOwnerBanned(project) (
+    if allowed and contextBool(c, "isAdmin") (
+      key = bannedViewKey(project)
+    ) else (
+      allowed = false
+    )
+  )
+  return {allowed: allowed, key: key}
+)

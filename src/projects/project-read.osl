@@ -1,0 +1,87 @@
+def handleGetProject(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  ensureViewKey(project)
+  maybeFlushProject(project)
+  object response = projectResponse(project, c)
+  object jsonAccess = projectJsonAccess(project, c)
+  if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and jsonAccess.allowed == true (
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    if release.len > 0 and release.contains("jsonUrl") (
+      response.projectJsonUrl = keyedJsonUrl(release.jsonUrl.toStr(), jsonAccess)
+      response.releaseVersion = release.version
+      response.releaseChannel = release.channel
+    )
+  )
+  c.json(200, {ok: true, project: response})
+)
+
+def handleGetEditorProject(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if projectHiddenFrom(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if !canSeeInsideProject(project, c) (
+    c.forbidden("see inside is disabled for this project")
+    return
+  )
+  ensureViewKey(project)
+  maybeFlushProject(project)
+  c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def handleGetProjectTrustedExtensions(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProjectJson(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  array jsonUrls = [projectJsonBaseUrl(project)]
+  if project.shared == true and (project.publicRelease ?? "").toStr() != "" (
+    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    if (release.jsonUrl ?? "").toStr() != "" (
+      jsonUrls.append(release.jsonUrl.toStr())
+    )
+  )
+  c.json(200, {ok: true, trustedExtensions: projectTrustedExtensions(project), jsonUrls: jsonUrls})
+)
+
+def handleGetProjectJson(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canViewProjectJson(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  if serveNotModified(c, project) (
+    return
+  )
+  serveProjectJson(c, project)
+)
