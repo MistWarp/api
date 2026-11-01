@@ -238,6 +238,7 @@ object editorSessionMints = {}
 
 def editorSessionMintAllowed(string userId) boolean (
   sync.lock("editor-session-mints")
+  defer sync.unlock("editor-session-mints")
   object entry = (editorSessionMints[userId] ?? {}).assertElse(object, {})
   if timestamp - (entry.since ?? 0).toNum() > 3600000 (
     entry = {since: timestamp, count: 0}
@@ -247,7 +248,6 @@ def editorSessionMintAllowed(string userId) boolean (
     entry.count = entry.count.toNum() + 1
   )
   editorSessionMints[userId] = entry
-  sync.unlock("editor-session-mints")
   return allowed
 )
 

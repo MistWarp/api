@@ -38,6 +38,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   string playtimeId = projectId ++ ":" ++ identityKey
   string playtimeLock = "playtime:" ++ playtimeId
   sync.lock(playtimeLock)
+  defer sync.unlock(playtimeLock)
   object playtime = (playtimeDocs.findById(playtimeId) ?? {})
   if playtime.len == 0 (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
@@ -48,7 +49,6 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   )
   playtime.projectId = projectId
   boolean saved = putDocument(playtimeDocs, playtimeId, playtime)
-  sync.unlock(playtimeLock)
   return saved
 )
 
@@ -62,17 +62,7 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
   if credited > 0 (
     string identityKey = session.identityKey.assertElse(string, playtimeIdentity(username))
     string playtimeId = projectId ++ ":" ++ identityKey
-    string playtimeLock = "playtime:" ++ playtimeId
-    sync.lock(playtimeLock)
-    object playtime = (playtimeDocs.findById(playtimeId) ?? {})
-    if playtime.len == 0 (
-      playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
-    )
-    playtime.duration = playtime.duration.toNum() + credited
-    playtime.updated = timestamp
-    playtime.projectId = projectId
-    putDocument(playtimeDocs, playtimeId, playtime)
-    sync.unlock(playtimeLock)
+    creditPlaytimeLocked(playtimeId, projectId, username, userId, credited)
   )
   if finished (
     void playtimeSessionDocs.deleteOne({_id: sessionId})
@@ -82,6 +72,20 @@ def creditPlaytimeSession(string projectId, string username, string sessionId, b
     putDocument(playtimeSessionDocs, sessionId, session)
   )
   return credited
+)
+
+def creditPlaytimeLocked(string playtimeId, string projectId, string username, string userId, number credited) (
+  string playtimeLock = "playtime:" ++ playtimeId
+  sync.lock(playtimeLock)
+  defer sync.unlock(playtimeLock)
+  object playtime = (playtimeDocs.findById(playtimeId) ?? {})
+  if playtime.len == 0 (
+    playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
+  )
+  playtime.duration = playtime.duration.toNum() + credited
+  playtime.updated = timestamp
+  playtime.projectId = projectId
+  putDocument(playtimeDocs, playtimeId, playtime)
 )
 
 def recordProjectDiagnostic(string projectId, boolean authenticated, string username, string sessionId, object body) object (
@@ -128,6 +132,7 @@ def recordProjectDiagnostic(string projectId, boolean authenticated, string user
   object item = {_id: diagnosticId, projectId: projectId, type: eventType, duration: duration, loadMs: loadMs, error: errorText, device: device, created: timestamp}
   string diagnosticLock = "project-diagnostics-" ++ projectId
   sync.lock(diagnosticLock)
+  defer sync.unlock(diagnosticLock)
   void diagnosticDocs.insertOne(item)
   array storedDiagnostics = diagnosticDocs.where("projectId", "==", projectId).sort("created", "desc").limit(550).all()
   for i storedDiagnostics.len (
@@ -135,7 +140,6 @@ def recordProjectDiagnostic(string projectId, boolean authenticated, string user
       void diagnosticDocs.deleteOne({_id: storedDiagnostics[i]["_id"]})
     )
   )
-  sync.unlock(diagnosticLock)
   return {ok: true}
 )
 

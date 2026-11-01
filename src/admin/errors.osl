@@ -273,11 +273,15 @@ def handleRecordSiteError(*serve.Context c) (
     created: timestamp,
     resolved: false
   })
-  sync.lock("site-errors")
-  void errorDocs.insertOne(entry)
-  sync.unlock("site-errors")
+  insertSiteErrorLocked(entry)
   void sweepSiteErrors()
   c.json(201, {ok: true})
+)
+
+def insertSiteErrorLocked(object entry) (
+  sync.lock("site-errors")
+  defer sync.unlock("site-errors")
+  void errorDocs.insertOne(entry)
 )
 
 def handleAdminGetErrors(*serve.Context c) (
@@ -317,16 +321,11 @@ def handleAdminResolveSiteError(*serve.Context c) (
   if body.contains("resolved") (
     resolved = body.resolved == true
   )
-  sync.lock("site-errors")
-  object entry = (errorDocs.findById(id) ?? {})
-  if entry.len == 0 (
-    sync.unlock("site-errors")
-    c.notFound("error not found")
+  object res = resolveSiteErrorLocked(c, id, resolved)
+  if res.found != true (
     return
   )
-  entry.resolved = resolved
-  boolean saved = putDocument(errorDocs, id, entry)
-  sync.unlock("site-errors")
+  boolean saved = res.saved == true
   if saved (
     c.json(200, {ok: true})
     return
@@ -334,14 +333,27 @@ def handleAdminResolveSiteError(*serve.Context c) (
   c.internalError("could not update error")
 )
 
+def resolveSiteErrorLocked(*serve.Context c, string id, boolean resolved) object (
+  sync.lock("site-errors")
+  defer sync.unlock("site-errors")
+  object entry = (errorDocs.findById(id) ?? {})
+  if entry.len == 0 (
+    c.notFound("error not found")
+    return {found: false}
+  )
+  entry.resolved = resolved
+  boolean saved = putDocument(errorDocs, id, entry)
+  return {found: true, saved: saved}
+)
+
 def deleteAllSiteErrors() number (
   sync.lock("site-errors")
+  defer sync.unlock("site-errors")
   array entries = errorDocs.all()
   for i entries.len (
     object entry = entries[i].assert(object)
     void errorDocs.deleteOne({_id: entry["_id"]})
   )
-  sync.unlock("site-errors")
   return entries.len
 )
 

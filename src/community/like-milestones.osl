@@ -15,6 +15,7 @@ def notifyLikeMilestones(string target, string kind, string contentId, number be
   string key = kind ++ ":" ++ contentId ++ ":" ++ recipient
   string lockName = "like-milestone:" ++ key
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object previous = (likeMilestoneDocs.findById(key) ?? {})
   number notifiedThrough = (previous.notifiedThrough ?? 0).toNum()
   array milestones = crossedLikeMilestones(before, after, notifiedThrough)
@@ -37,5 +38,4 @@ def notifyLikeMilestones(string target, string kind, string contentId, number be
       addNotification(target, "", notifType, payload)
     )
   )
-  sync.unlock(lockName)
 )

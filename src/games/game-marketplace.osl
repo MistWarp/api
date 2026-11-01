@@ -70,6 +70,7 @@ def grantGameProductItem(object project, object product, string userId, string p
 def saveGameProductEntitlement(string projectId, string userId, string productId, string paymentId) boolean (
   string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object entitlements = loadGameEntitlements(projectId, userId)
   object products = entitlements.products.assertElse(object, {})
   products[productId] = {purchasedAt: timestamp, paymentId: paymentId}
@@ -77,7 +78,6 @@ def saveGameProductEntitlement(string projectId, string userId, string productId
   entitlements.updatedAt = timestamp
   void fs.mkdir(gameEntitlementsDir ++ projectId ++ "/", {recursive: true})
   boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
-  sync.unlock(lockName)
   return saved
 )
 
@@ -87,6 +87,7 @@ def removeGameProductEntitlement(string projectId, string userId, string product
   )
   string lockName = "game-entitlement-" ++ projectId ++ "-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object entitlements = loadGameEntitlements(projectId, userId)
   object products = entitlements.products.assertElse(object, {})
   products.delete(productId)
@@ -94,7 +95,6 @@ def removeGameProductEntitlement(string projectId, string userId, string product
   entitlements.updatedAt = timestamp
   void fs.mkdir(gameEntitlementsDir ++ projectId ++ "/", {recursive: true})
   boolean saved = writeFile(gameEntitlementPath(projectId, userId), entitlements)
-  sync.unlock(lockName)
   return saved
 )
 
@@ -191,16 +191,15 @@ def handleGameProductIntent(*serve.Context c) (
 // gets here first.
 def completeGameProductPurchase(string key) object (
   sync.lock("purchase:" ++ key)
+  defer sync.unlock("purchase:" ++ key)
   object entry = paidPurchase(key)
   auto loaded = loadProject((entry.projectId ?? "").toStr())
   if !entry.contains("paid") or !loaded.ok (
-    sync.unlock("purchase:" ++ key)
     return {ok: false}
   )
   object project = loaded.project.assert(object)
   object found = findGameProduct(project, entry.productId.toStr())
   if !found.ok (
-    sync.unlock("purchase:" ++ key)
     return {ok: false}
   )
   object product = found.product.assert(object)
@@ -209,7 +208,6 @@ def completeGameProductPurchase(string key) object (
   string paymentId = entry.requestId.toStr()
   if !ownsGameProduct(project.id.toStr(), userId, product.id.toStr()) (
     if !saveGameProductEntitlement(project.id.toStr(), userId, product.id.toStr(), paymentId) or !grantGameProductItem(project, product, userId, paymentId) (
-      sync.unlock("purchase:" ++ key)
       return {ok: false, error: "failed to grant game product"}
     )
     // What the buyer paid, which a refund pays back.
@@ -218,7 +216,6 @@ def completeGameProductPurchase(string key) object (
     addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: paid})
   )
   forgetPurchase(key)
-  sync.unlock("purchase:" ++ key)
   return {ok: true, project: project, product: product}
 )
 

@@ -149,16 +149,15 @@ def grantInventoryItem(string userId, object project, object item, number amount
   string globalId = globalGameItemId(project.id.toStr(), item.id.toStr())
   string lockName = "game-inventory-" ++ gameDataUserKey(userId)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object inventory = loadGameInventory(userId)
   object items = inventory.items.assertElse(object, {})
   object owned = if items.contains(globalId) then items[globalId].assertElse(object, {}) else {}
   array grantIds = owned.grantIds.assertElse(array, [])
   if owned.lastGrantId.toStr() == sourceId or grantIds.contains(sourceId) (
-    sync.unlock(lockName)
     return {ok: true, replayed: true, item: owned}
   )
   if !items.contains(globalId) and items.getKeys().len >= mistwarpBenefitsForUserId(userId).maxGameInventoryItems.toNum() (
-    sync.unlock(lockName)
     return {ok: false, error: "portable item inventory limit reached"}
   )
   number current = owned.quantity.toNum().toInt()
@@ -184,7 +183,6 @@ def grantInventoryItem(string userId, object project, object item, number amount
   inventory.revision = inventory.revision.toNum().toInt() + 1
   inventory.updatedAt = timestamp
   boolean saved = writeFile(gameInventoryPath(userId), inventory)
-  sync.unlock(lockName)
   if !saved (
     return {ok: false, error: "failed to store portable item"}
   )

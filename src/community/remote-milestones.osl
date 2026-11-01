@@ -25,6 +25,7 @@ def milestoneDataFromUrl(string endpoint) object (
 def observeRemoteMilestone(string target, string kind, string id, number count, string path, object extra) (
   string key = "observed:" ++ kind ++ ":" ++ id
   sync.lock(key)
+  defer sync.unlock(key)
   object previous = (likeMilestoneDocs.findById(key) ?? {})
   // First observation establishes a baseline; an exact milestone still counts.
   number before = count - 1
@@ -33,7 +34,6 @@ def observeRemoteMilestone(string target, string kind, string id, number count, 
   )
   notifyLikeMilestones(target, kind, id, before, count, path, extra)
   putDocument(likeMilestoneDocs, key, {count: count})
-  sync.unlock(key)
 )
 
 def syncFollowerMilestones(string username) (

@@ -144,6 +144,7 @@ def startPurchase(string prefix, object entry, string payer, string payee, array
   // the open request and make two.
   string lock = "purchase-start:" ++ prefix ++ json.stringify(entry)
   sync.lock(lock)
+  defer sync.unlock(lock)
   object open = loadPurchaseKeys().keys.assertElse(object, {})
   array openKeys = open.getKeys()
   for i openKeys.len (
@@ -152,29 +153,30 @@ def startPurchase(string prefix, object entry, string payer, string payee, array
     // Only a request still waiting for an answer is reused. A declined one
     // would leave the person unable to try again until it expired.
     if samePurchase(stored, entry, prefix, openKey) and roturPaymentStatus(stored.requestId.toStr()) == "pending" (
-      sync.unlock(lock)
       return {ok: true, key: openKey, requestId: stored.requestId.toStr(), approveUrl: stored.approveUrl.toStr(), splits: shares}
     )
   )
   string key = prefix ++ randomString(16)
   object request = requestRoturPayment(payer, payee, shares, amount, note, key, returnUrl)
   if !request.ok (
-    sync.unlock(lock)
     return request
   )
   entry.requestId = request.id
   entry.approveUrl = request.approveUrl
   entry.expiresAt = request.expiresAt
   entry.at = timestamp
+  storePurchaseKeyLocked(key, entry)
+  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl, splits: shares}
+)
+
+def storePurchaseKeyLocked(string key, object entry) (
   sync.lock("purchase-keys")
+  defer sync.unlock("purchase-keys")
   object store = prunePurchaseKeys(loadPurchaseKeys())
   object keys = store.keys
   keys[key] = entry
   store.keys = keys
   savePurchaseKeys(store)
-  sync.unlock("purchase-keys")
-  sync.unlock(lock)
-  return {ok: true, key: key, requestId: request.id, approveUrl: request.approveUrl, splits: shares}
 )
 
 // The purchase key's entry, once it has been paid, else {}. Rotur is asked if
@@ -194,34 +196,40 @@ def paidPurchase(string key) object (
 
 def forgetPurchase(string key) (
   sync.lock("purchase-keys")
+  defer sync.unlock("purchase-keys")
   object store = loadPurchaseKeys()
   object keys = store.keys
   keys.delete(key)
   store.keys = keys
   savePurchaseKeys(store)
-  sync.unlock("purchase-keys")
 )
 
 // payment.completed: mark the purchase paid, and deliver what needs no more
 // from the buyer. Donations and refunds wait for the comment or the revoke
 // that started them.
 def completeRoturPayment(string reference, string requestId) (
+  if !markPurchasePaidLocked(reference, requestId) (
+    return
+  )
+  if reference.startsWith("mwbuy_") (
+    completeProjectPurchase(reference)
+  ) else if reference.startsWith("mwgame_") (
+    completeGameProductPurchase(reference)
+  )
+)
+
+def markPurchasePaidLocked(string reference, string requestId) boolean (
   sync.lock("purchase-keys")
+  defer sync.unlock("purchase-keys")
   object store = loadPurchaseKeys()
   object keys = store.keys
   if !keys.contains(reference) or (keys[reference].requestId ?? "").toStr() != requestId (
-    sync.unlock("purchase-keys")
-    return
+    return false
   )
   object entry = keys[reference].assert(object)
   entry.paid = true
   keys[reference] = entry
   store.keys = keys
   savePurchaseKeys(store)
-  sync.unlock("purchase-keys")
-  if reference.startsWith("mwbuy_") (
-    completeProjectPurchase(reference)
-  ) else if reference.startsWith("mwgame_") (
-    completeGameProductPurchase(reference)
-  )
+  return true
 )

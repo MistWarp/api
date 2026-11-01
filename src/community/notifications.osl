@@ -369,6 +369,7 @@ def addNotification(string target, string actor, string notifType, object extra)
   )
 
   sync.lock("notifications:" ++ targetKey)
+  defer sync.unlock("notifications:" ++ targetKey)
   array items = loadNotifications(targetKey)
   array next = [item]
   number kept = 1
@@ -395,13 +396,18 @@ def addNotification(string target, string actor, string notifType, object extra)
     )
   )
   saveNotifications(targetKey, next)
-  sync.unlock("notifications:" ++ targetKey)
 )
 
 def handleGetNotifications(*serve.Context c) (
   string username = contextString(c, "username")
   syncFollowerMilestones(username)
+  array local = refreshNotificationActorsLocked(username)
+  c.json(200, {ok: true, notifications: local})
+)
+
+def refreshNotificationActorsLocked(string username) array (
   sync.lock("notifications:" ++ normalizeUsername(username))
+  defer sync.unlock("notifications:" ++ normalizeUsername(username))
   array local = loadNotifications(username)
   boolean changed = false
   for i local.len (
@@ -421,19 +427,22 @@ def handleGetNotifications(*serve.Context c) (
   if changed (
     saveNotifications(username, local)
   )
-  sync.unlock("notifications:" ++ normalizeUsername(username))
-  c.json(200, {ok: true, notifications: local})
+  return local
 )
 
 def handleReadNotifications(*serve.Context c) (
   string username = contextString(c, "username")
+  markNotificationsReadLocked(username)
+  c.json(200, {ok: true})
+)
+
+def markNotificationsReadLocked(string username) (
   sync.lock("notifications:" ++ normalizeUsername(username))
+  defer sync.unlock("notifications:" ++ normalizeUsername(username))
   array items = loadNotifications(username)
   for i items.len (
     object item = items[i]
     item.read = true
   )
   saveNotifications(username, items)
-  sync.unlock("notifications:" ++ normalizeUsername(username))
-  c.json(200, {ok: true})
 )

@@ -462,8 +462,8 @@ def handleDeleteNews(*serve.Context c) (
 def handleReactNews(*serve.Context c) (
   string lockName = "news-reactions"
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   handleReactNewsLocked(c)
-  sync.unlock(lockName)
 )
 
 def handleReactNewsLocked(*serve.Context c) (

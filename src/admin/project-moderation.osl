@@ -116,6 +116,7 @@ def commentsVisibleTo(array comments,*serve.Context c) array (
 
 def renameShadowBannedUser(string oldKey, string newKey) (
   sync.lock("shadowbans")
+  defer sync.unlock("shadowbans")
   object data = loadShadowBans()
   object users = data.users.assertElse(object, {})
   if users.contains(oldKey) (
@@ -126,11 +127,11 @@ def renameShadowBannedUser(string oldKey, string newKey) (
     data.users = users
     saveShadowBans(data)
   )
-  sync.unlock("shadowbans")
 )
 
 def removeShadowBannedUser(string key) (
   sync.lock("shadowbans")
+  defer sync.unlock("shadowbans")
   object data = loadShadowBans()
   object users = data.users.assertElse(object, {})
   if users.contains(key) (
@@ -138,7 +139,6 @@ def removeShadowBannedUser(string key) (
     data.users = users
     saveShadowBans(data)
   )
-  sync.unlock("shadowbans")
 )
 
 def removeShadowBannedProject(string projectId) (
@@ -146,12 +146,12 @@ def removeShadowBannedProject(string projectId) (
     return
   )
   sync.lock("shadowbans")
+  defer sync.unlock("shadowbans")
   object data = loadShadowBans()
   object projects = data.projects.assertElse(object, {})
   projects.delete(projectId)
   data.projects = projects
   saveShadowBans(data)
-  sync.unlock("shadowbans")
 )
 
 def moderationReason(object body) string (
@@ -178,18 +178,23 @@ def handleShadowBanUser(*serve.Context c) (
     c.badRequest("cannot shadow ban an admin")
     return
   )
-  sync.lock("shadowbans")
-  object data = loadShadowBans()
-  object users = data.users.assertElse(object, {})
-  users[key] = {username: key, userId: userIdForUsername(name), reason: reason, by: contextString(c, "username"), created: timestamp}
-  data.users = users
-  boolean saved = saveShadowBans(data)
-  sync.unlock("shadowbans")
+  boolean saved = saveShadowBanUserLocked(c, key, name, reason)
   if !saved (
     c.internalError("could not save the shadow ban")
     return
   )
   c.json(200, {ok: true, shadowBan: shadowBanEntryFor(name)})
+)
+
+def saveShadowBanUserLocked(*serve.Context c, string key, string name, string reason) boolean (
+  sync.lock("shadowbans")
+  defer sync.unlock("shadowbans")
+  object data = loadShadowBans()
+  object users = data.users.assertElse(object, {})
+  users[key] = {username: key, userId: userIdForUsername(name), reason: reason, by: contextString(c, "username"), created: timestamp}
+  data.users = users
+  boolean saved = saveShadowBans(data)
+  return saved
 )
 
 def handleLiftShadowBan(*serve.Context c) (
@@ -254,18 +259,23 @@ def handleShadowBanProject(*serve.Context c) (
     return
   )
   string id = project.id.toStr()
-  sync.lock("shadowbans")
-  object data = loadShadowBans()
-  object projects = data.projects.assertElse(object, {})
-  projects[id] = {reason: reason, by: contextString(c, "username"), created: timestamp, title: project.title, owner: project.owner}
-  data.projects = projects
-  boolean saved = saveShadowBans(data)
-  sync.unlock("shadowbans")
+  boolean saved = saveShadowBanProjectLocked(c, project, id, reason)
   if !saved (
     c.internalError("could not save the shadow ban")
     return
   )
   c.json(200, {ok: true, project: projectResponse(project, c)})
+)
+
+def saveShadowBanProjectLocked(*serve.Context c, object project, string id, string reason) boolean (
+  sync.lock("shadowbans")
+  defer sync.unlock("shadowbans")
+  object data = loadShadowBans()
+  object projects = data.projects.assertElse(object, {})
+  projects[id] = {reason: reason, by: contextString(c, "username"), created: timestamp, title: project.title, owner: project.owner}
+  data.projects = projects
+  boolean saved = saveShadowBans(data)
+  return saved
 )
 
 def handleLiftProjectShadowBan(*serve.Context c) (
