@@ -3,11 +3,40 @@
   "version": "1.0.0",
   "main": "main.osl",
   "scripts": {
-    "dev": ["osl", "run", "main.osl"],
-    "test": ["osl", "test"],
-    "check": ["osl", "lsp", "check", "main.osl"],
-    "build": ["osl", "compile", "main.osl", "-o", "main"],
-    "routes": ["python3", "scripts/route_dump.py", "."],
-    "smoke": ["python3", "scripts/e2e_smoke.py"]
+    "dev": [
+      "osl",
+      "run",
+      "main.osl"
+    ],
+    "test": [
+      "osl",
+      "test"
+    ],
+    "check": [
+      "osl",
+      "lsp",
+      "check",
+      "main.osl"
+    ],
+    "build": [
+      "osl",
+      "compile",
+      "main.osl",
+      "-o",
+      "main"
+    ],
+    "routes": [
+      "python3",
+      "scripts/route_dump.py",
+      "."
+    ],
+    "smoke": [
+      "python3",
+      "scripts/e2e_smoke.py"
+    ],
+    "conventions": [
+      "python3",
+      "scripts/check_conventions.py"
+    ]
   }
 }

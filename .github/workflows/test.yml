@@ -10,6 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Conventions
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check_conventions.py --base=origin/${{ github.base_ref }}
 
       - uses: actions/setup-go@v5
         with:
