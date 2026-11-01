@@ -118,29 +118,101 @@ def handleGetRemixTree(*serve.Context c) (
   c.json(200, {ok: true, root: rootId, nodes: nodes})
 )
 
-def handleRemixProject(*serve.Context c) (
-  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
-  runLocked(projectSaveLock(c.param("id")), def() -> (
-    handleRemixProjectLocked(c, benefits)
-  ))
+type ForkRequest (
+  string id = ""
+  string username = ""
+  string userId = ""
+  object benefits = {}
+  string title = ""
+  string branch = ""
+  boolean enforceLimits = true
 )
 
-def handleRemixProjectLocked(*serve.Context c, object benefits) (
+type PreparedFork (
+  object failure = {}
+  object parent = {}
+  byte[] history = []
+  object manifest = {}
+  object hold = {}
+  string holdKey = ""
+)
+
+type ForkOutcome (
+  Refusal refusal = Refusal()
+  object forked = {}
+  string keptHoldKey = ""
+)
+
+def handleRemixProject(*serve.Context c) (
+  object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
+  object body = requestJSON(c)
+  string forkId = generateId()
+  for attempt 3 (
+    if !remixProjectOnce(c, body, benefits, forkId) (
+      return
+    )
+  )
+  c.json(409, {ok: false, code: "project_changed", error: "The project changed while it was being remixed. Try again."})
+)
+
+def remixProjectOnce(*serve.Context c, object body, object benefits, string forkId) boolean (
+  UpdateLookups lookups = UpdateLookups()
+  ForkOutcome outcome = ForkOutcome()
+  defer (
+    releaseStorageHolds(lookups, outcome.keptHoldKey)
+  )
+  holdRemixStorage(c, body, benefits, forkId, lookups)
+  lookups.replay = true
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    remixProjectLocked(c, body, benefits, forkId, lookups, outcome)
+  ))
+  if lookups.missed (
+    return true
+  )
+  finishRemix(c, outcome)
+  return false
+)
+
+def holdRemixStorage(*serve.Context c, object body, object benefits, string forkId, UpdateLookups lookups) (
+  if !usesRoturStorage(contextString(c, "userId")) (
+    return
+  )
   auto res = loadProject(c.param("id"))
   if !res.ok (
-    c.notFound("project not found")
     return
   )
   object parent = res.project.assert(object)
-  if !canViewProject(parent, c) (
-    c.notFound("project not found")
+  if isRefused(remixRefusal(c, parent)) (
     return
+  )
+  void prepareFork(parent, remixForkRequest(c, body, benefits, forkId, parent), lookups)
+)
+
+def remixProjectLocked(*serve.Context c, object body, object benefits, string forkId, UpdateLookups lookups, ForkOutcome outcome) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    outcome.refusal = refuse(404, "project not found")
+    return
+  )
+  object parent = res.project.assert(object)
+  outcome.refusal = remixRefusal(c, parent)
+  if isRefused(outcome.refusal) (
+    return
+  )
+  forkProjectWith(parent, remixForkRequest(c, body, benefits, forkId, parent), lookups, outcome)
+)
+
+def remixRefusal(*serve.Context c, object parent) Refusal (
+  if !canViewProject(parent, c) (
+    return refuse(404, "project not found")
   )
   if !canRemixProject(parent, c) (
-    c.forbidden("this project cannot be remixed")
-    return
+    return refuse(403, "this project cannot be remixed")
   )
-  object body = requestJSON(c)
+  return noRefusal()
+)
+
+def remixForkRequest(*serve.Context c, object body, object benefits, string forkId, object parent) ForkRequest (
   string forkTitle = parent.title.toStr() ++ " fork"
   if body.contains("title") and body.title != null and body.title.toStr().strip() != "" (
     forkTitle = body.title.toStr().strip().trim(1, 100)
@@ -149,12 +221,18 @@ def handleRemixProjectLocked(*serve.Context c, object benefits) (
   if body.contains("branch") and body.branch != null (
     forkBranch = body.branch.toStr().strip()
   )
-  object forked = forkProjectFor(parent, contextString(c, "username"), contextString(c, "userId"), benefits, forkTitle, forkBranch, !contextBool(c, "isAdmin"))
-  if forked.ok != true (
-    forkFailureResponse(c, forked)
+  return ForkRequest{id: forkId, username: contextString(c, "username"), userId: contextString(c, "userId"), benefits: benefits, title: forkTitle, branch: forkBranch, enforceLimits: !contextBool(c, "isAdmin")}
+)
+
+def finishRemix(*serve.Context c, ForkOutcome outcome) (
+  if refused(c, outcome.refusal) (
     return
   )
-  object project = forked.project.assert(object)
+  if outcome.forked.ok != true (
+    forkFailureResponse(c, outcome.forked)
+    return
+  )
+  object project = outcome.forked.project.assert(object)
   c.json(201, {
     ok: true,
     id: project.id,
@@ -177,78 +255,111 @@ def forkFailureResponse(*serve.Context c, object forked) (
 )
 
 def forkProjectFor(object source, string username, string userId, object benefits, string forkTitle, string requestedBranch, boolean enforceLimits) object (
+  UpdateLookups lookups = UpdateLookups()
+  ForkOutcome outcome = ForkOutcome()
+  defer (
+    releaseStorageHolds(lookups, outcome.keptHoldKey)
+  )
+  ForkRequest request = ForkRequest{id: generateId(), username: username, userId: userId, benefits: benefits, title: forkTitle, branch: requestedBranch, enforceLimits: enforceLimits}
+  forkProjectWith(source, request, lookups, outcome)
+  return outcome.forked
+)
+
+def forkProjectWith(object source, ForkRequest request, UpdateLookups lookups, ForkOutcome outcome) (
+  PreparedFork prepared = prepareFork(source, request, lookups)
+  if lookups.missed or prepared.failure.len > 0 (
+    outcome.forked = prepared.failure
+    return
+  )
+  outcome.forked = createFork(prepared, request, outcome)
+)
+
+def forkRefused(number status, string code, string message) PreparedFork (
+  return PreparedFork{failure: {ok: false, status: status, code: code, error: message}}
+)
+
+def forkStorageChanges(object parent, string forkId, number historyBytes) object (
+  // The fork shares the original's project.json and assets, and brings
+  // its own history.
+  object forkSummary = projectStorageSummary(parent, loadAssetsIndex().assets.assertElse(object, {}))
+  object forkHistoryBlob = {}
+  forkHistoryBlob["incoming:" ++ forkId] = historyBytes
+  forkSummary.history = forkHistoryBlob
+  object saving = {}
+  saving[forkId] = forkSummary
+  return {projects: saving}
+)
+
+def prepareFork(object source, ForkRequest request, UpdateLookups lookups) PreparedFork (
   object parent = source
-  number projectLimit = benefits.maxProjects.toNum()
-  if enforceLimits and ownedProjectSlotCount(userId, username) >= projectLimit (
-    return {ok: false, status: 413, code: "project_limit", error: "project limit reached; delete a trashed project permanently or upgrade your plan"}
+  number projectLimit = request.benefits.maxProjects.toNum()
+  if request.enforceLimits and ownedProjectSlotCount(request.userId, request.username) >= projectLimit (
+    return forkRefused(413, "project_limit", "project limit reached; delete a trashed project permanently or upgrade your plan")
   )
   string forkBranch = "main"
   if parent.contains("gitBranch") and parent.gitBranch != null and parent.gitBranch.toStr() != "" (
     forkBranch = parent.gitBranch.toStr()
   )
-  if requestedBranch != "" (
-    forkBranch = requestedBranch
+  if request.branch != "" (
+    forkBranch = request.branch
   )
   if forkBranch.len > 100 or forkBranch.contains(" ") or forkBranch.contains("\\") or forkBranch.contains("..") or forkBranch.startsWith("/") (
-    return {ok: false, status: 400, code: "invalid_branch", error: "invalid branch name"}
+    return forkRefused(400, "invalid_branch", "invalid branch name")
   )
 
   object jsonSnapshot = ensureProjectJsonSnapshot(parent)
   if !jsonSnapshot.ok (
-    return {ok: false, status: 500, code: "copy_failed", error: "could not copy the original project, try again"}
+    return forkRefused(500, "copy_failed", "could not copy the original project, try again")
   )
   parent = jsonSnapshot.project.assert(object)
   object workspaceSnapshots = ensureProjectWorkspaceSnapshots(parent)
   if !workspaceSnapshots.ok (
-    return {ok: false, status: 500, code: "history_failed", error: "could not prepare the original project history, try again"}
+    return forkRefused(500, "history_failed", "could not prepare the original project history, try again")
   )
   parent = workspaceSnapshots.project.assert(object)
 
   if !projectHasWorkspace(parent) (
-    return {ok: false, status: 409, code: "history_unavailable", error: "prepare the original project's history before remixing"}
+    return forkRefused(409, "history_unavailable", "prepare the original project's history before remixing")
   )
-  string id = generateId()
-  string sourcePath = cachedProjectWorkspacePath(parent)
-  string forkPath = tmpDir ++ id ++ ".fork.mwp"
-  string parentId = parent.id.toStr()
-  string forkJson = gitinspection.ForkHistoryArchiveJSON(sourcePath, forkPath, forkBranch, id, parentId)
-  auto parsedFork = json.parse(forkJson, {type: "object"})
-  if parsedFork.isErr() or parsedFork.unwrap().assert(object).ok != true (
-    void fs.remove(forkPath)
-    return {ok: false, status: 409, code: "history_unavailable", error: "requested branch history is unavailable"}
+  string forkPath = tmpDir ++ request.id ++ ".fork.mwp"
+  object archived = writeForkHistoryArchive(parent, forkBranch, request.id, forkPath)
+  if archived.ok != true (
+    return forkRefused(409, "history_unavailable", "requested branch history is unavailable")
   )
-  object forkHistory = parsedFork.unwrap().assert(object).manifest.assert(object)
+  object forkHistory = archived.manifest.assert(object)
   byte[] forkBody = fs.readFileBytes(forkPath).unwrapOr("".toBytes())
   void fs.remove(forkPath)
+  PreparedFork prepared = PreparedFork{parent: parent, history: forkBody, manifest: forkHistory, hold: noStorageHold()}
   number forkBytes = projectSizeBytes(parent) + forkBody.len
-  object hold = noStorageHold()
-  if usesRoturStorage(userId) (
-    // The fork shares the original's project.json and assets, and brings
-    // its own history.
-    object forkSummary = projectStorageSummary(parent, loadAssetsIndex().assets.assertElse(object, {}))
-    object forkHistoryBlob = {}
-    forkHistoryBlob["incoming:" ++ id] = forkBody.len
-    forkSummary.history = forkHistoryBlob
-    object saving = {}
-    saving[id] = forkSummary
-    hold = storageHold(userId, {projects: saving}, enforceLimits)
-    if hold.ok != true (
-      return {ok: false, status: 413, code: "storage_full", error: "storage full", refusal: hold.refusal}
+  if usesRoturStorage(request.userId) (
+    object changes = forkStorageChanges(parent, request.id, forkBody.len)
+    prepared.holdKey = storageHoldKey(request.userId, changes, request.enforceLimits)
+    prepared.hold = lookupStorageHold(lookups, request.userId, changes, request.enforceLimits)
+    if prepared.hold.ok != true (
+      prepared.failure = {ok: false, status: 413, code: "storage_full", error: "storage full", refusal: prepared.hold.refusal}
     )
-  ) else if enforceLimits and storageAllowance(benefits.storageBytes.toNum(), ownerStorageBytes(username), 0) < forkBytes (
-    return {ok: false, status: 413, code: "storage_full", error: "storage full", username: username, bytes: forkBytes}
+  ) else if request.enforceLimits and storageAllowance(request.benefits.storageBytes.toNum(), ownerStorageBytes(request.username), 0) < forkBytes (
+    prepared.failure = {ok: false, status: 413, code: "storage_full", error: "storage full", username: request.username, bytes: forkBytes}
   )
+  return prepared
+)
+
+def createFork(PreparedFork prepared, ForkRequest request, ForkOutcome outcome) object (
+  object parent = prepared.parent
+  string id = request.id
+  string parentId = parent.id.toStr()
+  byte[] forkBody = prepared.history
+  object forkHistory = prepared.manifest
   string forkKey = projectWorkspaceSnapshotKey(contentHash(forkBody))
   if !stageR2Blob(forkKey, forkBody, "application/x-mistwarp-project", "") (
-    storageHoldRelease(userId, hold)
     return {ok: false, status: 500, code: "store_failed", error: "could not store fork history"}
   )
 
   object project = {
     id: id,
-    owner: username,
-    ownerId: userId,
-    title: forkTitle,
+    owner: request.username,
+    ownerId: request.userId,
+    title: request.title,
     description: "",
     instructions: "",
     repo: null,
@@ -295,16 +406,15 @@ def forkProjectFor(object source, string username, string userId, object benefit
   )
 
   if !storeProjectExtensions(id, [], storedProjectExtensions(project), {}) (
-    storageHoldRelease(userId, hold)
     return {ok: false, status: 500, code: "extensions_failed", error: "could not index project extensions"}
   )
   if !saveProject(project) (
-    storageHoldRelease(userId, hold)
     return {ok: false, status: 500, code: "save_failed", error: "could not save fork"}
   )
+  outcome.keptHoldKey = prepared.holdKey
   upsertIndexEntry(project)
-  if usesRoturStorage(userId) (
-    thread.new(storageSettle, userId, hold)
+  if usesRoturStorage(request.userId) (
+    thread.new(storageSettle, request.userId, prepared.hold)
   )
   return {ok: true, project: project}
 )

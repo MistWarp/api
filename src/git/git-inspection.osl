@@ -2,7 +2,8 @@ export {
   cachedProjectWorkspacePath,
   projectRecordsCommit,
   projectWorkspaceFingerprint,
-  validGitObjectId
+  validGitObjectId,
+  writeForkHistoryArchive
 }
 
 auto gitInspectionPruneCache = cache.new({capacity: 4, ttl: 300000})
@@ -70,6 +71,16 @@ def cachedProjectWorkspacePath(object project) string (
     )
   )
   return cachedPath
+)
+
+def writeForkHistoryArchive(object project, string branch, string forkId, string outputPath) object (
+  string forkJson = gitinspection.ForkHistoryArchiveJSON(cachedProjectWorkspacePath(project), outputPath, branch, forkId, project.id.toStr())
+  auto parsed = json.parse(forkJson, {type: "object"})
+  if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
+    void fs.remove(outputPath)
+    return {ok: false}
+  )
+  return {ok: true, manifest: parsed.unwrap().assert(object).manifest.assert(object)}
 )
 
 def validGitObjectId(string oid) boolean (

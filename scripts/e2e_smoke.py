@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import uuid
@@ -29,12 +30,13 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena"}
 FULL_STORAGE = {"u_dee"}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
+SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
@@ -60,6 +62,9 @@ def default_sb3():
 
 
 class FakeRotur(BaseHTTPRequestHandler):
+    slow_ledger_reads = 0
+    slow_ledger_guard = threading.Lock()
+
     def answer(self, status, payload):
         body = json.dumps(payload).encode()
         self.send_response(status)
@@ -70,6 +75,12 @@ class FakeRotur(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/v2/storage-ledger/objects"):
+            if urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("user_id", [""])[0] in SLOW_LEDGER_USERS:
+                with FakeRotur.slow_ledger_guard:
+                    FakeRotur.slow_ledger_reads += 1
+                time.sleep(ROTUR_DELAY)
+                with FakeRotur.slow_ledger_guard:
+                    FakeRotur.slow_ledger_reads -= 1
             self.answer(200, {"objects": []})
             return
         if self.path.startswith("/v2/storage-ledger/"):
@@ -802,6 +813,37 @@ def slow_rotur_flow(server, step, steps, ids):
     }})
 
 
+def slow_ledger_flow(server, step, steps, ids):
+    status, created = step("slow ledger create", "POST", "/v1/projects", "sam", {"title": "Slow ledger smoke"})
+    project_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+    ids[project_id] = "<slow-ledger>"
+    step("slow ledger upload", "POST", "/v1/projects/<slow-ledger>/upload", "sam", form=({}, {"project": sb3_archive(project_with_costumes([]))}))
+    step("slow ledger share", "POST", "/v1/projects/<slow-ledger>/visibility", "sam", {"visibility": "public"})
+    step("accept agreement lena", "POST", "/v1/agreement/accept", "lena", {})
+    results = {}
+    waited = {}
+
+    def remix():
+        results["remix"] = server.call("POST", "/v1/projects/%s/remix" % project_id, "lena", {}, timeout=60)[0]
+
+    remixing = threading.Thread(target=remix)
+    remixing.start()
+    time.sleep(0.5)
+    asset_name, asset_content = svg_asset("slow ledger")
+    started = time.time()
+    results["upload"] = server.upload(project_id, "sam", sb3_archive(project_with_costumes([asset_name]), {asset_name: asset_content}))[0]
+    waited["upload"] = time.time() - started >= ROTUR_DELAY / 2
+    remixing.join()
+    time.sleep(0.5)
+    for _ in range(ROTUR_DELAY * 20):
+        if not FakeRotur.slow_ledger_reads:
+            break
+        time.sleep(0.1)
+    steps.append({"step": "upload during a remix with a slow storage ledger", "status": 0, "body": {
+        "statuses": results, "waitedForLedger": waited,
+    }})
+
+
 def locks_flow(server, step, steps, ids):
     status, created = step("locks create", "POST", "/v1/projects", "sam", {"title": "Locks smoke"})
     ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<locks>"
@@ -977,6 +1019,7 @@ def run(binary, sb3, keep):
         update_flow(server, step, ids)
         concurrent_flow(server, step, steps, ids)
         slow_rotur_flow(server, step, steps, ids)
+        slow_ledger_flow(server, step, steps, ids)
         locks_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
