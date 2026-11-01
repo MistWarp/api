@@ -254,8 +254,6 @@ def validateUploadedHistory(object project, byte[] body, string metadata, string
   return validateUploadedHistoryMode(project, body, metadata, currentHead, false)
 )
 
-// Only the explicit maintainer upload path may discard the stored graph.
-// With no base archive, validation also rejects deltas and incomplete history.
 def validateUploadedHistoryMode(object project, byte[] body, string metadata, string currentHead, boolean replaceHistory) object (
   string workId = tmpDir ++ project.id.toStr() ++ "." ++ randomString(8)
   string incomingPath = workId ++ ".incoming.mwp"

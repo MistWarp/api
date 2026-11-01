@@ -43,9 +43,6 @@ def inspectProjectJson(string path) object (
   return inspected
 )
 
-// storageAllowanceBytes is a student's local limit, or -1. A Rotur owner's
-// storage is held in the ledger instead, unless enforceStorage is off
-// (admins); the result's hold is committed or released by the caller.
 def uploadProjectFiles(object project, string extractDir, object benefits, number storageAllowanceBytes, boolean enforceStorage) object (
   array names = fs.readDir(extractDir).unwrapOr([])
   string jsonPath = extractDir ++ "/project.json"
@@ -154,7 +151,6 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
   object hold = noStorageHold()
   string ownerId = projectOwnerId(project)
   if usesRoturStorage(ownerId) (
-    // Assets uploaded ahead are counted by this save now, not twice.
     releasePendingAssetHolds(ownerId, project.owner.toStr(), projectAssets)
     object incoming = projectStorageSummary(project, knownAssets)
     object incomingJson = {}
