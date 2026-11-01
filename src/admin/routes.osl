@@ -1,3 +1,7 @@
+export {
+  registerAdminRoutes
+}
+
 def registerAdminRoutes(*serve.Router api) (
   api.POST("/errors", serve.limitRequests(20, {window: 60000}), handleRecordSiteError)
   api.GET("/stats", handlePublicStats)

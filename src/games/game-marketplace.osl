@@ -1,3 +1,7 @@
+export {
+  completeGameProductPurchase
+}
+
 def projectGameProducts(object project) array (
   if project.contains("gameProducts") and project.gameProducts != null (
     return project.gameProducts.assertElse(array, [])

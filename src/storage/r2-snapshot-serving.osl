@@ -1,3 +1,7 @@
+export {
+  serveProjectJsonStorageKey
+}
+
 def serveProjectJsonStorageKey(*serve.Context c, string key, boolean gzip) (
   if !isSafeBlobKey(key) (
     c.notFound("project snapshot not found")

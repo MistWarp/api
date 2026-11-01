@@ -1,5 +1,51 @@
 import "std:process"
 
+export {
+  assignmentDocs,
+  bountyWorkerDocs,
+  classDocs,
+  classroomAuditDocs,
+  classroomClaimDocs,
+  classroomGroupDocs,
+  classroomPlanDocs,
+  classroomPresentationDocs,
+  classroomTermsDocs,
+  cleanupExpiredCommunityRecords,
+  commentIndexDocs,
+  deleteDocumentsByField,
+  deleteProjectCommunityRecords,
+  developmentDocs,
+  diagnosticDocs,
+  errorDocs,
+  feedbackDocs,
+  funnelDocs,
+  ideaDocs,
+  initCommunityDatabase,
+  likeMilestoneDocs,
+  playtimeDocs,
+  playtimeSessionDocs,
+  previewDocs,
+  profileSearchDocs,
+  projectLastPlayed,
+  projectPlaytime,
+  projectSearchDocs,
+  projectTotalPlaytime,
+  pullDocs,
+  putDocument,
+  releaseDocs,
+  removeSearchProject,
+  reviewDocs,
+  schoolDocs,
+  spaceDocs,
+  spaceMemberDocs,
+  studentDocs,
+  submissionDocs,
+  syncSearchProfile,
+  syncSearchProject,
+  validPreviewKey
+}
+
+
 // The database and its collections are opened once at startup. A failure here
 // means the API cannot serve anything, so report the reason and stop instead of
 // carrying on with a half-initialized database.

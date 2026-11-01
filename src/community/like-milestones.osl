@@ -1,3 +1,7 @@
+export {
+  notifyLikeMilestones
+}
+
 // Claims survive inbox clearing and server restarts. Serialize claims for the
 // same item so simultaneous reactions cannot send the same milestone twice.
 def notifyLikeMilestones(string target, string kind, string contentId, number before, number after, string path, object extra) (

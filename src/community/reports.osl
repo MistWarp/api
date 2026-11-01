@@ -1,3 +1,13 @@
+export {
+  anonymiseReportsBy,
+  closeRoturReport,
+  fileUnfiledRoturReports,
+  loadReports,
+  reportedContent,
+  saveReports,
+  syncEscalatedRoturReports
+}
+
 def loadReports() array (
   auto res = readFile(reportsFile)
   if !res.ok (

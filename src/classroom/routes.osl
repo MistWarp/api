@@ -1,3 +1,7 @@
+export {
+  registerClassroomRoutes
+}
+
 def registerClassroomRoutes(*serve.Router api) (
   api.GET("/classroom/join/:code", serve.limitRequests(30, {window: 60000}), handleClassroomJoinInfo)
   api.POST("/classroom/login", serve.limitRequests(20, {window: 60000}), handleClassroomLogin)

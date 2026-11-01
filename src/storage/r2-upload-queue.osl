@@ -1,3 +1,10 @@
+export {
+  flushR2UploadQueue,
+  loadR2UploadQueue,
+  projectStorageActivityAt,
+  stageR2Blob
+}
+
 def projectStorageActivityAt(object project) number (
   number edited = (project.edited ?? 0).toNum()
   number created = (project.created ?? 0).toNum()

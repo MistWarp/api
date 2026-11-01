@@ -1,3 +1,10 @@
+export {
+  ensureGeneratedProjectHistory,
+  ensureUploadedProjectHistory,
+  generateMissingProjectHistories,
+  projectHasStoredContent
+}
+
 def writeGeneratedHistoryArchive(string projectJsonPath, string assetsPath, string outputPath, string projectId, string owner, number createdAt, string parentArchivePath, string parentHead, string parentId) string (
   return gitinspection.GenerateHistoryArchiveJSON(projectJsonPath, assetsPath, outputPath, projectId, owner, createdAt, parentArchivePath, parentHead, parentId)
 )

@@ -1,3 +1,10 @@
+export {
+  quotaPruneEvents,
+  quotaTotalBytes,
+  quotaWithoutNames,
+  storageAllowance
+}
+
 def quotaPruneEvents(array events, number nowMs, number windowMs) array (
   array kept = []
   for i events.len (

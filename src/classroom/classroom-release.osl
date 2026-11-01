@@ -1,3 +1,5 @@
+export {}
+
 number classroomClaimLifetimeMs = 1209600000
 
 def loadClassroomClaim(string code) object (

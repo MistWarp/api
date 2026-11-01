@@ -1,3 +1,7 @@
+export {
+  registerHistoryRoutes
+}
+
 def registerHistoryRoutes(*serve.Router api) (
   api.PATCH("/projects/:id/commits/:sha", requireAuth, handlePatchCommit)
   api.GET("/projects/:id/commits/:sha/co-authors", handleGetCommitCollaborators)

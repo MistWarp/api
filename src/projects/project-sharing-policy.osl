@@ -1,3 +1,7 @@
+export {
+  projectSourcePolicyAllows
+}
+
 def projectSourcePolicyAllows(object project, boolean isOwner) boolean (
   if isOwner (
     return true

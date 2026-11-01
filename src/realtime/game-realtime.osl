@@ -1,3 +1,9 @@
+export {
+  multiplayerTicketCache,
+  realtimeUpgradeGuard,
+  setupGameRealtime
+}
+
 auto multiplayerTicketCache = cache.new({capacity: 100000, ttl: 120000})
 auto realtimeHandshakeCache = cache.new({capacity: 100000, ttl: 30000})
 

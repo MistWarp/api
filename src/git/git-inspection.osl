@@ -1,3 +1,10 @@
+export {
+  cachedProjectWorkspacePath,
+  projectRecordsCommit,
+  projectWorkspaceFingerprint,
+  validGitObjectId
+}
+
 auto gitInspectionPruneCache = cache.new({capacity: 4, ttl: 300000})
 
 def projectWorkspaceFingerprint(object project) string (

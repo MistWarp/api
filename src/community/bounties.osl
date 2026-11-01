@@ -1,3 +1,5 @@
+export {}
+
 def bountyCommentKey(string bountyId) string (
   return "bounty-" ++ bountyId
 )

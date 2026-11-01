@@ -1,3 +1,9 @@
+export {
+  contextBool,
+  contextString,
+  requestJSON
+}
+
 def requestJSON(*serve.Context c) object (
   object body = c.bodyJSON() catch (err) (
     if err.kind == "ParseError" (

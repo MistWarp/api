@@ -1,3 +1,5 @@
+export {}
+
 def adminReportRole(object report, string key) string (
   string subject = (report.subject ?? report.targetUser ?? "").toStr()
   if subject == "" and report.type.toStr() == "user" (

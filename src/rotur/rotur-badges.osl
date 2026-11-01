@@ -1,3 +1,8 @@
+export {
+  recordCreatingDay,
+  roturBadgeEvent
+}
+
 // Badges on people's Rotur profiles, given by MistWarp's Rotur App:
 // https://docs.rotur.dev/build-an-app/badges
 //

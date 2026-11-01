@@ -1,3 +1,7 @@
+export {
+  canonicalHistoryHead
+}
+
 def storedPullCommentCount(object pull) number (
   if !pull.contains("commentCount") or pull.commentCount == null (
     return -1

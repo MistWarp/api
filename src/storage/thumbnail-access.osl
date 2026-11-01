@@ -1,3 +1,8 @@
+export {
+  loadThumbnailSecret,
+  thumbnailIsPublic
+}
+
 def loadThumbnailSecret(string path) string (
   string stored = fs.readFile(path).unwrapOr("").strip()
   if stored != "" (

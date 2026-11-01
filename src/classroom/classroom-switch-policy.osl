@@ -1,3 +1,5 @@
+export {}
+
 def classroomFlagOn(string value) boolean (
   string flag = value.toLower().strip()
   return flag == "1" or flag == "true" or flag == "yes" or flag == "on"

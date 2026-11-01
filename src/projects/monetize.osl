@@ -1,3 +1,20 @@
+export {
+  awardContributionBounty,
+  canSeeInsideProject,
+  completeProjectPurchase,
+  loadPurchaseKeys,
+  projectCommerceSplits,
+  projectIsViewable,
+  projectRevenue,
+  projectSaves,
+  projectVisibility,
+  prunePurchaseKeys,
+  refuseOldPaymentClient,
+  renameUserMonetization,
+  savePurchaseKeys,
+  sourcePolicyAllowsViewer
+}
+
 def projectVisibility(object project) string (
   if project.contains("visibility") and project.visibility != null (
     string v = project.visibility.toStr()

@@ -1,3 +1,7 @@
+export {
+  presentationViewerRole
+}
+
 number classroomPresentationLifetimeMs = 14400000
 
 def activePresentationForProject(string projectId) object (

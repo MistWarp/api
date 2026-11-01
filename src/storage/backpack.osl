@@ -1,3 +1,9 @@
+export {
+  backpackStoredBytes,
+  collectBackpackForUser,
+  purgeBackpackForUser
+}
+
 def backpackUserKey(string userId) string (
   return ("backpack:" ++ userId).hashSHA256()
 )

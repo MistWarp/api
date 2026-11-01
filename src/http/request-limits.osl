@@ -1,3 +1,14 @@
+export {
+  maxAppRequestBytes,
+  maxBackpackRequestBytes,
+  maxExtensionIndexRequestBytes,
+  maxProjectUploadRequestBytes,
+  maxStandardRequestBytes,
+  maxThumbnailRequestBytes,
+  maxUploadChunkRequestBytes,
+  maxWorkspaceBootstrapRequestBytes
+}
+
 number maxAppRequestBytes = 1073741824
 number maxStandardRequestBytes = 262144
 number maxProjectUploadRequestBytes = 1073741824

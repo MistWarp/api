@@ -1,3 +1,7 @@
+export {
+  registerGameRoutes
+}
+
 def registerGameRoutes(*serve.Router api) (
   api.GET("/me/game-saves", requireAuth, handleListMyGameSaves)
   api.GET("/me/game-inventory", requireAuth, handleGetMyGameInventory)

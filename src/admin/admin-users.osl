@@ -1,3 +1,9 @@
+export {
+  indexComment,
+  migrateCommentIndex,
+  unindexComment
+}
+
 def adminNotesFile() string (
   return "data/admin-notes.json"
 )

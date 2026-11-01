@@ -1,3 +1,5 @@
+export {}
+
 def projectCommitMetadata(object project) object (
   if project.contains("commitMetadata") and project.commitMetadata != null (
     return project.commitMetadata.assertElse(object, {})

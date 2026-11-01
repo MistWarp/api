@@ -1,3 +1,12 @@
+export {
+  cleanupExpiredSessions,
+  createSession,
+  getSession,
+  isAdminUser,
+  requestToken,
+  setAuthCookie
+}
+
 auto sessionCache = cache.new({capacity: 10000, ttl: 3600000})
 
 def setAuthCookie(*serve.Context c, string sessionId) (

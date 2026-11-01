@@ -1,3 +1,7 @@
+export {
+  publicReleaseRecord
+}
+
 def keyedJsonUrl(string url, object access) string (
   if url == "" or access.allowed != true (
     return ""

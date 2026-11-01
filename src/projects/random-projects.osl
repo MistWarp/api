@@ -1,3 +1,5 @@
+export {}
+
 def randomProjectEntry(array entries, string exclude) object (
   array candidates = []
   for i entries.len (

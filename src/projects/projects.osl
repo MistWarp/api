@@ -1,3 +1,38 @@
+export {
+  bannedKeyMatches,
+  canEditProject,
+  canViewProject,
+  canViewProjectJson,
+  cleanupExpiredStagedUploadParts,
+  deleteOrphanedAssets,
+  ensureProjectJsonSnapshot,
+  ensureProjectWorkspaceSnapshots,
+  ensureViewKey,
+  forkFailureResponse,
+  forkProjectFor,
+  ownerStorageBytes,
+  pendingUploadEvents,
+  projectJsonAccess,
+  projectMustStayPrivate,
+  projectResponse,
+  projectRole,
+  projectVersionHistory,
+  purgeProject,
+  purgeProjects,
+  quotaPath,
+  removeProjectStorageKeyIfOrphaned,
+  removeString,
+  roturMembershipUrl,
+  roturStorageFullResponse,
+  sharedProjectsCache,
+  storageDetails,
+  storageFullResponse,
+  sweepStagedProjects,
+  trashedProjectsOwnedBy,
+  validateUploadedHistory,
+  vanityLapseLoop
+}
+
 auto viewDedup = cache.new({capacity: 100000, ttl: 21600000})
 auto viewIndexFlush = cache.new({capacity: 100000, ttl: 600000})
 auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})

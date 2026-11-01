@@ -1,3 +1,9 @@
+export {
+  classroomSessionAllowed,
+  classroomSwitchGuard,
+  startClassroomTimers
+}
+
 boolean classroomEnabled = classroomFlagOn(configValue("CLASSROOM_ENABLED", ""))
 
 def classroomTestClass(object classDoc) boolean (

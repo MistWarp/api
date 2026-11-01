@@ -1,3 +1,17 @@
+export {
+  commentsVisibleTo,
+  moderationHoldResponse,
+  projectHiddenByModerator,
+  projectShadowBanEntry,
+  refuseIfHiddenByModerator,
+  removeShadowBannedUser,
+  renameShadowBannedUser,
+  reviewsVisibleTo,
+  shadowBannedSet,
+  userShadowBanned,
+  viewerSeesShadowBanned
+}
+
 auto shadowBansCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadShadowBans() object (
