@@ -4,8 +4,8 @@ export {
   setupGameRealtime
 }
 
-auto multiplayerTicketCache = cache.new({capacity: 100000, ttl: 120000})
-auto realtimeHandshakeCache = cache.new({capacity: 100000, ttl: 30000})
+*cache.Cache multiplayerTicketCache = cache.new({capacity: 100000, ttl: 120000})
+*cache.Cache realtimeHandshakeCache = cache.new({capacity: 100000, ttl: 30000})
 
 def realtimeRoomKey(object identity) string (
   return identity.projectId.toStr() ++ ":" ++ identity.projectVersion.toStr() ++ ":" ++ identity.context.toStr() ++ ":" ++ identity.room.toStr()

@@ -25,8 +25,6 @@ def quotaTotalBytes(array events, number nowMs, number windowMs) number (
   return total
 )
 
-// Drop pending uploads that a saved project now references, so their bytes
-// are counted once, as part of that project.
 def quotaWithoutNames(array events, array names, number nowMs, number windowMs) array (
   object saved = {}
   for i names.len (
@@ -43,8 +41,6 @@ def quotaWithoutNames(array events, array names, number nowMs, number windowMs) 
   return kept
 )
 
-// The most a project may occupy after a save. A user over their limit can
-// still save a project at its current size or smaller.
 def storageAllowance(number limit, number used, number currentBytes) number (
   number allowance = limit - (used - currentBytes)
   if allowance < currentBytes (

@@ -3,25 +3,6 @@ export {
   roturBadgeEvent
 }
 
-// Badges on people's Rotur profiles, given by MistWarp's Rotur App:
-// https://docs.rotur.dev/build-an-app/badges
-//
-// Which badges exist, and what earns them, is data, not code. Define the
-// badges on rotur.dev/me/developer, then map MistWarp's events to them in
-// data/rotur-badges.json, for example:
-//
-//   {"events": {
-//     "project_shared": [{"badge": "creator", "delta": 1}],
-//     "streak": [{"badge": "streak", "progress": "value"}]
-//   }}
-//
-// "delta" adds to someone's progress. "progress": "value" sets it to the
-// event's value. The events are project_shared (a project shared for the first
-// time), love_received (once per person per project), remixed (a remix of
-// your project was shared), comment_posted, and streak (days in a row you've
-// saved a project). A rule with neither is skipped. Without the file, nothing
-// is sent.
-
 string roturBadgesFile = "data/rotur-badges.json"
 
 def roturBadgeRules(string event) array (
@@ -45,15 +26,12 @@ def awardRoturBadges(string username, string event, number value) (
     ) else if (rule.progress ?? "").toStr() == "value" (
       change = {progress: value}
     )
-    // A rule that says neither is a mistake; sending it would reset progress.
     if badge != "" and change.len > 0 (
       roturApp("PUT", "/badges/" ++ url.escape(badge) ++ "/users/" ++ person, change)
     )
   )
 )
 
-// Badge updates go out in the background, so they never slow a request down.
-// Rotur only gives badges to MistWarp's own users, and ignores anyone else.
 def roturBadgeEvent(string username, string event, number value) (
   if username == "" or isStudentUsername(username) or !roturAppReady() or roturBadgeRules(event).len == 0 (
     return
@@ -61,7 +39,6 @@ def roturBadgeEvent(string username, string event, number value) (
   thread.new(awardRoturBadges, username, event, value)
 )
 
-// Counts days in a row on which someone saved a project.
 def recordCreatingDay(string username) (
   if username == "" or isStudentUsername(username) (
     return

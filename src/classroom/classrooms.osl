@@ -6,7 +6,7 @@ export {
   loadStudent
 }
 
-auto classroomPoolCache = cache.new({capacity: 10000, ttl: 60000})
+*cache.Cache classroomPoolCache = cache.new({capacity: 10000, ttl: 60000})
 
 def randomFromAlphabet(string alphabet, number length) string (
   string out = ""

@@ -9,6 +9,7 @@ EM_DASH = "\u2014"
 TEXT_FILE = re.compile(r"\.(osl|go|py|md|json|yml|yaml|sh|txt)$")
 SKIPPED = [re.compile(r"(^|/)go\.sum$"), re.compile(r"^data/")]
 DIRECTIVE = re.compile(r"^(//|#)\s*(nolint|noqa|go:|lint:|type:\s*ignore)")
+OSL_DISABLE = re.compile(r"^\s*//\s*osl-disable-(?:file|next-line)(?P<codes>(?:[ \t].*)?)$")
 
 
 def git(*args):
@@ -79,7 +80,7 @@ def python_comments(text):
     return found
 
 
-SCANNERS = {".osl": c_style_comments, ".go": c_style_comments, ".py": python_comments}
+SCANNERS = {".go": c_style_comments, ".py": python_comments}
 
 
 def main():
@@ -97,6 +98,9 @@ def main():
         for line, content in added.items():
             if EM_DASH in content and content.strip() not in removed:
                 problems.append(f'{path}:{line}  em dash: use a comma, parentheses or "to"')
+            escape = OSL_DISABLE.match(content) if path.endswith(".osl") else None
+            if escape and (not escape.group("codes").strip() or "OSL-COMMENT" in escape.group("codes")):
+                problems.append(f"{path}:{line}  lint directive: name the codes it turns off, and never OSL-COMMENT")
         scan = next((scanner for suffix, scanner in SCANNERS.items() if path.endswith(suffix)), None)
         if scan is None:
             continue

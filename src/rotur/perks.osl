@@ -9,17 +9,14 @@ export {
   vanityEligibility
 }
 
-auto paidPerksCache = cache.new({capacity: 10000, ttl: 300000})
-auto lastKnownTiers = cache.new({capacity: 10000, ttl: 2592000000})
-auto roturTierUnreachable = cache.new({capacity: 10000, ttl: 60000})
+*cache.Cache paidPerksCache = cache.new({capacity: 10000, ttl: 300000})
+*cache.Cache lastKnownTiers = cache.new({capacity: 10000, ttl: 2592000000})
+*cache.Cache roturTierUnreachable = cache.new({capacity: 10000, ttl: 60000})
 
 def roturTierForUser(string userId) string (
   return roturTierLookup(userId).tier.toStr()
 )
 
-// The user's Rotur tier, and whether Rotur gave it in the last 5 minutes.
-// While Rotur can't be reached, the last tier it gave is kept (known: false),
-// so an outage doesn't take anyone's perks away.
 def roturTierLookup(string userId) object (
   if userId == "" or isStudentUserId(userId) (
     return {tier: "Free", known: true}
@@ -30,7 +27,6 @@ def roturTierLookup(string userId) object (
       return {tier: cached.tier.toStr(), known: true}
     )
   )
-  // Rotur failed in the last minute: don't make every request wait on it again.
   if roturTierUnreachable.has(userId) (
     return lastKnownRoturTier(userId)
   )
@@ -48,7 +44,6 @@ def roturTierLookup(string userId) object (
 def profileRoturTier(string userId) object (
   object response = requests.get(roturBase ++ "/profile?id=" ++ url.escape(userId) ++ "&include_posts=0", roturServiceOptions()).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
   if response.status == 404 (
-    // No such Rotur account, so no plan.
     return {reached: true, tier: "Free"}
   )
   if response.status != 200 (
@@ -72,8 +67,6 @@ def lastKnownRoturTier(string userId) object (
   return {tier: "Free", known: false}
 )
 
-// "yes" or "no" for whether the project owner's plan includes vanity URLs,
-// or "unknown" while Rotur can't be reached.
 def vanityEligibility(object project) string (
   string ownerId = (project.ownerId ?? "").toStr()
   if ownerId == "" (
@@ -94,9 +87,6 @@ def vanityEligibility(object project) string (
 
 def mistwarpBenefitsForTier(string rawTier) object (
   string tier = normalizeRoturTier(rawTier)
-  // Storage isn't a MistWarp benefit: projects count against the person's
-  // one Rotur storage allowance (storage-ledger.osl), shown in
-  // roturBenefitsForTier.
   object benefits = {
     maxProjectAssetBytes: 10485760,
     maxProjectAssetsBytes: 52428800,
@@ -187,8 +177,6 @@ def mistwarpBenefitsForProject(object project) object (
 
 def roturBenefitsForTier(string rawTier) object (
   string tier = normalizeRoturTier(rawTier)
-  // storageBytes is the one Rotur storage allowance, which MistWarp projects
-  // share with Rotur's other apps.
   object benefits = {
     storageBytes: 1000000000,
     accessProducts: 5,

@@ -106,8 +106,6 @@ def ensureProjectJsonSnapshot(object project) object (
   project.jsonGzip = true
   project.pendingJson = false
   void fs.remove(tempPath)
-  // Return an immutable snapshot to the caller without rewriting the source
-  // record. Another save may have advanced that record while storage was read.
   return {ok: true, project: project}
 )
 

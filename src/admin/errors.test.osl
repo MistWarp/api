@@ -7,7 +7,7 @@ import "std:regex"
 import "../http/request-body.osl"
 
 string path = "/tmp/mistwarp-errors-" ++ timestamp.toStr() ++ ".db"
-auto testDb = db.open(path)
+*db.DB testDb = db.open(path)
 *db.Collection errorDocs = testDb.collection("site_errors")
 
 array errorReportOrigins = ["https://mistwarp.org"]

@@ -197,7 +197,6 @@ def projectResponse(object project,*serve.Context c) object (
     sizeBytes: projectSizeBytes(project),
     isOwner: isOwner
   }
-  // Owners see a lapsed vanity URL, so they can keep it or clear it.
   if isOwner and activeVanity.lapsed == true (
     response.vanityReserved = project.vanitySlug
     response.vanityLapsed = true

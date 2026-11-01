@@ -12,6 +12,7 @@ export {
   viewerSeesShadowBanned
 }
 
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
 auto shadowBansCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadShadowBans() object (

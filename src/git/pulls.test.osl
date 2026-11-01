@@ -9,7 +9,7 @@ import "std:thread"
 import "go:mistwarp.local/gitinspection"
 
 string dbPath = "/tmp/mistwarp-pulls-test-" ++ timestamp.toStr() ++ ".db"
-auto testDb = db.open(dbPath)
+*db.DB testDb = db.open(dbPath)
 *db.Collection pullDocs = testDb.collection("project_pulls")
 string tmpDir = "/tmp/mistwarp-pulls-test-" ++ timestamp.toStr() ++ "/"
 number maxWorkspaceBytes = 1000

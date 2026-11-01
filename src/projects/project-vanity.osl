@@ -2,8 +2,6 @@ export {
   vanityLapseLoop
 }
 
-// The vanity URL that works for a project right now (slug, or "" while the
-// owner's plan doesn't include one), and whether one is held but lapsed.
 def vanityState(object project) object (
   string slug = (project.vanitySlug ?? "").toStr()
   if slug == "" (
@@ -20,8 +18,6 @@ def activeVanitySlug(object project) string (
   return vanityState(project).slug.toStr()
 )
 
-// Projects holding a vanity URL, including lapsed ones. Entries indexed before
-// vanityClaim existed only have vanitySlug.
 def vanityClaimEntries(string slug) array (
   return vanityEntriesWhere("==", slug)
 )
@@ -71,7 +67,6 @@ def applyVanityLapse(string id, string slug, string eligibility) string (
   return applyVanityLapseLocked(id, slug, eligibility)
 )
 
-// Notices lapsed vanity URLs and releases them on time, even if nobody visits.
 def vanityLapseLoop() (
   while true (
     wait 900
@@ -81,7 +76,6 @@ def vanityLapseLoop() (
       string slug = (entry.vanityClaim ?? entry.vanitySlug ?? "").toStr()
       string eligibility = if slug == "" then "unknown" else vanityEligibility(entry)
       boolean lapsed = (entry.vanitySlug ?? "").toStr() != slug
-      // Nothing changes while Rotur can't be reached, or for a URL in use.
       if eligibility == "no" or (eligibility == "yes" and lapsed) (
         void applyVanityLapse(entry.id.toStr(), slug, eligibility)
       )

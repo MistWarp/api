@@ -187,8 +187,6 @@ def indexEntryFromProject(object project) object (
   if project.contains("vanitySlug") and project.vanitySlug != null (
     vanitySlug = project.vanitySlug.toStr()
   )
-  // vanityClaim holds the URL while it's lapsed. vanitySlug is what lists link
-  // to, so it's empty until the owner's plan includes vanity URLs again.
   return {
     id: project.id,
     owner: project.owner,
@@ -272,7 +270,6 @@ def saveProject(object project) boolean (
   if !isSafePathPart(id) (
     return false
   )
-  // Keep the inactivity scan and eviction consistent with published edits.
   sync.lock("r2-upload-queue")
   defer sync.unlock("r2-upload-queue")
   boolean saved = writeFile(projectsDir ++ id ++ ".json", project)

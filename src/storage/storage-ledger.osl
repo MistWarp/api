@@ -16,34 +16,11 @@ export {
   usesRoturStorage
 }
 
-// MistWarp's projects, assets and backpack count against each person's one
-// Rotur storage allowance (storage-ledger-policy.osl says what counts). The
-// Rotur API keeps the count in its storage ledger:
-//
-//   - Before something is stored, the kinds it makes bigger are reserved at
-//     their new totals (storageHold). The ledger only holds what they grow by,
-//     and answers 413 when that doesn't fit. Making things smaller always fits.
-//   - Once it's stored, the totals are worked out again from what's really
-//     there and the ledger is set to them (storageSettle), committing what was
-//     reserved. Deleting, emptying the trash and anything else that only frees
-//     space just settles.
-//   - Every six hours everyone is settled, which catches anything a settle
-//     missed while Rotur couldn't be reached.
-//
-// When Rotur can't be asked, MistWarp saves anyway rather than lose someone's
-// work, and the next settle counts it. Classroom students aren't Rotur
-// accounts: their class's plan gives them storage, worked out here as before.
-//
-// mistwarp-api runs on the same machine as the Rotur API, so it calls it
-// directly as the official app "mistwarp" with ROTUR_SERVICE_SECRET.
-// ROTUR_LOCAL_API_URL replaces http://127.0.0.1:5602 and has to be a loopback
-// address, so the secret never leaves the machine.
-
 string ledgerSecret = configValue("ROTUR_SERVICE_SECRET", "")
 string ledgerBaseSetting = configValue("ROTUR_LOCAL_API_URL", "")
 number ledgerPendingTtlSeconds = 604800
-auto projectStorageSummaries = cache.new({capacity: 200000, ttl: 86400000})
-auto storageSettleQueued = cache.new({capacity: 100000, ttl: 60000})
+*cache.Cache projectStorageSummaries = cache.new({capacity: 200000, ttl: 86400000})
+*cache.Cache storageSettleQueued = cache.new({capacity: 100000, ttl: 60000})
 
 def ledgerBase() string (
   string base = ledgerBaseSetting.strip()
@@ -56,8 +33,6 @@ def ledgerBase() string (
   return base
 )
 
-// http://127.0.0.1:<port>, http://localhost:<port> or http://[::1]:<port>,
-// with nothing after the port.
 def ledgerIsLoopback(string base) boolean (
   array prefixes = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"]
   for i prefixes.len (
@@ -82,8 +57,6 @@ def logLedgerSetup() (
   )
 )
 
-// Rotur accounts count through the ledger. Students and projects without a
-// known Rotur owner don't.
 def usesRoturStorage(string userId) boolean (
   return userId != "" and !isStudentUserId(userId)
 )
@@ -96,7 +69,6 @@ def projectOwnerId(object project) string (
   return ownerId
 )
 
-// { status, body }: status 0 when the ledger couldn't be asked at all.
 def ledgerCall(string method, string path, object body) object (
   if !ledgerReady() (
     return {status: 0, body: {}}
@@ -128,8 +100,6 @@ def ledgerCall(string method, string path, object body) object (
   return {status: status, body: data}
 )
 
-// The account's whole Rotur storage: { ok, used, max, available, bytes,
-// reserved }, where bytes and reserved are MistWarp's part of it.
 def ledgerAllowance(string userId) object (
   object resp = ledgerCall("GET", "/v2/storage-ledger/usage?user_id=" ++ url.escape(userId), {})
   if resp.status != 200 (
@@ -146,7 +116,6 @@ def ledgerAllowance(string userId) object (
   }
 )
 
-// What the ledger counts for MistWarp: { ok, objects: {name: bytes} }.
 def ledgerCounted(string userId) object (
   object resp = ledgerCall("GET", "/v2/storage-ledger/objects?user_id=" ++ url.escape(userId), {})
   if resp.status != 200 (
@@ -161,9 +130,6 @@ def ledgerCounted(string userId) object (
   return {ok: true, objects: objects}
 )
 
-// Holds room for object at bytes. { ok: true }, or { ok: false, status } with
-// used, max, available and needed when the allowance is full (413). ttl is
-// in seconds, 0 for the ledger's hour.
 def ledgerReserve(string userId, string reservation, string objectName, number bytes, number ttl) object (
   object body = {id: reservation, user_id: userId, object: objectName, bytes: bytes}
   if ttl > 0 (
@@ -190,8 +156,6 @@ def ledgerReserve(string userId, string reservation, string objectName, number b
   return {ok: false, status: resp.status}
 )
 
-// Counts a reservation as stored. Sent again, the ledger answers with the
-// first commit, so it's tried a few times.
 def ledgerCommit(string userId, string reservation, number bytes) boolean (
   for attempt 3 (
     object resp = ledgerCall("POST", "/v2/storage-ledger/reservations/" ++ reservation ++ "/commit", {user_id: userId, bytes: bytes})
@@ -211,7 +175,6 @@ def ledgerCommit(string userId, string reservation, number bytes) boolean (
   return false
 )
 
-// Gives a reservation back. One that isn't released expires on its own.
 def ledgerRelease(string userId, string reservation) (
   object resp = ledgerCall("DELETE", "/v2/storage-ledger/reservations/" ++ reservation ++ "?user_id=" ++ url.escape(userId), {})
   if resp.status != 200 and resp.status != 0 (
@@ -223,7 +186,6 @@ def ledgerRemove(string userId, object body) boolean (
   body.user_id = userId
   for attempt 3 (
     object resp = ledgerCall("POST", "/v2/storage-ledger/objects/remove", body)
-    // A deleted account's ledger went with it.
     if resp.status == 200 or (resp.status == 404 and (resp.body.code ?? "").toStr() == "account_not_found") (
       return true
     )
@@ -240,7 +202,6 @@ def ledgerRemove(string userId, object body) boolean (
   return false
 )
 
-// Frees everything MistWarp counted for an account, when it's deleted.
 def ledgerFreeAll(string userId) boolean (
   if !usesRoturStorage(userId) (
     return true
@@ -248,10 +209,6 @@ def ledgerFreeAll(string userId) boolean (
   return ledgerRemove(userId, {all: true})
 )
 
-// ---------- What someone stores ----------
-
-// A project file's summary, kept while the file is unchanged, with whose it
-// is: { ownerId, owner, id, summary }.
 def storedProjectSummary(string path, object assetSizes) object (
   if !fs.exists(path) (
     return {}
@@ -291,7 +248,6 @@ def storedFor(object stored, string userId, string username) boolean (
   return username != "" and normalizeUsername((stored.owner ?? "").toStr()) == normalizeUsername(username)
 )
 
-// The project.json snapshots a project's releases keep.
 def addReleaseBlobs(string projectId, object summary) object (
   array releases = releaseDocs.where("projectId", "==", projectId).all()
   for i releases.len (
@@ -309,8 +265,6 @@ def addReleaseBlobs(string projectId, object summary) object (
   return summary
 )
 
-// A release's snapshot size: recorded when it was made, or the project's own
-// when it's the same snapshot, or the copy on this machine.
 def releaseJsonBytes(object release, object summary) number (
   if release.contains("jsonBytes") and release.jsonBytes != null (
     return release.jsonBytes.toNum()
@@ -327,9 +281,6 @@ def releaseJsonBytes(object release, object summary) number (
   return 0
 )
 
-// One person's totals. changes.projects swaps in summaries by project id,
-// for a project about to be saved, and changes.backpack adds backpack items
-// about to be stored.
 def ownerStorageTotals(string userId, object changes) object (
   object assetSizes = loadAssetsIndex().assets.assertElse(object, {})
   string username = usernameForId(userId)
@@ -370,8 +321,6 @@ def ownerStorageTotals(string userId, object changes) object (
   return storageTotals(summaries, assetSizes, backpack)
 )
 
-// Everyone's totals at once, for the storage report and the six-hourly
-// settle: { userId: totals } for every Rotur account with anything stored.
 def everyoneStorageTotals() object (
   object assetSizes = loadAssetsIndex().assets.assertElse(object, {})
   object summariesByOwner = {}
@@ -419,15 +368,10 @@ def everyoneStorageTotals() object (
   return totals
 )
 
-// ---------- Holding and settling ----------
-
 def noStorageHold() object (
   return {ok: true, reservations: []}
 )
 
-// Reserves what a change would add for userId. { ok: true, reservations },
-// or { ok: false, refusal } when their Rotur storage is full and enforce is
-// set. Without enforce (admins), a full allowance doesn't stop the change.
 def storageHold(string userId, object changes, boolean enforce) object (
   if !usesRoturStorage(userId) or !ledgerReady() (
     return noStorageHold()
@@ -466,7 +410,6 @@ def storageHoldRelease(string userId, object hold) (
   )
 )
 
-// Sets the ledger to what userId really stores now, committing hold.
 def storageSettle(string userId, object hold) (
   if !usesRoturStorage(userId) or !ledgerReady() (
     return
@@ -481,7 +424,6 @@ def storageSettle(string userId, object hold) (
 def settleTotalsLocked(string userId, object totals, object hold) (
   object listed = ledgerCounted(userId)
   if !listed.ok (
-    // What was reserved expires, and the six-hourly settle counts it.
     return
   )
   object counted = listed.objects
@@ -509,16 +451,12 @@ def settleTotalsLocked(string userId, object totals, object hold) (
       if held.ok (
         void ledgerCommit(userId, id, bytes)
       ) else if held.status == 413 (
-        // Over their allowance: they keep what they have, uncounted past it,
-        // and can't add more until they're under it.
         log "[ledger] " ++ userId ++ " stores more than their Rotur storage allows; " ++ kind ++ " stays at what was counted"
       )
     )
   )
 )
 
-// Settles userId shortly, once however many changes arrive meanwhile, for
-// changes that only free space.
 def storageSettleSoon(string userId) (
   if !usesRoturStorage(userId) or !ledgerReady() (
     return
@@ -602,10 +540,6 @@ def storageSettleLoop() (
   )
 )
 
-// ---------- Files uploaded ahead of a save ----------
-
-// An asset uploaded before the project that uses it is saved holds room for
-// up to a week, released when the project is saved.
 def pendingAssetHold(string ownerId, string username, string name, number bytes, boolean enforce) object (
   object held = ledgerReserve(ownerId, "pending-" ++ name, "pending-" ++ name, bytes, ledgerPendingTtlSeconds)
   if !held.ok and held.status == 413 and enforce (
@@ -626,7 +560,6 @@ def recordPendingAssetLocked(string username, string name, number bytes) (
   writeFile(quotaPath(username), {pending: events})
 )
 
-// Releases the holds of assets a save now counts, or that failed to upload.
 def releasePendingAssetHolds(string ownerId, string username, array names) (
   if names.len == 0 (
     return
@@ -659,10 +592,6 @@ def forgetPendingAssetsLocked(string username, array names) array (
   return releasing
 )
 
-// ---------- Backfill ----------
-
-// What MistWarp stores for everyone, for the Rotur API's one-off
-// `claw storage-backfill`: { service, accounts: { id: { kind: bytes } } }.
 def storageReport() object (
   object totals = everyoneStorageTotals()
   object accounts = {}

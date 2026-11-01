@@ -89,7 +89,6 @@ writeFile(projectsDir ++ "active.json", active)
 flushR2UploadQueue()
 testing.assert(puts.len == 0 and loadR2UploadQueue().len == 3, "new projects upload nothing on the five-minute flush")
 
-// Simulate a persisted queue older than seven days, followed by another project save.
 array queuedItems = loadR2UploadQueue()
 for i queuedItems.len (
   object queuedItem = queuedItems[i].assert(object)
@@ -128,7 +127,6 @@ for i keys.len (
   testing.assert(!fs.exists(localBlobPath(keys[i].toStr())), "successful uploads remove local copies")
 )
 
-// Existing deployments already have uploaded blobs that were never evicted.
 for i keys.len (
   void fs.writeFile(localBlobPath(keys[i].toStr()), "payload")
 )
@@ -154,7 +152,6 @@ flushR2UploadQueue()
 testing.assert(fs.exists(localBlobPath(keys[1].toStr())), "unreadable project metadata prevents unsafe eviction")
 void fs.remove(projectsDir ++ "unreadable.json")
 
-// A busy project gets a backup after one hour without losing its local cache.
 writeFile(r2UploadQueueFile, {items: []})
 active.edited = timestamp
 writeFile(projectsDir ++ "active.json", active)

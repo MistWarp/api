@@ -259,9 +259,6 @@ def handleAdminPurgeClassroom(*serve.Context c) (
   c.json(200, {ok: true, classes: classes.len, students: students})
 )
 
-// Called when a teacher's account is erased. Each class they owned passes to
-// a co-teacher, or is deleted with its students when it has none, and they
-// leave every class and school they taught in.
 def eraseClassroomTeacher(string userId) (
   if userId == "" or isStudentUserId(userId) (
     return

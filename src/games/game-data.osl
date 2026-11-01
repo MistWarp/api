@@ -4,7 +4,7 @@ export {
   purgeGameDataForUser
 }
 
-auto gameDataCapabilityCache = cache.new({capacity: 100000, ttl: 300000})
+*cache.Cache gameDataCapabilityCache = cache.new({capacity: 100000, ttl: 300000})
 
 number gameSaveMaxBytes = 65536
 number gameDataCapabilityTtlMs = 300000

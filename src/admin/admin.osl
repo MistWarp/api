@@ -15,8 +15,9 @@ export {
   unbanUser
 }
 
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
 auto bansCache = cache.new({capacity: 2, ttl: 300000})
-auto adminsCache = cache.new({capacity: 2, ttl: 300000})
+*cache.Cache adminsCache = cache.new({capacity: 2, ttl: 300000})
 
 def loadAdmins() array (
   auto res = readFile(adminsFile)
@@ -64,13 +65,10 @@ def cachedBans() object (
   return data
 )
 
-// Rebuilt whenever the bans file is saved (a ban, an unban, a rename, or the
-// Rotur sync dropping a ban that ended there), and at most 5 minutes old.
 def bannedOwners() object (
   if bansCache.has("owners") (
     return bansCache.get("owners").assert(object)
   )
-  // One rebuild at a time; the rest wait for it and use its result.
   sync.lock("banned-owners")
   defer sync.unlock("banned-owners")
   if bansCache.has("owners") (
@@ -105,7 +103,6 @@ def projectsVisibleTo(array entries,*serve.Context c) array (
   return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), normalizeUsername(contextString(c, "username")), contextString(c, "userId"), contextBool(c, "isAdmin"))
 )
 
-// For lists that are cached publicly, so never differ for admins.
 def projectsVisibleToEveryone(array entries) array (
   return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), "", "", false)
 )
@@ -137,23 +134,14 @@ def banReasonFor(string username) string (
   return ""
 )
 
-// MistWarp's bans are also bans from MistWarp's Rotur App, so Rotur enforces
-// them: the person's MistWarp tokens stop working, and they can't sign in to
-// MistWarp again until the ban is lifted. They see the reason, never who banned
-// them. The local list stays the source MistWarp checks on every request.
-
 def roturBanPath(string username) string (
   return "/bans/" ++ url.escape(roturUserRef(username))
 )
 
-// "yes" once Rotur has the ban, "refused" if Rotur won't ban them (they are on
-// the app's team, a classroom student, or not a Rotur account it can ban), ""
-// to try again later.
 def pushRoturBan(string username, string reason) string (
   string shown = reason.strip()
-  // Older bans from a report only name the report, which means nothing to the
-  // person banned.
-  if shown == "" or regex.match("^report r[A-Za-z0-9_-]+$", shown) (
+  boolean namesOnlyTheReport = regex.match("^report r[A-Za-z0-9_-]+$", shown)
+  if shown == "" or namesOnlyTheReport (
     shown = "You broke MistWarp's community guidelines."
   )
   object res = roturApp("PUT", roturBanPath(username), {reason: shown.trim(1, 300), note: "Banned in MistWarp"})
@@ -166,7 +154,6 @@ def pushRoturBan(string username, string reason) string (
   return ""
 )
 
-// Lifts the ban on Rotur. True once Rotur no longer has it.
 def liftRoturBan(string username) boolean (
   object res = roturApp("DELETE", roturBanPath(username), {})
   return res.ok or res.status == 404
@@ -205,8 +192,6 @@ def unbanUser(string username) boolean (
   if !cachedBans().bans.assertElse(object, {}).contains(key) (
     return false
   )
-  // Remembered until a sync has seen Rotur without it, so the sync keeps
-  // trying if Rotur couldn't be told, and never brings the ban back.
   boolean lifted = liftRoturBan(username)
   sync.lock("bans")
   defer sync.unlock("bans")
@@ -218,15 +203,11 @@ def unbanUser(string username) boolean (
   return saveBans(data)
 )
 
-// Keeps MistWarp's bans and the Rotur App's in step, every few minutes: bans
-// made or lifted on rotur.dev/me/developer reach MistWarp, and bans and unbans
-// Rotur couldn't be told about yet are sent again.
 def syncRoturBans() (
   number started = timestamp
   object snapshot = bansSnapshotLocked()
   object snapshotBans = snapshot.bans.assertElse(object, {})
   object snapshotUnbans = snapshot.unbans
-  // Unbans first, so the list read next already reflects them.
   object liftedNow = {}
   array unbanKeys = snapshotUnbans.getKeys()
   for i unbanKeys.len (
@@ -239,8 +220,6 @@ def syncRoturBans() (
   if !res.ok (
     return
   )
-  // Rotur lists accounts it has banned itself with no username, so match on
-  // the ID too.
   object remote = {}
   object remoteIds = {}
   array listed = (res.data.bans ?? []).assertElse(array, [])
@@ -277,7 +256,6 @@ def syncRoturBans() (
     object unban = unbans[key].assertElse(object, {})
     boolean lifted = unban.lifted == true or liftedNow.contains(key)
     if lifted and (unban.at ?? 0).toNum() < started (
-      // Rotur's list was read after it lifted this one.
       unbans.delete(key)
       changed = true
     ) else if lifted and unban.lifted != true (
@@ -286,8 +264,6 @@ def syncRoturBans() (
       changed = true
     )
   )
-  // Unbanned while the ban was being pushed: Rotur has it again, so lift it
-  // again next time.
   array pushedKeys = pushed.getKeys()
   for i pushedKeys.len (
     string key = pushedKeys[i].toStr()
@@ -307,7 +283,6 @@ def syncRoturBans() (
     )
     string state = (ban.rotur ?? "").toStr()
     if ban.by.toStr() == "rotur_sync" (
-      // Rotur enforces its own account bans now; these copies were never lifted.
       bans.delete(key)
       changed = true
     ) else if state == "" and pushed.contains(key) and pushed[key] != "" (
@@ -315,13 +290,10 @@ def syncRoturBans() (
       bans[key] = ban
       changed = true
     ) else if state == "yes" and ban.created.toNum() < started and !remote.contains(key) and !remoteIds.contains(userIdForUsername(key)) (
-      // Lifted on rotur.dev.
       bans.delete(key)
       changed = true
     )
   )
-  // Banned again while the old ban was being lifted: the lift may have
-  // removed the new ban from Rotur, so push it again.
   array liftedKeys = liftedNow.getKeys()
   for i liftedKeys.len (
     string key = liftedKeys[i].toStr()
@@ -821,8 +793,6 @@ def handleAdminSearchProjects(*serve.Context c) (
   c.json(200, {ok: true, projects: matches})
 )
 
-// Who a report is about, as worked out from the content when it was filed.
-// Older reports are worked out now, never from what the reporter said.
 def reportTargetUser(object found) string (
   string subject = (found.subject ?? "").toStr()
   if subject != "" (

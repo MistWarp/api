@@ -146,10 +146,6 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
   return {ok: true, project: current, generated: true}
 )
 
-// Upload callers hold the publication lock. History preparation takes that
-// lock itself after resolving ancestors and revalidates the saved source.
-// Drop it during preparation to avoid both self-deadlock and nested locks
-// across remix ancestors, then restore the caller's lock ownership.
 def ensureUploadedProjectHistory(object project) object (
   string lockName = "project-history-" ++ project.id.toStr()
   sync.unlock(lockName)
@@ -179,8 +175,6 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
   string parentHead = ""
   string parentId = (project.remixParent ?? "").toStr()
   if parentId != "" (
-    // Absence never authorizes inventing a root or using today's parent HEAD.
-    // Keep the record retryable until its recorded base can be materialized.
     auto parentResult = loadProject(parentId)
     for attempt 2 (
       if !parentResult.ok and parentResult.missing != true (

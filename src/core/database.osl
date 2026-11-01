@@ -46,9 +46,6 @@ export {
 }
 
 
-// The database and its collections are opened once at startup. A failure here
-// means the API cannot serve anything, so report the reason and stop instead of
-// carrying on with a half-initialized database.
 def openCommunityDatabase(string path) *db.DB (
   *db.DB database = db.open(path) catch (err) (
     log "FATAL: could not open " ++ path ++ ": " ++ err.toStr()

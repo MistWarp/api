@@ -7,7 +7,7 @@ export {
   setAuthCookie
 }
 
-auto sessionCache = cache.new({capacity: 10000, ttl: 3600000})
+*cache.Cache sessionCache = cache.new({capacity: 10000, ttl: 3600000})
 
 def setAuthCookie(*serve.Context c, string sessionId) (
   c.setCookie("auth_token", sessionId, {maxAge: 604800000, path: "/", domain: "", secure: appURL.startsWith("https://"), httpOnly: true})
@@ -135,10 +135,6 @@ def handleRoturAuth(*serve.Context c) (
     return
   )
 
-  // The editor makes validators keyed to MistWarp's Rotur App, which its own
-  // sign-in token can do without validators:generate; Rotur then also refuses
-  // anyone the app has banned. Older editors use the old key. A validator
-  // checked against the wrong key is just invalid, so try the next.
   array keys = [roturAppKey]
   if roturClientId != "" (
     keys = [roturClientId, roturAppKey]
@@ -146,7 +142,6 @@ def handleRoturAuth(*serve.Context c) (
   object data = {}
   for i keys.len (
     object resp = requests.get(roturBase ++ "/validate?key=" ++ url.escape(keys[i].toStr()) ++ "&v=" ++ url.escape(validator)).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})
-    // Rotur answers every validator with 200, valid or not.
     number status = (resp.status ?? 0).toNum().toInt()
     if status < 200 or status >= 300 (
       c.json(401, {ok: false, error: "failed to validate token"})
@@ -163,13 +158,10 @@ def handleRoturAuth(*serve.Context c) (
     )
   )
 
-  // Rotur answers every "no" with valid false and a code. Only a real "yes"
-  // signs anyone in.
   if data.valid != true (
     string code = (data.code ?? "").toStr()
     if code != "" and code != "invalid_validator" (
       object refusal = {ok: false, code: code, error: (data.error ?? "Rotur refused this sign-in.").toStr(), redirectUrl: (data.redirect_url ?? "https://rotur.dev/me").toStr()}
-      // An app ban says why, and until when.
       if (data.reason ?? "").toStr() != "" (
         refusal.reason = data.reason.toStr()
       )
@@ -183,8 +175,6 @@ def handleRoturAuth(*serve.Context c) (
     return
   )
 
-  // Old-key validators skip Rotur's checks for the app. One made by another
-  // Rotur App's sign-in was passed on to MistWarp, so it isn't accepted.
   string madeBy = (data.app ?? "").toStr()
   if roturClientId != "" and madeBy.startsWith("app_") and madeBy != roturClientId (
     c.json(401, {ok: false, error: "this sign-in was made for another app", redirectUrl: "https://rotur.dev"})

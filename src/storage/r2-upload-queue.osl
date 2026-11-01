@@ -11,8 +11,6 @@ def projectStorageActivityAt(object project) number (
   return if edited > 0 then edited else created
 )
 
-// Shared blobs must wait for every project that references them, including trash.
-// Read under the queue lock, which also serializes project metadata publication.
 def loadR2BlobActivity() object (
   object activity = {}
   array directories = [projectsDir, trashDir]
@@ -86,7 +84,6 @@ def queueR2UploadLocked(string key, string contentType, string contentEncoding) 
   for i items.len (
     if items[i].assertElse(object, {}).key.toStr() == key (
       item.firstQueuedAt = items[i].assert(object).firstQueuedAt ?? items[i].assert(object).queuedAt ?? timestamp
-      // Keep upload age while restarting the local-cache inactivity window.
       items[i] = item
       found = true
     )
@@ -138,7 +135,6 @@ def flushR2UploadQueue() (
     queued[items[i].assert(object).key.toStr()] = true
   )
   number now = timestamp
-  // Older flushes retained their local copies. Reclaim those too, without PUTs.
   array storedKeys = stored.getKeys()
   for i storedKeys.len (
     string key = storedKeys[i].toStr()
@@ -158,7 +154,6 @@ def flushR2UploadQueue() (
     boolean removed = !isSafeBlobKey(key)
     number uploadAge = now - (item.firstQueuedAt ?? item.queuedAt ?? now).toNum()
     if !removed and (r2UploadReady(item, activity, now) or uploadAge >= 3600000) (
-      // Only immutable keys can use the inventory to skip an upload.
       boolean uploaded = (item.uploaded ?? false).assert(boolean) or (stored.contains(key) and !key.startsWith("projects/"))
       if !uploaded and uploadedItems < 64 and uploadedBytes < 268435456 and fs.exists(path) (
         byte[] body = fs.readFileBytes(path).unwrapOr("".toBytes())
@@ -170,7 +165,6 @@ def flushR2UploadQueue() (
       )
       if uploaded (
         item.uploaded = true
-        // Active projects retain their fast local copy after cloud backup.
         removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path)
       )
     )

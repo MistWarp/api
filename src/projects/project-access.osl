@@ -138,15 +138,11 @@ def ensureViewKey(object project) (
     project.bannedViewKey = randomString(16)
     saveProject(project)
   ) else if !ownerBanned and bannedViewKey(project) != "" (
-    // A later ban gets a new key.
     project.delete("bannedViewKey")
     saveProject(project)
   )
 )
 
-// While the owner is banned, a project's JSON is only served with this key,
-// which only admins are handed (the player fetches the JSON signed out).
-// Older view keys stop working until the ban is lifted.
 def bannedViewKey(object project) string (
   return (project.bannedViewKey ?? "").toStr()
 )

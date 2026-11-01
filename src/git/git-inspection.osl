@@ -6,7 +6,7 @@ export {
   writeForkHistoryArchive
 }
 
-auto gitInspectionPruneCache = cache.new({capacity: 4, ttl: 300000})
+*cache.Cache gitInspectionPruneCache = cache.new({capacity: 4, ttl: 300000})
 
 def projectWorkspaceFingerprint(object project) string (
   array keys = projectWorkspaceKeys(project)

@@ -146,8 +146,6 @@ def projectCommerceSplits(object project) array (
   if platformPoints > 0 (
     platformUser = mistwarpFeeAccount()
     if platformUser == "" (
-      // Without the fee account its share would go to the creator. No splits
-      // means the sale can't start.
       return []
     )
   )
@@ -252,8 +250,9 @@ def renameUserMonetization(string oldKey, string newName) boolean (
   return savePurchaseKeys(purchaseStore)
 )
 
-// Unpaid keys go after an hour (Rotur's requests expire after 15 minutes).
-// Paid ones still waiting for their comment or revoke are kept for 30 days.
+number unpaidPurchaseKeyLifetimeMs = 3600000
+number paidPurchaseKeyLifetimeMs = 2592000000
+
 def prunePurchaseKeys(object store) object (
   object keys = store.keys
   array names = keys.getKeys()
@@ -262,7 +261,7 @@ def prunePurchaseKeys(object store) object (
     string k = names[i].toStr()
     object entry = keys[k]
     number age = timestamp - entry.at.toNum()
-    if age < 3600000 or (entry.paid == true and age < 2592000000) (
+    if age < unpaidPurchaseKeyLifetimeMs or (entry.paid == true and age < paidPurchaseKeyLifetimeMs) (
       kept[k] = entry
     )
   )
@@ -443,9 +442,6 @@ def recordSale(object project, string buyer, number price, number sellerAmount) 
   project.saleHistory = sales
 )
 
-// An editor or packaged game from before payment requests sends no returnUrl.
-// It would pay MistWarp the old way, which nothing delivers any more, so it's
-// told to reload before anything is asked of Rotur.
 def refuseOldPaymentClient(*serve.Context c) boolean (
   if requestJSON(c).contains("returnUrl") (
     return false
@@ -471,7 +467,6 @@ def completeProjectPurchase(string key) object (
   if !hasBought(project, buyer) (
     number owed = entry.price.toNum()
     string seller = project.owner.toStr()
-    // The splits Rotur paid, as they were when the purchase started.
     array splits = (entry.splits ?? projectCommerceSplits(project)).assertElse(array, [])
     recordSale(project, buyer, owed, ownerAmountFromSplits(project, owed, splits))
     if addToLibrary(buyer, project.id.toStr()) (

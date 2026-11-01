@@ -24,8 +24,6 @@ def handleGetMyQuota(*serve.Context c) (
     projects.append({id: project.id, title: project.title, bytes: projectStorageBytes(project), trashed: true})
   )
   projects.sortBy("bytes", "descending")
-  // shared: used, limit and remaining are the person's whole Rotur storage,
-  // and mistwarp is what MistWarp holds of it.
   c.json(200, {
     ok: true,
     shared: details.shared,
@@ -90,9 +88,6 @@ def ownerStorageBytes(string username) number (
   return total
 )
 
-// shared is true for Rotur accounts, whose used, limit and remaining are their
-// whole Rotur storage, shared with Rotur's other apps; mistwarp is MistWarp's
-// part of it. known is false when Rotur couldn't say.
 def storageDetails(string username) object (
   string userId = userIdForUsername(username)
   if usesRoturStorage(userId) (
@@ -114,7 +109,6 @@ def storageDetails(string username) object (
 
 string roturMembershipUrl = "https://rotur.dev/membership"
 
-// The ledger refused something because the person's Rotur storage is full.
 def roturStorageFullResponse(*serve.Context c, object refusal) (
   c.json(413, {
     ok: false,
@@ -137,8 +131,6 @@ def storageFullResponse(*serve.Context c, object details, number neededBytes) (
   c.json(413, {ok: false, code: "storage_full", error: "Your projects and backpack use " ++ usedMb.toStr() ++ " MB of your " ++ limitMb.toStr() ++ " MB of storage, and this needs about " ++ neededMb.toStr() ++ " MB more. Delete projects or backpack items you no longer need and empty the trash, or upgrade your plan.", used: details.used, pending: details.pending, limit: details.limit, remaining: details.remaining})
 )
 
-// Assets uploaded ahead of a save count against storage until a saved
-// project references them or they age out.
 def reservePendingUpload(string username, string name, number bytes, number limit, boolean enforceLimit) object (
   string lockName = "upload-quota-" ++ normalizeUsername(username)
   sync.lock(lockName)
@@ -166,8 +158,6 @@ def releasePendingUploads(string username, array names) (
   )
 )
 
-// The most a student's project may occupy after a save, or -1 when the
-// owner's storage is counted by Rotur instead.
 def projectStorageAllowance(object project) number (
   if usesRoturStorage(projectOwnerId(project)) (
     return -1
@@ -176,8 +166,6 @@ def projectStorageAllowance(object project) number (
   return storageAllowance(limit, ownerStorageBytes(project.owner.toStr()), projectStorageBytes(project))
 )
 
-// Holds room for an asset uploaded ahead of the save that uses it, or
-// answers that there isn't any.
 def holdUploadAhead(*serve.Context c, object project, string name, number bytes) boolean (
   boolean enforce = !contextBool(c, "isAdmin")
   string ownerId = projectOwnerId(project)

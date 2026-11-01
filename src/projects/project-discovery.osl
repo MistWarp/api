@@ -2,6 +2,7 @@ export {
   sharedProjectsCache
 }
 
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
 auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
 
 def sharedIndexEntries() array (

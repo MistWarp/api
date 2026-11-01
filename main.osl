@@ -66,9 +66,6 @@ if !r2Local and appURL == "http://localhost:5627" (
   log "WARNING: APP_URL points to localhost but R2 is configured; thumbnails and pending project.json are served from APP_URL and will be unreachable. Set APP_URL to the public https API base."
 )
 
-// `main storage-report <file>` writes what MistWarp stores for everyone, for
-// the Rotur API's `claw storage-backfill`, and exits. Run it with the API
-// stopped.
 array commandArgs = process.args()
 if commandArgs.len >= 1 and commandArgs[1].toStr() == "storage-report" (
   if commandArgs.len != 2 (

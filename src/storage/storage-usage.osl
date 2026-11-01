@@ -68,8 +68,6 @@ def backfillTrashedProjectHistoryBytes(string file, object inventory) boolean (
   return writeFile(trashDir ++ file, project)
 )
 
-// What R2 holds, by key, with sizes: { ok, objects } (none when blobs are
-// only on this machine), or { ok: false, error }.
 def storageInventory() object (
   if r2Local (
     return {ok: true, objects: {}}
@@ -85,8 +83,6 @@ def storageInventory() object (
   return {ok: true, objects: (loaded.data.assertElse(object, {}).objects ?? {}).assertElse(object, {})}
 )
 
-// Projects saved before storage limits have no recorded history size.
-// Measure them once from local copies or the R2 inventory.
 def backfillProjectHistoryBytes() (
   string migrationId = "migration:project-history-bytes-v1"
   if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
@@ -121,9 +117,6 @@ def backfillProjectHistoryBytes() (
   log "Storage size backfill complete"
 )
 
-// Releases made before their snapshot's size was recorded, which counts
-// against the owner's Rotur storage. Measured once from local copies or the
-// R2 inventory.
 def backfillReleaseJsonBytes() boolean (
   string migrationId = "migration:release-json-bytes-v1"
   if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (

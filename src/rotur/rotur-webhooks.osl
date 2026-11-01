@@ -2,39 +2,22 @@ export {
   processRoturWebhooks
 }
 
-// Webhooks from MistWarp's Rotur App: https://docs.rotur.dev/build-an-app/webhooks
-//
-// Rotur tells MistWarp when someone deletes their Rotur account (user.deleted),
-// leaves MistWarp from rotur.dev/me/apps (user.left) or is banned from Rotur
-// (user.banned). MistWarp must then delete what it holds about them within 30
-// days, so it does it straight away. With privacy requests turned on, people
-// can also ask for a copy of their data or for it to be deleted. When someone
-// approves a payment request, payment.completed says which purchase was paid
-// (rotur-payments.osl).
-//
-// Rotur waits 10 seconds for an answer, and erasing someone can take longer,
-// so each delivery is saved to disk, answered, then handled by a worker. Saved
-// events also stop a retried delivery from being handled twice.
-
 string roturWebhookSecret = configValue("ROTUR_WEBHOOK_SECRET", "")
 string roturWebhooksFile = "data/rotur-webhooks.json"
-// Handled events are kept this long, longer than Rotur retries (36 minutes).
 number roturWebhookRetention = 604800000
 
-// Rotur-Signature is v1= and the hex HMAC-SHA256 of "<id>.<timestamp>.<raw
-// body>", keyed with the whole signing secret.
 def roturWebhookSignature(string secret, string id, string sentAt, string body) string (
   return "v1=" ++ crypto.hmac("sha256", secret, id ++ "." ++ sentAt ++ "." ++ body)
 )
 
-// A delivery is genuine if it is signed with the secret and was sent within
-// five minutes of now (in Unix seconds), so an old one can't be replayed.
+number roturWebhookMaxClockSkewSeconds = 300
+
 def roturWebhookValid(string secret, string id, string sentAt, string body, string signature, number now) boolean (
   if secret == "" or id == "" or signature == "" or !regex.match("^[0-9]{1,12}$", sentAt) (
     return false
   )
   number sent = sentAt.toNum()
-  if sent < now - 300 or sent > now + 300 (
+  if sent < now - roturWebhookMaxClockSkewSeconds or sent > now + roturWebhookMaxClockSkewSeconds (
     return false
   )
   return crypto.constantTimeCompare(signature, roturWebhookSignature(secret, id, sentAt, body))
@@ -48,7 +31,6 @@ def loadRoturWebhooks() object (
   return res.data.assert(object)
 )
 
-// Saves a verified delivery. Returns false if it was already saved.
 def queueRoturWebhook(object event) boolean (
   string id = event.id.toStr()
   object data = {}
@@ -121,7 +103,6 @@ def handleRoturEvent(object event) (
   )
 )
 
-// Handles every saved event that hasn't been handled yet, one at a time.
 def processRoturWebhooks() (
   sync.lock("rotur-webhooks-worker")
   defer sync.unlock("rotur-webhooks-worker")

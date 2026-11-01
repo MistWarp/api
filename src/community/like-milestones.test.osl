@@ -13,7 +13,7 @@ import "./like-milestone-policy.osl"
 import "./like-milestones.osl"
 
 string path = "/tmp/mistwarp-milestones-" ++ timestamp.toStr() ++ ".db"
-auto milestoneDb = db.open(path)
+*db.DB milestoneDb = db.open(path)
 *db.Collection likeMilestoneDocs = milestoneDb.collection("milestones")
 string roturBase = "http://127.0.0.1:18342"
 array sent = []
@@ -36,7 +36,6 @@ def normalizeUsername(string name) string (
 )
 
 def userIdForUsername(string name) string (
-  // Simulate an account rename without changing identity.
   if name == "alice" or name == "renamed" (
     return "u-alice"
   )
@@ -71,7 +70,6 @@ testing.assert(sent[1].data.path == "/project/p1", "links to the project")
 notifyLikeMilestones("alice", "project", "p1", 5, 4, "/project/p1", {})
 notifyLikeMilestones("alice", "project", "p1", 4, 5, "/project/p1", {})
 testing.assert(sent.len == 1, "unlike and relike do not repeat")
-// Persistence survives process-style close and reopen, and account renames.
 milestoneDb.close()
 milestoneDb = db.open(path)
 likeMilestoneDocs = milestoneDb.collection("milestones")
@@ -104,7 +102,6 @@ testing.assert(sent.len == 12 and sent[12].data.milestone == 25, "sampled counts
 observeRemoteMilestone("alice", "followers", "remote", 24, "/users/alice/followers", {})
 observeRemoteMilestone("alice", "followers", "remote", 25, "/users/alice/followers", {})
 testing.assert(sent.len == 12, "follower drops and refollows do not repeat")
-// A fake Rotur: 97 followers, of whom only 25 are public.
 def handleFakeProfile(*serve.Context c) (
   if c.param("name") == "hidden" (
     c.json(200, {username: "hidden", private: true, restricted: true})
