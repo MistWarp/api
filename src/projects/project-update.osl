@@ -185,7 +185,7 @@ def applyGroupTag(*serve.Context c, object project, object body, UpdateLookups l
     nextGroupTag = ""
   ) else if nextGroupTag == "" (
     return refuse(400, "invalid group tag")
-  ) else if !canManageGroupTag(nextGroupTag, c) (
+  ) else if !lookupGroupManager(lookups, c, nextGroupTag) (
     return refuse(403, "you cannot move this project into that group")
   )
   project.groupTag = nextGroupTag
