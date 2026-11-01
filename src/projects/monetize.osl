@@ -460,10 +460,10 @@ def handleProjectSalesEnded(*serve.Context c) (
 
 def completeProjectPurchase(string key) object (
   sync.lock("purchase:" ++ key)
+  defer sync.unlock("purchase:" ++ key)
   object entry = paidPurchase(key)
   auto res = loadProject((entry.projectId ?? "").toStr())
   if !entry.contains("paid") or !res.ok (
-    sync.unlock("purchase:" ++ key)
     return {ok: false}
   )
   object project = res.project.assert(object)
@@ -484,6 +484,5 @@ def completeProjectPurchase(string key) object (
     addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
   )
   forgetPurchase(key)
-  sync.unlock("purchase:" ++ key)
   return {ok: true, project: project}
 )

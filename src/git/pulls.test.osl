@@ -1,0 +1,252 @@
+import "std:testing"
+import "std:db"
+import "std:fs"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:sync"
+import "std:thread"
+import "go:mistwarp.local/gitinspection"
+
+string dbPath = "/tmp/mistwarp-pulls-test-" ++ timestamp.toStr() ++ ".db"
+auto testDb = db.open(dbPath)
+*db.Collection pullDocs = testDb.collection("project_pulls")
+string tmpDir = "/tmp/mistwarp-pulls-test-" ++ timestamp.toStr() ++ "/"
+number maxWorkspaceBytes = 1000
+string appURL = "http://127.0.0.1"
+
+boolean failing = false
+def failWhenAsked(string what) (
+  if failing (
+    throw "IOError: " ++ what ++ " failed"
+  )
+)
+
+def lockIsFree(string lockName) boolean (
+  boolean free = thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+  return free
+)
+
+def canonicalHistoryHead(object project) string (
+  return (project.gitHead ?? "").toStr()
+)
+def storedPullCommentCount(object pull) number (
+  return if pull.contains("commentCount") then pull.commentCount.toNum() else -1
+)
+def pullCommentCountAfterCreate(object pull, number actualCount) number (
+  return actualCount + 1
+)
+def pullCommentCountAfterDelete(object pull, number removed, number actualCount) number (
+  return actualCount
+)
+def nextPullSequence(number legacySequence, array latestPulls) number (
+  failWhenAsked("the pull sequence")
+  return legacySequence + 1
+)
+def loadComments(string key) array (
+  failWhenAsked("loading comments")
+  return []
+)
+def loadProject(string id) object (
+  failWhenAsked("loading the project")
+  return {ok: false, missing: true}
+)
+def putDocument(*db.Collection docs, string id, object doc) boolean (
+  void docs.deleteOne({_id: id})
+  return docs.insertOne(doc).isOk()
+)
+def projectWorkspaceKeys(object project) array (
+  return []
+)
+def contextBool(*serve.Context c, string key) boolean (
+  return false
+)
+def contextString(*serve.Context c, string key) string (
+  return ""
+)
+def addNotification(string target, string actor, string kind, object payload) (
+  return
+)
+
+def canEditProject(object project,*serve.Context c) boolean (
+  return false
+)
+def canSeeInsideProject(object project,*serve.Context c) boolean (
+  return false
+)
+def canViewProject(object project,*serve.Context c) boolean (
+  return false
+)
+def graphBranchLog(object graph, string branch) array (
+  return []
+)
+def identityMatches(string storedId, string storedUsername, string userId, string username) boolean (
+  return false
+)
+def projectHiddenFrom(object project,*serve.Context c) boolean (
+  return false
+)
+def projectRole(object project, string username) string (
+  return ""
+)
+def projectVersionHistory(object project) object (
+  return {}
+)
+def projectWorkspaceFingerprint(object project) string (
+  return ""
+)
+def requestJSON(*serve.Context c) object (
+  return {}
+)
+def validGitObjectId(string oid) boolean (
+  return false
+)
+def cachedProjectWorkspacePath(object project) string (
+  return ""
+)
+def commentResponse(object comment, string username) object (
+  return {}
+)
+def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
+  return false
+)
+def createComment(string key, string author, string authorId, string content, string parentId, string kind, number donationAmount, string donationPaymentId) object (
+  return {}
+)
+def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
+  return {}
+)
+def normalizeUsername(string username) string (
+  return ""
+)
+def notifyMentions(string content, string actor, array skip, object extra) (
+  return
+)
+def paginate(array items, number offset, number limit) array (
+  return []
+)
+def projectWorkspaceSnapshotKey(string hash) string (
+  return ""
+)
+def randomString(number length) string (
+  return ""
+)
+def removeProjectStorageKeyIfOrphaned(string key, string excludedId, boolean workspace) (
+  return
+)
+def saveProject(object project) boolean (
+  return false
+)
+def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
+  return false
+)
+def stageR2Blob(string key, byte[] body, string contentType, string contentEncoding) boolean (
+  return false
+)
+def usersAreBlocked(string first, string second) boolean (
+  return false
+)
+def awardContributionBounty(string bountyId, string projectId, string recipient) boolean (
+  return false
+)
+def contentHash(byte[] body) string (
+  return ""
+)
+def editComment(string key, string cid, string requester, string content) object (
+  return {}
+)
+def ensureProjectJsonSnapshot(object project) object (
+  return {}
+)
+def ensureProjectWorkspaceSnapshots(object project) object (
+  return {}
+)
+def projectRecordsCommit(object project, string sha) boolean (
+  return false
+)
+def projectSizeBytes(object project) number (
+  return 0
+)
+def storageSettleProject(object project) (
+  return
+)
+def storedProjectExtensions(object project) array (
+  return []
+)
+def storeProjectExtensions(string projectId, array previousExtensions, array extensions, object sources) boolean (
+  return false
+)
+def upsertIndexEntry(object project) boolean (
+  return false
+)
+def validateUploadedHistory(object project, byte[] body, string metadata, string currentHead) object (
+  return {}
+)
+import "./pulls.osl"
+
+object made = insertNativePullLocked({id: "p1"}, {id: "p2"}, "Pull", "Body", "", "base", 0, "sam", "u_sam")
+testing.assert(made.ok == true and made.pull.index == 1 and lockIsFree("native-pull-sequence:p1"), "a pull is numbered and the sequence lock released")
+failing = true
+testing.assert(try(insertNativePullLocked({id: "p1"}, {id: "p2"}, "Pull", "Body", "", "base", 0, "sam", "u_sam")).isErr(), "a failure while numbering a pull reaches the caller")
+testing.assert(lockIsFree("native-pull-sequence:p1"), "the sequence lock is released when numbering throws")
+failing = false
+
+object legacyPull = {"_id": "p1:1", targetProjectId: "p1", index: 1}
+void putDocument(pullDocs, "p1:1", legacyPull)
+countCreatedPullCommentLocked(legacyPull)
+testing.assert(pullDocument("p1", "1").commentCount == 1 and lockIsFree("pull-comment-count:p1:1"), "a new comment is counted")
+void putDocument(pullDocs, "p1:1", legacyPull)
+def countCreated() boolean (
+  countCreatedPullCommentLocked(legacyPull)
+  return true
+)
+def countDeleted() boolean (
+  countDeletedPullCommentLocked(legacyPull, 1)
+  return true
+)
+failing = true
+testing.assert(try(countCreated()).isErr() and lockIsFree("pull-comment-count:p1:1"), "the comment count lock is released when counting a new comment throws")
+testing.assert(try(countDeleted()).isErr() and lockIsFree("pull-comment-count:p1:1"), "the comment count lock is released when counting a deleted comment throws")
+failing = false
+
+def handleTestMerge(*serve.Context c) (
+  void fastForwardPullLocked(c, {index: 1}, {id: "p1"}, {id: "p2"}, "", "", "h1", "h2")
+)
+def handleTestBranches(*serve.Context c) (
+  handleProjectBranchMutation(c, "create")
+)
+*serve.Router app = serve.new()
+app.POST("/projects/:id/merge", handleTestMerge)
+app.POST("/projects/:id/branches", handleTestBranches)
+app.GET("/ready", def(*serve.Context c) -> (
+  c.json(200, {ok: true})
+))
+def runApp() (
+  app.run(":18353")
+)
+thread.new(runApp)
+string base = "http://127.0.0.1:18353"
+for i 50 (
+  if requests.get(base ++ "/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+
+failing = true
+number mergeStatus = requests.post(base ++ "/projects/p1/merge", {body: "{}"}).unwrapOr({status: 0}).status.toNum()
+testing.assert(mergeStatus >= 500 and lockIsFree("project-history-p1"), "the save lock is released when a pull merge throws")
+number branchStatus = requests.post(base ++ "/projects/p1/branches", {body: "{}"}).unwrapOr({status: 0}).status.toNum()
+testing.assert(branchStatus >= 500 and lockIsFree("project-history-p1"), "the save lock is released when a branch change throws")
+failing = false
+number missingStatus = requests.post(base ++ "/projects/p1/branches", {body: "{}"}).unwrapOr({status: 0}).status.toNum()
+testing.assert(missingStatus == 404 and lockIsFree("project-history-p1"), "branch changes still answer once the lock is free again")
+
+testDb.close()
+void fs.remove(dbPath)

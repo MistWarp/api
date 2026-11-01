@@ -274,8 +274,8 @@ def saveProject(object project) boolean (
   )
   // Keep the inactivity scan and eviction consistent with published edits.
   sync.lock("r2-upload-queue")
+  defer sync.unlock("r2-upload-queue")
   boolean saved = writeFile(projectsDir ++ id ++ ".json", project)
-  sync.unlock("r2-upload-queue")
   return saved
 )
 

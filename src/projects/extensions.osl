@@ -281,18 +281,24 @@ def removeProjectExtensionUsage(string projectId, array extensions) boolean (
       return false
     )
     if !seen.contains(hash) (
-      string lockName = "extension-" ++ hash
-      sync.lock(lockName)
-      object record = extensionRecord(policy, hash)
-      if record.contains("projects") (
-        record.projects = removeString(record.projects.assert(array), projectId)
-        if !writeFile(extensionRecordPath(hash), record) (
-          sync.unlock(lockName)
-          return false
-        )
+      if !removeExtensionProjectLocked(policy, hash, projectId) (
+        return false
       )
-      sync.unlock(lockName)
       seen[hash] = true
+    )
+  )
+  return true
+)
+
+def removeExtensionProjectLocked(object policy, string hash, string projectId) boolean (
+  string lockName = "extension-" ++ hash
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object record = extensionRecord(policy, hash)
+  if record.contains("projects") (
+    record.projects = removeString(record.projects.assert(array), projectId)
+    if !writeFile(extensionRecordPath(hash), record) (
+      return false
     )
   )
   return true
@@ -312,45 +318,47 @@ def storeProjectExtensions(string projectId, array previousExtensions, array ext
     string extensionUrl = extension.url.toStr()
     string reviewUrl = extensionReviewUrl(extensionUrl)
     boolean gallery = isGalleryExtensionUrl(extensionUrl)
-    string lockName = "extension-" ++ hash
-    sync.lock(lockName)
-    if !gallery and !fs.exists(extensionSourcePath(hash)) and sources.contains(extensionUrl) (
-      if !fs.writeFile(extensionSourcePath(hash), sources[extensionUrl].toStr()) (
-        sync.unlock(lockName)
-        return false
-      )
-    )
-    object record = extensionRecord(policy, hash)
-    if record.getKeys().len == 0 (
-      record = {status: "untrusted", urls: [], projects: [], firstSeen: timestamp}
-    )
-    if !record.contains("urls") (
-      record.urls = []
-    )
-    if !record.contains("projects") (
-      record.projects = []
-    )
-    if gallery (
-      record.status = "trusted"
-      record.gallery = true
-    )
-    array recordUrls = record.urls.assert(array)
-    array projects = record.projects.assert(array)
-    if !recordUrls.contains(reviewUrl) (
-      recordUrls.append(reviewUrl)
-    )
-    if !projects.contains(projectId) (
-      projects.append(projectId)
-    )
-    record.urls = recordUrls
-    record.projects = projects
-    if !writeFile(extensionRecordPath(hash), record) (
-      sync.unlock(lockName)
+    if !recordProjectExtensionLocked(policy, hash, projectId, extensionUrl, reviewUrl, gallery, sources) (
       return false
     )
-    sync.unlock(lockName)
   )
   return true
+)
+
+def recordProjectExtensionLocked(object policy, string hash, string projectId, string extensionUrl, string reviewUrl, boolean gallery, object sources) boolean (
+  string lockName = "extension-" ++ hash
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  if !gallery and !fs.exists(extensionSourcePath(hash)) and sources.contains(extensionUrl) (
+    if !fs.writeFile(extensionSourcePath(hash), sources[extensionUrl].toStr()) (
+      return false
+    )
+  )
+  object record = extensionRecord(policy, hash)
+  if record.getKeys().len == 0 (
+    record = {status: "untrusted", urls: [], projects: [], firstSeen: timestamp}
+  )
+  if !record.contains("urls") (
+    record.urls = []
+  )
+  if !record.contains("projects") (
+    record.projects = []
+  )
+  if gallery (
+    record.status = "trusted"
+    record.gallery = true
+  )
+  array recordUrls = record.urls.assert(array)
+  array projects = record.projects.assert(array)
+  if !recordUrls.contains(reviewUrl) (
+    recordUrls.append(reviewUrl)
+  )
+  if !projects.contains(projectId) (
+    projects.append(projectId)
+  )
+  record.urls = recordUrls
+  record.projects = projects
+  return writeFile(extensionRecordPath(hash), record)
 )
 
 def storedProjectExtensions(object project) array (
@@ -378,9 +386,9 @@ def migrateExtensionUsage() boolean (
     return true
   )
   sync.lock("extension-index-migration")
+  defer sync.unlock("extension-index-migration")
   state = readFile(statePath)
   if extensionUsageMigrated(state) (
-    sync.unlock("extension-index-migration")
     return true
   )
   array files = fs.readDir(projectsDir).unwrapOr([])
@@ -390,13 +398,11 @@ def migrateExtensionUsage() boolean (
       object project = res.data.assert(object)
       array extensions = storedProjectExtensions(project)
       if extensions.len > 0 and !storeProjectExtensions(project.id.toStr(), [], extensions, {}) (
-        sync.unlock("extension-index-migration")
         return false
       )
     )
   )
   boolean saved = writeFile(statePath, {version: 2})
-  sync.unlock("extension-index-migration")
   return saved
 )
 
@@ -578,11 +584,7 @@ def ensureExtensionRecords(object policy) boolean (
       if !record.contains("projects") (
         record.projects = []
       )
-      string lockName = "extension-" ++ hash
-      sync.lock(lockName)
-      boolean saved = fs.exists(extensionRecordPath(hash)) or writeFile(extensionRecordPath(hash), record)
-      sync.unlock(lockName)
-      if !saved (
+      if !writeMissingExtensionRecordLocked(hash, record) (
         return false
       )
     )
@@ -593,17 +595,20 @@ def ensureExtensionRecords(object policy) boolean (
     if fileName.endsWith(".js") (
       string hash = fileName.split(".")[1]
       if isExtensionHash(hash) and !fs.exists(extensionRecordPath(hash)) (
-        string lockName = "extension-" ++ hash
-        sync.lock(lockName)
-        boolean saved = fs.exists(extensionRecordPath(hash)) or writeFile(extensionRecordPath(hash), {status: "untrusted", urls: [], projects: [], firstSeen: timestamp})
-        sync.unlock(lockName)
-        if !saved (
+        if !writeMissingExtensionRecordLocked(hash, {status: "untrusted", urls: [], projects: [], firstSeen: timestamp}) (
           return false
         )
       )
     )
   )
   return true
+)
+
+def writeMissingExtensionRecordLocked(string hash, object record) boolean (
+  string lockName = "extension-" ++ hash
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  return fs.exists(extensionRecordPath(hash)) or writeFile(extensionRecordPath(hash), record)
 )
 
 def handleAdminGetExtensions(*serve.Context c) (
@@ -696,16 +701,9 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
     c.badRequest("gallery extensions are always trusted")
     return
   )
-  string lockName = "extension-" ++ hash
-  sync.lock(lockName)
-  record = readExtensionRecord(hash)
-  record.status = status
-  if !writeFile(extensionRecordPath(hash), record) (
-    sync.unlock(lockName)
-    c.internalError("could not save extension policy")
+  if !saveExtensionStatusLocked(c, hash, status) (
     return
   )
-  sync.unlock(lockName)
   number affectedCount = 0
   if status == "blocked" (
     object affected = unshareProjectsUsingHash(hash)
@@ -716,6 +714,19 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
     )
   )
   c.json(200, {ok: true, affected: affectedCount})
+)
+
+def saveExtensionStatusLocked(*serve.Context c, string hash, string status) boolean (
+  string lockName = "extension-" ++ hash
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object record = readExtensionRecord(hash)
+  record.status = status
+  if !writeFile(extensionRecordPath(hash), record) (
+    c.internalError("could not save extension policy")
+    return false
+  )
+  return true
 )
 
 def setExtensionUrlBlocked(object policy, string extensionUrl, boolean blocked) (

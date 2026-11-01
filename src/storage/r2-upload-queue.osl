@@ -102,6 +102,7 @@ def stageR2Blob(string key, BlobBody body, string contentType, string contentEnc
     return false
   )
   sync.lock("r2-upload-queue")
+  defer sync.unlock("r2-upload-queue")
   string path = localBlobPath(key)
   boolean saved = true
   if !fs.exists(path) (
@@ -111,7 +112,6 @@ def stageR2Blob(string key, BlobBody body, string contentType, string contentEnc
   if saved and !r2Local (
     saved = queueR2UploadLocked(key, contentType, contentEncoding)
   )
-  sync.unlock("r2-upload-queue")
   return saved
 )
 
@@ -120,15 +120,14 @@ def flushR2UploadQueue() (
     return
   )
   sync.lock("r2-upload-queue")
+  defer sync.unlock("r2-upload-queue")
   object activityResult = loadR2BlobActivity()
   if !activityResult.ok (
-    sync.unlock("r2-upload-queue")
     return
   )
   object activity = activityResult.activity.assert(object)
   object queueResult = readR2UploadQueue()
   if !queueResult.ok (
-    sync.unlock("r2-upload-queue")
     return
   )
   array items = queueResult.items.assert(array)
@@ -180,7 +179,6 @@ def flushR2UploadQueue() (
     )
   )
   writeFile(r2UploadQueueFile, {items: remaining})
-  sync.unlock("r2-upload-queue")
 )
 
 def removeQueuedR2UploadLocked(string key) boolean (

@@ -119,10 +119,9 @@ def handleGetRemixTree(*serve.Context c) (
 )
 
 def handleRemixProject(*serve.Context c) (
-  string lockName = "project-history-" ++ c.param("id")
-  sync.lock(lockName)
-  handleRemixProjectLocked(c)
-  sync.unlock(lockName)
+  runLocked(projectSaveLock(c.param("id")), def() -> (
+    handleRemixProjectLocked(c)
+  ))
 )
 
 def handleRemixProjectLocked(*serve.Context c) (

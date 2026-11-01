@@ -92,10 +92,7 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
 )
 
 def handlePatchCommit(*serve.Context c) (
-  string lockName = "project-history-" ++ c.param("id")
-  sync.lock(lockName)
-  object res = applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), contextString(c, "username"), contextBool(c, "isAdmin"))
-  sync.unlock(lockName)
+  object res = applyCommitPatchLocked(c)
   if res.status.toInt() == 404 (
     c.notFound(res.error.toStr())
   ) else if res.status.toInt() == 403 (
@@ -107,6 +104,13 @@ def handlePatchCommit(*serve.Context c) (
   ) else (
     c.json(200, res)
   )
+)
+
+def applyCommitPatchLocked(*serve.Context c) object (
+  string lockName = "project-history-" ++ c.param("id")
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  return applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), contextString(c, "username"), contextBool(c, "isAdmin"))
 )
 
 def handleGetCommitCollaborators(*serve.Context c) (

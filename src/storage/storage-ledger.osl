@@ -473,9 +473,9 @@ def storageSettle(string userId, object hold) (
   )
   string lockName = "storage-ledger-" ++ userId
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   object totals = ownerStorageTotals(userId, {})
   settleTotalsLocked(userId, totals, hold)
-  sync.unlock(lockName)
 )
 
 def settleTotalsLocked(string userId, object totals, object hold) (
@@ -523,23 +523,31 @@ def storageSettleSoon(string userId) (
   if !usesRoturStorage(userId) or !ledgerReady() (
     return
   )
-  sync.lock("storage-settle-queue")
-  boolean queued = storageSettleQueued.has(userId)
-  if !queued (
-    storageSettleQueued.set(userId, true)
-  )
-  sync.unlock("storage-settle-queue")
-  if !queued (
+  if !queueStorageSettleLocked(userId) (
     thread.new(settleQueued, userId)
   )
 )
 
+def queueStorageSettleLocked(string userId) boolean (
+  sync.lock("storage-settle-queue")
+  defer sync.unlock("storage-settle-queue")
+  boolean queued = storageSettleQueued.has(userId)
+  if !queued (
+    storageSettleQueued.set(userId, true)
+  )
+  return queued
+)
+
 def settleQueued(string userId) (
   wait 2
-  sync.lock("storage-settle-queue")
-  storageSettleQueued.delete(userId)
-  sync.unlock("storage-settle-queue")
+  forgetStorageSettleLocked(userId)
   storageSettle(userId, noStorageHold())
+)
+
+def forgetStorageSettleLocked(string userId) (
+  sync.lock("storage-settle-queue")
+  defer sync.unlock("storage-settle-queue")
+  storageSettleQueued.delete(userId)
 )
 
 def storageSettleProject(object project) (
@@ -562,21 +570,23 @@ def settleEveryoneOnce() number (
   number settled = 0
   for i people.len (
     string userId = people[i].toStr()
-    if usesRoturStorage(userId) (
-      string lockName = "storage-ledger-" ++ userId
-      sync.lock(lockName)
-      // Totals from the sweep may be a moment old; work them out again for
-      // anyone whose count would change.
-      object listed = ledgerCounted(userId)
-      object mine = (totals[userId] ?? zero).assertElse(object, zero)
-      if listed.ok and ledgerChanges(listed.objects, mine).len > 0 (
-        settleTotalsLocked(userId, ownerStorageTotals(userId, {}), noStorageHold())
-        settled += 1
-      )
-      sync.unlock(lockName)
+    if usesRoturStorage(userId) and settleChangedLocked(userId, (totals[userId] ?? zero).assertElse(object, zero)) (
+      settled += 1
     )
   )
   return settled
+)
+
+def settleChangedLocked(string userId, object mine) boolean (
+  string lockName = "storage-ledger-" ++ userId
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object listed = ledgerCounted(userId)
+  if listed.ok and ledgerChanges(listed.objects, mine).len > 0 (
+    settleTotalsLocked(userId, ownerStorageTotals(userId, {}), noStorageHold())
+    return true
+  )
+  return false
 )
 
 def storageSettleLoop() (
@@ -602,14 +612,18 @@ def pendingAssetHold(string ownerId, string username, string name, number bytes,
     return {ok: false, refusal: held}
   )
   if held.ok (
-    string lockName = "upload-quota-" ++ normalizeUsername(username)
-    sync.lock(lockName)
-    array events = pendingUploadEvents(username)
-    events.append({t: timestamp, bytes: bytes, name: name})
-    writeFile(quotaPath(username), {pending: events})
-    sync.unlock(lockName)
+    recordPendingAssetLocked(username, name, bytes)
   )
   return {ok: true}
+)
+
+def recordPendingAssetLocked(string username, string name, number bytes) (
+  string lockName = "upload-quota-" ++ normalizeUsername(username)
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  array events = pendingUploadEvents(username)
+  events.append({t: timestamp, bytes: bytes, name: name})
+  writeFile(quotaPath(username), {pending: events})
 )
 
 // Releases the holds of assets a save now counts, or that failed to upload.
@@ -617,8 +631,16 @@ def releasePendingAssetHolds(string ownerId, string username, array names) (
   if names.len == 0 (
     return
   )
+  array releasing = forgetPendingAssetsLocked(username, names)
+  for i releasing.len (
+    ledgerRelease(ownerId, "pending-" ++ releasing[i].toStr())
+  )
+)
+
+def forgetPendingAssetsLocked(string username, array names) array (
   string lockName = "upload-quota-" ++ normalizeUsername(username)
   sync.lock(lockName)
+  defer sync.unlock(lockName)
   array events = pendingUploadEvents(username)
   object wanted = {}
   for i names.len (
@@ -634,10 +656,7 @@ def releasePendingAssetHolds(string ownerId, string username, array names) (
   if releasing.len > 0 (
     writeFile(quotaPath(username), {pending: quotaWithoutNames(events, releasing, timestamp, quotaWindowMs)})
   )
-  sync.unlock(lockName)
-  for i releasing.len (
-    ledgerRelease(ownerId, "pending-" ++ releasing[i].toStr())
-  )
+  return releasing
 )
 
 // ---------- Backfill ----------

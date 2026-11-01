@@ -104,34 +104,36 @@ def handleUploadProjectAsset(*serve.Context c) (
     return
   )
 
+  if storeProjectAssetLocked(c, project, name, file) (
+    c.json(201, {ok: true, uploaded: true, name: name})
+  )
+)
+
+def storeProjectAssetLocked(*serve.Context c, object project, string name, object file) boolean (
   string assetLock = "asset-upload-" ++ name
   sync.lock(assetLock)
+  defer sync.unlock(assetLock)
   object assetsIndex = loadAssetsIndex()
   object knownAssets = assetsIndex.assets
   if knownAssets.contains(name) (
-    sync.unlock(assetLock)
     c.json(200, {ok: true, uploaded: false, name: name})
-    return
+    return false
   )
   if !holdUploadAhead(c, project, name, file.size.toNum()) (
-    sync.unlock(assetLock)
-    return
+    return false
   )
   if !stageR2Blob(assetObjectKey(name), file.data, contentTypeForExt(extPartOf(name)), "") (
     releaseUploadAhead(c, project, [name])
-    sync.unlock(assetLock)
     c.internalError("asset upload failed")
-    return
+    return false
   )
   knownAssets[name] = file.size
   if !saveAssetsIndex(assetsIndex) (
     r2Remove(assetObjectKey(name))
-    sync.unlock(assetLock)
     c.internalError("asset index update failed")
-    return
+    return false
   )
-  sync.unlock(assetLock)
-  c.json(201, {ok: true, uploaded: true, name: name})
+  return true
 )
 
 def handleStageProjectUploadPart(*serve.Context c) (
@@ -352,19 +354,7 @@ def handleCompleteProjectUploadPart(*serve.Context c) (
       c.badRequest("asset filename does not match its content")
       return
     )
-    string assetLock = "asset-upload-" ++ name
-    sync.lock(assetLock)
-    object assetsIndex = loadAssetsIndex()
-    object knownAssets = assetsIndex.assets
-    boolean stored = knownAssets.contains(name)
-    if !stored (
-      stored = stageR2Blob(assetObjectKey(name), data, contentTypeForExt(extPartOf(name)), "")
-      if stored (
-        knownAssets[name] = metadata.size
-        stored = saveAssetsIndex(assetsIndex)
-      )
-    )
-    sync.unlock(assetLock)
+    boolean stored = storeStagedAssetLocked(name, data, metadata.size.toNum())
     removeStagedUploadPart(token, metadata)
     if !stored (
       c.internalError("could not store asset")
@@ -389,4 +379,21 @@ def handleCompleteProjectUploadPart(*serve.Context c) (
     return
   )
   c.json(201, {ok: true, complete: true, token: token, kind: kind})
+)
+
+def storeStagedAssetLocked(string name, byte[] data, number size) boolean (
+  string assetLock = "asset-upload-" ++ name
+  sync.lock(assetLock)
+  defer sync.unlock(assetLock)
+  object assetsIndex = loadAssetsIndex()
+  object knownAssets = assetsIndex.assets
+  boolean stored = knownAssets.contains(name)
+  if !stored (
+    stored = stageR2Blob(assetObjectKey(name), data, contentTypeForExt(extPartOf(name)), "")
+    if stored (
+      knownAssets[name] = size
+      stored = saveAssetsIndex(assetsIndex)
+    )
+  )
+  return stored
 )

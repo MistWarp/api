@@ -373,6 +373,7 @@ def r2ObjectType(string key) string (
 
 def recordR2Stored(object item) (
   sync.lock("r2-storage-index")
+  defer sync.unlock("r2-storage-index")
   auto loaded = readFile(r2StorageIndexFile)
   object data = if loaded.ok then loaded.data.assertElse(object, {}) else {}
   if !data.contains("objects") (
@@ -385,11 +386,11 @@ def recordR2Stored(object item) (
     storedAt: timestamp
   }
   writeFile(r2StorageIndexFile, data)
-  sync.unlock("r2-storage-index")
 )
 
 def recordR2Removed(string key) (
   sync.lock("r2-storage-index")
+  defer sync.unlock("r2-storage-index")
   auto loaded = readFile(r2StorageIndexFile)
   if loaded.ok (
     object data = loaded.data.assertElse(object, {})
@@ -400,7 +401,6 @@ def recordR2Removed(string key) (
       writeFile(r2StorageIndexFile, data)
     )
   )
-  sync.unlock("r2-storage-index")
 )
 
 def syncR2StorageInventory(boolean force) object (
@@ -408,10 +408,10 @@ def syncR2StorageInventory(boolean force) object (
     return {ok: true, skipped: true, reason: "local_mode"}
   )
   sync.lock("r2-storage-inventory-sync")
+  defer sync.unlock("r2-storage-inventory-sync")
   auto loaded = readFile(r2StorageIndexFile)
   object current = if loaded.ok then loaded.data.assertElse(object, {}) else {}
   if !force and current.contains("syncedAt") and current.syncedAt.toNum() > 0 (
-    sync.unlock("r2-storage-inventory-sync")
     return {ok: true, skipped: true, syncedAt: current.syncedAt}
   )
   number scanStartedAt = timestamp
@@ -419,11 +419,19 @@ def syncR2StorageInventory(boolean force) object (
   auto parsed = json.parse(encoded, {type: "object"})
   if parsed.isErr() or parsed.unwrap().assert(object).ok != true (
     string errorMessage = if parsed.isErr() then "could not read the R2 inventory" else parsed.unwrap().assert(object).error.toStr()
-    sync.unlock("r2-storage-inventory-sync")
     return {ok: false, error: errorMessage}
   )
   object inventory = parsed.unwrap().assert(object)
+  boolean saved = saveR2InventoryLocked(inventory, scanStartedAt)
+  if !saved (
+    return {ok: false, error: "could not save the R2 inventory"}
+  )
+  return {ok: true, syncedAt: inventory.syncedAt, pages: inventory.pages}
+)
+
+def saveR2InventoryLocked(object inventory, number scanStartedAt) boolean (
   sync.lock("r2-storage-index")
+  defer sync.unlock("r2-storage-index")
   auto latestLoaded = readFile(r2StorageIndexFile)
   object latest = if latestLoaded.ok then latestLoaded.data.assertElse(object, {}) else {}
   object inventoryObjects = inventory.objects.assertElse(object, {})
@@ -436,17 +444,11 @@ def syncR2StorageInventory(boolean force) object (
       inventoryObjects[key] = item
     )
   )
-  boolean saved = writeFile(r2StorageIndexFile, {
+  return writeFile(r2StorageIndexFile, {
     objects: inventoryObjects,
     syncedAt: inventory.syncedAt,
     pages: inventory.pages
   })
-  sync.unlock("r2-storage-index")
-  sync.unlock("r2-storage-inventory-sync")
-  if !saved (
-    return {ok: false, error: "could not save the R2 inventory"}
-  )
-  return {ok: true, syncedAt: inventory.syncedAt, pages: inventory.pages}
 )
 
 def r2Remove(string key) boolean (
@@ -454,6 +456,7 @@ def r2Remove(string key) boolean (
     return false
   )
   sync.lock("r2-upload-queue")
+  defer sync.unlock("r2-upload-queue")
   boolean removed = readR2UploadQueue().ok.assert(boolean)
   if removed and !r2Local (
     auto deleted = r2Client.delete(key)
@@ -469,7 +472,6 @@ def r2Remove(string key) boolean (
     string path = localBlobPath(key)
     removed = !fs.exists(path) or fs.remove(path)
   )
-  sync.unlock("r2-upload-queue")
   return removed
 )
 
