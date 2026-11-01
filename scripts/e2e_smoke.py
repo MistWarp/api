@@ -375,14 +375,21 @@ def committed_workspace(server, ids, alias, who, message, delta=False, same_tree
     return history.archive(head, delta), json.dumps(history.metadata(head, delta))
 
 
-def staged_part(server, step, path, who, kind, data, name):
-    status, started = step(name + " start", "POST", path + "/upload-parts", who, {"kind": kind, "name": "", "size": len(data), "chunks": 1})
+def staged_part(server, step, path, who, kind, data, name, chunks=1):
+    status, started = step(name + " start", "POST", path + "/upload-parts", who, {"kind": kind, "name": "", "size": len(data), "chunks": chunks})
     token = started.get("token", "") if isinstance(started, dict) else ""
-    status, chunk = step(name + " chunk", "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": "0"}, {"chunk": data}))
-    for field in ("received", "size"):
-        if isinstance(chunk, dict) and chunk.get(field) == len(data):
-            chunk[field] = "<bytes sent>"
+    cut = (len(data) + chunks - 1) // chunks
+    for index in range(chunks):
+        part = data[index * cut:(index + 1) * cut]
+        status, chunk = step("%s chunk %d" % (name, index), "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": str(index)}, {"chunk": part}))
+        for field, sent in (("received", min(len(data), (index + 1) * cut)), ("size", len(data))):
+            if isinstance(chunk, dict) and chunk.get(field) == sent:
+                chunk[field] = "<bytes sent>"
     return token
+
+
+def complete_part(step, path, who, token, name):
+    step(name, "POST", path + "/upload-parts/%s/complete" % token, who, {})
 
 
 def upload_flow(server, step, ids):
@@ -476,9 +483,11 @@ def upload_flow(server, step, ids):
     archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Delta save", delta=True)
     upload("upload delta workspace", {"git": metadata}, {"project": plain, "workspace": archive})
     archive, metadata = committed_workspace(server, ids, "<history>", "sam", "Staged save", delta=True)
-    token = staged_part(server, step, path, "sam", "workspace", archive, "stage workspace")
+    token = staged_part(server, step, path, "sam", "workspace", archive, "stage workspace", chunks=2)
+    upload("upload unfinished staged workspace", {"git": metadata, "workspaceToken": token})
+    complete_part(step, path, "sam", token, "complete staged workspace")
     upload("upload staged workspace", {"git": metadata, "workspaceToken": token})
-    upload("upload reused workspace token", {"git": metadata, "workspaceToken": token})
+    upload("upload reused workspace token", {"workspaceToken": token})
 
     first = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<history>"), "sam"))
     oldest = first.head()
@@ -538,7 +547,8 @@ def upload_flow(server, step, ids):
     upload("upload pull merge stale head", {"pullId": pull_index, "expectedHead": ZERO_HEAD}, {"project": plain, "mergeTree": pull_tree})
     tree_token = staged_part(server, step, path, "sam", "mergeTree", pull_tree, "stage merge tree")
     upload("upload pull merge with unfinished tree", {"pullId": pull_index, "expectedHead": head, "mergeTreeToken": tree_token})
-    upload("upload pull merge", {"pullId": pull_index, "expectedHead": head}, {"project": plain, "mergeTree": pull_tree})
+    complete_part(step, path, "sam", tree_token, "complete staged merge tree")
+    upload("upload pull merge", {"pullId": pull_index, "expectedHead": head, "mergeTreeToken": tree_token})
     step("merged pull", "GET", path + "/pulls/" + pull_index, "sam")
     upload("upload merged pull again", {"pullId": pull_index}, {"project": plain, "mergeTree": pull_tree})
 
