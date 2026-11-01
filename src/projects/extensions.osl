@@ -718,6 +718,17 @@ def handleAdminSetExtensionPolicy(*serve.Context c) (
   c.json(200, {ok: true, affected: affectedCount})
 )
 
+def setExtensionUrlBlocked(object policy, string extensionUrl, boolean blocked) (
+  array blockedUrls = policy.blockedUrls.assert(array)
+  if blocked and !blockedUrls.contains(extensionUrl) (
+    blockedUrls.append(extensionUrl)
+  )
+  if !blocked (
+    blockedUrls = removeString(blockedUrls, extensionUrl)
+  )
+  policy.blockedUrls = blockedUrls
+)
+
 def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
   object body = requestJSON(c)
   if !body.contains("url") or !body.contains("blocked") (
@@ -735,13 +746,7 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
     return
   )
   object policy = loadExtensionPolicy()
-  array blockedUrls = policy.blockedUrls.assert(array)
-  if blocked and !blockedUrls.contains(extensionUrl) (
-    blockedUrls.append(extensionUrl)
-  )
-  if !blocked (
-    policy.blockedUrls = removeString(blockedUrls, extensionUrl)
-  )
+  setExtensionUrlBlocked(policy, extensionUrl, blocked)
   if !saveExtensionPolicy(policy) (
     c.internalError("could not save URL policy")
     return
