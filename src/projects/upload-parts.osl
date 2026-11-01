@@ -179,7 +179,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
   c.internalError("could not stage upload part")
   return
 )
-c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
+  c.json(201, {ok: true, token: token, size: file.size, expiresInMs: stagedUploadPartTtlMs})
 )
 
 def uploadPartChunkPath(string token, number index) string (
