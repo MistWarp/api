@@ -1208,7 +1208,7 @@ def startSubmissionLocked(*serve.Context c, object student, object assignment, s
     )
     object starterProject = starter.project.assert(object)
     if projectHasWorkspace(starterProject) (
-      created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), title, "", true)
+      created = forkProjectFor(starterProject, student.username.toStr(), student["_id"].toStr(), mistwarpBenefitsForUserId(student["_id"].toStr()), title, "", true)
     ) else (
       created = createBlankStudentProject(student, title)
     )

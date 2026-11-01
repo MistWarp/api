@@ -122,7 +122,7 @@ def handleCreateClassGroup(*serve.Context c) (
   string starterId = (assignment.starterProjectId ?? "").toStr()
   auto starter = loadProject(starterId)
   if starterId != "" and starter.ok and projectHasWorkspace(starter.project.assert(object)) (
-    created = forkProjectFor(starter.project.assert(object), owner.username.toStr(), owner["_id"].toStr(), title, "", true)
+    created = forkProjectFor(starter.project.assert(object), owner.username.toStr(), owner["_id"].toStr(), mistwarpBenefitsForUserId(owner["_id"].toStr()), title, "", true)
   ) else (
     created = createBlankStudentProject(owner, title)
   )

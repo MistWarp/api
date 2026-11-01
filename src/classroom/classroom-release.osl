@@ -134,7 +134,7 @@ def archiveSubmittedWork(object student, object classDoc) (
       auto loaded = loadProject(submission.projectId.toStr())
       if loaded.ok and projectHasWorkspace(loaded.project.assert(object)) (
         object project = loaded.project.assert(object)
-        object copy = forkProjectFor(project, teacherName, teacherId, (project.title.toStr() ++ " (" ++ student.displayName.toStr() ++ ")").trim(1, 100), "", false)
+        object copy = forkProjectFor(project, teacherName, teacherId, mistwarpBenefitsForUserId(teacherId), (project.title.toStr() ++ " (" ++ student.displayName.toStr() ++ ")").trim(1, 100), "", false)
         if copy.ok == true (
           submission.projectId = copy.project.id
         )
@@ -159,7 +159,7 @@ def handOverGroupProject(object project, object student, string claimantName, st
     )
   )
   if projectHasWorkspace(project) (
-    forkProjectFor(project, claimantName, claimantId, project.title.toStr(), "", false)
+    forkProjectFor(project, claimantName, claimantId, mistwarpBenefitsForUserId(claimantId), project.title.toStr(), "", false)
   )
   project.collaborators = rest
   moveProjectOwner(project, next.username.toStr(), next.userId.toStr())
