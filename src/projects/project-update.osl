@@ -1,8 +1,4 @@
-type OwnerTransfer (
-  string fromId = ""
-  string toId = ""
-  object hold = {}
-)
+export {}
 
 def handleUpdateProject(*serve.Context c) (
   string lockName = "project-upload:" ++ c.param("id")

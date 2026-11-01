@@ -1,5 +1,11 @@
 export {}
 
+type OwnerTransfer (
+  string fromId = ""
+  string toId = ""
+  object hold = {}
+)
+
 def applyBranding(object project, object body, object creatorBenefits) Refusal (
   if !body.contains("branding") (
     return noRefusal()
