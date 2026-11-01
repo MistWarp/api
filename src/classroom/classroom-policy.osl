@@ -1,3 +1,11 @@
+export {
+  apiRoutePath,
+  isStudentUserId,
+  isStudentUsername,
+  studentProjectUpdateAllowed,
+  studentRouteAllowed
+}
+
 string studentIdPrefix = "mwc_"
 string studentUsernameSeparator = "~"
 number studentLoginMaxFailures = 5

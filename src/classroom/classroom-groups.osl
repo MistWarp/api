@@ -1,3 +1,5 @@
+export {}
+
 number classroomGroupMinSize = 2
 number classroomGroupMaxSize = 6
 

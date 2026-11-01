@@ -1,3 +1,10 @@
+export {
+  eraseUser,
+  loadSafety,
+  userHasBlocked,
+  usersAreBlocked
+}
+
 def safetyPath(string username) string (
   return safetyDir ++ normalizeUsername(username) ++ ".json"
 )

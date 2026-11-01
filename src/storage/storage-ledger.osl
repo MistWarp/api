@@ -1,3 +1,21 @@
+export {
+  ledgerAllowance,
+  ledgerFreeAll,
+  logLedgerSetup,
+  noStorageHold,
+  pendingAssetHold,
+  projectOwnerId,
+  releasePendingAssetHolds,
+  storageHold,
+  storageHoldRelease,
+  storageReport,
+  storageSettle,
+  storageSettleLoop,
+  storageSettleProject,
+  storageSettleSoon,
+  usesRoturStorage
+}
+
 // MistWarp's projects, assets and backpack count against each person's one
 // Rotur storage allowance (storage-ledger-policy.osl says what counts). The
 // Rotur API keeps the count in its storage ledger:

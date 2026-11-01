@@ -1,3 +1,5 @@
+export {}
+
 def tierRank(string tier) number (
   string key = tier.toLower().strip()
   if key == "lite" (

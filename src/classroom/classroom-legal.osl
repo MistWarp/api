@@ -1,3 +1,7 @@
+export {
+  eraseClassroomTeacher
+}
+
 def classroomTermsRecord(string userId) object (
   return (classroomTermsDocs.findById(userId) ?? {})
 )

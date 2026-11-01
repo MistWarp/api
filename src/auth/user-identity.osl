@@ -1,3 +1,19 @@
+export {
+  discoverUserIdentity,
+  identityMatches,
+  loadUserIds,
+  purgeUser,
+  purgeUserSessions,
+  reconcileLoop,
+  replaceUserInArray,
+  rewriteNotificationIdentityFields,
+  roturServiceOptions,
+  saveUserIds,
+  userIdForUsername,
+  userIdsCache,
+  usernameForId
+}
+
 auto userIdsCache = cache.new({capacity: 10000, ttl: 300000})
 auto identityRefreshCache = cache.new({capacity: 10000, ttl: 300000})
 

@@ -1,3 +1,10 @@
+export {
+  authMiddleware,
+  editorSessionGuard,
+  requireAdmin,
+  requireAuth
+}
+
 def authMiddleware(*serve.Context c) (
   boolean authenticated = false
   string username = ""

@@ -1,3 +1,14 @@
+export {
+  canAccessPullWorkspace,
+  completeNativePull,
+  createNativePull,
+  projectBranchHead,
+  projectGitHead,
+  projectHasWorkspace,
+  pullCommentKey,
+  pullDocument
+}
+
 def projectGitHead(object project) string (
   return canonicalHistoryHead(project)
 )

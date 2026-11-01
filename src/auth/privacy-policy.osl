@@ -1,3 +1,14 @@
+export {
+  activityItemVisible,
+  activityPrivacy,
+  activityProjectIds,
+  effectiveProfileCommentsOff,
+  effectiveShowRecentActivity,
+  profileHasChoice,
+  profileIsMinor,
+  profileSearchable
+}
+
 def roturReportsMinor(object data) boolean (
   return data.contains("minor") and data.minor == true
 )

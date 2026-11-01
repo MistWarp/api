@@ -1,3 +1,11 @@
+export {
+  commentResponse,
+  createComment,
+  deleteComment,
+  editComment,
+  notifyMentions
+}
+
 def createComment(string key, string author, string authorId, string content, string parentId, string kind, number donationAmount, string donationPaymentId) object (
   string trimmed = content.strip()
   if trimmed == "" (

@@ -1,3 +1,5 @@
+export {}
+
 number classroomSeatPackSize = 10
 number classroomBillingGraceMs = 259200000
 number stripeSignatureToleranceSeconds = 300

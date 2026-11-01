@@ -1,3 +1,7 @@
+export {
+  projectStorageSummary
+}
+
 // What MistWarp counts against a person's one Rotur storage allowance, which
 // the Rotur API keeps in its storage ledger.
 //

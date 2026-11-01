@@ -1,3 +1,10 @@
+export {
+  requireGoodStanding,
+  setStanding,
+  standingInfo,
+  standingLevel
+}
+
 def standingRank(string level) number (
   if level == "warning" (
     return 1

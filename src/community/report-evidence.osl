@@ -1,3 +1,10 @@
+export {
+  handleGetEvidenceAsset,
+  handleGetEvidenceJson,
+  loadEvidenceMeta,
+  maybeClearProjectEvidence
+}
+
 def evidenceDirFor(string id) string (
   return reportEvidenceDir ++ id ++ "/"
 )

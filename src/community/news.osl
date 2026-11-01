@@ -1,3 +1,11 @@
+export {
+  isValidReaction,
+  loadNews,
+  migratePolicyNewsPosts,
+  purgeUserFromNews,
+  renameUserInNews
+}
+
 def loadNews() array (
   auto res = readFile(newsFile)
   if !res.ok (

@@ -1,3 +1,7 @@
+export {
+  vanityAfter
+}
+
 // A vanity project URL needs a plan that includes one. Once the owner's plan
 // stops including it, the URL stops working but stays reserved for them for
 // 30 days, so resubscribing brings it straight back. After that it is

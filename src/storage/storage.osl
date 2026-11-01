@@ -1,3 +1,29 @@
+export {
+  addActivity,
+  appendComment,
+  deleteProjectFile,
+  ensureDirectories,
+  indexEntryFromProject,
+  loadActivity,
+  loadAssetsIndex,
+  loadComments,
+  loadProfile,
+  loadProject,
+  profileExists,
+  projectHistoryBytes,
+  projectSizeBytes,
+  projectStorageBytes,
+  readFile,
+  refreshIndexUrls,
+  removeFromIndex,
+  saveAssetsIndex,
+  saveComments,
+  saveProfile,
+  saveProject,
+  upsertIndexEntry,
+  writeFile
+}
+
 def ensureDirectories() boolean (
   boolean res = fs.mkdir(projectsDir, {recursive: true})
   res = res and fs.mkdir(usersDir, {recursive: true})

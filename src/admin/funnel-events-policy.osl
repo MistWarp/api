@@ -1,3 +1,5 @@
+export {}
+
 object funnelEventVariants = {
   editor_open: [],
   home_view: [],

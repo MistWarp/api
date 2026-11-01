@@ -1,3 +1,18 @@
+export {
+  clampNumber,
+  copyFileReplacing,
+  extPartOf,
+  generateCommentId,
+  generateId,
+  isSafePathPart,
+  isValidMd5Ext,
+  md5PartOf,
+  normalizeTag,
+  normalizeUsername,
+  paginate,
+  randomString
+}
+
 def randomString(number length) string (
   return crypto.randomString(length)
 )

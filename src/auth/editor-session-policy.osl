@@ -1,3 +1,10 @@
+export {
+  editorCanDeleteProject,
+  editorProjectUpdateAllowed,
+  escapedRequestPath,
+  scopedRequestAllowed
+}
+
 number editorSessionTtlMs = 7200000
 number editorSessionMintsPerHour = 60
 

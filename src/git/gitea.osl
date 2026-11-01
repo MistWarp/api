@@ -1,3 +1,5 @@
+export {}
+
 def giteaHeaders(string sudoUser) object (
   object headers = {
     "Authorization": "token " ++ giteaAdminToken,

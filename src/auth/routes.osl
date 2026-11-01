@@ -1,3 +1,7 @@
+export {
+  registerAuthRoutes
+}
+
 def registerAuthRoutes(*serve.Router api) (
   api.GET("/health", handleHealth)
   api.GET("/health/dependencies", handleDependencyHealth)

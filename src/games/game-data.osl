@@ -1,3 +1,9 @@
+export {
+  collectGameDataForUser,
+  purgeGameDataForProject,
+  purgeGameDataForUser
+}
+
 auto gameDataCapabilityCache = cache.new({capacity: 100000, ttl: 300000})
 
 number gameSaveMaxBytes = 65536

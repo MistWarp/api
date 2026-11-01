@@ -1,3 +1,7 @@
+export {
+  assetNeedsUpload
+}
+
 def assetUrlForLocation(string name, boolean localExists, string localAssetsBase, string r2PublicBase) string (
   if localExists or r2PublicBase == "" (
     return localAssetsBase ++ "/" ++ name

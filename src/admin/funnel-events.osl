@@ -1,3 +1,5 @@
+export {}
+
 def recordFunnelEvent(string key, number now) (
   string id = "funnel:" ++ funnelDayKey(now)
   sync.lock("funnel-events")

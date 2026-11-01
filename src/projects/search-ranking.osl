@@ -1,3 +1,9 @@
+export {
+  searchMatchScore,
+  searchRank,
+  spaceSearchScore
+}
+
 def searchMatchScore(string text, string query) number (
   string value = text.toLower().strip()
   if value == "" or query == "" (

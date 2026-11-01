@@ -1,3 +1,5 @@
+export {}
+
 def rankChallengeEntries(array projects) array (
   array ranked = projects.sortBy("rankScore", "descending")
   for i ranked.len (

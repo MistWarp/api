@@ -1,3 +1,7 @@
+export {
+  requireCurrentAgreement
+}
+
 def agreementMetaPath string (
   return "data/agreement.json"
 )

@@ -1,3 +1,8 @@
+export {
+  registerProjectRoutes,
+  registerProjectUploadRoutes
+}
+
 def registerProjectUploadRoutes(*serve.Router uploads) (
   uploads.POST("/projects/:id/upload", serve.maxBodySize(maxProjectUploadRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProject)
   uploads.POST("/projects/:id/upload-parts/:token/chunk", serve.maxBodySize(maxUploadChunkRequestBytes), requireAuth, requireCurrentAgreement, handleUploadProjectPartChunk)

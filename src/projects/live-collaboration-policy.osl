@@ -1,3 +1,5 @@
+export {}
+
 def isSharedEditorRole(string role) boolean (
   return role == "owner" or role == "maintainer" or role == "editor"
 )

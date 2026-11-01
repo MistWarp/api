@@ -1,3 +1,5 @@
+export {}
+
 def relatedProjectEntries(array entries, string id, array excluded, number limit) array (
   object seen = {}
   seen[id] = true

@@ -1,3 +1,10 @@
+export {
+  canManageGroupContent,
+  canManageGroupTag,
+  groupTagOf,
+  normalizeGroupTag
+}
+
 auto groupSnapshotCache = cache.new({capacity: 10000, ttl: 60000})
 
 def normalizeGroupTag(string value) string (

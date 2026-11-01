@@ -1,3 +1,9 @@
+export {
+  registerBlobRoutes,
+  registerStorageRoutes,
+  registerStorageUploadRoutes
+}
+
 def registerBlobRoutes(*serve.Router app) (
   app.GET("/thumbnails/:file", handleGetThumbnail)
   app.GET("/blobs/assets/:name", handleGetAssetBlob)

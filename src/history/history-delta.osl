@@ -1,3 +1,7 @@
+export {
+  graphBranchLog
+}
+
 def appendUniqueCommit(array target, object seen, object commit, number limit) array (
   string sha = commit.sha.toStr()
   if sha != "" and !seen.contains(sha) and target.len < limit (

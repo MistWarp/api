@@ -1,3 +1,7 @@
+export {
+  sweepSiteErrors
+}
+
 number siteErrorRetentionMs = 7 * 86400000
 
 array siteErrorPathWords = [

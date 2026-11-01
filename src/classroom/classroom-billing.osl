@@ -1,3 +1,5 @@
+export {}
+
 def stripeBillingConfigured() boolean (
   return stripeSecretKey != "" and stripeWebhookSecret != "" and classroomBillingIntervals(stripeClassroomPrice, stripeClassroomPriceYearly).len > 0
 )

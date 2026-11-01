@@ -1,3 +1,8 @@
+export {
+  developmentFeedLoop,
+  nowSeconds
+}
+
 auto developmentCache = cache.new({capacity: 4, ttl: 300000})
 
 // MistWarp's own source lives in public GitHub repositories, so the work in

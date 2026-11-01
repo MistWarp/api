@@ -1,3 +1,10 @@
+export {
+  contentHash,
+  projectJsonSnapshotKey,
+  projectWorkspaceKeys,
+  projectWorkspaceSnapshotKey
+}
+
 def projectJsonSnapshotKey(string hash) string (
   return "project-json/" ++ hash ++ ".json.gz"
 )

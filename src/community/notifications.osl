@@ -1,3 +1,9 @@
+export {
+  addNotification,
+  loadNotifications,
+  saveNotifications
+}
+
 def loadNotifications(string username) array (
   string key = normalizeUsername(username)
   if !isSafePathPart(key) (

@@ -1,3 +1,5 @@
+export {}
+
 number maxBackpackBodyBytes = 20971520
 number maxBackpackThumbnailBytes = 1048576
 number maxBackpackItems = 2000

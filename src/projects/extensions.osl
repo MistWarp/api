@@ -1,3 +1,10 @@
+export {
+  migrateExtensionUsage,
+  projectBlockedExtension,
+  storeProjectExtensions,
+  storedProjectExtensions
+}
+
 def loadExtensionPolicy() object (
   auto res = readFile(extensionsFile)
   if !res.ok (

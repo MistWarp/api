@@ -1,3 +1,5 @@
+export {}
+
 def schoolForTeacher(string userId) object (
   if userId == "" or isStudentUserId(userId) (
     return {}

@@ -1,3 +1,5 @@
+export {}
+
 string classroomTermsVersion = "2026-10-01"
 number classroomRetentionWarnMs = 335 * 86400000
 number classroomRetentionDeleteMs = 365 * 86400000

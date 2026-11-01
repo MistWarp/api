@@ -1,3 +1,17 @@
+export {
+  creditPlaytimeSession,
+  migrateSpaceMemberships,
+  purgeUserCommunityRecords,
+  purgeUserFromSpaces,
+  recordProjectDiagnostic,
+  removeProjectFromSpaces,
+  removeProjectsFromSpaces,
+  stringArrayContainsUser,
+  syncSpaceMemberships,
+  warmShareCard,
+  xmlEscape
+}
+
 def stringArrayContainsUser(array users, string username) boolean (
   string wanted = normalizeUsername(username)
   for i users.len (
