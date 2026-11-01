@@ -3,4 +3,7 @@ import "./identity-lookup-policy.osl"
 
 testing.assert(profileLookupOutcome(200) == "found", "a 200 profile is a found user")
 testing.assert(profileLookupOutcome(404) == "missing", "a 404 means the user is gone")
-testing.assert(profileLookupOutcome(0) == "unavailable" and profileLookupOutcome(500) == "unavailable" and profileLookupOutcome(429) == "unavailable", "anything else means Rotur could not answer")
+testing.assert(profileLookupOutcome(400) == "missing" and profileLookupOutcome(403) == "missing", "a malformed or banned username is not found")
+testing.assert(profileLookupOutcome(0) == "unavailable", "an unreachable Rotur is unavailable")
+testing.assert(profileLookupOutcome(408) == "unavailable" and profileLookupOutcome(429) == "unavailable", "a timeout or rate limit is unavailable")
+testing.assert(profileLookupOutcome(500) == "unavailable" and profileLookupOutcome(502) == "unavailable" and profileLookupOutcome(503) == "unavailable", "server errors are unavailable")
