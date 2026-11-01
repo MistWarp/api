@@ -19,16 +19,16 @@ def roturMessageSignal(string sender, string recipient) object (
   if roturMessageSignals.has(cacheKey) (
     return roturMessageSignals.get(cacheKey).assertElse(object, {allowed: true, code: "", reason: ""})
   )
-  object result = roturApp("POST", "/signals/message", {"from": roturUserRef(sender), "to": roturUserRef(recipient)})
+  object res = roturApp("POST", "/signals/message", {"from": roturUserRef(sender), "to": roturUserRef(recipient)})
   object signal = {allowed: true, code: "", reason: ""}
-  if result.ok and result.data.allowed != true (
+  if res.ok and res.data.allowed != true (
     signal = {
       allowed: false,
-      code: (result.data.code ?? "settings").toStr(),
-      reason: (result.data.reason ?? "Rotur settings don't allow this message.").toStr()
+      code: (res.data.code ?? "settings").toStr(),
+      reason: (res.data.reason ?? "Rotur settings don't allow this message.").toStr()
     }
   )
-  if result.ok (
+  if res.ok (
     roturMessageSignals.set(cacheKey, signal)
   )
   return signal
@@ -54,11 +54,11 @@ def roturPurchaseRefusal(string buyer, number amount, string note) string (
   if buyer == "" or amount <= 0 (
     return ""
   )
-  object result = roturApp("POST", "/signals/purchase", {user: roturUserRef(buyer), amount: amount, currency: "credits", record: false, note: note.trim(1, 80)})
-  if !result.ok or result.data.allowed == true (
+  object res = roturApp("POST", "/signals/purchase", {user: roturUserRef(buyer), amount: amount, currency: "credits", record: false, note: note.trim(1, 80)})
+  if !res.ok or res.data.allowed == true (
     return ""
   )
-  return (result.data.reason ?? "Rotur settings don't allow this purchase.").toStr()
+  return (res.data.reason ?? "Rotur settings don't allow this purchase.").toStr()
 )
 
 // Who a comment reaches: the owner of the project or profile it's on, and the

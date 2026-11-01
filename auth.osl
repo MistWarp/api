@@ -44,11 +44,11 @@ def getSession(string token) object (
   if sessionCache.has(token) (
     session = sessionCache.get(token).assert(object)
   ) else (
-    auto result = readFile(path)
-    if !result.ok (
+    auto res = readFile(path)
+    if !res.ok (
       return {ok: false, error: "session not found"}
     )
-    session = result.data.assert(object)
+    session = res.data.assert(object)
     sessionCache.set(token, session)
   )
   if timestamp - session.createdAt.toNum() > 604800000 (

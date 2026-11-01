@@ -224,38 +224,38 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
     c.internalError("could not inspect project history")
     return
   )
-  object result = parsed.unwrap().assert(object)
-  if !result.contains("ok") or result.ok != true (
-    c.notFound((result.error ?? "commit not found").toStr())
+  object res = parsed.unwrap().assert(object)
+  if !res.contains("ok") or res.ok != true (
+    c.notFound((res.error ?? "commit not found").toStr())
     return
   )
-  c.json(200, result)
+  c.json(200, res)
 )
 
 def handleGetCommitInspection(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
   string operation = if (c.query("inline") ?? "") == "1" then "commit-inline" else "commit"
-  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), operation, "")
+  gitInspectionResponse(c, res.project.assert(object), c.param("sha"), operation, "")
 )
 
 def handleGetCommitTree(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "tree", "")
+  gitInspectionResponse(c, res.project.assert(object), c.param("sha"), "tree", "")
 )
 
 def handleGetCommitFile(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  gitInspectionResponse(c, result.project.assert(object), c.param("sha"), "file", (c.query("path") ?? ""))
+  gitInspectionResponse(c, res.project.assert(object), c.param("sha"), "file", (c.query("path") ?? ""))
 )

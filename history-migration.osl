@@ -146,9 +146,9 @@ def generateProjectHistory(object project, string parentPath, string parentHead,
 def ensureUploadedProjectHistory(object project) object (
   string lockName = "project-history-" ++ project.id.toStr()
   sync.unlock(lockName)
-  object result = ensureGeneratedProjectHistory(project, {}, false)
+  object res = ensureGeneratedProjectHistory(project, {}, false)
   sync.lock(lockName)
-  return result
+  return res
 )
 
 def ensureGeneratedProjectHistory(object project, object visiting, boolean allowMissingAssets) object (
@@ -215,20 +215,20 @@ def ensureGeneratedProjectHistory(object project, object visiting, boolean allow
 
   sync.lock("project-history-" ++ id)
   auto currentResult = loadProject(id)
-  object result = {ok: false, error: "project disappeared during migration"}
+  object res = {ok: false, error: "project disappeared during migration"}
   if currentResult.ok (
     object current = currentResult.project.assert(object)
     if projectHasWorkspace(current) (
-      result = {ok: true, project: current, generated: false}
+      res = {ok: true, project: current, generated: false}
     ) else if projectHistorySourceVersion(current) != projectHistorySourceVersion(project) or projectGitHead(current) != recordedHead (
-      result = {ok: false, error: "project changed during migration; will retry later"}
+      res = {ok: false, error: "project changed during migration; will retry later"}
     ) else (
-      result = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
+      res = generateProjectHistory(current, parentPath, parentHead, allowMissingAssets)
     )
   )
   sync.unlock("project-history-" ++ id)
   void fs.remove(parentPath)
-  return result
+  return res
 )
 
 def missingProjectHistoryFiles() array (
@@ -249,14 +249,14 @@ def missingProjectHistoryFiles() array (
   return missing
 )
 
-def logHistoryMigrationProgress(object stats, string name, object result) (
+def logHistoryMigrationProgress(object stats, string name, object res) (
   sync.lock("history-migration-progress")
   stats.processed = stats.processed.toNum() + 1
   string status = "skipped"
-  if !result.ok (
+  if !res.ok (
     stats.failed = stats.failed.toNum() + 1
-    status = "failed: " ++ result.error.toStr()
-  ) else if result.generated == true (
+    status = "failed: " ++ res.error.toStr()
+  ) else if res.generated == true (
     stats.generated = stats.generated.toNum() + 1
     status = "generated"
   ) else (
@@ -272,11 +272,11 @@ def generateMissingProjectHistoriesWorker(number workerIndex, number workerCount
     if ((i - 1) % workerCount) == workerIndex (
       string name = files[i].toStr()
       auto loaded = loadProject(name.replace(".json", ""))
-      object result = {ok: false, error: "project disappeared during migration"}
+      object res = {ok: false, error: "project disappeared during migration"}
       if loaded.ok (
-        result = ensureGeneratedProjectHistory(loaded.project.assert(object), {}, true)
+        res = ensureGeneratedProjectHistory(loaded.project.assert(object), {}, true)
       )
-      logHistoryMigrationProgress(stats, name, result)
+      logHistoryMigrationProgress(stats, name, res)
     )
   )
   jobs.done()

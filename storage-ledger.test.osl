@@ -95,11 +95,11 @@ def quotaPath(string username) string (
 )
 
 def pendingUploadEvents(string username) array (
-  auto result = readFile(quotaPath(username))
-  if !result.ok (
+  auto res = readFile(quotaPath(username))
+  if !res.ok (
     return []
   )
-  return quotaPruneEvents((result.data.assertElse(object, {}).pending ?? []).assertElse(array, []), timestamp, quotaWindowMs)
+  return quotaPruneEvents((res.data.assertElse(object, {}).pending ?? []).assertElse(array, []), timestamp, quotaWindowMs)
 )
 
 import "./utils.osl"

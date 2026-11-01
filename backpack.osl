@@ -250,16 +250,16 @@ def deleteBackpackItems(string userId, array ids) object (
 )
 
 def handleDeleteBackpackItem(*serve.Context c) (
-  object result = deleteBackpackItems(contextString(c, "userId"), [c.param("id")])
-  if result.ok != true (
+  object res = deleteBackpackItems(contextString(c, "userId"), [c.param("id")])
+  if res.ok != true (
     c.internalError("failed to save backpack")
     return
   )
-  if result.deleted.toNum() == 0 (
+  if res.deleted.toNum() == 0 (
     c.notFound("backpack item not found")
     return
   )
-  c.json(200, result)
+  c.json(200, res)
 )
 
 def handleDeleteBackpackItems(*serve.Context c) (
@@ -273,12 +273,12 @@ def handleDeleteBackpackItems(*serve.Context c) (
   for i raw.len (
     ids.append(raw[i].toStr())
   )
-  object result = deleteBackpackItems(contextString(c, "userId"), ids)
-  if result.ok != true (
+  object res = deleteBackpackItems(contextString(c, "userId"), ids)
+  if res.ok != true (
     c.internalError("failed to save backpack")
     return
   )
-  c.json(200, result)
+  c.json(200, res)
 )
 
 def handleGetBackpackBlob(*serve.Context c) (

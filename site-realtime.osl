@@ -61,11 +61,11 @@ def siteProjectKey(*ws.Connection conn, string projectId) string (
 )
 
 def siteProjectStats(string projectId) object (
-  auto result = loadProject(projectId)
-  if !result.ok (
+  auto res = loadProject(projectId)
+  if !res.ok (
     return {}
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   return {
     type: "project_stats",
     projectId: projectId,
@@ -76,11 +76,11 @@ def siteProjectStats(string projectId) object (
 )
 
 def siteBroadcastProject(string projectId, object message) (
-  auto result = loadProject(projectId)
-  if !result.ok (
+  auto res = loadProject(projectId)
+  if !res.ok (
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string encoded = json.stringify(message)
   for conn in siteRealtimeSocket.Connections() (
     if !siteSubscribed(conn, projectId) continue
@@ -105,11 +105,11 @@ def siteBroadcastStats(string projectId, string actor, object viewerState) (
     siteBroadcastProject(projectId, message)
     return
   )
-  auto result = loadProject(projectId)
-  if !result.ok (
+  auto res = loadProject(projectId)
+  if !res.ok (
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string actorMessage = json.stringify(message)
   string actorKey = normalizeUsername(actor)
   for conn in siteRealtimeSocket.Connections() (
@@ -168,8 +168,8 @@ def siteAuthenticate(*ws.Connection conn, object message) (
 def siteSubscribe(*ws.Connection conn, object message) (
   string projectId = message.projectId.assertElse(string, "").strip()
   string accessKey = message.accessKey.assertElse(string, "").strip()
-  auto result = loadProject(projectId)
-  if !result.ok or !siteCanView(result.project.assert(object), conn, accessKey) (
+  auto res = loadProject(projectId)
+  if !res.ok or !siteCanView(res.project.assert(object), conn, accessKey) (
     siteError(conn, "project not found")
     return
   )
@@ -217,15 +217,15 @@ def siteDiagnostic(*ws.Connection conn, object message) (
       siteFinishPlaytime(conn)
     )
   )
-  object result = recordProjectDiagnostic(
+  object res = recordProjectDiagnostic(
     projectId,
     conn.Get("authenticated") == true,
     conn.Get("username").assertElse(string, ""),
     conn.Get("sessionId").toStr(),
     diagnostic
   )
-  if !result.ok (
-    siteError(conn, result.error.toStr())
+  if !res.ok (
+    siteError(conn, res.error.toStr())
     return
   )
   if kind == "playtime_start" and conn.Get("authenticated") == true (

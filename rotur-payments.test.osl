@@ -24,11 +24,11 @@ def writeFile(string path, object data) boolean (
 )
 
 def loadPurchaseKeys() object (
-  auto result = readFile(purchaseKeysFile)
-  if !result.ok (
+  auto res = readFile(purchaseKeysFile)
+  if !res.ok (
     return {keys: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def savePurchaseKeys(object store) boolean (

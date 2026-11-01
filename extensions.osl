@@ -1,9 +1,9 @@
 def loadExtensionPolicy() object (
-  auto result = readFile(extensionsFile)
-  if !result.ok (
+  auto res = readFile(extensionsFile)
+  if !res.ok (
     return {hashes: {}, blockedUrls: []}
   )
-  object policy = result.data.assert(object)
+  object policy = res.data.assert(object)
   if !policy.contains("hashes") (
     policy.hashes = {}
   )
@@ -91,9 +91,9 @@ def extensionMetadata(string hash) object (
 )
 
 def readExtensionRecord(string hash) object (
-  auto result = readFile(extensionRecordPath(hash))
-  if result.ok (
-    return result.data.assert(object)
+  auto res = readFile(extensionRecordPath(hash))
+  if res.ok (
+    return res.data.assert(object)
   )
   return {}
 )
@@ -371,9 +371,9 @@ def migrateExtensionUsage() boolean (
   )
   array files = fs.readDir(projectsDir).unwrapOr([])
   for i files.len (
-    auto result = readFile(projectsDir ++ files[i].toStr())
-    if result.ok (
-      object project = result.data.assert(object)
+    auto res = readFile(projectsDir ++ files[i].toStr())
+    if res.ok (
+      object project = res.data.assert(object)
       array extensions = storedProjectExtensions(project)
       if extensions.len > 0 and !storeProjectExtensions(project.id.toStr(), [], extensions, {}) (
         sync.unlock("extension-index-migration")
@@ -387,9 +387,9 @@ def migrateExtensionUsage() boolean (
 )
 
 def projectTrustedExtensions(object project) array (
-  array result = []
+  array res = []
   if !project.contains("extensions") or project.extensions == null (
-    return result
+    return res
   )
   object policy = loadExtensionPolicy()
   array extensions = project.extensions.assert(array)
@@ -398,10 +398,10 @@ def projectTrustedExtensions(object project) array (
     string hash = extension.hash.toStr()
     string extensionUrl = extension.url.toStr()
     if !isGalleryExtensionUrl(extensionUrl) and extensionStatus(policy, hash, extensionUrl) == "trusted" (
-      result.append(extensionUrl.hashSHA256())
+      res.append(extensionUrl.hashSHA256())
     )
   )
-  return result
+  return res
 )
 
 def projectContainsExtensionHash(object project, string hash) boolean (
@@ -486,9 +486,9 @@ def unshareProjectsUsingHash(string hash) object (
   array files = fs.readDir(projectsDir).unwrapOr([])
   number affected = 0
   for i files.len (
-    auto result = readFile(projectsDir ++ files[i].toStr())
-    if result.ok (
-      object project = result.data.assert(object)
+    auto res = readFile(projectsDir ++ files[i].toStr())
+    if res.ok (
+      object project = res.data.assert(object)
       if projectContainsExtensionHash(project, hash) (
         if !unshareProjectForBlockedExtension(project) (
           return {ok: false, affected: affected}
@@ -504,9 +504,9 @@ def unshareProjectsUsingUrl(string extensionUrl) object (
   array files = fs.readDir(projectsDir).unwrapOr([])
   number affected = 0
   for i files.len (
-    auto result = readFile(projectsDir ++ files[i].toStr())
-    if result.ok (
-      object project = result.data.assert(object)
+    auto res = readFile(projectsDir ++ files[i].toStr())
+    if res.ok (
+      object project = res.data.assert(object)
       if projectContainsExtensionUrl(project, extensionUrl) (
         if !unshareProjectForBlockedExtension(project) (
           return {ok: false, affected: affected}
@@ -519,12 +519,12 @@ def unshareProjectsUsingUrl(string extensionUrl) object (
 )
 
 def handleGetProjectExtensionSource(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string urlHash = c.param("hash")
   if !canViewProjectJson(project, c) or !isExtensionHash(urlHash) (
     c.notFound("extension not found")
@@ -745,12 +745,12 @@ def handleAdminSetExtensionUrlPolicy(*serve.Context c) (
 )
 
 def handleAdminIndexProjectExtensions(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string workId = project.id.toStr() ++ "." ++ randomString(8)
   string gzipPath = tmpDir ++ workId ++ ".json.gz"
   string jsonPath = tmpDir ++ workId ++ ".json"

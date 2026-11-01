@@ -9,12 +9,12 @@ def handleGetMySettings(*serve.Context c) (
     c.badRequest("invalid username")
     return
   )
-  auto result = readFile(settingsPath(username))
-  if !result.ok (
+  auto res = readFile(settingsPath(username))
+  if !res.ok (
     c.json(200, {ok: true, settings: {}})
     return
   )
-  c.json(200, {ok: true, settings: result.data})
+  c.json(200, {ok: true, settings: res.data})
 )
 
 def handlePutMySettings(*serve.Context c) (

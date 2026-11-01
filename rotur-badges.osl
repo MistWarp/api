@@ -20,11 +20,11 @@
 string roturBadgesFile = "data/rotur-badges.json"
 
 def roturBadgeRules(string event) array (
-  auto result = readFile(roturBadgesFile)
-  if !result.ok (
+  auto res = readFile(roturBadgesFile)
+  if !res.ok (
     return []
   )
-  object events = (result.data.assertElse(object, {}).events ?? {}).assertElse(object, {})
+  object events = (res.data.assertElse(object, {}).events ?? {}).assertElse(object, {})
   return (events[event] ?? []).assertElse(array, [])
 )
 

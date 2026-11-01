@@ -57,14 +57,14 @@ def projectEntriesVisible(array entries, object banned, boolean isAdmin) array (
 )
 
 def shadowBanSet(object users, object projects, object idsByKey) object (
-  object set = bannedOwnerSet(users, idsByKey)
+  object bannedSet = bannedOwnerSet(users, idsByKey)
   object projectIds = {}
   array keys = projects.getKeys()
   for i keys.len (
     projectIds[keys[i].toStr()] = true
   )
-  set.projects = projectIds
-  return set
+  bannedSet.projects = projectIds
+  return bannedSet
 )
 
 def entryProjectShadowBanned(object shadowed, object entry) boolean (

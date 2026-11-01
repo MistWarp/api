@@ -189,12 +189,12 @@ def createNativePull(*serve.Context c, object target, object source, string titl
 def handleGetCommits(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   object history = projectVersionHistory(project)
   string etag = "\"project-history-" ++ projectWorkspaceFingerprint(project) ++ "-" ++ projectGitHead(project) ++ "-" ++ json.stringify(history).hashSHA256() ++ "\""
   c.setHeader("ETag", etag)
@@ -254,25 +254,25 @@ def projectBranchResponse(object project) array (
 def handleListProjectBranches(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   c.json(200, {ok: true, current: projectVersionHistory(project).branch, branches: projectBranchResponse(project)})
 )
 
 def handleProjectBranchMutation(*serve.Context c, string action) (
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     sync.unlock(lockName)
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) or !canSeeInsideProject(project, c) (
     sync.unlock(lockName)
     c.forbidden("only project maintainers can manage branches")
@@ -366,12 +366,12 @@ def handleDeleteProjectBranch(*serve.Context c) (
 )
 
 def handlePrepareBranchMerge(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canEditProject(result.project.assert(object), c) or !canSeeInsideProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) or !canSeeInsideProject(res.project.assert(object), c) (
     c.forbidden("only project maintainers can merge branches")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   object body = requestJSON(c)
   string sourceBranch = (body.source ?? "").toStr().strip()
   string targetBranch = (body.target ?? "").toStr().strip()
@@ -411,8 +411,8 @@ def handlePrepareBranchMerge(*serve.Context c) (
 )
 
 def handleListPulls(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
@@ -505,12 +505,12 @@ def handleCreatePullComment(*serve.Context c) (
     c.notFound("pull request not found")
     return
   )
-  auto result = loadProject(pull.targetProjectId.toStr())
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(pull.targetProjectId.toStr())
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this pull request")
     return
@@ -556,12 +556,12 @@ def handleDeletePullComment(*serve.Context c) (
     c.notFound("pull request not found")
     return
   )
-  auto result = loadProject(pull.targetProjectId.toStr())
-  if !result.ok (
+  auto res = loadProject(pull.targetProjectId.toStr())
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"))
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
@@ -713,12 +713,12 @@ def handleMergePull(*serve.Context c) (
     c.notFound("open pull request not found")
     return
   )
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canEditProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
     c.forbidden("only the project owner can merge")
     return
   )
-  object target = result.project.assert(object)
+  object target = res.project.assert(object)
   auto sourceResult = loadProject(pull.sourceProjectId.toStr())
   if !sourceResult.ok (
     c.notFound("source project not found")

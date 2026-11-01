@@ -37,11 +37,11 @@ def roturWebhookValid(string secret, string id, string sentAt, string body, stri
 )
 
 def loadRoturWebhooks() object (
-  auto result = readFile(roturWebhooksFile)
-  if !result.ok (
+  auto res = readFile(roturWebhooksFile)
+  if !res.ok (
     return {events: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 // Saves a verified delivery. Returns false if it was already saved.

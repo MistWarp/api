@@ -2097,12 +2097,12 @@ def handleReactSpaceComment(*serve.Context c) (
 )
 
 def handleCreatePreview(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2140,12 +2140,12 @@ def handleCreatePreview(*serve.Context c) (
 def handleListReleases(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   boolean canEdit = canEditProject(project, c)
   ensureViewKey(project)
   object jsonAccess = projectJsonAccess(project, c)
@@ -2161,28 +2161,28 @@ def handleListReleases(*serve.Context c) (
 )
 
 def handleCreateRelease(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
   )
   object body = requestJSON(c)
   string version = body.version.toStr().strip()
-  string channel = body.channel.toStr().toLower().strip()
+  string releaseChannel = body.channel.toStr().toLower().strip()
   if version == "" or version.len > 50 (
     c.badRequest("invalid version")
     return
   )
-  if channel != "stable" and channel != "beta" and channel != "development" and channel != "checkpoint" (
+  if releaseChannel != "stable" and releaseChannel != "beta" and releaseChannel != "development" and releaseChannel != "checkpoint" (
     c.badRequest("invalid release channel")
     return
   )
-  if channel == "checkpoint" and mistwarpBenefitsForProject(project).historyCheckpoints != true (
+  if releaseChannel == "checkpoint" and mistwarpBenefitsForProject(project).historyCheckpoints != true (
     c.forbidden("named history checkpoints require Rotur Lite, Plus, or Pro")
     return
   )
@@ -2213,14 +2213,14 @@ def handleCreateRelease(*serve.Context c) (
   string jsonUrl = appURL ++ "/v1/projects/" ++ project.id.toStr() ++ "/releases/" ++ url.escape(releaseId) ++ "/project.json"
   // jsonBytes is the snapshot's size, which counts against the owner's
   // storage for as long as the release keeps it.
-  object release = {_id: releaseId, projectId: project.id, version: version, channel: channel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonBytes: (project.storedJsonBytes ?? 0).toNum(), jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: contextString(c, "username"), creatorId: contextString(c, "userId")}
+  object release = {_id: releaseId, projectId: project.id, version: version, channel: releaseChannel, notes: notes, commit: commit, jsonKey: project.jsonKey, jsonBytes: (project.storedJsonBytes ?? 0).toNum(), jsonGzip: true, jsonUrl: jsonUrl, assetsBase: assetsBaseUrl(), created: timestamp, creator: contextString(c, "username"), creatorId: contextString(c, "userId")}
   void releaseDocs.insertOne(release)
   storageSettleProject(project)
-  if channel == "stable" (
+  if releaseChannel == "stable" (
     project.publicRelease = releaseId
     saveProject(project)
   )
-  if channel != "checkpoint" (
+  if releaseChannel != "checkpoint" (
     addActivity(contextString(c, "username"), "release", {projectId: project.id, projectTitle: project.title, version: version})
   )
   c.json(201, {ok: true, release: publicReleaseRecord(release, projectJsonAccess(project, c))})
@@ -2232,8 +2232,8 @@ def handleGetReleaseProjectJson(*serve.Context c) (
     c.notFound("release not found")
     return
   )
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProjectJson(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProjectJson(res.project.assert(object), c) (
     c.notFound("release not found")
     return
   )
@@ -2258,12 +2258,12 @@ def handleGetReleaseProjectJson(*serve.Context c) (
 )
 
 def handleDeleteRelease(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2457,23 +2457,23 @@ def handleRecordDiagnostic(*serve.Context c) (
     return
   )
   string sessionId = playtimeIdentity(contextString(c, "username"))
-  object result = recordProjectDiagnostic(
+  object res = recordProjectDiagnostic(
     c.param("id"),
     contextBool(c, "authenticated"),
     contextString(c, "username"),
     sessionId,
     requestJSON(c)
   )
-  if !result.ok (
-    c.badRequest(result.error.toStr())
+  if !res.ok (
+    c.badRequest(res.error.toStr())
     return
   )
   c.json(201, {ok: true})
 )
 
 def handleGetDiagnostics(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canEditProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
     c.forbidden("not your project")
     return
   )
@@ -2498,12 +2498,12 @@ def handleGetDiagnostics(*serve.Context c) (
 )
 
 def handleCreateProjectFeedback(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if feedbackDocs.where("projectId", "==", project.id.toStr()).limit(200).all().len >= 200 (
     c.badRequest("this project has reached its feedback limit")
     return
@@ -2527,8 +2527,8 @@ def handleCreateProjectFeedback(*serve.Context c) (
 )
 
 def handleGetProjectFeedback(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canEditProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
     c.forbidden("not your project")
     return
   )
@@ -2537,8 +2537,8 @@ def handleGetProjectFeedback(*serve.Context c) (
 )
 
 def handleUpdateProjectFeedback(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canEditProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canEditProject(res.project.assert(object), c) (
     c.forbidden("not your project")
     return
   )
@@ -2559,8 +2559,8 @@ def handleUpdateProjectFeedback(*serve.Context c) (
 )
 
 def handleListProjectReviews(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
@@ -2600,9 +2600,9 @@ def handleListUserReviews(*serve.Context c) (
       authorId = review.authorId.toStr()
     )
     if identityMatches(authorId, review.author.toStr(), requestedId, name) and reviews.len < limit and viewerSeesShadowBanned(review.author.toStr(), authorId, c) (
-      auto result = loadProject(review.projectId.toStr())
-      if result.ok and canViewProject(result.project.assert(object), c) (
-        object project = result.project.assert(object)
+      auto res = loadProject(review.projectId.toStr())
+      if res.ok and canViewProject(res.project.assert(object), c) (
+        object project = res.project.assert(object)
         review.projectTitle = project.title
         review.projectOwner = project.owner
         review.playtimeMs = authorPublicPlaytime(review.projectId.toStr(), review.author.toStr())
@@ -2614,12 +2614,12 @@ def handleListUserReviews(*serve.Context c) (
 )
 
 def handleSaveProjectReview(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if projectRole(project, contextString(c, "username")) == "owner" (
     c.badRequest("you cannot review your own project")
     return
@@ -2658,8 +2658,8 @@ def handleSaveProjectReview(*serve.Context c) (
 )
 
 def handleDeleteProjectReview(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
@@ -2959,12 +2959,12 @@ def xmlEscape(string value) string (
 )
 
 def handleProjectCard(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !projectIsViewable(result.project.assert(object)) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !projectIsViewable(res.project.assert(object)) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string title = xmlEscape(project.title.toStr()).trim(1, 58)
   string owner = xmlEscape(project.owner.toStr()).trim(1, 30)
   string thumbnail = xmlEscape(thumbUrlFor(project))
@@ -2991,19 +2991,19 @@ def ensureShareCard(object project) string (
 )
 
 def warmShareCard(string id) (
-  auto result = loadProject(id)
-  if result.ok and shareCardVisible(result.project.assert(object)) (
-    void ensureShareCard(result.project.assert(object))
+  auto res = loadProject(id)
+  if res.ok and shareCardVisible(res.project.assert(object)) (
+    void ensureShareCard(res.project.assert(object))
   )
 )
 
 def handleProjectSharePng(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !shareCardVisible(result.project.assert(object)) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !shareCardVisible(res.project.assert(object)) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if ensureShareCard(project) != "" (
     string cover = thumbUrlFor(project)
     c.setHeader("Location", if cover == "" then editorOrigin ++ "/images/apple-touch-icon.png" else cover)

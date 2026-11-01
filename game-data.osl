@@ -76,11 +76,11 @@ def emptyGameSave(string projectId, string userId, string context) object (
 )
 
 def loadGameSave(string projectId, string userId, string context) object (
-  auto result = readFile(gameSavePath(projectId, userId, context))
-  if !result.ok (
+  auto res = readFile(gameSavePath(projectId, userId, context))
+  if !res.ok (
     return emptyGameSave(projectId, userId, context)
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def gameSaveResponse(object save) object (
@@ -213,11 +213,11 @@ def requireGameDataCapability(*serve.Context c, object project) object (
   return {ok: true, capability: capability}
 )
 
-def rejectGameDataCapability(*serve.Context c, object result) boolean (
-  if result.ok == true (
+def rejectGameDataCapability(*serve.Context c, object res) boolean (
+  if res.ok == true (
     return false
   )
-  c.json(result.status.toNum().toInt(), {ok: false, error: result.error})
+  c.json(res.status.toNum().toInt(), {ok: false, error: res.error})
   return true
 )
 
