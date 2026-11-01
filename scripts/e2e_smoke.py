@@ -57,6 +57,10 @@ class Server:
         os.makedirs(os.path.join(data, "sessions"))
         with open(os.path.join(self.dir, ".env"), "w") as env:
             env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=http://127.0.0.1:9\n" % (self.port, self.port))
+        with open(os.path.join(data, "agreement.json"), "w") as handle:
+            json.dump({"version": 1, "text": "", "updatedAt": 1700000000000}, handle)
+        with open(os.path.join(data, "agreement.md"), "w") as handle:
+            handle.write("Smoke test agreement")
         with open(os.path.join(data, "userids.json"), "w") as handle:
             json.dump({"users": {uid: name for name, uid in USERS.items()}}, handle)
         for name, uid in USERS.items():
@@ -187,7 +191,10 @@ def run(binary, sb3, keep):
         step("delete remix", "DELETE", "/v1/projects/<project-remix>", "alice")
         step("trash", "GET", "/v1/me/trash", "alice")
         step("purge remix", "DELETE", "/v1/trash/<project-remix>", "alice")
+        step("delete shared project refused", "DELETE", "/v1/projects/<project>", "sam")
+        step("unshare", "POST", "/v1/projects/<project>/unpublish", "sam", {})
         step("delete project", "DELETE", "/v1/projects/<project>", "sam")
+        step("trash sam", "GET", "/v1/me/trash", "sam")
         step("missing project", "GET", "/v1/projects/nope")
         step("wrong method", "PATCH", "/v1/projects/<project>", "sam", {}, headers=("Allow",))
         step("legacy prefix", "GET", "/api/agreement")
