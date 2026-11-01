@@ -1,0 +1,138 @@
+export {
+  stringArrayContainsUser
+}
+
+def stringArrayContainsUser(array users, string username) boolean (
+  string wanted = normalizeUsername(username)
+  for i users.len (
+    if normalizeUsername(users[i].toStr()) == wanted (
+      return true
+    )
+  )
+  return false
+)
+
+def removeUser(array users, string username) array (
+  string wanted = normalizeUsername(username)
+  array next = []
+  for i users.len (
+    if normalizeUsername(users[i].toStr()) != wanted (
+      next.append(users[i])
+    )
+  )
+  return next
+)
+
+def validSpaceKind(string kind) boolean (
+  return (kind == "studio") or (kind == "collection") or (kind == "challenge")
+)
+
+def validSpaceVisibility(string visibility) boolean (
+  return (visibility == "public") or (visibility == "unlisted") or (visibility == "private")
+)
+
+def spaceManagers(object space) array (
+  if space.contains("managers") (
+    return space["managers"].assertElse(array, [])
+  )
+  return []
+)
+
+def spaceCuratorInvites(object space) array (
+  if space.contains("curatorInvites") (
+    return space["curatorInvites"].assertElse(array, [])
+  )
+  return []
+)
+
+def spaceLikes(object space) array (
+  if space.contains("likes") (
+    return space["likes"].assertElse(array, [])
+  )
+  return []
+)
+
+def spaceBrokenHearts(object space) array (
+  if space.contains("brokenHearts") (
+    return space["brokenHearts"].assertElse(array, [])
+  )
+  return []
+)
+
+def spaceProjectIds(object space) array (
+  if space.contains("projects") and space.projects != null (
+    return space.projects.assertElse(array, [])
+  )
+  return []
+)
+
+def spaceFollowers(object space) array (
+  if space.contains("followers") and space.followers != null (
+    return space.followers.assertElse(array, [])
+  )
+  return []
+)
+
+def spaceCommentKey(string id) string (
+  return "space-" ++ id
+)
+
+def spaceThumbnailPath(string id) string (
+  return thumbnailsDir ++ "space-" ++ id ++ ".png"
+)
+
+def spaceThumbnailUrl(object space) string (
+  string path = spaceThumbnailPath(space["_id"].toStr())
+  if !fs.exists(path) (
+    return ""
+  )
+  return appURL ++ "/thumbnails/space-" ++ space["_id"].toStr() ++ ".png?t=" ++ space.edited.toStr()
+)
+
+def isSpaceOwner(object space,*serve.Context c) boolean (
+  string ownerId = ""
+  if space.contains("ownerId") and space.ownerId != null (
+    ownerId = space.ownerId.toStr()
+  )
+  return contextBool(c, "isAdmin") or identityMatches(ownerId, space.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+)
+
+def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
+  string ownerId = ""
+  if project.contains("ownerId") and project.ownerId != null (
+    ownerId = project.ownerId.toStr()
+  )
+  return identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+)
+
+def isSpaceInvitee(object space,*serve.Context c) boolean (
+  array invites = spaceCuratorInvites(space)
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) == normalizeUsername(contextString(c, "username")) (
+      return true
+    )
+  )
+  return false
+)
+
+def canManageSpace(object space,*serve.Context c) boolean (
+  if contextBool(c, "isAdmin") (
+    return true
+  )
+  string username = contextString(c, "username")
+  if isSpaceOwner(space, c) (
+    return true
+  )
+  if canManageGroupContent(space, c) (
+    return true
+  )
+  return stringArrayContainsUser(spaceManagers(space), username)
+)
+
+def canViewSpace(object space,*serve.Context c) boolean (
+  if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" (
+    return true
+  )
+  return canManageSpace(space, c) or isSpaceInvitee(space, c)
+)

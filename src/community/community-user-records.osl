@@ -1,0 +1,312 @@
+export {
+  purgeUserCommunityRecords,
+  purgeUserFromSpaces
+}
+
+def purgeUserFromSpaces(string username) boolean (
+  string key = normalizeUsername(username)
+  array spaces = spaceDocs.all()
+  for i spaces.len (
+    object space = spaces[i].assert(object)
+    string spaceId = space["_id"].toStr()
+    if normalizeUsername(space.owner.toStr()) == key (
+      void spaceDocs.deleteOne({_id: space["_id"]})
+      deleteSpaceMemberships(spaceId)
+      void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")
+      void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".jsonl")
+      void fs.remove(spaceThumbnailPath(spaceId))
+    ) else (
+      boolean changed = spaceRelatedUserKeys(space).contains(key)
+      array likes = spaceLikes(space)
+      array broken = spaceBrokenHearts(space)
+      if stringArrayContainsUser(likes, key) or stringArrayContainsUser(broken, key) (
+        changed = true
+      )
+      space.managers = removeUser(spaceManagers(space), key)
+      space.followers = removeUser(space.followers.assertElse(array, []), key)
+      space.likes = removeUser(likes, key)
+      space.brokenHearts = removeUser(broken, key)
+      array curatorInvites = []
+      array storedCuratorInvites = spaceCuratorInvites(space)
+      for j storedCuratorInvites.len (
+        object invite = storedCuratorInvites[j].assert(object)
+        if normalizeUsername(invite.username.toStr()) != key (
+          curatorInvites.append(invite)
+        )
+      )
+      space.curatorInvites = curatorInvites
+      if space.kind.toStr() == "challenge" (
+        space.participants = removeUser(challengeArray(space, "participants"), key)
+        space.judges = removeUser(challengeArray(space, "judges"), key)
+        array judgeInvites = []
+        array storedJudgeInvites = challengeArray(space, "judgeInvites")
+        for j storedJudgeInvites.len (
+          object invite = storedJudgeInvites[j].assert(object)
+          if normalizeUsername(invite.username.toStr()) != key (
+            judgeInvites.append(invite)
+          )
+        )
+        space.judgeInvites = judgeInvites
+        array scores = []
+        array storedScores = challengeArray(space, "scores")
+        for j storedScores.len (
+          object score = storedScores[j].assert(object)
+          if normalizeUsername(score.judge.toStr()) != key (
+            scores.append(score)
+          ) else (
+            changed = true
+          )
+        )
+        space.scores = scores
+        array votes = []
+        array storedVotes = challengeArray(space, "audienceVotes")
+        for j storedVotes.len (
+          object vote = storedVotes[j].assert(object)
+          if normalizeUsername(vote.username.toStr()) != key (
+            votes.append(vote)
+          ) else (
+            changed = true
+          )
+        )
+        space.audienceVotes = votes
+      )
+      if changed (
+        space.edited = timestamp
+        putSpaceDocument(space)
+      )
+    )
+  )
+  return true
+)
+
+def purgeUserCommunityRecords(string username, string userId) boolean (
+  string key = normalizeUsername(username)
+  deleteDocumentsByField(reviewDocs, "authorKey", key)
+  deleteDocumentsByField(feedbackDocs, "author", username)
+  deleteDocumentsByField(playtimeDocs, "username", username)
+  if userId != "" (
+    deleteDocumentsByField(playtimeDocs, "userId", userId)
+    deleteDocumentsByField(feedbackDocs, "authorId", userId)
+  )
+  void playtimeSessionDocs.deleteOne({_id: key})
+
+  array releases = releaseDocs.where("creator", "==", username).all()
+  for i releases.len (
+    object release = releases[i].assert(object)
+    release.creator = "Deleted User"
+    putDocument(releaseDocs, release["_id"].toStr(), release)
+  )
+
+  array ideas = ideaDocs.all()
+  for i ideas.len (
+    object idea = ideas[i].assert(object)
+    string ideaId = idea["_id"].toStr()
+    if normalizeUsername(idea.author.toStr()) == key (
+      void ideaDocs.deleteOne({_id: idea["_id"]})
+      void fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".json")
+      void fs.remove(commentsDir ++ "roadmap-" ++ ideaId ++ ".jsonl")
+    ) else (
+      array likes = []
+      if idea.contains("likes") (
+        likes = idea["likes"].assertElse(array, [])
+      ) else if idea.contains("voters") (
+        likes = idea["voters"].assertElse(array, [])
+      )
+      array dislikes = []
+      if idea.contains("dislikes") (
+        dislikes = idea["dislikes"].assertElse(array, [])
+      )
+      array nextLikes = removeUser(likes, key)
+      array nextDislikes = removeUser(dislikes, key)
+      if nextLikes.len != likes.len or nextDislikes.len != dislikes.len (
+        idea.likes = nextLikes
+        idea.dislikes = nextDislikes
+        idea.voters = []
+        idea.votes = nextLikes.len - nextDislikes.len
+        putDocument(ideaDocs, ideaId, idea)
+      )
+    )
+  )
+  return true
+)
+
+def renameUserCommunityRecords(string oldKey, string newKey, string newName) boolean (
+  array spaces = spaceDocs.all()
+  for i spaces.len (
+    object space = spaces[i].assert(object)
+    boolean changed = spaceRelatedUserKeys(space).contains(oldKey)
+    array likes = spaceLikes(space)
+    array brokenHearts = spaceBrokenHearts(space)
+    if stringArrayContainsUser(likes, oldKey) or stringArrayContainsUser(brokenHearts, oldKey) (
+      changed = true
+    )
+    if normalizeUsername(space.owner.toStr()) == oldKey (
+      space.owner = newName
+    )
+    space.managers = replaceUserInArray(spaceManagers(space), oldKey, newName)
+    space.followers = replaceUserInArray(space.followers.assertElse(array, []), oldKey, newKey)
+    space.likes = replaceUserInArray(likes, oldKey, newKey)
+    space.brokenHearts = replaceUserInArray(brokenHearts, oldKey, newKey)
+    array curatorInvites = spaceCuratorInvites(space)
+    for j curatorInvites.len (
+      object invite = curatorInvites[j].assert(object)
+      if normalizeUsername(invite.username.toStr()) == oldKey (
+        invite.username = newName
+        changed = true
+      )
+      if normalizeUsername(invite.invitedBy.toStr()) == oldKey (
+        invite.invitedBy = newName
+        changed = true
+      )
+      curatorInvites[j] = invite
+    )
+    space.curatorInvites = curatorInvites
+    if space.kind.toStr() == "challenge" (
+      space.participants = replaceUserInArray(challengeArray(space, "participants"), oldKey, newName)
+      space.judges = replaceUserInArray(challengeArray(space, "judges"), oldKey, newName)
+      array judgeInvites = challengeArray(space, "judgeInvites")
+      for j judgeInvites.len (
+        object invite = judgeInvites[j].assert(object)
+        if normalizeUsername(invite.username.toStr()) == oldKey (
+          invite.username = newName
+          changed = true
+        )
+        if normalizeUsername(invite.invitedBy.toStr()) == oldKey (
+          invite.invitedBy = newName
+          changed = true
+        )
+        judgeInvites[j] = invite
+      )
+      space.judgeInvites = judgeInvites
+      array scores = challengeArray(space, "scores")
+      for j scores.len (
+        object score = scores[j].assert(object)
+        if normalizeUsername(score.judge.toStr()) == oldKey (
+          score.judge = newName
+          scores[j] = score
+          changed = true
+        )
+      )
+      space.scores = scores
+      array votes = challengeArray(space, "audienceVotes")
+      for j votes.len (
+        object vote = votes[j].assert(object)
+        if normalizeUsername(vote.username.toStr()) == oldKey (
+          vote.username = newName
+          votes[j] = vote
+          changed = true
+        )
+      )
+      space.audienceVotes = votes
+      array submissions = challengeArray(space, "submissions")
+      for j submissions.len (
+        object submission = submissions[j].assert(object)
+        if normalizeUsername(submission.owner.toStr()) == oldKey (
+          submission.owner = newName
+          submissions[j] = submission
+          changed = true
+        )
+      )
+      space.submissions = submissions
+    )
+    if changed (
+      putSpaceDocument(space)
+    )
+  )
+
+  array reviews = reviewDocs.where("authorKey", "==", oldKey).all()
+  for i reviews.len (
+    object review = reviews[i].assert(object)
+    string oldId = review["_id"].toStr()
+    string newId = review.projectId.toStr() ++ ":" ++ newKey
+    review.author = newName
+    review.authorKey = newKey
+    void reviewDocs.deleteOne({_id: oldId})
+    putDocument(reviewDocs, newId, review)
+  )
+
+  array playtimeRecords = playtimeDocs.all()
+  for i playtimeRecords.len (
+    object playtime = playtimeRecords[i].assert(object)
+    if normalizeUsername(playtime.username.toStr()) == oldKey (
+      string oldId = playtime["_id"].toStr()
+      string newId = playtime.projectId.toStr() ++ ":" ++ newKey
+      object existing = (playtimeDocs.findById(newId) ?? {})
+      if existing.len > 0 and newId != oldId (
+        playtime.duration = playtime.duration.toNum() + existing.duration.toNum()
+      )
+      playtime.username = newName
+      void playtimeDocs.deleteOne({_id: oldId})
+      putDocument(playtimeDocs, newId, playtime)
+    )
+  )
+  object session = (playtimeSessionDocs.findById(oldKey) ?? {})
+  if session.len > 0 (
+    session.username = newName
+    void playtimeSessionDocs.deleteOne({_id: oldKey})
+    putDocument(playtimeSessionDocs, newKey, session)
+  )
+
+  array feedback = feedbackDocs.all()
+  for i feedback.len (
+    object item = feedback[i].assert(object)
+    if normalizeUsername(item.author.toStr()) == oldKey (
+      item.author = newName
+      putDocument(feedbackDocs, item["_id"].toStr(), item)
+    )
+  )
+  array releases = releaseDocs.all()
+  for i releases.len (
+    object release = releases[i].assert(object)
+    if normalizeUsername(release.creator.toStr()) == oldKey (
+      release.creator = newName
+      putDocument(releaseDocs, release["_id"].toStr(), release)
+    )
+  )
+  array pulls = pullDocs.all()
+  for i pulls.len (
+    object pull = pulls[i].assert(object)
+    boolean changed = false
+    if normalizeUsername(pull.author.toStr()) == oldKey (
+      pull.author = newName
+      changed = true
+    )
+    if normalizeUsername(pull.sourceOwner.toStr()) == oldKey (
+      pull.sourceOwner = newName
+      changed = true
+    )
+    if changed (
+      putDocument(pullDocs, pull["_id"].toStr(), pull)
+    )
+  )
+
+  array ideas = ideaDocs.all()
+  for i ideas.len (
+    object idea = ideas[i].assert(object)
+    boolean changed = false
+    if normalizeUsername(idea.author.toStr()) == oldKey (
+      idea.author = newName
+      changed = true
+    )
+    array likes = []
+    if idea.contains("likes") (
+      likes = idea["likes"].assertElse(array, [])
+    ) else if idea.contains("voters") (
+      likes = idea["voters"].assertElse(array, [])
+    )
+    array dislikes = []
+    if idea.contains("dislikes") (
+      dislikes = idea["dislikes"].assertElse(array, [])
+    )
+    if stringArrayContainsUser(likes, oldKey) or stringArrayContainsUser(dislikes, oldKey) (
+      idea.likes = replaceUserInArray(likes, oldKey, newName)
+      idea.dislikes = replaceUserInArray(dislikes, oldKey, newName)
+      idea.voters = []
+      changed = true
+    )
+    if changed (
+      putDocument(ideaDocs, idea["_id"].toStr(), idea)
+    )
+  )
+  return true
+)

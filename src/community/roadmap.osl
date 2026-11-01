@@ -1,0 +1,281 @@
+def handleListIdeas(*serve.Context c) (
+  array ideas = ideaDocs.sort("created", "desc").all()
+  string username = contextString(c, "username")
+  array developmentFeed = developmentPulls()
+  for i ideas.len (
+    object idea = ideas[i].assert(object)
+    boolean needsSave = false
+    if !idea.contains("source") (
+      idea.source = "community"
+      if normalizeUsername(idea.author.toStr()) == "mist" (
+        idea.source = "mistwarp"
+      )
+      needsSave = true
+    )
+    if !idea.contains("interested") (
+      idea.interested = idea.source.toStr() == "mistwarp"
+      needsSave = true
+    )
+    if !idea.contains("kind") (
+      idea.kind = "idea"
+      needsSave = true
+    )
+    if !idea.contains("commentCount") (
+      idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+      needsSave = true
+    )
+    if needsSave (
+      putDocument(ideaDocs, idea["_id"].toStr(), idea)
+    )
+    array likes = []
+    array dislikes = []
+    if idea.contains("likes") (
+      likes = idea["likes"].assertElse(array, [])
+    ) else if idea.contains("voters") (
+      likes = idea["voters"].assertElse(array, [])
+    )
+    if idea.contains("dislikes") (
+      dislikes = idea["dislikes"].assertElse(array, [])
+    )
+    idea.likesCount = likes.len
+    idea.dislikesCount = dislikes.len
+    idea.score = likes.len - dislikes.len
+    idea.myVote = ""
+    if stringArrayContainsUser(likes, username) (
+      idea.myVote = "like"
+    ) else if stringArrayContainsUser(dislikes, username) (
+      idea.myVote = "dislike"
+    )
+    idea.likes = []
+    idea.dislikes = []
+    idea.voters = []
+    idea.pullRequests = resolveIdeaPulls(idea, developmentFeed)
+    ideas[i] = idea
+  )
+  ideas.sortBy("score", "descending")
+  c.json(200, {ok: true, ideas: ideas})
+)
+
+def handleCreateIdea(*serve.Context c) (
+  object body = requestJSON(c)
+  string title = body.title.toStr().strip()
+  string description = body.description.toStr().strip()
+  if title == "" or title.len > 120 or description == "" or description.len > 3000 (
+    c.badRequest("add a title and a description")
+    return
+  )
+  string category = "Other"
+  if body.contains("category") (
+    category = body.category.toStr().trim(1, 40)
+  )
+  string kind = "idea"
+  if body.contains("kind") (
+    kind = body.kind.toStr().toLower()
+  )
+  if kind != "idea" and kind != "bug" (
+    c.badRequest("invalid roadmap entry type")
+    return
+  )
+  string ideaId = "i" ++ randomString(14)
+  string source = "community"
+  if contextBool(c, "isAdmin") (
+    source = "mistwarp"
+  )
+  object idea = {_id: ideaId, title: title, description: description, category: category, kind: kind, author: contextString(c, "username"), authorId: contextString(c, "userId"), source: source, interested: source == "mistwarp", status: "open", pulls: [], likes: [contextString(c, "username")], dislikes: [], votes: 1, commentCount: 0, created: timestamp, edited: timestamp}
+  void ideaDocs.insertOne(idea)
+  idea.myVote = "like"
+  idea.likesCount = 1
+  idea.dislikesCount = 0
+  idea.score = 1
+  idea.commentCount = 0
+  idea.likes = []
+  idea.dislikes = []
+  idea.pullRequests = []
+  c.json(201, {ok: true, idea: idea})
+)
+
+def handleVoteIdea(*serve.Context c) (
+  string lockName = "idea-reactions:" ++ c.param("id")
+  sync.lock(lockName)
+  handleVoteIdeaLocked(c)
+  sync.unlock(lockName)
+)
+
+def handleVoteIdeaLocked(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  string username = contextString(c, "username")
+  string vote = requestJSON(c).vote.toStr().toLower()
+  if vote != "like" and vote != "dislike" (
+    c.badRequest("vote must be like or dislike")
+    return
+  )
+  array likes = []
+  array dislikes = []
+  if idea.contains("likes") (
+    likes = idea["likes"].assertElse(array, [])
+  ) else if idea.contains("voters") (
+    likes = idea["voters"].assertElse(array, [])
+  )
+  if idea.contains("dislikes") (
+    dislikes = idea["dislikes"].assertElse(array, [])
+  )
+  number previousLikes = likes.len
+  boolean hadVote = false
+  if vote == "like" (
+    hadVote = stringArrayContainsUser(likes, username)
+  ) else (
+    hadVote = stringArrayContainsUser(dislikes, username)
+  )
+  likes = removeUser(likes, username)
+  dislikes = removeUser(dislikes, username)
+  if !hadVote and vote == "like" (
+    likes.append(username)
+  ) else if !hadVote and vote == "dislike" (
+    dislikes.append(username)
+  )
+  idea.likes = likes
+  idea.dislikes = dislikes
+  idea.votes = likes.len - dislikes.len
+  idea.edited = timestamp
+  if !putDocument(ideaDocs, idea["_id"].toStr(), idea) (
+    c.internalError("could not save reaction")
+    return
+  )
+  notifyLikeMilestones(idea.author.toStr(), "roadmap post", idea["_id"].toStr(), previousLikes, likes.len, "/roadmap#idea-" ++ idea["_id"].toStr(), {})
+  string myVote = ""
+  if !hadVote (
+    myVote = vote
+  )
+  c.json(200, {ok: true, myVote: myVote, likesCount: likes.len, dislikesCount: dislikes.len, score: likes.len - dislikes.len})
+)
+
+def handleGetIdeaComments(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  object page = commentPage(loadComments("roadmap-" ++ idea["_id"].toStr()), c)
+  page.ok = true
+  c.json(200, page)
+)
+
+def handleCreateIdeaComment(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  object body = requestJSON(c)
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  string parentId = ""
+  if body.contains("parent") and body.parent != null (
+    parentId = body.parent.toStr()
+  )
+  object created = createComment("roadmap-" ++ idea["_id"].toStr(), contextString(c, "username"), contextString(c, "userId"), body.content.toStr(), parentId, "comment", 0, "")
+  if !created.ok (
+    c.badRequest(created.error.toStr())
+    return
+  )
+  if idea.contains("commentCount") (
+    idea.commentCount = idea.commentCount.toNum() + 1
+  ) else (
+    idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+  )
+  putDocument(ideaDocs, idea["_id"].toStr(), idea)
+  string commenter = contextString(c, "username")
+  string parentAuthor = created.parentAuthor.toStr()
+  string preview = created.comment.content.toStr()
+  if parentAuthor != "" and normalizeUsername(parentAuthor) != normalizeUsername(commenter) (
+    addNotification(parentAuthor, commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
+  )
+  if normalizeUsername(idea.author.toStr()) != normalizeUsername(parentAuthor) (
+    addNotification(idea.author.toStr(), commenter, "roadmap_comment", {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
+  )
+  notifyMentions(created.comment.content.toStr(), commenter, [idea.author.toStr(), parentAuthor], {roadmapId: idea["_id"], roadmapTitle: idea.title, preview: preview})
+  c.json(201, created)
+)
+
+def handleDeleteIdeaComment(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  object deleted = deleteComment("roadmap-" ++ idea["_id"].toStr(), c.param("cid"), contextString(c, "username"), idea.author.toStr(), contextBool(c, "isAdmin"))
+  if !deleted.ok (
+    c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
+    return
+  )
+  if idea.contains("commentCount") (
+    idea.commentCount = clampNumber(
+      idea.commentCount.toNum() - deleted.removed.toNum(),
+      0,
+      idea.commentCount.toNum()
+    )
+  ) else (
+    idea.commentCount = loadComments("roadmap-" ++ idea["_id"].toStr()).len
+  )
+  putDocument(ideaDocs, idea["_id"].toStr(), idea)
+  c.json(200, {ok: true})
+)
+
+def handleEditIdeaComment(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  object body = requestJSON(c)
+  if !body.contains("content") or body.content == null (
+    c.badRequest("comment content is required")
+    return
+  )
+  object edited = editComment("roadmap-" ++ idea["_id"].toStr(), c.param("cid"), contextString(c, "username"), body.content.toStr())
+  if !edited.ok (
+    c.json(edited.status.toInt(), {ok: false, error: edited.error})
+    return
+  )
+  c.json(200, edited)
+)
+
+def handleReactIdeaComment(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  reactToComment(c, "roadmap-" ++ idea["_id"].toStr(), "/roadmap?idea=" ++ idea["_id"].toStr())
+)
+
+def handleUpdateIdea(*serve.Context c) (
+  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  if idea.len == 0 (
+    c.notFound("idea not found")
+    return
+  )
+  object body = requestJSON(c)
+  if body.contains("status") (
+    string status = body.status.toStr().toLower()
+    if status == "open" or status == "planned" or status == "building" or status == "shipped" or status == "declined" (
+      idea.status = status
+    )
+  )
+  if body.contains("interested") (
+    idea.interested = body.interested == true
+  )
+  if body.contains("pulls") and typeof(body.pulls) == "array" (
+    idea.pulls = normalizePullLinks(body.pulls.assert(array))
+  )
+  idea.edited = timestamp
+  putDocument(ideaDocs, idea["_id"].toStr(), idea)
+  idea.pullRequests = resolveIdeaPulls(idea, developmentPulls())
+  c.json(200, {ok: true, idea: idea})
+)

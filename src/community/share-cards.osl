@@ -1,0 +1,74 @@
+export {
+  warmShareCard,
+  xmlEscape
+}
+
+def xmlEscape(string value) string (
+  return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+)
+
+def handleProjectCard(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !projectIsViewable(res.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  string title = xmlEscape(project.title.toStr()).trim(1, 58)
+  string owner = xmlEscape(project.owner.toStr()).trim(1, 30)
+  string thumbnail = xmlEscape(thumbUrlFor(project))
+  number hearts = project.loves.assert(array).len
+  string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"630\" viewBox=\"0 0 1200 630\"><rect width=\"1200\" height=\"630\" fill=\"#17151d\"/><rect x=\"48\" y=\"48\" width=\"650\" height=\"488\" rx=\"24\" fill=\"#24202d\"/><image href=\"" ++ thumbnail ++ "\" x=\"48\" y=\"48\" width=\"650\" height=\"488\" preserveAspectRatio=\"xMidYMid slice\"/><text x=\"750\" y=\"190\" fill=\"#a78bfa\" font-family=\"Arial,sans-serif\" font-size=\"34\" font-weight=\"700\">MistWarp</text><text x=\"750\" y=\"270\" fill=\"#ffffff\" font-family=\"Arial,sans-serif\" font-size=\"48\" font-weight=\"700\">" ++ title ++ "</text><text x=\"750\" y=\"330\" fill=\"#c8c2d2\" font-family=\"Arial,sans-serif\" font-size=\"28\">by " ++ owner ++ "</text><text x=\"750\" y=\"430\" fill=\"#c8c2d2\" font-family=\"Arial,sans-serif\" font-size=\"24\">" ++ project.views.toStr() ++ " plays   " ++ hearts.toStr() ++ " hearts</text></svg>"
+  c.setHeader("Cache-Control", "public, max-age=300")
+  c.send(200, "image/svg+xml; charset=utf-8", storagefs.Bytes(svg))
+)
+
+def shareCardPath(object project) string (
+  return cardsDir ++ project.id.toStr() ++ "-" ++ project.edited.toStr() ++ ".png"
+)
+
+def shareCardVisible(object project) boolean (
+  return project.shared == true and projectIsViewable(project) and !projectHiddenByModerator(project)
+)
+
+def ensureShareCard(object project) string (
+  string path = shareCardPath(project)
+  if fs.exists(path) (
+    return ""
+  )
+  return sharecard.Render(thumbnailFileFor(project), project.title.toStr(), project.owner.toStr(), path)
+)
+
+def warmShareCard(string id) (
+  auto res = loadProject(id)
+  if res.ok and shareCardVisible(res.project.assert(object)) (
+    void ensureShareCard(res.project.assert(object))
+  )
+)
+
+def handleProjectSharePng(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !shareCardVisible(res.project.assert(object)) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if ensureShareCard(project) != "" (
+    string cover = thumbUrlFor(project)
+    c.setHeader("Location", if cover == "" then editorOrigin ++ "/images/apple-touch-icon.png" else cover)
+    c.setHeader("Cache-Control", "public, max-age=300")
+    c.status(302)
+    return
+  )
+  boolean current = c.query("v") == project.edited.toStr()
+  string etag = "\"" ++ project.id.toStr() ++ "-" ++ project.edited.toStr() ++ "\""
+  c.setHeader("ETag", etag)
+  c.setHeader("Cache-Control", if current then "public, max-age=31536000, immutable" else "public, max-age=3600")
+  if (c.header("If-None-Match") ?? "") == etag (
+    c.status(304)
+    return
+  )
+  c.setHeader("Content-Type", "image/png")
+  c.setHeader("X-Content-Type-Options", "nosniff")
+  c.file(shareCardPath(project))
+)

@@ -1,0 +1,157 @@
+export {
+  migrateSpaceMemberships,
+  removeProjectFromSpaces,
+  removeProjectsFromSpaces,
+  syncSpaceMemberships
+}
+
+def appendSpaceUserKey(array keys, string username) array (
+  string key = normalizeUsername(username)
+  if key != "" and !keys.contains(key) (
+    keys.append(key)
+  )
+  return keys
+)
+
+def spaceRelatedUserKeys(object space) array (
+  array keys = appendSpaceUserKey([], space.owner.toStr())
+  array managers = spaceManagers(space)
+  for i managers.len (
+    keys = appendSpaceUserKey(keys, managers[i].toStr())
+  )
+  array followers = space.followers.assertElse(array, [])
+  for i followers.len (
+    keys = appendSpaceUserKey(keys, followers[i].toStr())
+  )
+  array curatorInvites = spaceCuratorInvites(space)
+  for i curatorInvites.len (
+    object invite = curatorInvites[i].assert(object)
+    keys = appendSpaceUserKey(keys, invite.username.toStr())
+  )
+  if space.kind.toStr() == "challenge" (
+    array participants = challengeArray(space, "participants")
+    for i participants.len (
+      keys = appendSpaceUserKey(keys, participants[i].toStr())
+    )
+    array judges = challengeArray(space, "judges")
+    for i judges.len (
+      keys = appendSpaceUserKey(keys, judges[i].toStr())
+    )
+    array judgeInvites = challengeArray(space, "judgeInvites")
+    for i judgeInvites.len (
+      object invite = judgeInvites[i].assert(object)
+      keys = appendSpaceUserKey(keys, invite.username.toStr())
+    )
+  )
+  return keys
+)
+
+def syncSpaceMemberships(object space) boolean (
+  string spaceId = space["_id"].toStr()
+  array keys = spaceRelatedUserKeys(space)
+  string signature = json.stringify(keys)
+  string stateId = "space:" ++ spaceId
+  object state = (spaceMemberDocs.findById(stateId) ?? {})
+  if state.len > 0 and state.signature.toStr() == signature (
+    return true
+  )
+  array previous = spaceMemberDocs.where("spaceId", "==", spaceId).all()
+  for i previous.len (
+    object membership = previous[i].assert(object)
+    void spaceMemberDocs.deleteOne({_id: membership["_id"]})
+  )
+  for i keys.len (
+    string userKey = keys[i].toStr()
+    void spaceMemberDocs.insertOne({_id: "member:" ++ userKey ++ ":" ++ spaceId, kind: "member", userKey: userKey, spaceId: spaceId})
+  )
+  return putDocument(spaceMemberDocs, stateId, {kind: "state", signature: signature})
+)
+
+def putSpaceDocument(object space) boolean (
+  boolean saved = putDocument(spaceDocs, space["_id"].toStr(), space)
+  if saved (
+    syncSpaceMemberships(space)
+  )
+  return saved
+)
+
+def deleteSpaceMemberships(string spaceId) boolean (
+  array memberships = spaceMemberDocs.where("spaceId", "==", spaceId).all()
+  for i memberships.len (
+    object membership = memberships[i].assert(object)
+    void spaceMemberDocs.deleteOne({_id: membership["_id"]})
+  )
+  void spaceMemberDocs.deleteOne({_id: "space:" ++ spaceId})
+  return true
+)
+
+def migrateSpaceMemberships() boolean (
+  string migrationId = "migration:space-members-v1"
+  if (spaceMemberDocs.findById(migrationId) ?? {}).len > 0 (
+    return true
+  )
+  array previous = spaceMemberDocs.all()
+  for i previous.len (
+    object document = previous[i].assert(object)
+    void spaceMemberDocs.deleteOne({_id: document["_id"]})
+  )
+  array spaces = spaceDocs.all()
+  for i spaces.len (
+    syncSpaceMemberships(spaces[i].assert(object))
+  )
+  return putDocument(spaceMemberDocs, migrationId, {kind: "migration", completed: timestamp})
+)
+
+def removeProjectsFromSpaces(array removedProjectIds) boolean (
+  array spaces = spaceDocs.all()
+  for i spaces.len (
+    object space = spaces[i].assert(object)
+    array storedProjectIds = space.projects.assertElse(array, [])
+    array projectIds = []
+    boolean changed = false
+    for j storedProjectIds.len (
+      if removedProjectIds.contains(storedProjectIds[j].toStr()) (
+        changed = true
+      ) else (
+        projectIds.append(storedProjectIds[j])
+      )
+    )
+    if changed (
+      space.projects = projectIds
+      array submissions = []
+      array storedSubmissions = challengeArray(space, "submissions")
+      for j storedSubmissions.len (
+        object submission = storedSubmissions[j].assert(object)
+        if !removedProjectIds.contains(submission.projectId.toStr()) (
+          submissions.append(submission)
+        )
+      )
+      space.submissions = submissions
+      array scores = []
+      array storedScores = challengeArray(space, "scores")
+      for j storedScores.len (
+        object score = storedScores[j].assert(object)
+        if !removedProjectIds.contains(score.projectId.toStr()) (
+          scores.append(score)
+        )
+      )
+      space.scores = scores
+      array votes = []
+      array storedVotes = challengeArray(space, "audienceVotes")
+      for j storedVotes.len (
+        object vote = storedVotes[j].assert(object)
+        if !removedProjectIds.contains(vote.projectId.toStr()) (
+          votes.append(vote)
+        )
+      )
+      space.audienceVotes = votes
+      space.edited = timestamp
+      putSpaceDocument(space)
+    )
+  )
+  return true
+)
+
+def removeProjectFromSpaces(string projectId) boolean (
+  return removeProjectsFromSpaces([projectId])
+)
