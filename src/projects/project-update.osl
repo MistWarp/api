@@ -1,10 +1,9 @@
 export {}
 
 def handleUpdateProject(*serve.Context c) (
-  string lockName = "project-upload:" ++ c.param("id")
-  sync.lock(lockName)
-  handleUpdateProjectLocked(c)
-  sync.unlock(lockName)
+  runLocked("project-upload:" ++ c.param("id"), def() -> (
+    handleUpdateProjectLocked(c)
+  ))
 )
 
 def handleUpdateProjectLocked(*serve.Context c) (
@@ -30,12 +29,12 @@ def handleUpdateProjectLocked(*serve.Context c) (
   applyProjectFlags(project, body)
   if refused(c, projectSaleRefusal(body)) return
   if refused(c, applyRemixShareUpdate(c, project, body)) return
-  applyTags(project, body)
+  if refused(c, applyTags(project, body)) return
   if refused(c, applyGameProducts(project, body)) return
   if refused(c, applyGameItems(project, body)) return
   if refused(c, applyInventoryPolicy(project, body)) return
   if refused(c, gameGrantRefusal(project, body)) return
-  applyCompatibility(project, body)
+  if refused(c, applyCompatibility(project, body)) return
   if refused(c, applyTeamUpdate(c, project, body)) return
 
   if refused(c, holdTransferredStorage(c, project, transfer)) return
@@ -173,6 +172,9 @@ def applyTeamUpdate(*serve.Context c, object project, object body) Refusal (
   )
   if !isOwnerOrAdmin(c, project) (
     return refuse(403, "only the owner can manage the project team")
+  )
+  if typeof(body.collaborators) != "array" (
+    return refuse(400, "collaborators must be a list")
   )
   return applyCollaborators(project, body.collaborators.assert(array))
 )

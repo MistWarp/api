@@ -4,6 +4,9 @@ def applyCollaborators(object project, array incoming) Refusal (
   array collaborators = []
   number totalShare = 0
   for i incoming.len (
+    if typeof(incoming[i]) != "object" (
+      return refuse(400, "each teammate must be an object")
+    )
     if collaborators.len < 25 (
       object entry = incoming[i].assert(object)
       string username = normalizeUsername(entry.username.toStr())

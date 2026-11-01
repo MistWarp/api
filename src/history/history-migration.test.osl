@@ -15,6 +15,7 @@ number saves = 0
 number readFailures = 0
 boolean failRead = false
 boolean failCopy = false
+boolean throwRead = false
 number serial = 0
 
 def randomString(number length) string (
@@ -23,6 +24,9 @@ def randomString(number length) string (
 )
 
 def loadProject(string id) object (
+  if throwRead (
+    throw "project read exploded"
+  )
   if readFailures > 0 (
     readFailures -= 1
     return {ok: false, retryable: true}
@@ -209,4 +213,30 @@ sync.lock("project-history-stale-upload")
 object staleHistory = ensureUploadedProjectHistory(staleUpload)
 sync.unlock("project-history-stale-upload")
 testing.assert(staleHistory.ok == false and saves == before, "history preparation rejects a replaced upload snapshot")
+def releaseUploadLock(string lockName) boolean (
+  sync.unlock(lockName)
+  return true
+)
+def uploadLockFree(string lockName) boolean (
+  return thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+)
+object throwingChild = {id: "throwing-child", owner: "Mist", created: 9000, jsonKey: "throwing-child.json", lastUploadAt: 9000, remixParent: "parent", remixBaseCommit: base, assets: []}
+throwRead = true
+sync.lock("project-history-throwing-child")
+testing.assert(try(ensureUploadedProjectHistory(throwingChild)).isErr(), "a failing ancestor read reaches the upload")
+throwRead = false
+testing.assert(!uploadLockFree("project-history-throwing-child") and !try(releaseUploadLock("project-history-throwing-child")).isErr(), "a failing ancestor read hands the lock back to the upload")
+testing.assert(uploadLockFree("project-history-throwing-child"), "the upload can then release its lock")
+object throwingRoot = {id: "throwing-root", owner: "Mist", created: 9000, jsonKey: "throwing-root.json", lastUploadAt: 9000, assets: []}
+throwRead = true
+sync.lock("project-history-throwing-root")
+testing.assert(try(ensureUploadedProjectHistory(throwingRoot)).isErr(), "a failing read under the history lock reaches the upload")
+throwRead = false
+testing.assert(!try(releaseUploadLock("project-history-throwing-root")).isErr() and uploadLockFree("project-history-throwing-root"), "a failing read under the history lock still hands the lock back once")
 void fs.remove(tmpDir)

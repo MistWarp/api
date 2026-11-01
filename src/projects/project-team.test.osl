@@ -36,6 +36,7 @@ testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", 
 testing.assert(applyCollaborators(project, [{username: "ghost", role: "editor"}]).message == "Rotur user not found: ghost", "unknown users are refused")
 testing.assert(applyCollaborators(project, [{username: "alice", role: "editor"}, {username: "ALICE", role: "tester"}]).message == "a person can only appear once in the project team", "teammates appear once")
 testing.assert(applyCollaborators(project, [{username: "alice", role: "editor", share: 40}, {username: "bob", role: "editor", share: 40}]).message == "teammate revenue shares cannot exceed 70 percent", "total shares are capped")
+testing.assert(applyCollaborators(project, ["alice"]).message == "each teammate must be an object", "teammates must be objects")
 testing.assert(project.collaborators.len == 2, "a refused team leaves the saved team alone")
 
 array previousTeam = [{username: "Alice", role: "maintainer"}, {username: "bob", role: "editor"}]

@@ -43,6 +43,9 @@ for i 51 (
   manyCredits.append({who: "A", role: "B"})
 )
 testing.assert(applyCredits(credited, {credits: manyCredits}).message == "too many credits", "credits are capped at 50")
+testing.assert(applyCredits(credited, {credits: "x"}).message == "credits must be a list" and applyCredits(credited, {credits: null}).status == 400, "credits must be a list")
+testing.assert(applyCredits(credited, {credits: ["Ada"]}).message == "each credit must be an object", "each credit must be an object")
+testing.assert(credited.credits.len == 2, "refused credits leave the saved credits alone")
 
 object flagged = {id: "p1"}
 applyProjectFlags(flagged, {commentsOff: "yes", remixable: 0, seeInside: false})
@@ -54,6 +57,7 @@ testing.assert(!isRefused(applyRemixShare(flagged, 50)) and flagged.remixShare =
 object tagged = {id: "p1"}
 applyTags(tagged, {tags: ["Games", "games", "#Puzzle", "bad tag!", "a", "b", "c", "d", "e", "f", "g", "h", "i"]})
 testing.assert(tagged.tags == ["games", "puzzle", "a", "b", "c", "d", "e", "f", "g", "h"], "tags are normalized, unique and capped at 10")
+testing.assert(applyTags(tagged, {tags: "games"}).message == "tags must be a list" and tagged.tags.len == 10, "tags must be a list")
 
 object product = {id: "Pack", name: "Pack", description: "d", price: 10, grantsItem: "sword", icon: "https://i.example/i.png"}
 object shop = {id: "p1"}
@@ -105,3 +109,4 @@ applyCompatibility(compatible, {compatibility: null})
 testing.assert(!compatible.contains("compatibility"), "null compatibility is ignored")
 applyCompatibility(compatible, {compatibility: {mobile: true, controller: "yes"}})
 testing.assert(compatible.compatibility.mobile == true and compatible.compatibility.keyboard == false and compatible.compatibility.controller == false, "compatibility only accepts true")
+testing.assert(applyCompatibility(compatible, {compatibility: "mobile"}).message == "compatibility must be an object" and compatible.compatibility.mobile == true, "compatibility must be an object")

@@ -1,0 +1,32 @@
+import "std:testing"
+import "std:sync"
+import "std:thread"
+import "./project-lock.osl"
+
+def lockIsFree(string lockName) boolean (
+  boolean free = thread.new(def() -> (
+    boolean taken = sync.tryLock(lockName)
+    if taken (
+      sync.unlock(lockName)
+    )
+    return taken
+  )).wait()
+  return free
+)
+
+boolean heldInside = true
+runLocked("save-lock-test", def() -> (
+  heldInside = !lockIsFree("save-lock-test")
+))
+testing.assert(heldInside, "the lock is held while the work runs")
+testing.assert(lockIsFree("save-lock-test"), "the lock is released after the work returns")
+
+def failingSave() (
+  throw "bad request body"
+)
+def lockedFailingSave() boolean (
+  runLocked("save-lock-test", failingSave)
+  return true
+)
+testing.assert(try(lockedFailingSave()).isErr(), "a failure in the work still reaches the caller")
+testing.assert(lockIsFree("save-lock-test"), "the lock is released when the work throws")

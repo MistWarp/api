@@ -155,7 +155,7 @@ class Server:
         if not self.keep:
             shutil.rmtree(self.dir)
 
-    def call(self, method, path, who=None, body=None, raw=None, content_type="application/json"):
+    def call(self, method, path, who=None, body=None, raw=None, content_type="application/json", timeout=30):
         data = raw if raw is not None else (None if body is None else json.dumps(body).encode("utf-8"))
         request = urllib.request.Request(self.base + path, data=data, method=method)
         if who:
@@ -163,10 +163,12 @@ class Server:
         if data is not None:
             request.add_header("Content-Type", content_type)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 status, text, headers = response.status, response.read(), response.headers
         except urllib.error.HTTPError as error:
             status, text, headers = error.code, error.read(), error.headers
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+            return 599, {"timedOut": str(error)}, {}
         if text[:2] == b"\x1f\x8b":
             text = gzip.decompress(text)
         try:
@@ -412,6 +414,7 @@ def upload_flow(server, step, ids):
            {"project": with_asset, "thumbnail": b"\x89PNG smoke thumbnail"})
     step("check assets", "POST", path + "/assets/check", "sam", {"assets": [asset_name, other_name]})
     step("check invalid asset name", "POST", path + "/assets/check", "sam", {"assets": ["nope"]})
+    step("check assets not a list", "POST", path + "/assets/check", "sam", {"assets": "x"})
     sparse = sb3_archive(project_with_costumes([asset_name], {"ext": "https://example.com/ext.js"}))
     upload("upload sparse", {"extensions": json.dumps({"https://example.com/ext.js": "class SmokeExtension {}"})}, {"project": sparse})
     upload("upload second asset", files={"project": sb3_archive(project_with_costumes([asset_name, other_name]), {other_name: other_content})})
@@ -643,6 +646,16 @@ def update_flow(server, step, ids):
     patch("patch transfer", {"owner": "bob", "keepGroup": True, "title": "Given away"})
     patch("patch after transfer", {"title": "Mine again"})
     step("get updated project", "GET", path, "bob")
+    for name, body in (
+        ("patch credits not a list", {"credits": "x"}),
+        ("patch credit not an object", {"credits": ["Ada"]}),
+        ("patch tags not a list", {"tags": "games"}),
+        ("patch compatibility not an object", {"compatibility": "mobile"}),
+        ("patch team not a list", {"collaborators": "alice"}),
+        ("patch teammate not an object", {"collaborators": ["alice"]}),
+        ("patch after bad input", {"title": "Still saving"}),
+    ):
+        step(name, "PUT", path, "bob", body, timeout=5)
 
 
 def volatile_key(key):
@@ -677,7 +690,7 @@ def run(binary, sb3, keep):
     ids = {}
     steps = []
 
-    def step(name, method, path, who=None, body=None, upload=None, headers=(), form=None):
+    def step(name, method, path, who=None, body=None, upload=None, headers=(), form=None, timeout=30):
         real_path = path
         for alias, real in ((a, r) for r, a in ids.items()):
             real_path = real_path.replace(alias, real)
@@ -687,7 +700,7 @@ def run(binary, sb3, keep):
         elif form is not None:
             status, parsed, response_headers = server.form(real_path, who, form[0], form[1])
         else:
-            status, parsed, response_headers = server.call(method, real_path, who, body)
+            status, parsed, response_headers = server.call(method, real_path, who, body, timeout=timeout)
         record = {"step": name, "status": status, "body": parsed}
         for header in headers:
             record[header] = response_headers.get(header, "")

@@ -75,13 +75,19 @@ def applyCredits(object project, object body) Refusal (
   if !body.contains("credits") (
     return noRefusal()
   )
+  if typeof(body.credits) != "array" (
+    return refuse(400, "credits must be a list")
+  )
   array incoming = body.credits.assert(array)
   if incoming.len > 50 (
     return refuse(400, "too many credits")
   )
   array credits = []
   for i incoming.len (
-    object entry = incoming[i]
+    if typeof(incoming[i]) != "object" (
+      return refuse(400, "each credit must be an object")
+    )
+    object entry = incoming[i].assert(object)
     string who = entry.who.toStr().strip()
     string role = entry.role.toStr().strip()
     string creditUrl = ""
@@ -133,9 +139,12 @@ def applyRemixShare(object project, number remixShare) Refusal (
   return noRefusal()
 )
 
-def applyTags(object project, object body) (
+def applyTags(object project, object body) Refusal (
   if !body.contains("tags") (
-    return
+    return noRefusal()
+  )
+  if typeof(body.tags) != "array" (
+    return refuse(400, "tags must be a list")
   )
   array incoming = body.tags.assert(array)
   array tags = []
@@ -148,6 +157,7 @@ def applyTags(object project, object body) (
     )
   )
   project.tags = tags
+  return noRefusal()
 )
 
 def applyGameProducts(object project, object body) Refusal (
@@ -311,13 +321,18 @@ def gameGrantRefusal(object project, object body) Refusal (
   return noRefusal()
 )
 
-def applyCompatibility(object project, object body) (
-  if body.contains("compatibility") and body.compatibility != null (
-    object compatibilityInfo = body.compatibility.assert(object)
-    project.compatibility = {
-      mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
-      keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
-      controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
-    }
+def applyCompatibility(object project, object body) Refusal (
+  if !body.contains("compatibility") or body.compatibility == null (
+    return noRefusal()
   )
+  if typeof(body.compatibility) != "object" (
+    return refuse(400, "compatibility must be an object")
+  )
+  object compatibilityInfo = body.compatibility.assert(object)
+  project.compatibility = {
+    mobile: compatibilityInfo.contains("mobile") and compatibilityInfo.mobile == true,
+    keyboard: compatibilityInfo.contains("keyboard") and compatibilityInfo.keyboard == true,
+    controller: compatibilityInfo.contains("controller") and compatibilityInfo.controller == true
+  }
+  return noRefusal()
 )
