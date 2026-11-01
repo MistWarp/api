@@ -31,8 +31,9 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
-VOLATILE_KEYS = re.compile(r"(^|_)(id|_id|at|time|timestamp|created|updated|modified|expires|sha|commit|head|token|etag|key|url)$|At$|Id$|Ms$|Url$|Key$|Sha$", re.I)
-APPROX_KEYS = {"bytes", "mistwarp", "sizeBytes", "historyBytes", "storedJsonBytes", "used", "usedBytes", "storageUsed", "received", "size"}
+VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
+VOLATILE_FIELDS = {("notifications", "id"), ("largest", "bytes"), ("", "mistwarp")}
+SAVE_PATH = re.compile(r"^/v1/projects/([^/]+)(/upload)?$")
 HEX = re.compile(r"^[0-9a-f]{32,64}$")
 ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T")
 
@@ -160,25 +161,35 @@ class Server:
             return json.load(handle)
 
     def blob_inventory(self):
-        counts = {}
+        inventory = {}
         root = os.path.join(self.dir, "data", "blobs")
         for folder, _, names in os.walk(root):
             for name in names:
-                prefix = os.path.relpath(folder, root).split(os.sep)[0]
-                counts[prefix] = counts.get(prefix, 0) + 1
-        return counts
+                path = os.path.relpath(os.path.join(folder, name), root)
+                prefix = path.split(os.sep)[0]
+                if prefix in ("assets", "project-json"):
+                    inventory.setdefault(prefix, []).append(path)
+                else:
+                    inventory[prefix] = inventory.get(prefix, 0) + 1
+        for prefix, value in inventory.items():
+            if isinstance(value, list):
+                value.sort()
+        return inventory
 
 
 SMOKE_AUTHOR = b"Smoke <smoke@mistwarp.org> 1700000000 +0000"
 ZERO_HEAD = "0" * 40
 EMBEDDED_HEX = re.compile(r"[0-9a-f]{32,64}")
+CONTENT_NAME = re.compile(r"^(assets/)?[0-9a-f]{32}\.[a-z0-9]+$|^project-json/[0-9a-f]{64}\.json\.gz$")
+ACCESS_KEY = re.compile(r"([?&]k=)[A-Za-z0-9]+")
+EMBEDDED_TIME = re.compile(r"(?<![0-9])1[0-9]{12}(?![0-9])")
 
 
 def sb3_archive(project_json, files=None):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         if project_json is not None:
-            archive.writestr("project.json", json.dumps(project_json))
+            archive.writestr("project.json", json.dumps(project_json, ensure_ascii=False))
         for name, content in (files or {}).items():
             archive.writestr(name, content)
     return buffer.getvalue()
@@ -307,18 +318,6 @@ def real_id(ids, alias):
     return next(real for real, known in ids.items() if known == alias)
 
 
-def stored_project(project):
-    def scrub(value):
-        if isinstance(value, dict):
-            return {key: scrub(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [scrub(item) for item in value]
-        if isinstance(value, str):
-            return EMBEDDED_HEX.sub("<hex>", value)
-        return value
-    return scrub(project)
-
-
 def committed_workspace(server, ids, alias, who, message, delta=False, same_tree=False):
     history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, alias), who))
     tree = history.tree_of(history.head())
@@ -331,7 +330,10 @@ def committed_workspace(server, ids, alias, who, message, delta=False, same_tree
 def staged_part(server, step, path, who, kind, data, name):
     status, started = step(name + " start", "POST", path + "/upload-parts", who, {"kind": kind, "name": "", "size": len(data), "chunks": 1})
     token = started.get("token", "") if isinstance(started, dict) else ""
-    step(name + " chunk", "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": "0"}, {"chunk": data}))
+    status, chunk = step(name + " chunk", "POST", path + "/upload-parts/%s/chunk" % token, who, form=({"index": "0"}, {"chunk": data}))
+    for field in ("received", "size"):
+        if isinstance(chunk, dict) and chunk.get(field) == len(data):
+            chunk[field] = "<bytes sent>"
     return token
 
 
@@ -367,6 +369,10 @@ def upload_flow(server, step, ids):
     sparse = sb3_archive(project_with_costumes([asset_name], {"ext": "https://example.com/ext.js"}))
     upload("upload sparse", {"extensions": json.dumps({"https://example.com/ext.js": "class SmokeExtension {}"})}, {"project": sparse})
     upload("upload second asset", files={"project": sb3_archive(project_with_costumes([asset_name, other_name]), {other_name: other_content})})
+    wide_name, wide_content = svg_asset("\u00fcn\u00efc\u00f6d\u00e9 \u2713 " * 400)
+    wide_project = project_with_costumes([asset_name, other_name, wide_name])
+    wide_project["targets"][0]["variables"] = {"wide": ["\u00e9\u2713", "\u00e9\u2713\U0001F600" * 3000]}
+    upload("upload non-ascii project", files={"project": sb3_archive(wide_project, {wide_name: wide_content})})
 
     head, edited = head_and_edited()
     upload("upload stale edited", {"expectedEdited": "1"})
@@ -474,6 +480,8 @@ def update_flow(server, step, ids):
     patch("patch long description", {"description": "d" * 5001})
     patch("patch long instructions", {"instructions": "i" * 5001})
     patch("patch long notes", {"notes": "n" * 5001})
+    patch("patch non-ascii description", {"description": "\u00e9\u2713" * 2400})
+    patch("patch long non-ascii notes", {"notes": "\u00e9" * 5001})
     patch("patch credits", {"credits": [
         {"who": "Ada", "role": "Art", "url": "https://example.com/ada"},
         {"who": "Bo", "role": "Music", "url": None},
@@ -554,24 +562,29 @@ def update_flow(server, step, ids):
     step("get updated project", "GET", path, "bob")
 
 
-def normalize(value, ids, key=""):
+def volatile_key(key):
+    return key in VOLATILE_NAMES
+
+
+def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
-        return {k: normalize(v, ids, k) for k, v in sorted(value.items())}
+        return {k: normalize(v, ids, k, key) for k, v in sorted(value.items())}
     if isinstance(value, list):
-        return [normalize(v, ids, key) for v in value]
+        return [normalize(v, ids, key, parent) for v in value]
+    if (parent, key) in VOLATILE_FIELDS:
+        return "<volatile>"
     if isinstance(value, str):
         value = re.sub(r"127\.0\.0\.1:\d+", "127.0.0.1:<port>", value)
         for real, alias in ids.items():
             value = value.replace(real, alias)
-        if HEX.match(value) or ISO.match(value):
+        if volatile_key(key) or HEX.match(value) or ISO.match(value):
             return "<volatile>"
-        if VOLATILE_KEYS.search(key) and not value.startswith("<project"):
-            return "<volatile>"
-        return value
+        value = ACCESS_KEY.sub(r"\1<key>", value)
+        if CONTENT_NAME.match(value):
+            return value
+        return EMBEDDED_TIME.sub("<time>", EMBEDDED_HEX.sub("<hex>", value))
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if key in APPROX_KEYS:
-            return "~%d KiB" % round(value / 1024)
-        if VOLATILE_KEYS.search(key) or value >= 1e12:
+        if volatile_key(key) or value >= 1e12:
             return "<volatile>"
     return value
 
@@ -586,6 +599,7 @@ def run(binary, sb3, keep):
         for alias, real in ((a, r) for r, a in ids.items()):
             real_path = real_path.replace(alias, real)
         if upload:
+            real_path = "/v1/projects/%s/upload" % upload
             status, parsed, response_headers = server.upload(upload, who, sb3)
         elif form is not None:
             status, parsed, response_headers = server.form(real_path, who, form[0], form[1])
@@ -595,6 +609,9 @@ def run(binary, sb3, keep):
         for header in headers:
             record[header] = response_headers.get(header, "")
         steps.append(record)
+        saved = SAVE_PATH.match(real_path)
+        if saved and 200 <= status < 300 and (method, bool(saved.group(2))) in (("PUT", False), ("POST", True)):
+            steps.append({"step": name + " stored", "status": 0, "body": server.read_project(saved.group(1))})
         return status, parsed
 
     try:
@@ -639,7 +656,7 @@ def run(binary, sb3, keep):
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
-                steps.append({"step": "stored " + alias, "status": 0, "body": stored_project(server.read_project(real))})
+                steps.append({"step": "stored " + alias, "status": 0, "body": server.read_project(real)})
         steps.append({"step": "blob inventory", "status": 0, "body": server.blob_inventory()})
     finally:
         server.stop()
