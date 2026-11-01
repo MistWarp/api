@@ -76,11 +76,11 @@ def emptyGameSave(string projectId, string userId, string context) object (
 )
 
 def loadGameSave(string projectId, string userId, string context) object (
-  auto result = readFile(gameSavePath(projectId, userId, context))
-  if !result.ok (
+  auto res = readFile(gameSavePath(projectId, userId, context))
+  if !res.ok (
     return emptyGameSave(projectId, userId, context)
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def gameSaveResponse(object save) object (
@@ -213,11 +213,11 @@ def requireGameDataCapability(*serve.Context c, object project) object (
   return {ok: true, capability: capability}
 )
 
-def rejectGameDataCapability(*serve.Context c, object result) boolean (
-  if result.ok == true (
+def rejectGameDataCapability(*serve.Context c, object res) boolean (
+  if res.ok == true (
     return false
   )
-  c.json(result.status.toNum().toInt(), {ok: false, error: result.error})
+  c.json(res.status.toNum().toInt(), {ok: false, error: res.error})
   return true
 )
 
@@ -278,7 +278,7 @@ def handlePutMyProjectSave(*serve.Context c) (
     return
   )
   string serialized = json.stringify(value)
-  if serialized.len > gameSaveMaxBytes (
+  if serialized.toBytes().len > gameSaveMaxBytes (
     c.badRequest("project save exceeds 64 KiB")
     return
   )
@@ -313,7 +313,7 @@ def handlePutMyProjectSave(*serve.Context c) (
   current.lastRequestId = requestId
   string path = gameSavePath(projectId, userId, context)
   number previousBytes = if fs.exists(path) then fs.size(path).unwrapOr(0) else 0
-  number nextBytes = json.stringify(current).len
+  number nextBytes = json.stringify(current).toBytes().len
   number usedBytes = storedGameSaveBytes(userId)
   number projectedBytes = (usedBytes - previousBytes) + nextBytes
   number storageLimit = mistwarpBenefitsForUserId(userId).gameSaveStorageBytes.toNum()
@@ -357,7 +357,7 @@ def handleListMyGameSaves(*serve.Context c) (
           title = project.project.assert(object).title.toStr()
           owner = project.project.assert(object).owner.toStr()
         )
-        saves.append({projectId: projectId, title: title, owner: owner, revision: record.revision, updatedAt: record.updatedAt, bytes: json.stringify(record.value).len})
+        saves.append({projectId: projectId, title: title, owner: owner, revision: record.revision, updatedAt: record.updatedAt, bytes: json.stringify(record.value).toBytes().len})
       )
     )
   )

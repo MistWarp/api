@@ -1,9 +1,9 @@
 def loadShadowBans() object (
-  auto result = readFile(shadowBansFile)
-  if !result.ok (
+  auto res = readFile(shadowBansFile)
+  if !res.ok (
     return {users: {}, projects: {}}
   )
-  object data = result.data.assertElse(object, {})
+  object data = res.data.assertElse(object, {})
   data.users = (data.users ?? {}).assertElse(object, {})
   data.projects = (data.projects ?? {}).assertElse(object, {})
   return data
@@ -219,12 +219,12 @@ def handleListShadowBans(*serve.Context c) (
 )
 
 def loadModeratedProject(*serve.Context c) object (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return {}
   )
-  return result.project.assert(object)
+  return res.project.assert(object)
 )
 
 def handleShadowBanProject(*serve.Context c) (

@@ -512,7 +512,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     return false
   )
   if projectJsonIsGzip(project) (
-    if fetched.body.len > maxStoredProjectJsonBytes (
+    if fetched.body.toStr().toBytes().len > maxStoredProjectJsonBytes (
       return false
     )
     return fs.writeFileBytes(outputPath, fetched.body)
@@ -652,12 +652,12 @@ def handleGetProjectBlob(*serve.Context c) (
 def handleGetProjectWorkspace(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   boolean allowed = canSeeInsideProject(project, c)
   if !allowed and (c.query("pull") ?? "") != "" (
     allowed = canAccessPullWorkspace(project, (c.query("pull") ?? ""), c)

@@ -1,9 +1,9 @@
 def loadUserIds() object (
-  auto result = readFile(userIdsFile)
-  if !result.ok (
+  auto res = readFile(userIdsFile)
+  if !res.ok (
     return {users: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def saveUserIds(object data) boolean (
@@ -84,9 +84,9 @@ def renameUserInProfiles(string oldKey, string newKey, string newName) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") and name != newKey ++ ".json" (
-      auto result = readFile(usersDir ++ name)
-      if result.ok (
-        object other = result.data.assert(object)
+      auto res = readFile(usersDir ++ name)
+      if res.ok (
+        object other = res.data.assert(object)
         boolean changed = false
         array followers = other.followers.assert(array)
         if arrayContainsUserKey(followers, oldKey) (
@@ -123,9 +123,9 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = loadProject(name.replace(".json", ""))
-      if result.ok (
-        object project = result.project.assert(object)
+      auto res = loadProject(name.replace(".json", ""))
+      if res.ok (
+        object project = res.project.assert(object)
         boolean changed = false
         if normalizeUsername(project.owner.toStr()) == oldKey (
           project.owner = newName
@@ -340,9 +340,9 @@ def renameUserInNotifications(string userId, string oldKey, string newKey, strin
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = readFile(notificationsDir ++ name)
-      if result.ok (
-        object data = result.data.assert(object)
+      auto res = readFile(notificationsDir ++ name)
+      if res.ok (
+        object data = res.data.assert(object)
         array items = data.items.assert(array)
         boolean changed = false
         for j items.len (
@@ -371,9 +371,9 @@ def renameUserInNotifications(string userId, string oldKey, string newKey, strin
 def renameUserInActivity(string oldKey, string newKey, string newName) (
   renameUserFile(activityDir, oldKey, newKey)
   string path = activityDir ++ newKey ++ ".json"
-  auto result = readFile(path)
-  if result.ok (
-    object data = result.data.assert(object)
+  auto res = readFile(path)
+  if res.ok (
+    object data = res.data.assert(object)
     array items = data.items.assert(array)
     for i items.len (
       object item = items[i]
@@ -571,9 +571,9 @@ def purgeUserFromProfiles(string key) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = readFile(usersDir ++ name)
-      if result.ok (
-        object other = result.data.assert(object)
+      auto res = readFile(usersDir ++ name)
+      if res.ok (
+        object other = res.data.assert(object)
         boolean changed = false
         array followers = other.followers.assert(array)
         if stringArrayContainsUser(followers, key) (
@@ -610,9 +610,9 @@ def purgeUserFromProjects(string key, string userId) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = loadProject(name.replace(".json", ""))
-      if result.ok (
-        object project = result.project.assert(object)
+      auto res = loadProject(name.replace(".json", ""))
+      if res.ok (
+        object project = res.project.assert(object)
         if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
           purgeProject(project)
           continue
@@ -682,9 +682,9 @@ def purgeUserFromProjects(string key, string userId) (
   for i trashFiles.len (
     string name = trashFiles[i].toStr()
     if name.endsWith(".json") (
-      auto result = readFile(trashDir ++ name)
-      if result.ok (
-        object project = result.data.assert(object)
+      auto res = readFile(trashDir ++ name)
+      if res.ok (
+        object project = res.data.assert(object)
         if identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), userId, key) (
           purgeProject(project)
         )
@@ -722,9 +722,9 @@ def purgeUserFromNotifications(string key) (
   for i files.len (
     string name = files[i].toStr()
     if name.endsWith(".json") (
-      auto result = readFile(notificationsDir ++ name)
-      if result.ok (
-        object data = result.data.assert(object)
+      auto res = readFile(notificationsDir ++ name)
+      if res.ok (
+        object data = res.data.assert(object)
         array items = data.items.assert(array)
         array kept = []
         boolean changed = false
@@ -831,9 +831,9 @@ def reconcileDeletedUsers() (
     for i projectFiles.len (
       string name = projectFiles[i].toStr()
       if name.endsWith(".json") (
-        auto result = readFile(directory ++ name)
-        if result.ok (
-          object project = result.data.assert(object)
+        auto res = readFile(directory ++ name)
+        if res.ok (
+          object project = res.data.assert(object)
           string uid = (project.ownerId ?? "").toStr()
           string uname = project.owner.toStr()
           if uid != "" (

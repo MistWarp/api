@@ -14,7 +14,7 @@ def createComment(string key, string author, string authorId, string content, st
   string lockName = "comments:" ++ key
   sync.lock(lockName)
   string commentsPath = commentsDir ++ key ++ ".jsonl"
-  if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).len > 8388608 (
+  if fs.exists(commentsPath) and fs.size(commentsPath).unwrapOr(0) + json.stringify({author: author, content: trimmed}).toBytes().len > 8388608 (
     sync.unlock(lockName)
     return {ok: false, error: "this comment thread is full"}
   )
@@ -370,12 +370,12 @@ def commentPage(array allComments,*serve.Context c) object (
 )
 
 def handleGetProjectComments(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return
@@ -404,12 +404,12 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
   if refuseOldPaymentClient(c) (
     return
   )
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this project")
     return
@@ -453,12 +453,12 @@ def handleProjectCommentDonationIntent(*serve.Context c) (
   c.json(200, started))
 
 def handleCreateProjectComment(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if usersAreBlocked(contextString(c, "username"), project.owner.toStr()) (
     c.forbidden("you cannot comment on this project")
     return
@@ -569,12 +569,12 @@ def handleCreateProjectComment(*serve.Context c) (
 )
 
 def handleDeleteProjectComment(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
 
   boolean requesterIsAdmin = contextBool(c, "isAdmin")
   object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), requesterIsAdmin)
@@ -592,8 +592,8 @@ def handleDeleteProjectComment(*serve.Context c) (
 )
 
 def handleEditProjectComment(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
@@ -619,12 +619,12 @@ def handleEditProjectComment(*serve.Context c) (
 )
 
 def handlePinProjectComment(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok or !canViewProject(result.project.assert(object), c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   object body = requestJSON(c)
   boolean pinned = true
   if body.contains("pinned") and body.pinned != null (
@@ -816,12 +816,12 @@ def reactToComment(*serve.Context c, string key, string path) (
 )
 
 def handleReactProjectComment(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return

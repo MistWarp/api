@@ -11,12 +11,12 @@ array entries = [
 ]
 
 def ids(array projects) string (
-  string result = ""
+  string res = ""
   for i projects.len (
     object project = projects[i]
-    result ++= project.id.toStr()
+    res ++= project.id.toStr()
   )
-  return result
+  return res
 )
 
 testing.assert(ids(relatedProjectEntries(entries, "a", [], 4)) == "bcde", "same owner fills half, then shared tags, then trending")

@@ -1,28 +1,28 @@
 def ensureDirectories() boolean (
-  boolean result = fs.mkdir(projectsDir, {recursive: true})
-  result = result and fs.mkdir(usersDir, {recursive: true})
-  result = result and fs.mkdir(sessionsDir, {recursive: true})
-  result = result and fs.mkdir(commentsDir, {recursive: true})
-  result = result and fs.mkdir(reportsDir, {recursive: true})
-  result = result and fs.mkdir(notificationsDir, {recursive: true})
-  result = result and fs.mkdir(activityDir, {recursive: true})
-  result = result and fs.mkdir(userSettingsDir, {recursive: true})
-  result = result and fs.mkdir(tmpDir, {recursive: true})
-  result = result and fs.mkdir(stagingDir, {recursive: true})
-  result = result and fs.mkdir(thumbnailsDir, {recursive: true})
-  result = result and fs.mkdir(cardsDir, {recursive: true})
-  result = result and fs.mkdir(quotaDir, {recursive: true})
-  result = result and fs.mkdir(agreementAcceptDir, {recursive: true})
-  result = result and fs.mkdir(extensionsDir, {recursive: true})
-  result = result and fs.mkdir(releasesDir, {recursive: true})
-  result = result and fs.mkdir(safetyDir, {recursive: true})
-  result = result and fs.mkdir(trashDir, {recursive: true})
-  result = result and fs.mkdir(gameSavesDir, {recursive: true})
-  result = result and fs.mkdir(gameSaveUsageDir, {recursive: true})
-  result = result and fs.mkdir(gameEntitlementsDir, {recursive: true})
-  result = result and fs.mkdir(gameInventoryDir, {recursive: true})
-  result = result and fs.mkdir(backpackDir, {recursive: true})
-  return result
+  boolean res = fs.mkdir(projectsDir, {recursive: true})
+  res = res and fs.mkdir(usersDir, {recursive: true})
+  res = res and fs.mkdir(sessionsDir, {recursive: true})
+  res = res and fs.mkdir(commentsDir, {recursive: true})
+  res = res and fs.mkdir(reportsDir, {recursive: true})
+  res = res and fs.mkdir(notificationsDir, {recursive: true})
+  res = res and fs.mkdir(activityDir, {recursive: true})
+  res = res and fs.mkdir(userSettingsDir, {recursive: true})
+  res = res and fs.mkdir(tmpDir, {recursive: true})
+  res = res and fs.mkdir(stagingDir, {recursive: true})
+  res = res and fs.mkdir(thumbnailsDir, {recursive: true})
+  res = res and fs.mkdir(cardsDir, {recursive: true})
+  res = res and fs.mkdir(quotaDir, {recursive: true})
+  res = res and fs.mkdir(agreementAcceptDir, {recursive: true})
+  res = res and fs.mkdir(extensionsDir, {recursive: true})
+  res = res and fs.mkdir(releasesDir, {recursive: true})
+  res = res and fs.mkdir(safetyDir, {recursive: true})
+  res = res and fs.mkdir(trashDir, {recursive: true})
+  res = res and fs.mkdir(gameSavesDir, {recursive: true})
+  res = res and fs.mkdir(gameSaveUsageDir, {recursive: true})
+  res = res and fs.mkdir(gameEntitlementsDir, {recursive: true})
+  res = res and fs.mkdir(gameInventoryDir, {recursive: true})
+  res = res and fs.mkdir(backpackDir, {recursive: true})
+  return res
 )
 
 def projectSizeBytes(object project) number (
@@ -61,11 +61,11 @@ def weekViewsOf(object project) number (
 )
 
 def loadAssetsIndex() object (
-  auto result = readFile(assetsIndexFile)
-  if !result.ok (
+  auto res = readFile(assetsIndexFile)
+  if !res.ok (
     return {assets: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def saveAssetsIndex(object index) boolean (
@@ -97,11 +97,11 @@ def writeFile(string path, object data) boolean (
 )
 
 def loadIndex() object (
-  auto result = readFile(indexFile)
-  if !result.ok (
+  auto res = readFile(indexFile)
+  if !res.ok (
     return {projects: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def saveIndex(object index) boolean (
@@ -225,13 +225,13 @@ def loadProject(string id) object (
   if !isSafePathPart(id) (
     return {ok: false, error: "invalid project id"}
   )
-  auto result = readFile(projectsDir ++ id ++ ".json")
-  if !result.ok (
+  auto res = readFile(projectsDir ++ id ++ ".json")
+  if !res.ok (
     string projectPath = projectsDir ++ id ++ ".json"
     boolean missing = storagefs.Missing(projectPath)
     return {ok: false, error: if missing then "project not found" else "project read failed", missing: missing, retryable:!missing}
   )
-  object project = result.data.assert(object)
+  object project = res.data.assert(object)
   if (!project.contains("ownerId") or project.ownerId == null or project.ownerId.toStr() == "") and project.contains("owner") and project.owner != null (
     string uid = userIdForUsername(project.owner.toStr())
     if uid != "" (
@@ -282,11 +282,11 @@ def loadProfile(string username) object (
   if !isSafePathPart(key) (
     return defaultProfile(username)
   )
-  auto result = readFile(usersDir ++ key ++ ".json")
-  if !result.ok (
+  auto res = readFile(usersDir ++ key ++ ".json")
+  if !res.ok (
     return defaultProfile(username)
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def saveProfile(object profile) boolean (
@@ -304,11 +304,11 @@ def loadActivity(string username) array (
   if !isSafePathPart(key) (
     return []
   )
-  auto result = readFile(activityDir ++ key ++ ".json")
-  if !result.ok (
+  auto res = readFile(activityDir ++ key ++ ".json")
+  if !res.ok (
     return []
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.items.assert(array)
 )
 
@@ -334,11 +334,11 @@ def addActivity(string username, string activityType, object extra) (
 )
 
 def loadCommentsLegacy(string key) array (
-  auto result = readFile(commentsDir ++ key ++ ".json")
-  if !result.ok (
+  auto res = readFile(commentsDir ++ key ++ ".json")
+  if !res.ok (
     return []
   )
-  object data = result.data.assert(object)
+  object data = res.data.assert(object)
   return data.comments.assert(array)
 )
 

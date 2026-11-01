@@ -167,13 +167,13 @@ def projectCommerceSplits(object project) array (
   )
 
   addCommerceSplit(totals, project.owner.toStr(), 10000 - allocated)
-  array result = []
+  array res = []
   array usernames = totals.getKeys()
   for i usernames.len (
     string username = usernames[i].toStr()
-    result.append({username: username, basis_points: totals[username].toNum().toInt()})
+    res.append({username: username, basis_points: totals[username].toNum().toInt()})
   )
-  return result
+  return res
 )
 
 def ownerAmountFromSplits(object project, number amount, array splits) number (
@@ -207,11 +207,11 @@ def awardContributionBounty(string bountyId, string projectId, string recipient)
 )
 
 def loadPurchaseKeys() object (
-  auto result = readFile(purchaseKeysFile)
-  if !result.ok (
+  auto res = readFile(purchaseKeysFile)
+  if !res.ok (
     return {keys: {}}
   )
-  return result.data.assert(object)
+  return res.data.assert(object)
 )
 
 def savePurchaseKeys(object store) boolean (
@@ -326,12 +326,12 @@ def handleGetMyStats(*serve.Context c) (
 )
 
 def handleSetVisibility(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -444,12 +444,12 @@ def handleProjectSalesEnded(*serve.Context c) (
 def completeProjectPurchase(string key) object (
   sync.lock("purchase:" ++ key)
   object entry = paidPurchase(key)
-  auto result = loadProject((entry.projectId ?? "").toStr())
-  if !entry.contains("paid") or !result.ok (
+  auto res = loadProject((entry.projectId ?? "").toStr())
+  if !entry.contains("paid") or !res.ok (
     sync.unlock("purchase:" ++ key)
     return {ok: false}
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   string buyer = entry.buyer.toStr()
   if !hasBought(project, buyer) (
     number owed = entry.price.toNum()

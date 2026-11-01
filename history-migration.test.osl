@@ -152,8 +152,8 @@ testing.assert(repeated.ok == true and saves == before, "bootstrap/migration nev
 object missing = {id: "missing", jsonKey: "x", lastUploadAt: 1, remixParent: "deleted"}
 object missingResult = ensureGeneratedProjectHistory(missing, {}, false)
 testing.assert(missingResult.ok == false and missingResult.code == "parent_missing" and saves == before, "deleted parent requires original history")
-object unknown = {id: "unknown", jsonKey: "x", lastUploadAt: 1, remixParent: "parent"}
-testing.assert(ensureGeneratedProjectHistory(unknown, {}, false).ok == false, "never guess a historical base from today's parent HEAD")
+object unknownProject = {id: "unknown", jsonKey: "x", lastUploadAt: 1, remixParent: "parent"}
+testing.assert(ensureGeneratedProjectHistory(unknownProject, {}, false).ok == false, "never guess a historical base from today's parent HEAD")
 object cycleA = {id: "a", jsonKey: "a", lastUploadAt: 1, remixParent: "b"}
 object cycleB = {id: "b", jsonKey: "b", lastUploadAt: 1, remixParent: "a"}
 records.a = cycleA

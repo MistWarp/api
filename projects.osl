@@ -608,11 +608,11 @@ def quotaPath(string username) string (
 )
 
 def pendingUploadEvents(string username) array (
-  auto result = readFile(quotaPath(username))
-  if !result.ok (
+  auto res = readFile(quotaPath(username))
+  if !res.ok (
     return []
   )
-  object data = result.data.assertElse(object, {})
+  object data = res.data.assertElse(object, {})
   if !data.contains("pending") (
     return []
   )
@@ -836,12 +836,12 @@ def cleanupExpiredStagedUploadParts() (
 )
 
 def handleUploadProjectAsset(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
@@ -903,12 +903,12 @@ def handleUploadProjectAsset(*serve.Context c) (
 )
 
 def handleStageProjectUploadPart(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
@@ -970,12 +970,12 @@ def assembleUploadPart(string token, number count, number expectedBytes) boolean
 )
 
 def handleCreateProjectUploadPart(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
@@ -1259,7 +1259,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
         if needsUpload and !pendingNames.contains(name) (
           pendingUploads.append({path: assetPath, name: name})
           pendingNames[name] = true
-          knownAssets[name] = content.len
+          knownAssets[name] = content.toBytes().len
         )
       )
     )
@@ -1340,7 +1340,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
       storageHoldRelease(ownerId, hold)
       return {ok: false, error: "asset upload failed", status: 502}
     )
-    knownAssets[name] = content.len
+    knownAssets[name] = content.toBytes().len
     uploaded += 1
   )
   if uploaded > 0 (
@@ -1531,12 +1531,12 @@ def sweepStagedProjects() (
 )
 
 def handleCheckProjectAssets(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
@@ -1575,12 +1575,12 @@ def handleUploadProject(*serve.Context c) (
 )
 
 def handleUploadProjectLocked(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canSaveLiveProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2141,12 +2141,12 @@ def handleUploadProjectLocked(*serve.Context c) (
 )
 
 def handleBootstrapProjectHistory(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2166,12 +2166,12 @@ def handleBootstrapProjectHistory(*serve.Context c) (
 )
 
 def handleSetThumbnail(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -2204,12 +2204,12 @@ def handleSetThumbnail(*serve.Context c) (
 def handleGetProject(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return
@@ -2325,12 +2325,12 @@ def handleResolveVanityProject(*serve.Context c) (
     return
   )
   object entry = matches[1].assert(object)
-  auto result = loadProject(entry.id.toStr())
-  if !result.ok (
+  auto res = loadProject(entry.id.toStr())
+  if !res.ok (
     c.notFound("vanity project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) or activeVanitySlug(project) != slug (
     c.notFound("vanity project not found")
     return
@@ -2339,12 +2339,12 @@ def handleResolveVanityProject(*serve.Context c) (
 )
 
 def handleGetEditorProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if projectHiddenFrom(project, c) (
     c.notFound("project not found")
     return
@@ -2361,12 +2361,12 @@ def handleGetEditorProject(*serve.Context c) (
 def handleGetProjectTrustedExtensions(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProjectJson(project, c) (
     c.notFound("project not found")
     return
@@ -2382,12 +2382,12 @@ def handleGetProjectTrustedExtensions(*serve.Context c) (
 )
 
 def handleGetProjectJson(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProjectJson(project, c) (
     c.notFound("project not found")
     return
@@ -2406,12 +2406,12 @@ def handleUpdateProject(*serve.Context c) (
 )
 
 def handleUpdateProjectLocked(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   array previousTeam = project.collaborators.assertElse(array, [])
   if !canEditProject(project, c) (
     c.forbidden("not your project")
@@ -2663,7 +2663,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
         c.badRequest("game product prices must be between 0 and 1000 credits")
         return
       )
-      if productIcon != "" and productIcon.len > 100000 (
+      if productIcon != "" and productIcon.toBytes().len > 100000 (
         c.badRequest("game product icons must be smaller than 100KB")
         return
       )
@@ -2709,7 +2709,7 @@ def handleUpdateProjectLocked(*serve.Context c) (
       if visualType == "image" (
         string itemImage = visual.url.toStr().strip()
         if itemImage.startsWith("data:image/") (
-          if itemImage.len > 100000 (
+          if itemImage.toBytes().len > 100000 (
             c.badRequest("portable item images must be smaller than 100KB")
             return
           )
@@ -2997,12 +2997,12 @@ def purgeProjects(array projects) (
 )
 
 def handleDeleteProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
@@ -3041,11 +3041,11 @@ def loadTrashedProject(string id) object (
   if !isSafePathPart(id) (
     return {ok: false, error: "invalid project id"}
   )
-  auto result = readFile(trashDir ++ id ++ ".json")
-  if !result.ok (
+  auto res = readFile(trashDir ++ id ++ ".json")
+  if !res.ok (
     return {ok: false, error: "trashed project not found"}
   )
-  return {ok: true, project: result.data.assert(object)}
+  return {ok: true, project: res.data.assert(object)}
 )
 
 def purgeExpiredTrash() (
@@ -3053,9 +3053,9 @@ def purgeExpiredTrash() (
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
-      auto result = readFile(trashDir ++ file)
-      if result.ok (
-        object project = result.data.assert(object)
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
         if project.contains("purgeAt") and project.purgeAt.toNum() <= timestamp (
           purgeProject(project)
         )
@@ -3073,9 +3073,9 @@ def handleGetMyTrash(*serve.Context c) (
   for i files.len (
     string file = files[i].toStr()
     if file.endsWith(".json") (
-      auto result = readFile(trashDir ++ file)
-      if result.ok (
-        object project = result.data.assert(object)
+      auto res = readFile(trashDir ++ file)
+      if res.ok (
+        object project = res.data.assert(object)
         string ownerId = (project.ownerId ?? "").toStr()
         if identityMatches(ownerId, project.owner.toStr(), userId, username) (
           projects.append({
@@ -3095,12 +3095,12 @@ def handleGetMyTrash(*serve.Context c) (
 )
 
 def handleRestoreProject(*serve.Context c) (
-  auto result = loadTrashedProject(c.param("id"))
-  if !result.ok (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
     c.notFound("trashed project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
@@ -3127,12 +3127,12 @@ def handleRestoreProject(*serve.Context c) (
 )
 
 def handlePurgeTrashedProject(*serve.Context c) (
-  auto result = loadTrashedProject(c.param("id"))
-  if !result.ok (
+  auto res = loadTrashedProject(c.param("id"))
+  if !res.ok (
     c.notFound("trashed project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
@@ -3142,12 +3142,12 @@ def handlePurgeTrashedProject(*serve.Context c) (
 )
 
 def handlePublishProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -3194,12 +3194,12 @@ def handlePublishProject(*serve.Context c) (
 )
 
 def handleUnpublishProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canEditProject(project, c) (
     c.forbidden("not your project")
     return
@@ -3224,12 +3224,12 @@ def handleUnpublishProject(*serve.Context c) (
 )
 
 def handleViewProject(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !projectIsViewable(project) (
     c.json(200, {ok: true})
     return
@@ -3288,12 +3288,12 @@ def handleReactProjectLocked(*serve.Context c) (
     c.badRequest("invalid reaction")
     return
   )
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return
@@ -3501,9 +3501,9 @@ def handleSitemap(*serve.Context c) (
   array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("views", "descending")
   array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
-  string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+  string sitemapXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
   for i staticPaths.len (
-    xml ++= sitemapUrl(staticPaths[i].toStr())
+    sitemapXml ++= sitemapUrl(staticPaths[i].toStr())
   )
   object owners = {}
   number count = 0
@@ -3514,20 +3514,20 @@ def handleSitemap(*serve.Context c) (
       if entry.contains("vanitySlug") and entry.vanitySlug != null and entry.vanitySlug.toStr() != "" (
         path = "/p/" ++ entry.vanitySlug.toStr()
       )
-      xml ++= sitemapUrl(path)
+      sitemapXml ++= sitemapUrl(path)
       count += 1
       string ownerKey = normalizeUsername(entry.owner.toStr())
       if ownerKey != "" and !owners.contains(ownerKey) (
         owners[ownerKey] = true
-        xml ++= sitemapUrl("/users/" ++ entry.owner.toStr())
+        sitemapXml ++= sitemapUrl("/users/" ++ entry.owner.toStr())
         count += 1
       )
     )
   )
-  xml ++= "</urlset>"
+  sitemapXml ++= "</urlset>"
   c.setHeader("Content-Type", "application/xml; charset=utf-8")
   c.setHeader("Cache-Control", "public, max-age=3600")
-  c.text(200, xml)
+  c.text(200, sitemapXml)
 )
 
 def handleLeaderboard(*serve.Context c) (
@@ -3582,11 +3582,11 @@ def remixEntryVisibleInList(object entry,*serve.Context c) boolean (
   if !contextBool(c, "authenticated") (
     return false
   )
-  auto result = loadProject(entry.id.toStr())
-  if !result.ok (
+  auto res = loadProject(entry.id.toStr())
+  if !res.ok (
     return false
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   return projectRole(project, contextString(c, "username")) != "" or canEditProject(project, c)
 )
 
@@ -3605,12 +3605,12 @@ def handleGetRemixes(*serve.Context c) (
 
 def handleGetRemixTree(*serve.Context c) (
   string id = c.param("id")
-  auto result = loadProject(id)
-  if !result.ok (
+  auto res = loadProject(id)
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object project = result.project.assert(object)
+  object project = res.project.assert(object)
   if !canViewProject(project, c) (
     c.notFound("project not found")
     return
@@ -3692,12 +3692,12 @@ def handleRemixProject(*serve.Context c) (
 )
 
 def handleRemixProjectLocked(*serve.Context c) (
-  auto result = loadProject(c.param("id"))
-  if !result.ok (
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
     c.notFound("project not found")
     return
   )
-  object parent = result.project.assert(object)
+  object parent = res.project.assert(object)
   if !canViewProject(parent, c) (
     c.notFound("project not found")
     return
@@ -3889,9 +3889,9 @@ def materializeWorktreeAssets(object project, byte[] body, string extractDir, bo
   )
   string assetDirs = extractDir ++ "\n" ++ localBlobsDir ++ "assets"
   auto parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs), {type: "object"})
-  object result = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
-  array missing = (result.missing ?? []).assertElse(array, [])
-  if !result.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
+  object res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+  array missing = (res.missing ?? []).assertElse(array, [])
+  if !res.ok and missing.len > 0 and missing.len <= maxAssetCount and !r2Local (
     void fs.mkdir(fetchDir, {recursive: true})
     for i missing.len (
       string name = missing[i].toStr()
@@ -3900,15 +3900,15 @@ def materializeWorktreeAssets(object project, byte[] body, string extractDir, bo
       )
     )
     parsed = json.parse(gitinspection.MaterializeWorktreeAssetsJSON(incomingPath, outputPath, basePath, assetDirs ++ "\n" ++ fetchDir), {type: "object"})
-    result = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
+    res = if parsed.isErr() then {ok: false} else parsed.unwrap().assert(object)
   )
   void fs.remove(incomingPath)
   void fs.remove(fetchDir)
-  if result.ok != true (
+  if res.ok != true (
     void fs.remove(outputPath)
     return {ok: false}
   )
-  number refs = (result.refs ?? 0).toNum()
+  number refs = (res.refs ?? 0).toNum()
   if refs == 0 (
     return {ok: true, refs: 0}
   )
@@ -3951,12 +3951,12 @@ def validateUploadedHistoryMode(object project, byte[] body, string metadata, st
     void fs.remove(outputPath)
     return {ok: false, error: "could not validate history"}
   )
-  object result = parsed.unwrap().assert(object)
-  if result.ok (
+  object res = parsed.unwrap().assert(object)
+  if res.ok (
     byte[] data = fs.readFileBytes(outputPath).unwrapOr("".toBytes())
-    result.data = data
-    result.size = data.len
+    res.data = data
+    res.size = data.len
   )
   void fs.remove(outputPath)
-  return result
+  return res
 )

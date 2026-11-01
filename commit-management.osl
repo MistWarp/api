@@ -92,18 +92,18 @@ def applyCommitPatch(string id, string sha, object body, string username, boolea
 def handlePatchCommit(*serve.Context c) (
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
-  object result = applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), contextString(c, "username"), contextBool(c, "isAdmin"))
+  object res = applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), contextString(c, "username"), contextBool(c, "isAdmin"))
   sync.unlock(lockName)
-  if result.status.toInt() == 404 (
-    c.notFound(result.error.toStr())
-  ) else if result.status.toInt() == 403 (
-    c.forbidden(result.error.toStr())
-  ) else if result.status.toInt() == 400 (
-    c.badRequest(result.error.toStr())
-  ) else if result.status.toInt() != 200 (
-    c.internalError(result.error.toStr())
+  if res.status.toInt() == 404 (
+    c.notFound(res.error.toStr())
+  ) else if res.status.toInt() == 403 (
+    c.forbidden(res.error.toStr())
+  ) else if res.status.toInt() == 400 (
+    c.badRequest(res.error.toStr())
+  ) else if res.status.toInt() != 200 (
+    c.internalError(res.error.toStr())
   ) else (
-    c.json(200, result)
+    c.json(200, res)
   )
 )
 
