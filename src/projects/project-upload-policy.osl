@@ -1,6 +1,6 @@
 export {}
 
-type UploadRequest (
+class UploadRequest (
   boolean replaceHistory = false
   string expectedHead = ""
   string expectedEdited = ""
@@ -17,7 +17,7 @@ type UploadRequest (
   string mergeTreeToken = ""
 )
 
-type UploadHistory (
+class UploadHistory (
   string currentHead = ""
   string baseHead = ""
   object info = {}
@@ -31,7 +31,7 @@ type UploadHistory (
   byte[] generatedWorkspace = []
 )
 
-type HistoryIdentity (
+class HistoryIdentity (
   string projectId = ""
   string remixParent = ""
   string baseCommit = ""

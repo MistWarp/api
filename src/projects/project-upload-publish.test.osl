@@ -8,7 +8,7 @@ import "std:fs"
 import "std:thread"
 import "./project-upload-publish.osl"
 
-type UploadArchive (
+class UploadArchive (
   def discard() (
     return
   )

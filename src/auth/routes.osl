@@ -1,3 +1,4 @@
+import "std:date"
 export {
   registerAuthRoutes
 }
@@ -7,7 +8,7 @@ def registerAuthRoutes(*serve.Router api) (
   api.GET("/health/dependencies", handleDependencyHealth)
 
   api.POST("/auth", handleRoturAuth)
-  api.POST("/auth/editor-session", serve.limitRequests(600, {window: 3600000}), requireAuth, handleCreateEditorSession)
+  api.POST("/auth/editor-session", serve.rateLimit({requests: 600, window: date.hour}), requireAuth, handleCreateEditorSession)
   api.GET("/me", handleGetMe)
   api.POST("/logout", handleLogout)
 

@@ -1,6 +1,6 @@
 export {}
 
-type UploadRollback (
+class UploadRollback (
   array previousWorkspaceKeys = []
   string ownerId = ""
   object hold = {}

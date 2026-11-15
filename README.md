@@ -6,7 +6,7 @@ It runs at `https://api.mistwarp.org/v1`. The editor and community site are [scr
 
 ## Getting started
 
-You need OSL 3.0.
+You need OSL 6.1.
 
 ```sh
 cp .env.example .env

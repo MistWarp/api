@@ -1,6 +1,6 @@
 # AGENTS.md
 
-mistwarp-api is the OSL backend behind https://api.mistwarp.org/v1, for the MistWarp community site and editor (scratch-gui). It needs OSL 3.0. Community data is in SQLite (`data/community.db`), other state is JSON under `data/`, and project files are in Cloudflare R2.
+mistwarp-api is the OSL backend behind https://api.mistwarp.org/v1, for the MistWarp community site and editor (scratch-gui). It needs OSL 6.1. Community data is in SQLite (`data/community.db`), other state is JSON under `data/`, and project files are in Cloudflare R2.
 
 ## Where code goes
 

@@ -56,7 +56,10 @@ def completeRoturPayment(string reference, string requestId) (
 )
 
 import "./rotur-webhooks.osl"
-string roturWebhooksFile = dir ++ "rotur-webhooks.json"
+def useTestWebhooksFile() (
+  roturWebhooksFile = dir ++ "rotur-webhooks.json"
+)
+useTestWebhooksFile()
 
 string body = "{\"id\":\"evt_1\",\"type\":\"user.left\",\"data\":{\"user_id\":\"u-sam\"}}"
 string signature = "v1=" ++ crypto.hmac("sha256", "whsec_test", "evt_1.1790000000." ++ body)

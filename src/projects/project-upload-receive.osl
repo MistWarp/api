@@ -1,6 +1,6 @@
 export {}
 
-type UploadArchive (
+class UploadArchive (
   byte[] data = []
   string workId = ""
   string zipPath = ""

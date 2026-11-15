@@ -9,9 +9,12 @@ import "std:thread"
 import "./backpack-policy.osl"
 
 string backpackDir = "/tmp/mistwarp-backpack-test/"
-number maxBackpackItems = 10
-number maxBackpackBodyBytes = 1000
-number maxBackpackThumbnailBytes = 1000
+def useTestLimits() (
+  maxBackpackItems = 10
+  maxBackpackBodyBytes = 1000
+  maxBackpackThumbnailBytes = 1000
+)
+useTestLimits()
 
 boolean failing = false
 object written = {}

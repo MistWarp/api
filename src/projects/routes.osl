@@ -1,3 +1,4 @@
+import "std:date"
 export {
   registerProjectRoutes,
   registerProjectUploadRoutes
@@ -25,8 +26,8 @@ def registerProjectRoutes(*serve.Router api) (
 
   api.GET("/leaderboard", handleLeaderboard)
 
-  api.POST("/projects", requireAuth, serve.limitRequests(30, {window: 3600000}), handleCreateProject)
-  api.POST("/projects/:id/live", requireAuth, serve.limitRequests(120, {window: 60000}), handleLiveCollaboration)
+  api.POST("/projects", requireAuth, serve.rateLimit({requests: 30, window: date.hour}), handleCreateProject)
+  api.POST("/projects/:id/live", requireAuth, serve.rateLimit({requests: 120, window: date.minute}), handleLiveCollaboration)
   api.POST("/projects/:id/assets/check", requireAuth, handleCheckProjectAssets)
   api.POST("/projects/:id/upload-parts", requireAuth, requireCurrentAgreement, handleCreateProjectUploadPart)
   api.POST("/projects/:id/upload-parts/:token/complete", requireAuth, requireCurrentAgreement, handleCompleteProjectUploadPart)
@@ -55,7 +56,7 @@ def registerProjectRoutes(*serve.Router api) (
   api.POST("/projects/:id/react", requireAuth, handleReactProject)
   api.GET("/projects/:id/remixes", handleGetRemixes)
   api.GET("/projects/:id/remixtree", handleGetRemixTree)
-  api.POST("/projects/:id/remix", requireAuth, serve.limitRequests(30, {window: 3600000}), handleRemixProject)
+  api.POST("/projects/:id/remix", requireAuth, serve.rateLimit({requests: 30, window: date.hour}), handleRemixProject)
 
   api.GET("/admin/extensions", requireAdmin, handleAdminGetExtensions)
 
