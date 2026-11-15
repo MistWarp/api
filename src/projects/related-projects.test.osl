@@ -1,7 +1,7 @@
 import "std:testing"
 import "./related-projects.osl"
 
-array entries = [
+object[] entries = [
   {id: "a", owner: "Mist", tags: ["games"]},
   {id: "b", owner: "mist", tags: ["art"]},
   {id: "c", owner: "mist", tags: ["art"]},
@@ -10,7 +10,7 @@ array entries = [
   {id: "f", owner: "third", tags: []}
 ]
 
-def ids(array projects) string (
+def ids(object[] projects) string (
   string res = ""
   for i projects.len (
     object project = projects[i]
@@ -19,7 +19,11 @@ def ids(array projects) string (
   return res
 )
 
-testing.assert(ids(relatedProjectEntries(entries, "a", [], 4)) == "bcde", "same owner fills half, then shared tags, then trending")
-testing.assert(ids(relatedProjectEntries(entries, "a", ["b", "d"], 3)) == "cef", "excluded projects are skipped")
-testing.assert(ids(relatedProjectEntries(entries, "missing", [], 2)) == "ab", "unknown projects fall back to trending order")
-testing.assert(ids(relatedProjectEntries(entries, "a", [], 24)) == "bcdef", "the current project never appears")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], [], 4)) == "bcde", "same owner fills half, then shared tags, then trending")
+testing.assert(ids(relatedProjectEntries(entries, "a", ["b", "d"], [], 3)) == "cef", "excluded projects are skipped")
+testing.assert(ids(relatedProjectEntries(entries, "missing", [], [], 2)) == "ab", "unknown projects fall back to trending order")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], [], 24)) == "bcdef", "the current project never appears")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], ["f", "e"], 4)) == "febc", "projects the same players stayed in come first, up to half the list")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], ["f", "e", "d"], 4)) == "febc", "co-played projects never take more than half the list")
+testing.assert(ids(relatedProjectEntries(entries, "a", ["f"], ["f", "gone", "a"], 3)) == "bdc", "co-played projects skip excluded, hidden and current ones")
+testing.assert(ids(relatedProjectEntries(entries, "a", [], ["b", "c"], 4)) == "bcde", "co-played projects by the same owner still leave room for others")

@@ -1,0 +1,66 @@
+import "std:testing"
+import "./play-signals.osl"
+
+number now = 8000000000000
+
+def play(string projectId, string player, number duration) object (
+  return {_id: projectId ++ ":" ++ player, projectId: projectId, userId: player, username: player, duration: duration, updated: now}
+)
+
+def ids(string[] items) string (
+  string res = ""
+  for i items.len (
+    res ++= items[i] ++ " "
+  )
+  return res.strip()
+)
+
+def entryIds(object[] items) string (
+  string res = ""
+  for i items.len (
+    object item = items[i]
+    res ++= item.id.toStr()
+  )
+  return res
+)
+
+object[] rows = []
+for i 5 (
+  string player = "fan" ++ i.toStr()
+  rows.append(play("bait", player, 60000))
+  if i <= 3 (
+    rows.append(play("pair", player, 60000))
+  )
+  if i <= 2 (
+    rows.append(play("thin", player, 60000))
+  )
+)
+rows.append(play("bait", "maker", 900000))
+rows.append(play("solo", "maker", 900000))
+rows.append(play("bait", "skimmer", 2000))
+rows.append({_id: "bait:old", projectId: "bait", userId: "old", username: "old", duration: 60000, updated: now - 9000000000})
+rows.append({_id: "pair:legacy", projectId: "pair", userId: "", username: " Legacy ", duration: 60000, updated: now})
+string[string] owners = {bait: "maker", solo: "maker", pair: "someone", thin: "someone"}
+PlaySignals signals = playSignalsFrom(rows, owners, now)
+
+testing.assert(holdWeight(signals, "bait") == 7 / 10, "held plays raise the weight, the owner's and old plays do not count")
+testing.assert(holdWeight(signals, "unplayed") == 0.5, "projects nobody has played sit in the middle")
+testing.assert(ids(coPlayedIds(signals, "bait", 5)) == "pair", "a project needs three shared players to count as co-played")
+testing.assert(ids(coPlayedIds(signals, "thin", 5)) == "", "projects with few held players get no co-plays")
+testing.assert(ids(coPlayedIds(signals, "solo", 5)) == "", "the owner's own plays never link projects")
+testing.assert((signals.players["pair"] ?? 0) == 4, "legacy rows without a user id count once under their username")
+
+object[] tied = []
+for i 30 (
+  tied.append({id: "t" ++ (100 + i).toStr(), weekViews: 5})
+)
+testing.assert(entryIds(trendingOrder(tied, PlaySignals())).startsWith("t101t102t103t104t105t106t107t108t109t110t111t112t113t114t115"), "equal ranks keep their incoming order on long lists")
+
+object[] entries = [
+  {id: "pair", weekViews: 10},
+  {id: "bait", weekViews: 9},
+  {id: "x", weekViews: 9},
+  {id: "z", weekViews: 0}
+]
+testing.assert(entryIds(trendingOrder(entries, signals)) == "pairbaitxz", "views are weighted by how long plays last")
+testing.assert(entryIds(trendingOrder(entries, PlaySignals())) == "pairbaitxz", "without playtime the order follows views")
