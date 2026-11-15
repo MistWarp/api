@@ -4,6 +4,8 @@ object funnelEventVariants = {
   editor_open: [],
   home_view: [],
   project_view: ["signed_in", "signed_out"],
+  visit_start: ["new", "returning"],
+  visit_depth: ["2", "3", "5", "10"],
   project_play_start: [],
   start_creating: ["home"],
   signin_prompt_shown: ["remix", "save", "library", "react", "comment", "follow"],

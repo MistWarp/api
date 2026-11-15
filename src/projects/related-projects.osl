@@ -1,62 +1,90 @@
 export {}
 
-def relatedProjectEntries(array entries, string id, array excluded, number limit) array (
-  object seen = {}
-  seen[id] = true
+class RelatedPick (
+  object[] related = []
+  string[boolean] seen = {}
+  number limit = 6
+)
+
+def pickRelated(RelatedPick pick, object entry) boolean (
+  string entryId = entry.id.toStr()
+  if pick.related.len >= pick.limit or pick.seen.contains(entryId) (
+    return false
+  )
+  pick.seen[entryId] = true
+  pick.related.append(entry)
+  return true
+)
+
+def sharesTag(object entry, string[] tags) boolean (
+  if !entry.contains("tags") or entry.tags == null (
+    return false
+  )
+  array entryTags = entry.tags.assert(array)
+  for j tags.len (
+    if entryTags.contains(tags[j]) (
+      return true
+    )
+  )
+  return false
+)
+
+def relatedProjectEntries(object[] entries, string id, string[] excluded, string[] coPlayed, number limit) object[] (
+  RelatedPick pick = RelatedPick()
+  pick.limit = limit
+  pick.seen[id] = true
   for i excluded.len (
-    string excludedId = excluded[i].toStr().strip()
+    string excludedId = excluded[i].strip()
     if excludedId != "" (
-      seen[excludedId] = true
+      pick.seen[excludedId] = true
     )
   )
   string ownerKey = ""
-  array tags = []
+  string[] tags = []
+  string[object] byId = {}
   for i entries.len (
     object entry = entries[i]
+    byId[entry.id.toStr()] = entry
     if entry.id.toStr() == id (
       ownerKey = entry.owner.toStr().toLower()
-      if entry.contains("tags") and entry.tags != null (
-        tags = entry.tags.assert(array)
-      )
+      tags = sharedTagList(entry)
     )
   )
   number ownerLimit = (limit / 2).toInt()
   if ownerLimit < 1 (
     ownerLimit = 1
   )
-  array related = []
+  number coPlayLimit = ownerLimit
+  for i coPlayed.len (
+    if pick.related.len < coPlayLimit and byId.contains(coPlayed[i]) (
+      void pickRelated(pick, byId[coPlayed[i]].assert(object))
+    )
+  )
+  number ownerCount = 0
   for i entries.len (
     object entry = entries[i]
-    string entryId = entry.id.toStr()
-    if related.len < ownerLimit and !seen.contains(entryId) and ownerKey != "" and entry.owner.toStr().toLower() == ownerKey (
-      seen[entryId] = true
-      related.append(entry)
+    if ownerCount < ownerLimit and ownerKey != "" and entry.owner.toStr().toLower() == ownerKey and pickRelated(pick, entry) (
+      ownerCount += 1
     )
   )
   for i entries.len (
-    object entry = entries[i]
-    string entryId = entry.id.toStr()
-    if related.len < limit and !seen.contains(entryId) and entry.contains("tags") and entry.tags != null (
-      array entryTags = entry.tags.assert(array)
-      boolean shares = false
-      for j tags.len (
-        if entryTags.contains(tags[j]) (
-          shares = true
-        )
-      )
-      if shares (
-        seen[entryId] = true
-        related.append(entry)
-      )
+    if sharesTag(entries[i], tags) (
+      void pickRelated(pick, entries[i])
     )
   )
   for i entries.len (
-    object entry = entries[i]
-    string entryId = entry.id.toStr()
-    if related.len < limit and !seen.contains(entryId) (
-      seen[entryId] = true
-      related.append(entry)
+    void pickRelated(pick, entries[i])
+  )
+  return pick.related
+)
+
+def sharedTagList(object entry) string[] (
+  string[] tags = []
+  if entry.contains("tags") and entry.tags != null (
+    array raw = entry.tags.assert(array)
+    for i raw.len (
+      tags.append(raw[i].toStr())
     )
   )
-  return related
+  return tags
 )

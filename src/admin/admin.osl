@@ -7,6 +7,7 @@ export {
   loadBans,
   projectHiddenFrom,
   projectOwnerBanned,
+  playerUnbanned,
   projectsVisibleTo,
   projectsVisibleToEveryone,
   saveAdmins,
@@ -101,6 +102,10 @@ def projectHiddenFrom(object project,*serve.Context c) boolean (
 
 def projectsVisibleTo(array entries,*serve.Context c) array (
   return projectEntriesListed(entries, bannedOwners(), shadowBannedSet(), normalizeUsername(contextString(c, "username")), contextString(c, "userId"), contextBool(c, "isAdmin"))
+)
+
+def playerUnbanned(string username, string userId) boolean (
+  return !ownerInBannedSet(bannedOwners(), username, userId) and !ownerInBannedSet(shadowBannedSet(), username, userId)
 )
 
 def projectsVisibleToEveryone(array entries) array (

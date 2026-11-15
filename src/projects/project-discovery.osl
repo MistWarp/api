@@ -5,6 +5,9 @@ export {
 // osl-disable-next-line OSL-UNTYPED-GLOBAL
 auto sharedProjectsCache = cache.new({capacity: 2, ttl: 60000})
 
+// osl-disable-next-line OSL-UNTYPED-GLOBAL
+auto playSignalsCache = cache.new({capacity: 2, ttl: 300000})
+
 def sharedIndexEntries() array (
   if sharedProjectsCache.has("projects") (
     return sharedProjectsCache.get("projects").assert(array)
@@ -19,6 +22,51 @@ def sharedIndexEntries() array (
   )
   sharedProjectsCache.set("projects", entries)
   return entries
+)
+
+def sharedPlayRows(array rows) object[] (
+  string[boolean] allowed = {}
+  object[] kept = []
+  for i rows.len (
+    object row = rows[i].assert(object)
+    string username = (row.username ?? "").toStr()
+    string key = normalizeUsername(username)
+    if key != "" and !allowed.contains(key) (
+      allowed[key] = playerUnbanned(username, (row.userId ?? "").toStr()) and effectiveShowRecentActivity(loadProfile(username))
+    )
+    if key != "" and (allowed[key] ?? false) (
+      kept.append(row)
+    )
+  )
+  return kept
+)
+
+def buildPlaySignals() PlaySignals (
+  string[string] ownerKeys = {}
+  array entries = sharedIndexEntries()
+  for i entries.len (
+    object entry = entries[i]
+    ownerKeys[entry.id.toStr()] = (entry.ownerKey ?? entry.owner ?? "").toStr().toLower().strip()
+  )
+  array rows = playtimeDocs.all() catch (err) (
+    log "WARNING: could not read playtime for discovery: " ++ err.toStr()
+    return PlaySignals()
+  )
+  return playSignalsFrom(sharedPlayRows(rows), ownerKeys, timestamp)
+)
+
+def currentPlaySignals() PlaySignals (
+  if playSignalsCache.has("signals") (
+    return playSignalsCache.get("signals").assert(PlaySignals)
+  )
+  sync.lock("play-signals")
+  defer sync.unlock("play-signals")
+  if playSignalsCache.has("signals") (
+    return playSignalsCache.get("signals").assert(PlaySignals)
+  )
+  PlaySignals signals = buildPlaySignals()
+  playSignalsCache.set("signals", signals)
+  return signals
 )
 
 def handleExplore(*serve.Context c) (
@@ -87,7 +135,7 @@ def handleExplore(*serve.Context c) (
   ) else if sort == "undiscovered" (
     entries.sortBy("views", "ascending")
   ) else if sort == "trending" (
-    entries.sortBy("weekViews", "descending")
+    entries = trendingOrder(entries, currentPlaySignals())
   ) else (
     entries.sortBy("sharedAt", "descending")
   )
@@ -109,15 +157,15 @@ def handleRandomProject(*serve.Context c) (
 )
 
 def handleRelatedProjects(*serve.Context c) (
-  array entries = projectsVisibleToEveryone(sharedIndexEntries())
-  entries.sortBy("weekViews", "descending")
+  PlaySignals signals = currentPlaySignals()
+  object[] entries = trendingOrder(projectsVisibleToEveryone(sharedIndexEntries()), signals)
   number limit = clampNumber(c.queryInt("limit", 6), 1, 24)
-  c.json(200, {ok: true, projects: relatedProjectEntries(entries, c.param("id"), (c.query("exclude") ?? "").split(","), limit)})
+  string id = c.param("id")
+  c.json(200, {ok: true, projects: relatedProjectEntries(entries, id, (c.query("exclude") ?? "").split(","), coPlayedIds(signals, id, 200), limit)})
 )
 
 def handleFeaturedProject(*serve.Context c) (
-  array entries = projectsVisibleToEveryone(sharedIndexEntries())
-  entries.sortBy("weekViews", "descending")
+  object[] entries = trendingOrder(projectsVisibleToEveryone(sharedIndexEntries()), currentPlaySignals())
   array pool = []
   for i entries.len (
     object entry = entries[i]

@@ -1,0 +1,143 @@
+export {}
+
+number heldPlayMs = 30000
+number playWindowMs = 7776000000
+number minHeldPlayers = 5
+number minCoPlayers = 3
+
+class PlaySignals (
+  string[number] players = {}
+  string[number] held = {}
+  string[string[]] heldBy = {}
+  string[string[]] heldProjects = {}
+)
+
+struct RankedId (
+  string id = ""
+  number score = 0
+)
+
+struct RankedEntry (
+  number index = 0
+  number rank = 0
+  number views = 0
+)
+
+def playerKeyOf(string userId, string username) string (
+  if userId.strip() != "" (
+    return userId.strip()
+  )
+  return username.toLower().strip()
+)
+
+def addHeldPlay(PlaySignals signals, string projectId, string player) (
+  signals.held[projectId] = (signals.held[projectId] ?? 0) + 1
+  string[] byProject = signals.heldBy[projectId] ?? []
+  byProject.append(player)
+  signals.heldBy[projectId] = byProject
+  string[] byPlayer = signals.heldProjects[player] ?? []
+  byPlayer.append(projectId)
+  signals.heldProjects[player] = byPlayer
+)
+
+def playSignalsFrom(object[] rows, string[string] ownerKeys, number now) PlaySignals (
+  PlaySignals signals = PlaySignals()
+  for i rows.len (
+    object row = rows[i]
+    string projectId = (row.projectId ?? "").toStr()
+    string username = (row.username ?? "").toStr()
+    string player = playerKeyOf((row.userId ?? "").toStr(), username)
+    string owner = ownerKeys[projectId] ?? ""
+    boolean ownPlay = owner != "" and username.toLower().strip() == owner
+    boolean recent = now - (row.updated ?? 0).toNum() <= playWindowMs
+    if projectId != "" and player != "" and !ownPlay and recent (
+      signals.players[projectId] = (signals.players[projectId] ?? 0) + 1
+      if (row.duration ?? 0).toNum() >= heldPlayMs (
+        addHeldPlay(signals, projectId, player)
+      )
+    )
+  )
+  return signals
+)
+
+def holdWeight(PlaySignals signals, string projectId) number (
+  number playerCount = signals.players[projectId] ?? 0
+  number heldCount = signals.held[projectId] ?? 0
+  return (heldCount + 2) / (playerCount + 4)
+)
+
+def compareRankedEntries(RankedEntry a, RankedEntry b) int (
+  if a.rank != b.rank (
+    return if a.rank > b.rank then -1 else 1
+  )
+  if a.views != b.views (
+    return if a.views > b.views then -1 else 1
+  )
+  return (a.index - b.index).toInt()
+)
+
+def trendingOrder(object[] entries, PlaySignals signals) object[] (
+  RankedEntry[] ranked = []
+  for i entries.len (
+    object entry = entries[i]
+    number views = (entry.weekViews ?? 0).toNum()
+    ranked.append(RankedEntry(i, views * holdWeight(signals, entry.id.toStr()), views))
+  )
+  RankedEntry[] sorted = ranked.sort(compareRankedEntries)
+  object[] ordered = []
+  for i sorted.len (
+    ordered.append(entries[sorted[i].index])
+  )
+  return ordered
+)
+
+def compareRankedIds(RankedId a, RankedId b) int (
+  if a.score != b.score (
+    return if a.score > b.score then -1 else 1
+  )
+  if a.id == b.id (
+    return 0
+  )
+  return if a.id < b.id then -1 else 1
+)
+
+def coPlayScores(PlaySignals signals, string projectId) object (
+  string[] sharedPlayers = signals.heldBy[projectId] ?? []
+  string[number] scores = {}
+  string[number] counts = {}
+  for i sharedPlayers.len (
+    string[] playedNext = signals.heldProjects[sharedPlayers[i]] ?? []
+    number share = 1 / (playedNext.len.toNum().sqrt() ?? 1)
+    for j playedNext.len (
+      string otherId = playedNext[j]
+      if otherId != projectId (
+        scores[otherId] = (scores[otherId] ?? 0) + share
+        counts[otherId] = (counts[otherId] ?? 0) + 1
+      )
+    )
+  )
+  return {scores: scores, counts: counts}
+)
+
+def coPlayedIds(PlaySignals signals, string projectId, number limit) string[] (
+  string[] ids = []
+  if (signals.held[projectId] ?? 0) < minHeldPlayers (
+    return ids
+  )
+  object found = coPlayScores(signals, projectId)
+  string[number] scores = found.scores.assert(string[number])
+  string[number] counts = found.counts.assert(string[number])
+  RankedId[] ranked = []
+  for otherId of scores (
+    if (counts[otherId] ?? 0) >= minCoPlayers (
+      ranked.append(RankedId(otherId, scores[otherId] ?? 0))
+    )
+  )
+  RankedId[] sorted = ranked.sort(compareRankedIds)
+  for i sorted.len (
+    if ids.len < limit (
+      ids.append(sorted[i].id)
+    )
+  )
+  return ids
+)

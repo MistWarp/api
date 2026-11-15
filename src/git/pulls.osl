@@ -897,6 +897,7 @@ def fastForwardPullLocked(*serve.Context c, object pull, object target, object s
   target.assets = source.assets
   target.sizeBytes = projectSizeBytes(source)
   target.edited = timestamp
+  target.lastUploadAt = timestamp
   if source.contains("jsonBytes") (
     target.jsonBytes = source.jsonBytes
   )
