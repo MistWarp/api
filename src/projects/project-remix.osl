@@ -118,7 +118,7 @@ def handleGetRemixTree(*serve.Context c) (
   c.json(200, {ok: true, root: rootId, nodes: nodes})
 )
 
-type ForkRequest (
+class ForkRequest (
   string id = ""
   string username = ""
   string userId = ""
@@ -128,7 +128,7 @@ type ForkRequest (
   boolean enforceLimits = true
 )
 
-type PreparedFork (
+class PreparedFork (
   object failure = {}
   object parent = {}
   byte[] history = []
@@ -137,7 +137,7 @@ type PreparedFork (
   string holdKey = ""
 )
 
-type ForkOutcome (
+class ForkOutcome (
   Refusal refusal = Refusal()
   object forked = {}
   string keptHoldKey = ""

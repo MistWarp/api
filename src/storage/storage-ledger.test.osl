@@ -236,8 +236,11 @@ thread.new(def() -> (
   fakeLedger.run("127.0.0.1:18761")
 ))
 wait 0.3
-string ledgerSecret = secret
-string ledgerBaseSetting = "http://127.0.0.1:18761/"
+def pointLedgerAtStub() (
+  ledgerSecret = secret
+  ledgerBaseSetting = "http://127.0.0.1:18761/"
+)
+pointLedgerAtStub()
 testing.assert(ledgerReady(), "with the secret and a loopback address, storage counts")
 
 def countedFor(string userId) object (

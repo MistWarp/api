@@ -1,11 +1,12 @@
+import "std:date"
 export {
   registerAdminRoutes
 }
 
 def registerAdminRoutes(*serve.Router api) (
-  api.POST("/errors", serve.limitRequests(20, {window: 60000}), handleRecordSiteError)
+  api.POST("/errors", serve.rateLimit({requests: 20, window: date.minute}), handleRecordSiteError)
   api.GET("/stats", handlePublicStats)
-  api.POST("/events", serve.limitRequests(120, {window: 60000}), handleRecordFunnelEvent)
+  api.POST("/events", serve.rateLimit({requests: 120, window: date.minute}), handleRecordFunnelEvent)
 
   api.POST("/admin/reports/action", requireAdmin, handleReportAction)
 

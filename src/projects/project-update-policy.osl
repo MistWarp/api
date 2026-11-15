@@ -1,6 +1,6 @@
 export {}
 
-type OwnerTransfer (
+class OwnerTransfer (
   string fromId = ""
   string toId = ""
   object hold = {}
