@@ -282,6 +282,12 @@ func TestInspectChangesSummarisesCommit(t *testing.T) {
 	if len(targets) != 2 || targets[0].(map[string]any)["path"] != "Cat" || targets[1].(map[string]any)["path"] != "Stage" {
 		t.Fatalf("unexpected targets: %v", targets)
 	}
+	if name := targets[0].(map[string]any)["name"]; name != "Cat" {
+		t.Fatalf("target name = %v, want the sprite name", name)
+	}
+	if _, named := targets[1].(map[string]any)["name"]; named {
+		t.Fatalf("a stage file without a header should have no name: %v", targets[1])
+	}
 	for _, raw := range result["files"].([]any) {
 		file := raw.(map[string]any)
 		if file["path"] == "README.md" && file["newData"] == nil {
@@ -406,11 +412,14 @@ func TestCompareFractchIgnoresOlderSnakeCaseSpellings(t *testing.T) {
 
 func TestCamelIdentifiers(t *testing.T) {
 	cases := map[string]string{
-		"wait_until x_pos;":        "waitUntil xPos;",
-		"Big_Name _private a1_b2":  "Big_Name _private a1B2",
-		"say \"snake_case\";":      "say \"snake_case\";",
-		"// keep_this\nset_x 1;":   "// keep_this\nsetX 1;",
-		"strings.menu_textCase(x)": "strings.menuTextCase(x)",
+		"wait_until x_pos;":              "waitUntil xPos;",
+		"Big_Name _private a1_b2":        "Big_Name _private a1B2",
+		"say \"snake_case\";":            "say \"snake_case\";",
+		"// keep_this\nset_x 1;":         "// keep_this\nsetX 1;",
+		"strings.menu_textCase(x)":       "strings.menuTextCase(x)",
+		"say `${costume_name} x_y`;":     "say `${costumeName} x_y`;",
+		"say `a ${f(\"}\", b_c)} ${d_e`": "say `a ${f(\"}\", bC)} ${dE`",
+		"say `\\${not_this}`;":           "say `\\${not_this}`;",
 	}
 	for input, want := range cases {
 		if got := camelIdentifiers(input); got != want {

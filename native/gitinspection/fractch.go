@@ -47,6 +47,7 @@ type fractchFileChanges struct {
 	Scripts []fractchScriptChange `json:"scripts"`
 	Items   []fractchItemChange   `json:"items"`
 	State   []fractchStateChange  `json:"state"`
+	Name    string                `json:"-"`
 	assets  assetLookup
 	work    int
 }
@@ -676,9 +677,22 @@ func compareFractchSources(before, after []fractchSource, assets assetLookup) fr
 	changes := fractchFileChanges{Scripts: []fractchScriptChange{}, Items: []fractchItemChange{}, State: []fractchStateChange{}, assets: assets}
 	beforeScripts, beforeItems := partitionStatements(before)
 	afterScripts, afterItems := partitionStatements(after)
+	changes.Name = targetHeaderName(afterItems)
+	if changes.Name == "" {
+		changes.Name = targetHeaderName(beforeItems)
+	}
 	changes.compareItems(beforeItems, afterItems)
 	changes.compareScripts(beforeScripts, afterScripts)
 	return changes
+}
+
+func targetHeaderName(items []fractchStatement) string {
+	for _, statement := range items {
+		if statement.Kind == "sprite" || statement.Kind == "stage" {
+			return statement.Name
+		}
+	}
+	return ""
 }
 
 func compareFractchAssets(before, after string, assets assetLookup) fractchFileChanges {

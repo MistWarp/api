@@ -410,13 +410,54 @@ func nextNonSpace(src string, i int) byte {
 	return 0
 }
 
+func camelTemplate(builder *strings.Builder, text string) {
+	for i := 0; i < len(text); {
+		if text[i] == '\\' && i+1 < len(text) {
+			builder.WriteString(text[i : i+2])
+			i += 2
+			continue
+		}
+		if !strings.HasPrefix(text[i:], "${") {
+			builder.WriteByte(text[i])
+			i++
+			continue
+		}
+		end := i + 2
+		depth := 1
+		for end < len(text) && depth > 0 {
+			switch text[end] {
+			case '"':
+				end = skipFractchString(text, end)
+				continue
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+			end++
+		}
+		inner := end
+		if depth == 0 {
+			inner = end - 1
+		}
+		builder.WriteString("${")
+		builder.WriteString(camelIdentifiers(text[i+2 : inner]))
+		builder.WriteString(text[inner:end])
+		i = end
+	}
+}
+
 func camelIdentifiers(src string) string {
 	var builder strings.Builder
 	for i := 0; i < len(src); {
 		c := src[i]
 		if isFractchQuote(c) {
 			end := skipFractchString(src, i)
-			builder.WriteString(src[i:end])
+			if c == '`' {
+				camelTemplate(&builder, src[i:end])
+			} else {
+				builder.WriteString(src[i:end])
+			}
 			i = end
 			continue
 		}

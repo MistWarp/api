@@ -8,6 +8,7 @@ import (
 
 type fractchTargetChanges struct {
 	Path     string                `json:"path"`
+	Name     string                `json:"name,omitempty"`
 	Status   string                `json:"status"`
 	Files    []string              `json:"files"`
 	TooLarge bool                  `json:"tooLarge,omitempty"`
@@ -187,7 +188,7 @@ func structuredChanges(changes []map[string]any, baseArchive archive, parentFile
 			continue
 		}
 		compared := compareFractchSources(before, after, assetLookup{before: dirAssets(parentFiles, dir), after: dirAssets(currentFiles, dir)})
-		target.Scripts, target.Items, target.State = compared.Scripts, compared.Items, compared.State
+		target.Name, target.Scripts, target.Items, target.State = compared.Name, compared.Scripts, compared.Items, compared.State
 		if len(target.Scripts) == 0 && len(target.Items) == 0 && len(target.State) == 0 {
 			continue
 		}
