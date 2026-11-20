@@ -599,6 +599,8 @@ def upload_flow(server, step, ids, steps):
     step("upload remix change", "POST", "/v1/projects/<history-remix>/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     status, pull = step("open pull", "POST", path + "/pulls", "alice", {"sourceProjectId": remix_id, "title": "Smoke pull", "body": "From the remix"})
     pull_index = str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    step("pull changes", "GET", path + "/pulls/" + pull_index + "/diff?view=changes", "sam")
+    step("pull changes as stranger", "GET", path + "/pulls/" + pull_index + "/diff?view=changes", "bob")
     status, bob_project = step("bob create", "POST", "/v1/projects", "bob", {"title": "Bob smoke"})
     ids[str(bob_project.get("id", "")) if isinstance(bob_project, dict) else ""] = "<bob>"
     with server.faulty("projects"):
@@ -639,6 +641,9 @@ def upload_flow(server, step, ids, steps):
     step("credit unknown commit", "PATCH", path + "/commits/" + "1" * 40, "sam", {"coAuthors": ["alice"]})
     step("credit commit as stranger", "PATCH", path + "/commits/" + head, "bob", {"coAuthors": ["alice"]})
     step("commit co-authors", "GET", path + "/commits/" + head + "/co-authors")
+    step("commit changes", "GET", path + "/commits/" + head + "/changes", "sam")
+    step("commit changes signed out", "GET", path + "/commits/" + head + "/changes")
+    step("changes of unknown commit", "GET", path + "/commits/" + "1" * 40 + "/changes", "sam")
     step("rename branch", "PATCH", path + "/branches", "sam", {"branch": "feature", "name": "feature-two"})
     step("rename branch as stranger", "PATCH", path + "/branches", "bob", {"branch": "feature-two", "name": "x"})
     step("delete branch", "DELETE", path + "/branches", "sam", {"branch": "feature-two"})
