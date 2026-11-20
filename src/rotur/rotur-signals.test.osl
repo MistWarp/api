@@ -36,8 +36,7 @@ import "./rotur-signals.osl"
 
 refusals = {"owner>commenter": "settings"}
 testing.assert(commentRefusal("profile-owner", "owner", "c1") == "", "a message setting doesn't stop a public reply")
-testing.assert(roturMessageRefusal("owner", "commenter") == "refused: settings", "it does stop the reply notifying them")
-testing.assert(isMessageNotification("reply") and isMessageNotification("mention") and !isMessageNotification("follow"), "replies and mentions carry words, follows don't")
+testing.assert(!roturMessageAllowed("owner", "commenter") and roturMessageAllowed("commenter", "owner"), "roturMessageAllowed reads the same signal")
 
 refusals = {"stranger>owner": "unavailable"}
 testing.assert(commentRefusal("project-p1", "stranger", "") == "", "someone who can't use MistWarp right now still has comments on their project")
@@ -52,6 +51,6 @@ testing.assert(commentRefusal("profile-owner", "owner", "") == "", "commenting o
 
 asked = []
 refusals = {}
-roturMessageRefusal("a", "b")
-roturMessageRefusal("a", "b")
+commentRefusal("profile-b", "a", "")
+commentRefusal("profile-b", "a", "")
 testing.assert(asked.len == 1, "an answer is kept for a minute: " ++ json.stringify(asked))
