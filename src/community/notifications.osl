@@ -361,8 +361,13 @@ def addNotification(string target, string actor, string notifType, object extra)
   }
 
   boolean keepLocal = isStudentUserId(targetId) or isStudentUserId(actorId) or isStudentUsername(actor) or notifType.startsWith("classroom_")
-  if !keepLocal and postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
-    return
+  if !keepLocal (
+    if postRoturNotification(targetKey, targetId, actor, actorId, notifType, payload) (
+      return
+    )
+    if !roturMessageAllowed(actor, target) (
+      return
+    )
   )
 
   sync.lock("notifications:" ++ targetKey)

@@ -1,5 +1,6 @@
 export {
   commentRefusal,
+  roturMessageAllowed,
   roturPurchaseRefusal
 }
 
@@ -28,6 +29,10 @@ def roturMessageSignal(string sender, string recipient) object (
     roturMessageSignals.set(cacheKey, signal)
   )
   return signal
+)
+
+def roturMessageAllowed(string sender, string recipient) boolean (
+  return roturMessageSignal(sender, recipient).allowed == true
 )
 
 def roturPurchaseRefusal(string buyer, number amount, string note) string (

@@ -36,6 +36,7 @@ import "./rotur-signals.osl"
 
 refusals = {"owner>commenter": "settings"}
 testing.assert(commentRefusal("profile-owner", "owner", "c1") == "", "a message setting doesn't stop a public reply")
+testing.assert(!roturMessageAllowed("owner", "commenter") and roturMessageAllowed("commenter", "owner"), "roturMessageAllowed reads the same signal")
 
 refusals = {"stranger>owner": "unavailable"}
 testing.assert(commentRefusal("project-p1", "stranger", "") == "", "someone who can't use MistWarp right now still has comments on their project")

@@ -1,0 +1,129 @@
+import "std:testing"
+import "std:sync"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:thread"
+
+string notificationsDir = "notifications/"
+string editorOrigin = "https://mistwarp.org"
+string mistwarpRoturToken = "token"
+string roturBase = "http://127.0.0.1:18343"
+object files = {}
+array askedRotur = []
+number roturStatus = 200
+array messageRefused = []
+
+def normalizeUsername(string name) string (
+  return name.toLower().strip()
+)
+
+def isSafePathPart(string value) boolean (
+  return value != ""
+)
+
+def readFile(string path) object (
+  if !files.contains(path) (
+    return {ok: false, data: null}
+  )
+  return {ok: true, data: files[path]}
+)
+
+def writeFile(string path, object data) boolean (
+  files[path] = data
+  return true
+)
+
+def userIdForUsername(string name) string (
+  return "u-" ++ name.toLower()
+)
+
+def loadSafety(string username) object (
+  if username == "blocker" (
+    return {blocked: ["stranger"], muted: []}
+  )
+  return {blocked: [], muted: []}
+)
+
+def userHasBlocked(string actor, string target) boolean (
+  return false
+)
+
+def userShadowBanned(string actor) boolean (
+  return false
+)
+
+def isStudentUserId(string id) boolean (
+  return id == "u-student"
+)
+
+def isStudentUsername(string name) boolean (
+  return name == "student"
+)
+
+def roturMessageAllowed(string sender, string recipient) boolean (
+  return !messageRefused.contains(sender ++ ">" ++ recipient)
+)
+
+def randomString(number length) string (
+  return "r" * length
+)
+
+def contextString(*serve.Context c, string key) string (
+  return ""
+)
+
+def syncFollowerMilestones(string username) (
+  void username
+)
+
+def usernameForId(string id) string (
+  return id
+)
+
+def rewriteNotificationIdentityFields(object data, string oldKey, string newName) boolean (
+  return false
+)
+
+import "./notifications.osl"
+
+def handleFakeNotification(*serve.Context c) (
+  askedRotur.append(c.body())
+  c.json(roturStatus, {ok: roturStatus == 200})
+)
+*serve.Router fakeRotur = serve.new()
+fakeRotur.POST("/v2/notifications", handleFakeNotification)
+fakeRotur.GET("/ready", handleFakeNotification)
+
+def runFakeRotur() (
+  fakeRotur.run(":18343")
+)
+thread.new(runFakeRotur)
+for i 50 (
+  if requests.get(roturBase ++ "/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+askedRotur = []
+
+messageRefused = ["stranger>owner"]
+addNotification("owner", "stranger", "comment", {projectId: "p1", projectTitle: "Game", commentId: "c1", preview: "hi"})
+testing.assert(askedRotur.len == 1, "a comment from someone the owner doesn't accept messages from still goes to Rotur")
+testing.assert(loadNotifications("owner").len == 0, "and Rotur keeps it, not MistWarp")
+
+addNotification("blocker", "stranger", "comment", {projectId: "p1"})
+testing.assert(askedRotur.len == 1, "a MistWarp block still stops it")
+
+roturStatus = 500
+addNotification("owner", "stranger", "comment", {projectId: "p2"})
+testing.assert(loadNotifications("owner").len == 0, "when Rotur can't take it, a refused message signal stops the local copy")
+messageRefused = []
+addNotification("owner", "friend", "comment", {projectId: "p3"})
+testing.assert(loadNotifications("owner").len == 1, "and an allowed one is kept locally")
+
+askedRotur = []
+messageRefused = ["student>owner"]
+addNotification("owner", "student", "comment", {projectId: "p4"})
+testing.assert(askedRotur.len == 0, "a student's notification stays in MistWarp")
+testing.assert(loadNotifications("owner").len == 2, "and classroom rules, not Rotur's message signal, decide it")
