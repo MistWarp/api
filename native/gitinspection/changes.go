@@ -73,15 +73,18 @@ func isAssetPath(path string) bool {
 	return strings.HasPrefix(path, "assets/") || strings.Contains(path, "/assets/") || strings.HasPrefix(path, "fonts/")
 }
 
-func dirFractchFiles(files map[string]gitFile, dir string) []string {
-	paths := []string{}
+func fractchFilesByDir(files map[string]gitFile) map[string][]string {
+	byDir := map[string][]string{}
 	for path := range files {
-		if isFractchPath(path) && pathDir(path) == dir {
-			paths = append(paths, path)
+		if isFractchPath(path) {
+			dir := pathDir(path)
+			byDir[dir] = append(byDir[dir], path)
 		}
 	}
-	sort.Strings(paths)
-	return paths
+	for _, paths := range byDir {
+		sort.Strings(paths)
+	}
+	return byDir
 }
 
 func readSources(source archive, files map[string]gitFile, paths []string, budget *int) ([]fractchSource, bool) {
@@ -153,12 +156,14 @@ func structuredChanges(changes []map[string]any, baseArchive archive, parentFile
 		ordered = append(ordered, dir)
 	}
 	sort.Strings(ordered)
+	beforeByDir := fractchFilesByDir(parentFiles)
+	afterByDir := fractchFilesByDir(currentFiles)
 	targets := []fractchTargetChanges{}
 	budget := 0
 	tooLarge := false
 	for _, dir := range ordered {
-		beforePaths := dirFractchFiles(parentFiles, dir)
-		afterPaths := dirFractchFiles(currentFiles, dir)
+		beforePaths := beforeByDir[dir]
+		afterPaths := afterByDir[dir]
 		if len(beforePaths) == 0 && len(afterPaths) == 0 {
 			continue
 		}

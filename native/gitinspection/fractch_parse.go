@@ -90,13 +90,11 @@ func skipSpace(src string, i int) int {
 	return i
 }
 
-func startsTopLevelStatement(src string, i int) bool {
-	word := firstWord.FindString(src[skipSpace(src, i):])
-	return topLevelKeywords[word]
-}
+var blockKeywords = map[string]bool{"when": true, "def": true, "script": true}
 
 func readFractchStatement(src string, i int) int {
 	braces, brackets := 0, 0
+	block := blockKeywords[firstWord.FindString(src[i:])]
 	for i < len(src) {
 		c := src[i]
 		if isFractchQuote(c) {
@@ -112,9 +110,11 @@ func readFractchStatement(src string, i int) int {
 		case '{':
 			braces++
 		case '}':
-			braces--
-			if braces <= 0 {
-				return i
+			if braces > 0 {
+				braces--
+				if braces == 0 && block {
+					return i
+				}
 			}
 		case '(', '[':
 			brackets++
@@ -127,8 +127,12 @@ func readFractchStatement(src string, i int) int {
 				return i
 			}
 		case '\n':
-			if braces == 0 && brackets == 0 && startsTopLevelStatement(src, i) {
-				return i
+			if braces == 0 && brackets == 0 {
+				next := skipSpace(src, i)
+				if topLevelKeywords[firstWord.FindString(src[next:])] {
+					return i
+				}
+				i = next
 			}
 		}
 	}
@@ -145,6 +149,7 @@ func splitFractchStatements(src string) []string {
 		}
 	}
 	i := 0
+	lastEnd := -1
 	for i < len(src) {
 		next := skipSpace(src, i)
 		if len(pending) > 0 && strings.Count(src[i:next], "\n") > 1 {
@@ -157,10 +162,17 @@ func splitFractchStatements(src string) []string {
 		if isCommentStart(src, i) {
 			end := skipFractchComment(src, i)
 			text := src[i:end]
-			if !(strings.HasPrefix(text, "/**") && strings.Contains(text, "* target:")) {
+			if strings.HasPrefix(text, "/**") && strings.Contains(text, "* target:") {
+				i = end
+				continue
+			}
+			if lastEnd >= 0 && len(pending) == 0 && !strings.Contains(src[lastEnd:i], "\n") {
+				statements = append(statements, strings.TrimSpace(text))
+			} else {
 				pending = append(pending, strings.TrimSpace(text))
 			}
 			i = end
+			lastEnd = end
 			continue
 		}
 		end := readFractchStatement(src, i)
@@ -171,6 +183,7 @@ func splitFractchStatements(src string) []string {
 		}
 		statements = append(statements, text)
 		i = end
+		lastEnd = end
 	}
 	flush()
 	return statements
@@ -307,6 +320,9 @@ func skipHiddenValue(src string, i int) int {
 	depth := 0
 	for i < len(src) {
 		c := src[i]
+		if isCommentStart(src, i) {
+			return i
+		}
 		if isFractchQuote(c) {
 			i = skipFractchString(src, i)
 			continue
@@ -330,19 +346,19 @@ func skipHiddenValue(src string, i int) int {
 }
 
 func stripHiddenFrom(src string, i int, inParen bool) (string, int, bool) {
-	var builder strings.Builder
+	out := make([]byte, 0, 64)
 	hidden, comma := false, false
 	for i < len(src) {
 		c := src[i]
 		if isFractchQuote(c) {
 			end := skipFractchString(src, i)
-			builder.WriteString(src[i:end])
+			out = append(out, src[i:end]...)
 			i = end
 			continue
 		}
 		if isCommentStart(src, i) {
 			end := skipFractchComment(src, i)
-			builder.WriteString(src[i:end])
+			out = append(out, src[i:end]...)
 			i = end
 			continue
 		}
@@ -355,31 +371,33 @@ func stripHiddenFrom(src string, i int, inParen bool) (string, int, bool) {
 			after := nextNonSpace(src, next)
 			standalone := !isIdentifierByte(before) && (after == 0 || strings.IndexByte(";,){]\n", after) >= 0)
 			if stripped && standalone {
-				builder.WriteString(inner)
+				out = append(out, inner...)
 			} else {
-				builder.WriteString("(" + inner + ")")
+				out = append(out, '(')
+				out = append(out, inner...)
+				out = append(out, ')')
 			}
 			i = next
 			continue
 		}
 		if c == ')' && inParen {
-			return builder.String(), i + 1, hidden && !comma
+			return string(out), i + 1, hidden && !comma
 		}
 		if c == ',' {
 			comma = true
 		}
 		if strings.HasPrefix(src[i:], "??") {
-			kept := strings.TrimRight(builder.String(), " \t")
-			builder.Reset()
-			builder.WriteString(kept)
+			for len(out) > 0 && (out[len(out)-1] == ' ' || out[len(out)-1] == '\t') {
+				out = out[:len(out)-1]
+			}
 			hidden = true
 			i = skipHiddenValue(src, i+2)
 			continue
 		}
-		builder.WriteByte(c)
+		out = append(out, c)
 		i++
 	}
-	return builder.String(), i, false
+	return string(out), i, false
 }
 
 func nextNonSpace(src string, i int) byte {
@@ -444,7 +462,7 @@ func parseFractchStatement(text, file string) fractchStatement {
 	comments, code := leadingFractchComments(text)
 	statement := fractchStatement{File: file, Body: text}
 	if code == "" {
-		statement.Kind = "comment"
+		statement.Kind = "note"
 		statement.Key = "note " + text
 		statement.Name = firstLine(text)
 		return statement

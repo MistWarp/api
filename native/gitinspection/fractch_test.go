@@ -351,6 +351,7 @@ func TestStripHiddenValuesKeepsCallsAndExpressions(t *testing.T) {
 		"say \"(x ?? 1)\";":           "say \"(x ?? 1)\";",
 		"say (answer() ?? (\"a\"));":  "say answer();",
 		"pick(a ?? 1, b);":            "pick(a, b);",
+		"say a ?? 1 // x, y\n":        "say a// x, y\n",
 		"say answer() ?? \"hi\";":     "say answer();",
 	}
 	for input, want := range cases {

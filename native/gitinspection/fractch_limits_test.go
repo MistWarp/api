@@ -148,3 +148,61 @@ func FuzzCompareFractch(f *testing.F) {
 		camelIdentifiers(after)
 	})
 }
+
+func TestCompareFractchManyHiddenValuesIsFast(t *testing.T) {
+	body := "when flag {\n" + strings.Repeat("  say a ?? 1;\n", 80000) + "}\n"
+	requireFast(t, 3*time.Second, func() {
+		compareFractch(body, strings.Replace(body, "say a", "think a", 1))
+	})
+}
+
+func TestSplitFractchStatementsLongBlankRunsIsFast(t *testing.T) {
+	src := "var a = 1" + strings.Repeat(" \n", 1000000) + "var b = 2\n"
+	requireFast(t, 3*time.Second, func() {
+		if statements := splitFractchStatements(src); len(statements) != 2 {
+			t.Errorf("expected two statements, got %d", len(statements))
+		}
+	})
+}
+
+func TestInspectChangesManySpriteFoldersIsFast(t *testing.T) {
+	repo := newTestRepository()
+	before := map[string]string{}
+	after := map[string]string{}
+	for i := 0; i < 5000; i++ {
+		path := fmt.Sprintf("S%d/main.fractch", i)
+		before[path] = repo.object("blob", []byte(fmt.Sprintf("sprite \"S%d\";\n", i)))
+		after[path] = repo.object("blob", []byte(fmt.Sprintf("sprite \"S%d\" at 1,1;\n", i)))
+	}
+	first := repo.commit(repo.nestedTree(before), "", "Initial version")
+	second := repo.commit(repo.nestedTree(after), first, "Move everything")
+	path := repo.write(t)
+	requireFast(t, 5*time.Second, func() {
+		result := decodeResult(t, Inspect(path, second, "changes", "", second))
+		if result["totals"].(map[string]any)["state"] != float64(5000) {
+			t.Errorf("totals %v", result["totals"])
+		}
+	})
+}
+
+func TestSplitFractchStatementsKeepsObjectValuesWhole(t *testing.T) {
+	src := "var o = {\"a\": 1} id \"o\"\nvar p = json({\"b\": {\"c\": 2}}) id \"p\";\nwhen flag {\n  say 1;\n}\n"
+	statements := splitFractchStatements(src)
+	if len(statements) != 3 || statements[0] != "var o = {\"a\": 1} id \"o\"" {
+		t.Fatalf("statements %q", statements)
+	}
+	edited := strings.Replace(src, "{\"a\": 1}", "{\"a\": 2}", 1)
+	changes := compareFractch(src, edited)
+	if len(changes.State) != 1 || changes.State[0].Name != "o" || len(changes.Items) != 0 {
+		t.Fatalf("object value change not isolated: %+v", changes)
+	}
+}
+
+func TestCompareFractchTrailingNoteStaysApartFromNextScript(t *testing.T) {
+	src := "var a = 1 id \"a\"; // note\nwhen flag {\n  say 1;\n}\n"
+	edited := strings.Replace(src, "// note", "// a better note", 1)
+	changes := compareFractch(src, edited)
+	if len(changes.Scripts) != 0 || len(changes.Items) != 2 || changes.Items[0].Kind != "note" {
+		t.Fatalf("editing a trailing note changed a script: %+v", changes)
+	}
+}
