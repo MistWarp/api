@@ -272,14 +272,14 @@ func TestInspectChangesSummarisesCommit(t *testing.T) {
 	totals := result["totals"].(map[string]any)
 	scripts := totals["scripts"].(map[string]any)
 	assets := totals["assets"].(map[string]any)
-	if scripts["changed"] != float64(1) || scripts["added"] != float64(0) || totals["state"] != float64(1) || totals["codeChanged"] != true {
+	if scripts["changed"] != float64(1) || scripts["added"] != float64(0) || totals["state"] != float64(1) || totals["stateOnly"] != false {
 		t.Fatalf("unexpected totals: %v", totals)
 	}
 	if assets["added"] != float64(1) || assets["removed"] != float64(1) || assets["modified"] != float64(1) || totals["files"] != float64(2) {
 		t.Fatalf("unexpected asset totals: %v", totals)
 	}
 	targets := result["targets"].([]any)
-	if len(targets) != 2 || targets[0].(map[string]any)["path"] != "Cat/main.fractch" || targets[1].(map[string]any)["path"] != "Stage/main.fractch" {
+	if len(targets) != 2 || targets[0].(map[string]any)["path"] != "Cat" || targets[1].(map[string]any)["path"] != "Stage" {
 		t.Fatalf("unexpected targets: %v", targets)
 	}
 	for _, raw := range result["files"].([]any) {
@@ -294,7 +294,7 @@ func TestInspectChangesSummarisesCommit(t *testing.T) {
 
 	initial := decodeResult(t, Inspect(path, first, "changes", "", second))
 	initialTotals := initial["totals"].(map[string]any)
-	if initialTotals["scripts"].(map[string]any)["added"] != float64(3) || initialTotals["codeChanged"] != true {
+	if initialTotals["scripts"].(map[string]any)["added"] != float64(3) || initialTotals["stateOnly"] != false {
 		t.Fatalf("initial commit totals: %v", initialTotals)
 	}
 }
@@ -308,7 +308,7 @@ func TestInspectChangesStateOnlyCommitIsNotCode(t *testing.T) {
 	second := repo.commit(secondTree, first, "Updated project")
 	result := decodeResult(t, Inspect(repo.write(t), second, "changes", "", second))
 	totals := result["totals"].(map[string]any)
-	if totals["codeChanged"] != false || totals["state"] != float64(1) {
+	if totals["stateOnly"] != true || totals["state"] != float64(1) {
 		t.Fatalf("state-only commit totals: %v", totals)
 	}
 }
@@ -350,7 +350,8 @@ func TestStripHiddenValuesKeepsCallsAndExpressions(t *testing.T) {
 		"move (a + b ?? 3) * 2;":      "move (a + b) * 2;",
 		"say \"(x ?? 1)\";":           "say \"(x ?? 1)\";",
 		"say (answer() ?? (\"a\"));":  "say answer();",
-		"pick(a ?? 1, b);":            "pick(a ?? 1, b);",
+		"pick(a ?? 1, b);":            "pick(a, b);",
+		"say answer() ?? \"hi\";":     "say answer();",
 	}
 	for input, want := range cases {
 		if got := stripHiddenValues(input); got != want {

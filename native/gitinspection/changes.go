@@ -9,6 +9,7 @@ import (
 type fractchTargetChanges struct {
 	Path     string                `json:"path"`
 	Status   string                `json:"status"`
+	Files    []string              `json:"files"`
 	TooLarge bool                  `json:"tooLarge,omitempty"`
 	Scripts  []fractchScriptChange `json:"scripts"`
 	Items    []fractchItemChange   `json:"items"`
@@ -29,21 +30,38 @@ type assetCounts struct {
 }
 
 type changeTotals struct {
-	Scripts     scriptCounts `json:"scripts"`
-	Items       int          `json:"items"`
-	State       int          `json:"state"`
-	Assets      assetCounts  `json:"assets"`
-	Files       int          `json:"files"`
-	CodeChanged bool         `json:"codeChanged"`
+	Scripts   scriptCounts `json:"scripts"`
+	Items     int          `json:"items"`
+	State     int          `json:"state"`
+	Assets    assetCounts  `json:"assets"`
+	Files     int          `json:"files"`
+	StateOnly bool         `json:"stateOnly"`
 }
 
-func targetAssets(files map[string]gitFile, targetPath string) func(string) string {
-	dir := ""
-	if slash := strings.LastIndexByte(targetPath, '/'); slash >= 0 {
-		dir = targetPath[:slash+1]
+func pathDir(path string) string {
+	if slash := strings.LastIndexByte(path, '/'); slash >= 0 {
+		return path[:slash]
+	}
+	return ""
+}
+
+func spriteDir(path string) string {
+	if index := strings.Index(path, "/assets/"); index >= 0 {
+		return path[:index]
+	}
+	if strings.HasPrefix(path, "assets/") {
+		return ""
+	}
+	return pathDir(path)
+}
+
+func dirAssets(files map[string]gitFile, dir string) func(string) string {
+	prefix := ""
+	if dir != "" {
+		prefix = dir + "/"
 	}
 	return func(relative string) string {
-		return files[dir+relative].OID
+		return files[prefix+relative].OID
 	}
 }
 
@@ -55,90 +73,125 @@ func isAssetPath(path string) bool {
 	return strings.HasPrefix(path, "assets/") || strings.Contains(path, "/assets/") || strings.HasPrefix(path, "fonts/")
 }
 
-func blobText(source archive, files map[string]gitFile, path string) (string, bool, bool) {
-	file, ok := files[path]
-	if !ok {
-		return "", true, false
+func dirFractchFiles(files map[string]gitFile, dir string) []string {
+	paths := []string{}
+	for path := range files {
+		if isFractchPath(path) && pathDir(path) == dir {
+			paths = append(paths, path)
+		}
 	}
-	if file.Size > maxInlineDiffFileBytes {
-		return "", false, true
+	sort.Strings(paths)
+	return paths
+}
+
+func readSources(source archive, files map[string]gitFile, paths []string, budget *int) ([]fractchSource, bool) {
+	sources := []fractchSource{}
+	for _, path := range paths {
+		file := files[path]
+		if file.Size > maxInlineDiffFileBytes || *budget+file.Size > maxInlineDiffTotalBytes {
+			return nil, false
+		}
+		kind, content, found := source.readObject(file.OID)
+		if !found || kind != "blob" {
+			return nil, false
+		}
+		*budget += file.Size
+		sources = append(sources, fractchSource{Path: path, Text: string(content)})
 	}
-	kind, content, found := source.readObject(file.OID)
-	if !found || kind != "blob" {
-		return "", false, false
+	return sources, true
+}
+
+func (totals *changeTotals) countTarget(target fractchTargetChanges) {
+	for _, script := range target.Scripts {
+		switch script.Change {
+		case "added":
+			totals.Scripts.Added++
+		case "removed":
+			totals.Scripts.Removed++
+		case "moved":
+			totals.Scripts.Moved++
+		default:
+			totals.Scripts.Changed++
+		}
 	}
-	return string(content), true, false
+	totals.Items += len(target.Items)
+	totals.State += len(target.State)
 }
 
 func structuredChanges(changes []map[string]any, baseArchive archive, parentFiles map[string]gitFile, headArchive archive, currentFiles map[string]gitFile) ([]fractchTargetChanges, []map[string]any, changeTotals) {
-	targets := []fractchTargetChanges{}
 	others := []map[string]any{}
 	totals := changeTotals{}
-	budget := 0
+	dirs := map[string]bool{}
+	authoredFiles := 0
 	for _, change := range changes {
 		path, _ := change["path"].(string)
 		status, _ := change["status"].(string)
-		if !isFractchPath(path) {
-			if isAssetPath(path) {
-				switch status {
-				case "added":
-					totals.Assets.Added++
-				case "removed":
-					totals.Assets.Removed++
-				default:
-					totals.Assets.Modified++
-				}
-			} else {
-				totals.Files++
-				totals.CodeChanged = totals.CodeChanged || path != "fractch.json"
+		if isFractchPath(path) {
+			dirs[pathDir(path)] = true
+			continue
+		}
+		others = append(others, change)
+		if isAssetPath(path) {
+			dirs[spriteDir(path)] = true
+			switch status {
+			case "added":
+				totals.Assets.Added++
+			case "removed":
+				totals.Assets.Removed++
+			default:
+				totals.Assets.Modified++
 			}
-			others = append(others, change)
 			continue
 		}
-		target := fractchTargetChanges{Path: path, Status: status, Scripts: []fractchScriptChange{}, Items: []fractchItemChange{}, State: []fractchStateChange{}}
-		before, beforeOK, beforeLarge := blobText(baseArchive, parentFiles, path)
-		after, afterOK, afterLarge := blobText(headArchive, currentFiles, path)
-		size := len(before) + len(after)
-		if beforeLarge || afterLarge || budget+size > maxInlineDiffTotalBytes {
-			target.TooLarge = true
-			totals.CodeChanged = true
-			targets = append(targets, target)
+		totals.Files++
+		if path != "fractch.json" {
+			authoredFiles++
+		}
+	}
+	ordered := []string{}
+	for dir := range dirs {
+		ordered = append(ordered, dir)
+	}
+	sort.Strings(ordered)
+	targets := []fractchTargetChanges{}
+	budget := 0
+	tooLarge := false
+	for _, dir := range ordered {
+		beforePaths := dirFractchFiles(parentFiles, dir)
+		afterPaths := dirFractchFiles(currentFiles, dir)
+		if len(beforePaths) == 0 && len(afterPaths) == 0 {
 			continue
 		}
+		status := "modified"
+		if len(beforePaths) == 0 {
+			status = "added"
+		} else if len(afterPaths) == 0 {
+			status = "removed"
+		}
+		listed := afterPaths
+		if len(listed) == 0 {
+			listed = beforePaths
+		}
+		target := fractchTargetChanges{Path: dir, Status: status, Files: listed, Scripts: []fractchScriptChange{}, Items: []fractchItemChange{}, State: []fractchStateChange{}}
+		before, beforeOK := readSources(baseArchive, parentFiles, beforePaths, &budget)
+		after, afterOK := readSources(headArchive, currentFiles, afterPaths, &budget)
 		if !beforeOK || !afterOK {
 			target.TooLarge = true
-			totals.CodeChanged = true
+			tooLarge = true
 			targets = append(targets, target)
 			continue
 		}
-		budget += size
-		compared := compareFractchAssets(before, after, assetLookup{before: targetAssets(parentFiles, path), after: targetAssets(currentFiles, path)})
+		compared := compareFractchSources(before, after, assetLookup{before: dirAssets(parentFiles, dir), after: dirAssets(currentFiles, dir)})
 		target.Scripts, target.Items, target.State = compared.Scripts, compared.Items, compared.State
-		for _, script := range target.Scripts {
-			switch script.Change {
-			case "added":
-				totals.Scripts.Added++
-			case "removed":
-				totals.Scripts.Removed++
-			default:
-				totals.Scripts.Changed++
-			}
-		}
-		for _, state := range target.State {
-			if state.Kind == "script" && state.Field == "position" {
-				totals.Scripts.Moved++
-			}
-		}
-		totals.Items += len(target.Items)
-		totals.State += len(target.State)
-		if len(target.Scripts) > 0 || len(target.Items) > 0 {
-			totals.CodeChanged = true
-		}
 		if len(target.Scripts) == 0 && len(target.Items) == 0 && len(target.State) == 0 {
 			continue
 		}
+		totals.countTarget(target)
 		targets = append(targets, target)
 	}
+	scripts := totals.Scripts.Added + totals.Scripts.Removed + totals.Scripts.Changed + totals.Scripts.Moved
+	assets := totals.Assets.Added + totals.Assets.Removed + totals.Assets.Modified
+	totals.StateOnly = totals.State > 0 && scripts == 0 && totals.Items == 0 && authoredFiles == 0 && assets == 0 && !tooLarge
 	return targets, others, totals
 }
 
