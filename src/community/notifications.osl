@@ -347,7 +347,7 @@ def addNotification(string target, string actor, string notifType, object extra)
   if actorKey != "" and userShadowBanned(actor) (
     return
   )
-  if isMessageNotification(notifType) and roturMessageRefusal(actor, target) != "" (
+  if isCommentNotification(notifType) and roturNotificationRefusal(actor, target) != "" (
     return
   )
   object payload = sanitizeNotificationPayload(extra, notifType, actor)

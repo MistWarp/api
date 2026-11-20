@@ -1,7 +1,7 @@
 export {
   commentRefusal,
-  isMessageNotification,
-  roturMessageRefusal,
+  isCommentNotification,
+  roturNotificationRefusal,
   roturPurchaseRefusal
 }
 
@@ -32,15 +32,15 @@ def roturMessageSignal(string sender, string recipient) object (
   return signal
 )
 
-def roturMessageRefusal(string sender, string recipient) string (
-  object signal = roturMessageSignal(sender, recipient)
-  if signal.allowed == true (
+def roturNotificationRefusal(string actor, string target) string (
+  object signal = roturMessageSignal(actor, target)
+  if signal.allowed == true or !["blocked", "banned", "unavailable"].contains(signal.code) (
     return ""
   )
   return signal.reason.toStr()
 )
 
-def isMessageNotification(string notifType) boolean (
+def isCommentNotification(string notifType) boolean (
   return ["comment", "reply", "mention", "profile_comment", "space_comment", "roadmap_comment", "donation"].contains(notifType)
 )
 

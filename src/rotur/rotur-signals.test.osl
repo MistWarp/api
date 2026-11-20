@@ -36,8 +36,20 @@ import "./rotur-signals.osl"
 
 refusals = {"owner>commenter": "settings"}
 testing.assert(commentRefusal("profile-owner", "owner", "c1") == "", "a message setting doesn't stop a public reply")
-testing.assert(roturMessageRefusal("owner", "commenter") == "refused: settings", "it does stop the reply notifying them")
-testing.assert(isMessageNotification("reply") and isMessageNotification("mention") and !isMessageNotification("follow"), "replies and mentions carry words, follows don't")
+testing.assert(roturNotificationRefusal("owner", "commenter") == "", "a message setting doesn't stop the reply notifying them either")
+testing.assert(isCommentNotification("comment") and isCommentNotification("profile_comment") and isCommentNotification("reply") and isCommentNotification("mention") and !isCommentNotification("follow"), "comments, replies and mentions are checked, follows aren't")
+
+refusals = {"stranger>owner": "friends_only"}
+testing.assert(roturNotificationRefusal("stranger", "owner") == "", "friends-only messages still let a stranger's comment notify the owner")
+
+refusals = {"blocker>owner": "blocked"}
+testing.assert(roturNotificationRefusal("blocker", "owner") == "refused: blocked", "a block stops the notification")
+
+refusals = {"banned>owner": "banned"}
+testing.assert(roturNotificationRefusal("banned", "owner") == "refused: banned", "a ban stops the notification")
+
+refusals = {"commenter>gone": "unavailable"}
+testing.assert(roturNotificationRefusal("commenter", "gone") == "refused: unavailable", "someone who can't use MistWarp isn't notified")
 
 refusals = {"stranger>owner": "unavailable"}
 testing.assert(commentRefusal("project-p1", "stranger", "") == "", "someone who can't use MistWarp right now still has comments on their project")
@@ -52,6 +64,6 @@ testing.assert(commentRefusal("profile-owner", "owner", "") == "", "commenting o
 
 asked = []
 refusals = {}
-roturMessageRefusal("a", "b")
-roturMessageRefusal("a", "b")
+roturNotificationRefusal("a", "b")
+roturNotificationRefusal("a", "b")
 testing.assert(asked.len == 1, "an answer is kept for a minute: " ++ json.stringify(asked))
