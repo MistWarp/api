@@ -591,6 +591,10 @@ def upload_flow(server, step, ids, steps):
     head, edited = head_and_edited()
     upload("upload live editor", {"expectedEdited": edited}, who="alice")
 
+    private_head, _ = head_and_edited()
+    step("commit summaries of a private project signed out", "GET", path + "/commit-summaries?shas=" + private_head)
+    step("commit summaries of a private project as a stranger", "GET", path + "/commit-summaries?shas=" + private_head, "bob")
+    step("commit summaries of a private project as an editor", "GET", path + "/commit-summaries?shas=" + private_head, "alice")
     step("share history", "POST", path + "/visibility", "sam", {"visibility": "public"})
     status, remixed = step("remix history", "POST", path + "/remix", "alice", {})
     remix_id = str(remixed.get("id", "") or (remixed.get("project") or {}).get("id", "")) if isinstance(remixed, dict) else ""

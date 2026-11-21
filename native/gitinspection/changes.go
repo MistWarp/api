@@ -217,10 +217,21 @@ func treeFiles(source archive, tree string) (map[string]gitFile, bool) {
 }
 
 type commitChanges struct {
-	legacy  bool
-	targets []fractchTargetChanges
-	others  []map[string]any
-	totals  changeTotals
+	legacy     bool
+	targets    []fractchTargetChanges
+	others     []map[string]any
+	totals     changeTotals
+	spriteDirs map[string]bool
+}
+
+func spriteDirsOf(trees ...map[string]gitFile) map[string]bool {
+	dirs := map[string]bool{}
+	for _, files := range trees {
+		for dir := range fractchFilesByDir(files) {
+			dirs[dir] = true
+		}
+	}
+	return dirs
 }
 
 func computeChanges(baseArchive archive, baseCommit gitCommit, headArchive archive, headCommit gitCommit, inline bool) (commitChanges, string) {
@@ -257,7 +268,7 @@ func computeChanges(baseArchive archive, baseCommit gitCommit, headArchive archi
 	if inline {
 		inlineDiffContent(others, baseArchive, parentFiles, headArchive, currentFiles)
 	}
-	return commitChanges{legacy: legacy, targets: targets, others: others, totals: totals}, ""
+	return commitChanges{legacy: legacy, targets: targets, others: others, totals: totals, spriteDirs: spriteDirsOf(parentFiles, currentFiles)}, ""
 }
 
 func changesBetween(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
@@ -279,7 +290,9 @@ func summarizeComputed(computed commitChanges) map[string]any {
 	for _, file := range computed.others {
 		path, _ := file["path"].(string)
 		if isAssetPath(path) {
-			assetDirs[spriteDir(path)] = true
+			if dir := spriteDir(path); dir != "" && computed.spriteDirs[dir] {
+				assetDirs[dir] = true
+			}
 		} else if path != "fractch.json" {
 			files++
 		}

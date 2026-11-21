@@ -1,0 +1,34 @@
+import "std:testing"
+import "std:regex"
+import "./commit-summary-cache.osl"
+
+string first = "84223eef0258932ae0bf0bcb885ecb252431f6ec"
+string second = "ef2bedd84c4a6403078ab088c795fae166ea9baf"
+array parsed = requestedCommitShas(first ++ ", nothex," ++ first.toUpper() ++ "," ++ second ++ "," ++ first)
+testing.assert(parsed.len == 2, "invalid, uppercase and repeated shas are dropped")
+testing.assert(parsed[1] == first and parsed[2] == second, "shas keep their requested order")
+
+string many = ""
+for i 60 (
+  string hex = i.toStr().hashSHA256().trim(1, 40)
+  many ++= hex ++ ","
+)
+testing.assert(requestedCommitShas(many).len == commitSummaryLimit(), "at most fifty shas are summarised per request")
+
+object cached = {}
+cached[first] = {ok: true, sha: first}
+cached[second] = {ok: false, failedAt: 1000}
+testing.assert(cachedCommitSummary(cached, first, 5000).ok == true, "stored summaries are reused")
+testing.assert(cachedCommitSummary(cached, second, 2000).ok == false, "a recent failure is not retried")
+testing.assert(!cachedCommitSummary(cached, second, 1000 + commitSummaryRetryMs()).contains("ok"), "an old failure is retried")
+testing.assert(!cachedCommitSummary(cached, "1" ++ first.trim(2, 40), 5000).contains("ok"), "unknown shas need computing")
+
+object computed = {}
+computed["new"] = {ok: true}
+object merged = mergedCommitSummaryCache(cached, computed)
+testing.assert(merged.len == 3 and merged["new"].ok == true, "new summaries are added to the cache")
+object full = {}
+for i commitSummaryCacheLimit() (
+  full["k" ++ i.toStr()] = {ok: true}
+)
+testing.assert(mergedCommitSummaryCache(full, computed).len == 1, "a full cache starts again from this request")

@@ -286,29 +286,16 @@ def handleGetCommitFile(*serve.Context c) (
   gitInspectionResponse(c, res.project.assert(object), c.param("sha"), "file", (c.query("path") ?? ""))
 )
 
-def commitSummaryLimit() number (
-  return 50
-)
-
-def requestedCommitShas(string raw) array (
-  array shas = []
-  object seen = {}
-  for entry in raw.split(",") (
-    string sha = entry.toStr().trim()
-    if validGitObjectId(sha) and !seen.contains(sha) and shas.len < commitSummaryLimit() (
-      seen[sha] = true
-      shas.append(sha)
-    )
-  )
-  return shas
-)
-
 def commitSummaryCacheDir() string (
   return tmpDir ++ "git-summaries/"
 )
 
+def commitSummaryCacheVersion() string (
+  return "s1"
+)
+
 def commitSummaryCacheName(object project) string (
-  return gitInspectionCacheVersion() ++ "." ++ project.id.toStr().hashSHA256() ++ ".json"
+  return commitSummaryCacheVersion() ++ "." ++ project.id.toStr().hashSHA256() ++ ".json"
 )
 
 def readCommitSummaryCache(string cachePath) object (
@@ -325,22 +312,28 @@ def readCommitSummaryCache(string cachePath) object (
 def computeCommitSummary(string workspacePath, string sha, string allowedHeads) object (
   auto parsed = json.parse(gitinspection.Inspect(workspacePath, sha, "summary", "", allowedHeads), {type: "object"})
   if parsed.isErr() (
-    return {}
+    return {ok: false, failedAt: timestamp}
   )
   object summary = parsed.unwrap().assert(object)
   if !summary.contains("ok") or summary.ok != true (
-    return {}
+    return {ok: false, failedAt: timestamp}
   )
   return summary
 )
 
-def writeCommitSummaryCache(string cachePath, object cached) (
+def storeCommitSummaries(string cacheDir, string cacheName, object computed) (
+  string cachePath = cacheDir ++ cacheName
+  string lockName = "git-summaries-" ++ cacheName
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  object cached = mergedCommitSummaryCache(readCommitSummaryCache(cachePath), computed)
   string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
   if fs.writeFile(temporaryPath, json.stringify(cached)) (
     if !fs.rename(temporaryPath, cachePath) (
       void fs.remove(temporaryPath)
     )
   )
+  pruneGitInspectionCache(cacheDir, cacheName)
 )
 
 def handleGetCommitSummaries(*serve.Context c) (
@@ -358,50 +351,43 @@ def handleGetCommitSummaries(*serve.Context c) (
   )
   array shas = requestedCommitShas((c.query("shas") ?? ""))
   object summaries = {}
-  if shas.len == 0 (
-    c.json(200, {ok: true, summaries: summaries})
-    return
-  )
   string allowedHeads = projectGitAllowedHeadsString(project)
-  if allowedHeads == "" (
+  if shas.len == 0 or allowedHeads == "" (
     c.json(200, {ok: true, summaries: summaries})
     return
   )
   string cacheDir = commitSummaryCacheDir()
   void fs.mkdir(cacheDir, {recursive: true})
   string cacheName = commitSummaryCacheName(project)
-  string cachePath = cacheDir ++ cacheName
-  string lockName = "git-summaries-" ++ cacheName
-  sync.lock(lockName)
-  defer sync.unlock(lockName)
-  object cached = readCommitSummaryCache(cachePath)
-  boolean changed = false
+  object cached = readCommitSummaryCache(cacheDir ++ cacheName)
+  object computed = {}
   string workspacePath = ""
+  boolean workspaceMissing = false
   for i shas.len (
     string sha = shas[i].toStr()
     if projectRecordsCommit(project, sha) (
-      if cached.contains(sha) and cached[sha] != null (
-        summaries[sha] = cached[sha]
-      ) else (
+      object entry = cachedCommitSummary(cached, sha, timestamp)
+      if entry.contains("ok") (
+        if entry.ok == true (
+          summaries[sha] = entry
+        )
+      ) else if !workspaceMissing (
         if workspacePath == "" (
           workspacePath = cachedProjectWorkspacePath(project)
-          if workspacePath == "" (
-            c.notFound("workspace not found")
-            return
-          )
+          workspaceMissing = workspacePath == ""
         )
-        object summary = computeCommitSummary(workspacePath, sha, allowedHeads)
-        if summary.contains("ok") (
-          summaries[sha] = summary
-          cached[sha] = summary
-          changed = true
+        if !workspaceMissing (
+          object summary = computeCommitSummary(workspacePath, sha, allowedHeads)
+          computed[sha] = summary
+          if summary.ok == true (
+            summaries[sha] = summary
+          )
         )
       )
     )
   )
-  if changed (
-    writeCommitSummaryCache(cachePath, cached)
-    pruneGitInspectionCache(cacheDir, cacheName)
+  if computed.len > 0 (
+    storeCommitSummaries(cacheDir, cacheName, computed)
   )
   c.json(200, {ok: true, summaries: summaries})
 )

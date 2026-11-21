@@ -2,6 +2,7 @@ package gitinspection
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -337,6 +338,60 @@ func TestInspectChangesStateOnlyCommitIsNotCode(t *testing.T) {
 	totals := result["totals"].(map[string]any)
 	if totals["stateOnly"] != true || totals["state"] != float64(1) {
 		t.Fatalf("state-only commit totals: %v", totals)
+	}
+}
+
+func TestInspectSummaryNamesOnlySpriteFolders(t *testing.T) {
+	repo := newTestRepository()
+	code := repo.object("blob", []byte(fractchBase))
+	firstTree := repo.nestedTree(map[string]string{
+		"Cat/main.fractch":    code,
+		"Cat/assets/a.svg":    repo.object("blob", []byte("<svg/>")),
+		"fonts/Brand.ttf":     repo.object("blob", []byte("font one")),
+		"assets/loose.png":    repo.object("blob", []byte("png one")),
+		"Stage/stage.fractch": repo.object("blob", []byte("stage \"Stage\";\n")),
+	})
+	first := repo.commit(firstTree, "", "Initial version")
+	secondTree := repo.nestedTree(map[string]string{
+		"Cat/main.fractch":    code,
+		"Cat/assets/a.svg":    repo.object("blob", []byte("<svg width=\"2\"/>")),
+		"fonts/Brand.ttf":     repo.object("blob", []byte("font two")),
+		"assets/loose.png":    repo.object("blob", []byte("png two")),
+		"Stage/stage.fractch": repo.object("blob", []byte("stage \"Stage\";\n")),
+	})
+	second := repo.commit(secondTree, first, "Updated project")
+	path := repo.write(t)
+	summary := decodeResult(t, Inspect(path, second, "summary", "", second))
+	if names := summary["sprites"].([]any); len(names) != 1 || names[0] != "Cat" || summary["spriteCount"] != float64(1) {
+		t.Fatalf("only the Cat folder should be named: %v", summary)
+	}
+	assets := summary["totals"].(map[string]any)["assets"].(map[string]any)
+	if assets["modified"] != float64(3) {
+		t.Fatalf("every changed asset should still be counted: %v", assets)
+	}
+	changes := decodeResult(t, Inspect(path, second, "changes", "", second))
+	summaryTotals, _ := json.Marshal(summary["totals"])
+	changeTotals, _ := json.Marshal(changes["totals"])
+	if string(summaryTotals) != string(changeTotals) {
+		t.Fatalf("summary totals %s differ from changes totals %s", summaryTotals, changeTotals)
+	}
+}
+
+func TestInspectSummaryStateOnlyAndMissingParent(t *testing.T) {
+	repo := newTestRepository()
+	firstTree := repo.nestedTree(map[string]string{"Cat/main.fractch": repo.object("blob", []byte(fractchBase))})
+	first := repo.commit(firstTree, "", "Initial version")
+	moved := strings.Replace(fractchBase, `sprite "Cat" at 10,20`, `sprite "Cat" at 99,20`, 1)
+	second := repo.commit(repo.nestedTree(map[string]string{"Cat/main.fractch": repo.object("blob", []byte(moved))}), first, "Updated project")
+	orphan := repo.commit(firstTree, strings.Repeat("e", 40), "Updated project")
+	path := repo.write(t)
+	summary := decodeResult(t, Inspect(path, second, "summary", "", second+","+orphan))
+	totals := summary["totals"].(map[string]any)
+	if totals["stateOnly"] != true || len(summary["sprites"].([]any)) != 0 || summary["spriteCount"] != float64(0) {
+		t.Fatalf("a state-only commit names no sprites: %v", summary)
+	}
+	if failed := decodeResult(t, Inspect(path, orphan, "summary", "", second+","+orphan)); failed["ok"] == true {
+		t.Fatalf("a commit whose parent is missing should fail: %v", failed)
 	}
 }
 
