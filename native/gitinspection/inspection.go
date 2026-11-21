@@ -39,9 +39,11 @@ type gitCommit struct {
 }
 
 type archive struct {
-	objects map[string]*zip.File
-	trusted map[string]bool
-	memo    *objectMemo
+	objects       map[string]*zip.File
+	worktree      map[string]*zip.File
+	worktreeByOID map[string]*zip.File
+	trusted       map[string]bool
+	memo          *objectMemo
 }
 
 type treeItem struct {
@@ -64,18 +66,49 @@ func openArchive(path string) (*zip.ReadCloser, archive, error) {
 }
 
 func indexArchive(files []*zip.File) archive {
-	result := archive{objects: make(map[string]*zip.File)}
+	result := archive{
+		objects:  make(map[string]*zip.File),
+		worktree: make(map[string]*zip.File),
+	}
 	for _, item := range files {
-		if strings.HasPrefix(item.Name, ".git/objects/") && !item.FileInfo().IsDir() {
+		if item.FileInfo().IsDir() {
+			continue
+		}
+		if strings.HasPrefix(item.Name, ".git/objects/") {
 			result.objects[item.Name] = item
+		} else if safeWorktreePath(item.Name) {
+			result.worktree[item.Name] = item
 		}
 	}
 	return result
 }
 
+func readWorktreeEntry(item *zip.File) ([]byte, bool) {
+	if item == nil || item.UncompressedSize64 > maxObjectBytes {
+		return nil, false
+	}
+	source, err := item.Open()
+	if err != nil {
+		return nil, false
+	}
+	content, readErr := io.ReadAll(io.LimitReader(source, maxObjectBytes+1))
+	closeErr := source.Close()
+	if readErr != nil || closeErr != nil || len(content) > maxObjectBytes {
+		return nil, false
+	}
+	return content, true
+}
+
 func (a archive) readObject(oid string) (string, []byte, bool) {
 	if len(oid) != 40 {
 		return "", nil, false
+	}
+	if item := a.worktreeByOID[oid]; item != nil {
+		content, ok := readWorktreeEntry(item)
+		if !ok {
+			return "", nil, false
+		}
+		return "blob", content, true
 	}
 	item := a.objects[".git/objects/"+oid[:2]+"/"+oid[2:]]
 	if item == nil || item.UncompressedSize64 > maxObjectBytes {

@@ -1,0 +1,100 @@
+export {
+  remixGraphDivergence
+}
+
+def collectGraphParents(object graph, object parentsBySha) (
+  if !graph.contains("nodes") or graph.nodes == null (
+    return
+  )
+  array nodes = graph.nodes.assertElse(array, [])
+  for i nodes.len (
+    object node = nodes[i].assertElse(object, {})
+    string sha = (node.sha ?? "").toStr()
+    if sha != "" and !parentsBySha.contains(sha) (
+      array parents = []
+      if node.contains("parents") and node.parents != null (
+        parents = node.parents.assertElse(array, [])
+      )
+      parentsBySha[sha] = parents
+    )
+  )
+)
+
+def walkGraphReachable(string head, object parentsBySha) object (
+  object visited = {}
+  array queue = [head]
+  number index = 1
+  while index <= queue.len (
+    string sha = queue[index].toStr()
+    index += 1
+    if sha != "" and !visited.contains(sha) (
+      visited[sha] = true
+      if parentsBySha.contains(sha) (
+        array parents = parentsBySha[sha].assertElse(array, [])
+        for j parents.len (
+          string parentSha = parents[j].toStr()
+          if parentSha != "" and !visited.contains(parentSha) (
+            queue.append(parentSha)
+          )
+        )
+      )
+    )
+  )
+  return visited
+)
+
+def diffCountAndTruncation(object sourceSet, object otherSet, object parentsBySha) object (
+  array keys = sourceSet.getKeys()
+  number count = 0
+  boolean truncated = false
+  boolean shared = false
+  for i keys.len (
+    string sha = keys[i].toStr()
+    if otherSet.contains(sha) (
+      shared = true
+    ) else (
+      count += 1
+      if !parentsBySha.contains(sha) (
+        truncated = true
+      ) else (
+        array parents = parentsBySha[sha].assertElse(array, [])
+        for j parents.len (
+          string parentSha = parents[j].toStr()
+          if parentSha != "" and !parentsBySha.contains(parentSha) (
+            truncated = true
+          )
+        )
+      )
+    )
+  )
+  return {count: count, truncated: truncated, shared: shared}
+)
+
+def remixGraphDivergence(string childHead, object childGraph, string parentHead, object parentGraph) object (
+  if childHead == "" or parentHead == "" (
+    return {resolved: true, known: false}
+  )
+  if childHead == parentHead (
+    return {resolved: true, known: true, ahead: 0, behind: 0}
+  )
+  object parentsBySha = {}
+  collectGraphParents(childGraph, parentsBySha)
+  collectGraphParents(parentGraph, parentsBySha)
+  if !parentsBySha.contains(childHead) or !parentsBySha.contains(parentHead) (
+    return {resolved: false, known: false}
+  )
+  object childSet = walkGraphReachable(childHead, parentsBySha)
+  object parentSet = walkGraphReachable(parentHead, parentsBySha)
+  object aheadInfo = diffCountAndTruncation(childSet, parentSet, parentsBySha)
+  object behindInfo = diffCountAndTruncation(parentSet, childSet, parentsBySha)
+  if aheadInfo.shared == true (
+    if aheadInfo.truncated == true or behindInfo.truncated == true (
+      return {resolved: false, known: false}
+    )
+    return {resolved: true, known: true, ahead: aheadInfo.count, behind: behindInfo.count}
+  )
+  if aheadInfo.truncated == true or behindInfo.truncated == true (
+    return {resolved: false, known: false}
+  )
+  return {resolved: true, known: false}
+)

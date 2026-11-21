@@ -97,6 +97,43 @@ def projectCommentDonationAnalytics(object project) object (
   }
 )
 
+def projectRemixFrom(object project, *serve.Context c) object (
+  string parentId = ""
+  if project.contains("remixParent") and project.remixParent != null (
+    parentId = project.remixParent.toStr()
+  )
+  if parentId == "" or parentId == project.id.toStr() (
+    return {}
+  )
+  auto parentRes = loadProject(parentId)
+  if !parentRes.ok (
+    return {}
+  )
+  object parent = parentRes.project.assert(object)
+  if !canViewProject(parent, c) (
+    return {}
+  )
+  object parentVanity = vanityState(parent)
+  string parentBranch = "main"
+  if parent.contains("gitBranch") and parent.gitBranch != null and parent.gitBranch.toStr() != "" (
+    parentBranch = parent.gitBranch.toStr()
+  )
+  object info = {
+    id: parent.id,
+    owner: parent.owner,
+    title: parent.title,
+    vanitySlug: parentVanity.slug.toStr(),
+    branch: parentBranch,
+    head: projectGitHead(parent)
+  }
+  object divergence = projectRemixDivergence(project, parent)
+  if (divergence.known ?? false) == true (
+    info.ahead = (divergence.ahead ?? 0).toNum()
+    info.behind = (divergence.behind ?? 0).toNum()
+  )
+  return info
+)
+
 def projectResponse(object project,*serve.Context c) object (
   array loves = project.loves.assert(array)
   array broken = []
@@ -233,6 +270,10 @@ def projectResponse(object project,*serve.Context c) object (
   response.remixBaseCommit = ""
   if project.contains("remixBaseCommit") and project.remixBaseCommit != null (
     response.remixBaseCommit = project.remixBaseCommit
+  )
+  object remixFrom = projectRemixFrom(project, c)
+  if remixFrom.len > 0 (
+    response.remixFrom = remixFrom
   )
   response.needsHistoryBootstrap = isOwner and hasContent and response.workspaceUrl.toStr() == ""
   object searchEntry = indexEntryFromProject(project)
