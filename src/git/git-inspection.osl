@@ -179,12 +179,10 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
     return fs.readFile(cachePath).unwrapOr("")
   )
   string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
-  if resultJson.toBytes().len <= 33554432 and gitinspection.InspectionError(resultJson) == "" (
+  if resultJson.toBytes().len <= 1048576 and gitinspection.InspectionError(resultJson) == "" (
     string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-    if fs.writeFile(temporaryPath, resultJson) (
-      if !fs.rename(temporaryPath, cachePath) (
-        void fs.remove(temporaryPath)
-      )
+    if !fs.writeFile(temporaryPath, resultJson) or !fs.rename(temporaryPath, cachePath) (
+      void fs.remove(temporaryPath)
     )
   )
   return resultJson

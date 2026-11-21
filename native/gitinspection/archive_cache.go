@@ -124,18 +124,20 @@ func (m *objectMemo) storeListing(treeOID string, files []gitFile) {
 	m.listingFiles += len(files)
 }
 
-func (m *objectMemo) reachableFrom(allowedHeads string, walk func() map[string]bool) map[string]bool {
+func (m *objectMemo) reachableFrom(allowedHeads string, walk func() map[string]bool) (map[string]bool, bool) {
 	m.mu.Lock()
 	set := m.reach[allowedHeads]
 	if set == nil {
-		set = &reachSet{}
-		if len(m.reach) < memoReachLimit {
-			m.reach[allowedHeads] = set
+		if len(m.reach) >= memoReachLimit {
+			m.mu.Unlock()
+			return nil, false
 		}
+		set = &reachSet{}
+		m.reach[allowedHeads] = set
 	}
 	m.mu.Unlock()
 	set.once.Do(func() { set.visited = walk() })
-	return set.visited
+	return set.visited, true
 }
 
 type sharedArchive struct {
@@ -154,6 +156,8 @@ var sharedArchives = struct {
 	sync.Mutex
 	entries map[string]*sharedArchive
 }{entries: make(map[string]*sharedArchive)}
+
+var sharedArchiveJanitor sync.Once
 
 var inspectionSlots = make(chan struct{}, max(2, runtime.NumCPU()/2))
 
@@ -204,6 +208,7 @@ func (s *sharedArchive) release() {
 	sharedArchives.Lock()
 	defer sharedArchives.Unlock()
 	s.refs--
+	s.lastUsed = time.Now()
 	if s.evicted && s.refs == 0 {
 		s.closeLocked()
 	}
@@ -229,9 +234,25 @@ func openSharedArchiveFile(path string) (*os.File, os.FileInfo, archive, error) 
 	return file, info, opened, nil
 }
 
+func startSharedArchiveJanitor() {
+	go func() {
+		for range time.Tick(time.Minute) {
+			sharedArchives.Lock()
+			evictSharedArchivesLocked(time.Now())
+			sharedArchives.Unlock()
+		}
+	}()
+}
+
 func acquireSharedArchive(path string) (*sharedArchive, error) {
+	sharedArchiveJanitor.Do(startSharedArchiveJanitor)
 	info, err := os.Stat(path)
 	if err != nil {
+		sharedArchives.Lock()
+		if entry := sharedArchives.entries[path]; entry != nil {
+			dropSharedArchiveLocked(entry)
+		}
+		sharedArchives.Unlock()
 		return nil, err
 	}
 	now := time.Now()

@@ -372,11 +372,15 @@ func (a archive) reachable(sha, allowedHeads string) bool {
 	if a.memo == nil {
 		return a.walkReachable(sha, allowedHeads)
 	}
-	return a.memo.reachableFrom(allowedHeads, func() map[string]bool {
+	visited, memoized := a.memo.reachableFrom(allowedHeads, func() map[string]bool {
 		visited := make(map[string]bool)
 		a.walkHistory(allowedHeads, visited, "")
 		return visited
-	})[sha]
+	})
+	if !memoized {
+		return a.walkReachable(sha, allowedHeads)
+	}
+	return visited[sha]
 }
 
 func (a archive) walkReachable(sha, allowedHeads string) bool {

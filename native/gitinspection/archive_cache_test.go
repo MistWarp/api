@@ -119,6 +119,32 @@ func TestInspectReportsRemovedArchive(t *testing.T) {
 	if result := decodeResult(t, Inspect(path, head, "tree", "", head)); result["error"] != "workspace archive is unavailable" {
 		t.Fatalf("expected unavailable archive, got %#v", result)
 	}
+	sharedArchives.Lock()
+	_, kept := sharedArchives.entries[path]
+	sharedArchives.Unlock()
+	if kept {
+		t.Fatal("removed archive is still held open")
+	}
+}
+
+func TestReachabilityWorksWhenMemoIsFull(t *testing.T) {
+	repository := newTestRepository()
+	tree := repository.tree("a.txt", repository.object("blob", []byte("a\n")))
+	first := repository.commit(tree, "", "First")
+	second := repository.commit(tree, first, "Second")
+	path := repository.write(t)
+	reader, memoized, err := openArchive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	memoized.memo = newObjectMemo()
+	for i := 0; i < memoReachLimit; i++ {
+		memoized.reachable(first, strings.Repeat(string(rune('a'+i)), 40))
+	}
+	if !memoized.reachable(first, second) || memoized.reachable(second, first) {
+		t.Fatal("reachability is wrong once the memo is full")
+	}
 }
 
 func TestInspectConcurrentRequestsAgree(t *testing.T) {
