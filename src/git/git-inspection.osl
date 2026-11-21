@@ -209,8 +209,8 @@ def projectUncommittedSummary(object project) object (
   if parsed.isErr() (
     return {}
   )
-  object result = parsed.unwrap().assert(object)
-  if (result.ok ?? false) != true or (result.dirty ?? false) != true (
+  object payload = parsed.unwrap().assert(object)
+  if (payload.ok ?? false) != true or (payload.dirty ?? false) != true (
     return {}
   )
   string branch = "main"
@@ -222,8 +222,8 @@ def projectUncommittedSummary(object project) object (
     branch: branch,
     date: project.edited ?? 0,
     author: project.owner ?? "",
-    files: (result.changedFiles ?? 0).toNum(),
-    summary: (result.summary ?? {}).assertElse(object, {})
+    files: (payload.changedFiles ?? 0).toNum(),
+    summary: (payload.summary ?? {}).assertElse(object, {})
   }
 )
 
@@ -264,14 +264,14 @@ def cachedRemixArchiveDivergence(object child, object parent) object (
   if parsed.isErr() (
     return {known: false}
   )
-  object result = parsed.unwrap().assert(object)
-  if (result.ok ?? false) != true or (result.commonAncestor ?? false) != true (
+  object payload = parsed.unwrap().assert(object)
+  if (payload.ok ?? false) != true or (payload.commonAncestor ?? false) != true (
     return {known: false}
   )
   return {
     known: true,
-    ahead: (result.ahead ?? 0).toNum(),
-    behind: (result.behind ?? 0).toNum()
+    ahead: (payload.ahead ?? 0).toNum(),
+    behind: (payload.behind ?? 0).toNum()
   }
 )
 
