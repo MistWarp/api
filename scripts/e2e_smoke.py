@@ -646,6 +646,7 @@ def upload_flow(server, step, ids, steps):
     step("changes of unknown commit", "GET", path + "/commits/" + "1" * 40 + "/changes", "sam")
     step("commit summaries", "GET", path + "/commit-summaries?shas=" + head + ",nothex," + "1" * 40 + "," + head, "sam")
     step("commit summaries signed out", "GET", path + "/commit-summaries?shas=" + head)
+    step("commit summaries from cache", "GET", path + "/commit-summaries?shas=" + head, "sam")
     step("commit summaries without shas", "GET", path + "/commit-summaries", "sam")
     step("rename branch", "PATCH", path + "/branches", "sam", {"branch": "feature", "name": "feature-two"})
     step("rename branch as stranger", "PATCH", path + "/branches", "bob", {"branch": "feature-two", "name": "x"})
