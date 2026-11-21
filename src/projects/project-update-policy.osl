@@ -117,6 +117,9 @@ def applyProjectFlags(object project, object body) (
   if body.contains("commentsOff") (
     project.commentsOff = body.commentsOff == true
   )
+  if body.contains("issuesOff") (
+    project.issuesOff = body.issuesOff == true
+  )
   if body.contains("remixable") (
     project.remixable = body.remixable != false
   )

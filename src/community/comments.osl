@@ -179,6 +179,28 @@ def setCommentPin(string key, string cid, string requester, string moderator, bo
   return {ok: true, comment: target}
 )
 
+def setCommentIssue(string key, string cid, string state, string requester, boolean canTriage) object (
+  string lockName = "comments:" ++ key
+  sync.lock(lockName)
+  defer sync.unlock(lockName)
+  array comments = loadComments(key)
+  for i comments.len (
+    object existing = comments[i].assert(object)
+    if existing.id.toStr() == cid (
+      object applied = applyCommentIssue(existing, comments, state, requester, canTriage, timestamp)
+      if applied.ok != true or applied.changed != true (
+        return applied
+      )
+      comments[i] = applied.comment
+      if !saveComments(key, comments) (
+        return {ok: false, error: "could not save comment", status: 500}
+      )
+      return applied
+    )
+  )
+  return {ok: false, error: "comment not found", status: 404}
+)
+
 def deleteComment(string key, string cid, string requester, string moderator, boolean isAdmin) object (
   string lockName = "comments:" ++ key
   sync.lock(lockName)
@@ -290,6 +312,30 @@ def commentResponse(object comment, string username) object (
   return comment
 )
 
+def issueThreads(array comments, array roots, string filter, number wantedNumber) object (
+  array issueRoots = []
+  object issueIds = {}
+  for i roots.len (
+    object root = roots[i].assert(object)
+    if commentMatchesIssueFilter(root, filter, wantedNumber) (
+      issueRoots.append(root)
+      issueIds[root.id.toStr()] = true
+    )
+  )
+  array threadComments = []
+  for i comments.len (
+    object comment = comments[i].assert(object)
+    string rootId = comment.id.toStr()
+    if commentParentId(comment) != "" (
+      rootId = commentParentId(comment)
+    )
+    if issueIds.contains(rootId) (
+      threadComments.append(comment)
+    )
+  )
+  return {comments: threadComments, roots: issueRoots}
+)
+
 def commentPage(array allComments,*serve.Context c) object (
   array comments = commentsVisibleTo(allComments, c)
   for i comments.len (
@@ -301,6 +347,13 @@ def commentPage(array allComments,*serve.Context c) object (
     if commentParentId(comment) == "" (
       roots.append(comment)
     )
+  )
+  object issueCounts = commentIssueCounts(roots)
+  string issueFilter = (c.query("issue") ?? "")
+  if validIssueFilter(issueFilter) (
+    object threads = issueThreads(comments, roots, issueFilter, c.queryInt("number", 0))
+    comments = threads.comments.assert(array)
+    roots = threads.roots.assert(array)
   )
   if (c.query("sort") ?? "") == "donations" (
     for i roots.len (
@@ -338,7 +391,7 @@ def commentPage(array allComments,*serve.Context c) object (
   number totalRoots = roots.len
   number requestedLimit = c.queryInt("limit", 0)
   if requestedLimit <= 0 or c.queryBool("all", false) (
-    return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots}
+    return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots, issueCounts: issueCounts}
   )
   number offset = clampNumber(c.queryInt("offset", 0), 0, totalRoots)
   number limit = clampNumber(requestedLimit, 1, 100)
@@ -377,7 +430,8 @@ def commentPage(array allComments,*serve.Context c) object (
   return {
     comments: page,
     totalRoots: totalRoots,
-    nextOffset: clampNumber(offset + limit, 0, totalRoots)
+    nextOffset: clampNumber(offset + limit, 0, totalRoots),
+    issueCounts: issueCounts
   }
 )
 
@@ -656,6 +710,42 @@ def handlePinProjectComment(*serve.Context c) (
     actor: contextString(c, "username")
   })
   c.json(200, updated)
+)
+
+def handleSetProjectCommentIssue(*serve.Context c) (
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  object body = requestJSON(c)
+  string state = (body.state ?? "").toStr()
+  if !validIssueState(state) (
+    c.badRequest("state must be open, done or none")
+    return
+  )
+  if state != "none" and project.contains("issuesOff") and project.issuesOff == true (
+    c.json(403, {ok: false, error: "issues are turned off for this project"})
+    return
+  )
+  string actor = contextString(c, "username")
+  object updated = setCommentIssue("project-" ++ project.id.toStr(), c.param("cid"), state, actor, canEditProject(project, c))
+  if !updated.ok (
+    c.json(updated.status.toInt(), {ok: false, error: updated.error})
+    return
+  )
+  object comment = commentResponse(updated.comment.assert(object), actor)
+  comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), comment.author.toStr())
+  if updated.changed == true (
+    siteBroadcastProject(project.id.toStr(), {
+      type: "comment_edited",
+      projectId: project.id,
+      comment: comment,
+      actor: actor
+    })
+  )
+  c.json(200, {ok: true, comment: comment})
 )
 
 def profileCommentKey(string name) string (

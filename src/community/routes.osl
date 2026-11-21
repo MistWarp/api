@@ -92,6 +92,7 @@ def registerCommunityRoutes(*serve.Router api) (
   api.PUT("/projects/:id/comments/:cid", requireAuth, handleEditProjectComment)
   api.POST("/projects/:id/comments/:cid/react", requireAuth, handleReactProjectComment)
   api.POST("/projects/:id/comments/:cid/pin", requireAuth, handlePinProjectComment)
+  api.PUT("/projects/:id/comments/:cid/issue", requireAuth, handleSetProjectCommentIssue)
 
   api.GET("/bounties/:id/activity", handleGetBountyActivity)
   api.POST("/bounties/:id/comments", requireAuth, requireGoodStanding, serve.rateLimit({requests: 30, window: date.minute}), handleCreateBountyComment)

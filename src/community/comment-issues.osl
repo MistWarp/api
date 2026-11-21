@@ -1,0 +1,123 @@
+export {
+  applyCommentIssue,
+  commentIssueCounts,
+  commentIssueState,
+  commentMatchesIssueFilter,
+  validIssueFilter,
+  validIssueState
+}
+
+def commentIssueState(object comment) string (
+  if !comment.contains("issue") or comment.issue == null (
+    return ""
+  )
+  object issue = comment.issue.assert(object)
+  if issue.contains("state") and issue.state != null (
+    string state = issue.state.toStr()
+    if state == "open" or state == "done" (
+      return state
+    )
+  )
+  return ""
+)
+
+def commentIssueNumber(object comment) number (
+  if commentIssueState(comment) == "" (
+    return 0
+  )
+  object issue = comment.issue.assert(object)
+  if issue.contains("number") and issue.number != null (
+    return issue.number.toNum()
+  )
+  return 0
+)
+
+def validIssueState(string state) boolean (
+  return state == "open" or state == "done" or state == "none"
+)
+
+def validIssueFilter(string filter) boolean (
+  return filter == "open" or filter == "done" or filter == "any"
+)
+
+def nextCommentIssueNumber(array comments) number (
+  number highest = 0
+  for i comments.len (
+    object existing = comments[i].assert(object)
+    if existing.contains("issue") and existing.issue != null (
+      object issue = existing.issue.assert(object)
+      if issue.contains("number") and issue.number != null and issue.number.toNum() > highest (
+        highest = issue.number.toNum()
+      )
+    )
+  )
+  return highest + 1
+)
+
+def applyCommentIssue(object comment, array comments, string state, string requester, boolean canTriage, number now) object (
+  if !validIssueState(state) (
+    return {ok: false, error: "unknown issue state", status: 400}
+  )
+  if comment.contains("parent") and comment.parent != null and comment.parent.toStr() != "" (
+    return {ok: false, error: "only top-level comments can be issues", status: 400}
+  )
+  boolean isAuthor = normalizeUsername(comment.author.toStr()) == normalizeUsername(requester)
+  if !isAuthor and !canTriage (
+    return {ok: false, error: "not allowed", status: 403}
+  )
+  string current = commentIssueState(comment)
+  if state == "none" (
+    if comment.contains("issue") (
+      comment.delete("issue")
+    )
+    return {ok: true, comment: comment, changed: current != ""}
+  )
+  if current == state (
+    return {ok: true, comment: comment, changed: false}
+  )
+  object issue = {}
+  if current != "" (
+    issue = comment.issue.assert(object)
+  ) else (
+    issue = {number: nextCommentIssueNumber(comments), openedBy: requester, openedAt: now}
+  )
+  issue.state = state
+  if state == "done" (
+    issue.closedBy = requester
+    issue.closedAt = now
+  ) else (
+    if issue.contains("closedBy") (
+      issue.delete("closedBy")
+    )
+    if issue.contains("closedAt") (
+      issue.delete("closedAt")
+    )
+  )
+  comment.issue = issue
+  return {ok: true, comment: comment, changed: true}
+)
+
+def commentMatchesIssueFilter(object comment, string filter, number wantedNumber) boolean (
+  string state = commentIssueState(comment)
+  if state == "" (
+    return false
+  )
+  if wantedNumber > 0 and commentIssueNumber(comment) != wantedNumber (
+    return false
+  )
+  return filter == "any" or filter == state
+)
+
+def commentIssueCounts(array roots) object (
+  number open = 0
+  number done = 0
+  for i roots.len (
+    string state = commentIssueState(roots[i].assert(object))
+    if state == "open" (
+      open = open + 1
+    ) else if state == "done" (
+      done = done + 1
+    )
+  )
+  return {open: open, done: done}
+)
