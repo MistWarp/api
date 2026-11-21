@@ -41,6 +41,13 @@ type gitCommit struct {
 type archive struct {
 	objects map[string]*zip.File
 	trusted map[string]bool
+	memo    *objectMemo
+}
+
+type treeItem struct {
+	mode string
+	name string
+	oid  string
 }
 
 func failure(message string) string {
@@ -53,13 +60,17 @@ func openArchive(path string) (*zip.ReadCloser, archive, error) {
 	if err != nil {
 		return nil, archive{}, err
 	}
+	return reader, indexArchive(reader.File), nil
+}
+
+func indexArchive(files []*zip.File) archive {
 	result := archive{objects: make(map[string]*zip.File)}
-	for _, item := range reader.File {
+	for _, item := range files {
 		if strings.HasPrefix(item.Name, ".git/objects/") && !item.FileInfo().IsDir() {
 			result.objects[item.Name] = item
 		}
 	}
-	return reader, result, nil
+	return result
 }
 
 func (a archive) readObject(oid string) (string, []byte, bool) {
@@ -138,6 +149,11 @@ func (a archive) objectKind(oid string) string {
 }
 
 func (a archive) parseCommit(oid string) (gitCommit, bool) {
+	if a.memo != nil {
+		if commit, ok := a.memo.commit(oid); ok {
+			return commit, true
+		}
+	}
 	kind, body, ok := a.readObject(oid)
 	if !ok || kind != "commit" {
 		return gitCommit{}, false
@@ -173,10 +189,135 @@ func (a archive) parseCommit(oid string) (gitCommit, bool) {
 	if len(result.Tree) != 40 {
 		return gitCommit{}, false
 	}
+	if a.memo != nil {
+		a.memo.storeCommit(oid, result)
+	}
 	return result, true
 }
 
+func (a archive) treeObject(oid string) ([]byte, bool) {
+	if a.memo != nil {
+		if body, ok := a.memo.tree(oid); ok {
+			return body, true
+		}
+	}
+	kind, body, ok := a.readObject(oid)
+	if !ok || kind != "tree" {
+		return nil, false
+	}
+	if a.memo != nil {
+		a.memo.storeTree(oid, body)
+	}
+	return body, true
+}
+
+func parseTreeEntries(body []byte) ([]treeItem, bool) {
+	entries := []treeItem{}
+	position := 0
+	for position < len(body) {
+		space := bytes.IndexByte(body[position:], ' ')
+		if space < 1 {
+			return nil, false
+		}
+		space += position
+		nul := bytes.IndexByte(body[space+1:], 0)
+		if nul < 1 {
+			return nil, false
+		}
+		nul += space + 1
+		if nul+21 > len(body) {
+			return nil, false
+		}
+		name := string(body[space+1 : nul])
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+			return nil, false
+		}
+		entries = append(entries, treeItem{
+			mode: string(body[position:space]), name: name, oid: hex.EncodeToString(body[nul+1 : nul+21]),
+		})
+		position = nul + 21
+	}
+	return entries, true
+}
+
+func treeMode(mode string) bool {
+	return mode == "40000" || mode == "040000"
+}
+
+func blobSummary(blob []byte) blobInfo {
+	probe := blob
+	if len(probe) > 8000 {
+		probe = probe[:8000]
+	}
+	return blobInfo{size: len(blob), binary: bytes.IndexByte(probe, 0) >= 0}
+}
+
+func (a archive) blobInfo(oid string) (blobInfo, bool) {
+	if a.memo != nil {
+		if info, ok := a.memo.blob(oid); ok {
+			return info, true
+		}
+	}
+	kind, blob, ok := a.readObject(oid)
+	if !ok || kind != "blob" {
+		return blobInfo{}, false
+	}
+	info := blobSummary(blob)
+	if a.memo != nil {
+		a.memo.storeBlob(oid, info)
+	}
+	return info, true
+}
+
+func (a archive) findFile(rootOID, requestedPath string) (gitFile, []byte, string) {
+	treeOID := rootOID
+	parts := strings.Split(requestedPath, "/")
+	for depth, part := range parts {
+		if depth > maxTreeDepth {
+			return gitFile{}, nil, "commit tree is invalid"
+		}
+		body, ok := a.treeObject(treeOID)
+		if !ok {
+			return gitFile{}, nil, "commit tree is invalid"
+		}
+		entries, ok := parseTreeEntries(body)
+		if !ok {
+			return gitFile{}, nil, "commit tree is invalid"
+		}
+		last := depth == len(parts)-1
+		next := ""
+		for _, entry := range entries {
+			if entry.name != part || treeMode(entry.mode) == last {
+				continue
+			}
+			if !last {
+				next = entry.oid
+				break
+			}
+			kind, content, found := a.readObject(entry.oid)
+			if !found || kind != "blob" {
+				return gitFile{}, nil, "file object is unavailable"
+			}
+			info := blobSummary(content)
+			if a.memo != nil {
+				a.memo.storeBlob(entry.oid, info)
+			}
+			return gitFile{Path: requestedPath, OID: entry.oid, Mode: entry.mode, Size: info.size, Binary: info.binary}, content, ""
+		}
+		if next == "" {
+			return gitFile{}, nil, "file was not found at this commit"
+		}
+		treeOID = next
+	}
+	return gitFile{}, nil, "file was not found at this commit"
+}
+
 func (a archive) walkTree(rootOID string) ([]gitFile, bool) {
+	if a.memo != nil {
+		if files, ok := a.memo.listing(rootOID); ok {
+			return files, true
+		}
+	}
 	files := []gitFile{}
 	active := make(map[string]bool)
 	var walk func(string, string, int) bool
@@ -186,70 +327,73 @@ func (a archive) walkTree(rootOID string) ([]gitFile, bool) {
 		}
 		active[treeOID] = true
 		defer delete(active, treeOID)
-		kind, body, ok := a.readObject(treeOID)
-		if !ok || kind != "tree" {
+		body, ok := a.treeObject(treeOID)
+		if !ok {
 			return false
 		}
-		position := 0
-		for position < len(body) {
-			space := bytes.IndexByte(body[position:], ' ')
-			if space < 1 {
-				return false
-			}
-			space += position
-			nul := bytes.IndexByte(body[space+1:], 0)
-			if nul < 1 {
-				return false
-			}
-			nul += space + 1
-			if nul+21 > len(body) {
-				return false
-			}
-			mode := string(body[position:space])
-			name := string(body[space+1 : nul])
-			if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
-				return false
-			}
-			childOID := hex.EncodeToString(body[nul+1 : nul+21])
-			fullPath := name
+		entries, ok := parseTreeEntries(body)
+		if !ok {
+			return false
+		}
+		for _, entry := range entries {
+			fullPath := entry.name
 			if prefix != "" {
-				fullPath = prefix + "/" + name
+				fullPath = prefix + "/" + entry.name
 			}
-			position = nul + 21
-			if mode == "40000" || mode == "040000" {
-				if !walk(childOID, fullPath, depth+1) {
+			if treeMode(entry.mode) {
+				if !walk(entry.oid, fullPath, depth+1) {
 					return false
 				}
 				continue
 			}
-			blobKind, blob, ok := a.readObject(childOID)
-			if !ok || blobKind != "blob" {
+			info, ok := a.blobInfo(entry.oid)
+			if !ok {
 				return false
 			}
-			probe := blob
-			if len(probe) > 8000 {
-				probe = probe[:8000]
-			}
 			files = append(files, gitFile{
-				Path: fullPath, OID: childOID, Mode: mode, Size: len(blob), Binary: bytes.IndexByte(probe, 0) >= 0,
+				Path: fullPath, OID: entry.oid, Mode: entry.mode, Size: info.size, Binary: info.binary,
 			})
 			if len(files) > maxTreeFiles {
 				return false
 			}
 		}
-		return position == len(body)
+		return true
 	}
-	return files, walk(rootOID, "", 0)
+	if !walk(rootOID, "", 0) {
+		return files, false
+	}
+	if a.memo != nil {
+		a.memo.storeListing(rootOID, files)
+	}
+	return files, true
 }
 
 func (a archive) reachable(sha, allowedHeads string) bool {
+	if a.memo == nil {
+		return a.walkReachable(sha, allowedHeads)
+	}
+	visited, memoized := a.memo.reachableFrom(allowedHeads, func() map[string]bool {
+		visited := make(map[string]bool)
+		a.walkHistory(allowedHeads, visited, "")
+		return visited
+	})
+	if !memoized {
+		return a.walkReachable(sha, allowedHeads)
+	}
+	return visited[sha]
+}
+
+func (a archive) walkReachable(sha, allowedHeads string) bool {
+	return a.walkHistory(allowedHeads, make(map[string]bool), sha)
+}
+
+func (a archive) walkHistory(allowedHeads string, visited map[string]bool, target string) bool {
 	queue := []string{}
 	for _, candidate := range strings.Split(allowedHeads, ",") {
 		if len(candidate) == 40 {
 			queue = append(queue, candidate)
 		}
 	}
-	visited := make(map[string]bool)
 	for len(queue) > 0 && len(visited) <= maxReachable {
 		candidate := queue[0]
 		queue = queue[1:]
@@ -257,7 +401,7 @@ func (a archive) reachable(sha, allowedHeads string) bool {
 			continue
 		}
 		visited[candidate] = true
-		if candidate == sha {
+		if target != "" && candidate == target {
 			return true
 		}
 		commit, ok := a.parseCommit(candidate)
@@ -308,11 +452,14 @@ func CommitTreesDiffer(basePath, baseHead, incomingPath, incomingHead string) st
 // Inspect reads a commit, tree, or file from the loose Git objects stored in a
 // MistWarp project archive. It returns the JSON contract consumed by the OSL API.
 func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) string {
-	reader, archive, err := openArchive(workspacePath)
+	releaseSlot := acquireInspectionSlot()
+	defer releaseSlot()
+	shared, err := acquireSharedArchive(workspacePath)
 	if err != nil {
 		return failure("workspace archive is unavailable")
 	}
-	defer reader.Close()
+	defer shared.release()
+	archive := shared.archive
 
 	commit, ok := archive.parseCommit(sha)
 	if !ok {
@@ -330,21 +477,11 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 		}
 		return encode(map[string]any{"ok": true, "sha": sha, "commit": commit, "files": files}, "could not encode commit tree")
 	case "file":
-		files, ok := archive.walkTree(commit.Tree)
-		if !ok {
-			return failure("commit tree is invalid")
+		file, content, problem := archive.findFile(commit.Tree, requestedPath)
+		if problem != "" {
+			return failure(problem)
 		}
-		for _, file := range files {
-			if file.Path != requestedPath {
-				continue
-			}
-			kind, content, found := archive.readObject(file.OID)
-			if !found || kind != "blob" {
-				return failure("file object is unavailable")
-			}
-			return encode(map[string]any{"ok": true, "sha": sha, "file": file, "content": content}, "could not encode file")
-		}
-		return failure("file was not found at this commit")
+		return encode(map[string]any{"ok": true, "sha": sha, "file": file, "content": content}, "could not encode file")
 	case "commit-inline":
 		return archive.inspectCommit(sha, commit, true)
 	case "changes":
@@ -525,4 +662,21 @@ func compareCommitTrees(baseArchive archive, baseSHA string, baseCommit gitCommi
 		"ok": true, "sha": headSHA, "parent": baseSHA, "tree": headCommit.Tree, "parentTree": parentTree, "commit": headCommit, "files": changes,
 		"additions": additions, "deletions": deletions, "legacy": legacy,
 	}, "could not encode commit inspection")
+}
+
+func InspectionError(result string) string {
+	var status struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result), &status); err != nil {
+		return "could not inspect project history"
+	}
+	if status.OK {
+		return ""
+	}
+	if status.Error == "" {
+		return "commit not found"
+	}
+	return status.Error
 }

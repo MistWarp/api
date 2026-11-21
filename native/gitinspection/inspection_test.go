@@ -48,7 +48,7 @@ func (r *testRepository) commit(tree, parent, message string) string {
 	return r.object("commit", []byte(body))
 }
 
-func (r *testRepository) write(t *testing.T) string {
+func (r *testRepository) write(t testing.TB) string {
 	t.Helper()
 	file, err := os.CreateTemp(t.TempDir(), "workspace-*.mwp")
 	if err != nil {

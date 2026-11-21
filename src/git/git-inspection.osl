@@ -169,24 +169,20 @@ def validGitFilePath(string path) boolean (
 )
 
 def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, string sha, string operation, string requestedPath, string allowedHeads) string (
-  string cacheDir = tmpDir ++ "git-inspection/"
+  string cacheDir = tmpDir ++ "git-inspection-results/"
   void fs.mkdir(cacheDir, {recursive: true})
-  string cacheName = gitInspectionCacheVersion() ++ "." ++ projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256() ++ ".json"
+  string cacheKey = projectWorkspaceFingerprint(project) ++ "." ++ allowedHeads.hashSHA256() ++ "." ++ sha ++ "." ++ operation ++ "." ++ requestedPath.hashSHA256()
+  string cacheName = gitInspectionCacheVersion() ++ "." ++ cacheKey.hashSHA256() ++ ".json"
   pruneGitInspectionCache(cacheDir, cacheName)
   string cachePath = cacheDir ++ cacheName
   if fs.exists(cachePath) and fs.size(cachePath).unwrapOr(0) <= 33554432 (
     return fs.readFile(cachePath).unwrapOr("")
   )
   string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
-  if resultJson.toBytes().len <= 33554432 (
-    auto parsed = json.parse(resultJson, {type: "object"})
-    if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
-      string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-      if fs.writeFile(temporaryPath, resultJson) (
-        if !fs.rename(temporaryPath, cachePath) (
-          void fs.remove(temporaryPath)
-        )
-      )
+  if resultJson.toBytes().len <= 1048576 and gitinspection.InspectionError(resultJson) == "" (
+    string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
+    if !fs.writeFile(temporaryPath, resultJson) or !fs.rename(temporaryPath, cachePath) (
+      void fs.remove(temporaryPath)
     )
   )
   return resultJson
@@ -235,18 +231,17 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
     c.notFound("workspace not found")
     return
   )
-  string resultJson = cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
-  auto parsed = json.parse(resultJson, {type: "object"})
-  if parsed.isErr() (
-    c.internalError("could not inspect project history")
+  string resultJson = if operation == "file" then gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads) else cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
+  string problem = gitinspection.InspectionError(resultJson)
+  if problem == "could not inspect project history" (
+    c.internalError(problem)
     return
   )
-  object res = parsed.unwrap().assert(object)
-  if !res.contains("ok") or res.ok != true (
-    c.notFound((res.error ?? "commit not found").toStr())
+  if problem != "" (
+    c.notFound(problem)
     return
   )
-  c.json(200, res)
+  c.send(200, "application/json; charset=utf-8", resultJson)
 )
 
 def handleGetCommitInspection(*serve.Context c) (
