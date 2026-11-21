@@ -1,8 +1,6 @@
 package gitinspection
 
 import (
-	"bytes"
-	"encoding/hex"
 	"strings"
 )
 
@@ -16,33 +14,17 @@ type treeEntry struct {
 }
 
 func (a archive) readTreeEntries(oid string) (map[string]treeEntry, bool) {
-	kind, body, ok := a.readObject(oid)
-	if !ok || kind != "tree" {
+	body, ok := a.treeObject(oid)
+	if !ok {
 		return nil, false
 	}
-	entries := map[string]treeEntry{}
-	position := 0
-	for position < len(body) {
-		space := bytes.IndexByte(body[position:], ' ')
-		if space < 1 {
-			return nil, false
-		}
-		space += position
-		nul := bytes.IndexByte(body[space+1:], 0)
-		if nul < 1 {
-			return nil, false
-		}
-		nul += space + 1
-		if nul+21 > len(body) {
-			return nil, false
-		}
-		mode := string(body[position:space])
-		name := string(body[space+1 : nul])
-		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
-			return nil, false
-		}
-		entries[name] = treeEntry{OID: hex.EncodeToString(body[nul+1 : nul+21]), Dir: mode == "40000" || mode == "040000"}
-		position = nul + 21
+	items, ok := parseTreeEntries(body)
+	if !ok {
+		return nil, false
+	}
+	entries := make(map[string]treeEntry, len(items))
+	for _, item := range items {
+		entries[item.name] = treeEntry{OID: item.oid, Dir: treeMode(item.mode)}
 	}
 	return entries, true
 }

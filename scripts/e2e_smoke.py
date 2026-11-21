@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import difflib
 import gzip
 import hashlib
@@ -648,6 +649,31 @@ def upload_flow(server, step, ids, steps):
     step("commit changes", "GET", path + "/commits/" + head + "/changes", "sam")
     step("commit changes signed out", "GET", path + "/commits/" + head + "/changes")
     step("changes of unknown commit", "GET", path + "/commits/" + "1" * 40 + "/changes", "sam")
+    step("commit inline", "GET", path + "/commits/" + head + "?inline=1", "sam")
+    status, last = server.call("GET", "/v1/projects/%s/commits/%s/last-commits" % (real_id(ids, "<history>"), head), "sam")[:2]
+    last_commits = last.get("commits") or {} if isinstance(last, dict) else {}
+    steps.append({"step": "commit last commits", "status": status, "body": {
+        "complete": last.get("complete") if isinstance(last, dict) else None,
+        "paths": {name: (last_commits.get(sha) or {}).get("message") for name, sha in ((last.get("paths") or {}) if isinstance(last, dict) else {}).items()},
+    }})
+    status, tree = step("commit tree", "GET", path + "/commits/" + head + "/tree", "sam")
+    tree_paths = sorted(str(item.get("path", "")) for item in (tree.get("files") or [])) if isinstance(tree, dict) else []
+    for tree_path in tree_paths:
+        step("commit file " + tree_path, "GET", path + "/commits/" + head + "/file?path=" + urllib.parse.quote(tree_path), "sam")
+    if tree_paths:
+        step("commit file signed out", "GET", path + "/commits/" + head + "/file?path=" + urllib.parse.quote(tree_paths[0]))
+        directory = tree_paths[-1].rpartition("/")[0]
+        if directory:
+            step("commit file of a directory", "GET", path + "/commits/" + head + "/file?path=" + urllib.parse.quote(directory), "sam")
+    step("commit file missing", "GET", path + "/commits/" + head + "/file?path=missing.txt", "sam")
+    step("commit file invalid path", "GET", path + "/commits/" + head + "/file?path=../x", "sam")
+    step("commit file of unknown commit", "GET", path + "/commits/" + "1" * 40 + "/file?path=project.json", "sam")
+    burst = [server.call("GET", "/v1/projects/%s/commits/%s/file?path=%s" % (real_id(ids, "<history>"), head, urllib.parse.quote(tree_path)), "sam") for tree_path in tree_paths]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+        parallel = list(pool.map(lambda tree_path: server.call("GET", "/v1/projects/%s/commits/%s/file?path=%s" % (real_id(ids, "<history>"), head, urllib.parse.quote(tree_path)), "sam"), tree_paths * 8))
+    steps.append({"step": "commit files in parallel match", "status": 0, "body": all(
+        result[0] == burst[index % len(burst)][0] and result[1] == burst[index % len(burst)][1] for index, result in enumerate(parallel)
+    ) if burst else True})
     step("commit summaries", "GET", path + "/commit-summaries?shas=" + head + ",nothex," + "1" * 40 + "," + head, "sam")
     step("commit summaries signed out", "GET", path + "/commit-summaries?shas=" + head)
     step("commit summaries from cache", "GET", path + "/commit-summaries?shas=" + head, "sam")

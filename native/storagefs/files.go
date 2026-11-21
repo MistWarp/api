@@ -14,7 +14,7 @@ import (
 const (
 	cacheMaxAge   = 24 * time.Hour
 	cacheMaxFiles = 256
-	cacheMaxBytes = 2147483648
+	cacheMaxBytes = 1 << 30
 )
 
 func Missing(path string) bool {
