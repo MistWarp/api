@@ -14,7 +14,7 @@ array comments = [
 ]
 
 object denied = applyCommentIssue(comments[3].assert(object), comments, "open", "Sam", false, 10)
-testing.assert(denied.ok == false and denied.status == 403, "people cannot turn someone else's comment into an issue")
+testing.assert(denied.ok == false and denied.status == 404, "people cannot turn someone else's comment into an issue, and cannot tell it exists")
 
 object reply = applyCommentIssue(comments[2].assert(object), comments, "open", "mist", true, 10)
 testing.assert(reply.ok == false and reply.status == 400, "replies cannot become issues")
@@ -55,5 +55,14 @@ object counts = commentIssueCounts([comments[1], comments[3], {id: "c4", author:
 testing.assert(counts.open == 1 and counts.done == 1, "counts split open and done issues")
 
 object removed = applyCommentIssue(comments[3].assert(object), comments, "none", "mist", true, 15)
-testing.assert(removed.ok == true and removed.changed == true and !removed.comment.assert(object).contains("issue"), "an issue can go back to a plain comment")
+testing.assert(removed.ok == true and removed.changed == true and commentIssueState(removed.comment.assert(object)) == "", "an issue can go back to a plain comment")
+comments[3] = removed.comment
+testing.assert(nextCommentIssueNumber(comments) == 3, "a removed issue keeps its number reserved")
+testing.assert(!commentMatchesIssueFilter(comments[3].assert(object), "any", 0), "removed issues are not listed")
+object counted = commentIssueCounts([comments[1], comments[3]])
+testing.assert(counted.open == 1 and counted.done == 0, "removed issues are not counted")
+object retracked = applyCommentIssue(comments[3].assert(object), comments, "open", "Ana", false, 16)
+testing.assert(retracked.ok == true and retracked.comment.issue.number == 2 and retracked.comment.issue.state == "open", "tracking a removed issue again brings back its number")
+object plainNone = applyCommentIssue({id: "c9", author: "Lee", content: "hi", parent: ""}, comments, "none", "Lee", false, 17)
+testing.assert(plainNone.ok == true and plainNone.changed == false and !plainNone.comment.assert(object).contains("issue"), "removing an issue from a plain comment changes nothing")
 testing.assert(validIssueFilter("any") and !validIssueFilter("none"), "none is a state, not a filter")

@@ -295,6 +295,10 @@ def editCommentLocked(string key, string cid, string requester, string trimmed) 
   return {ok: true, comment: target}
 )
 
+def commentAuthorShadowed(object comment) boolean (
+  return ownerInBannedSet(shadowBannedSet(), (comment.author ?? "").toStr(), (comment.authorId ?? "").toStr())
+)
+
 def commentResponse(object comment, string username) object (
   object reactions = {}
   if comment.contains("reactions") and comment.reactions != null (
@@ -625,12 +629,14 @@ def handleCreateProjectComment(*serve.Context c) (
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
   created.comment = commentResponse(created.comment.assert(object), commenter)
   created.comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), commenter)
-  siteBroadcastProject(project.id.toStr(), {
-    type: "comment_created",
-    projectId: project.id,
-    comment: created.comment,
-    actor: commenter
-  })
+  if !commentAuthorShadowed(created.comment.assert(object)) (
+    siteBroadcastProject(project.id.toStr(), {
+      type: "comment_created",
+      projectId: project.id,
+      comment: created.comment,
+      actor: commenter
+    })
+  )
   c.json(201, created)
 )
 
@@ -675,12 +681,14 @@ def handleEditProjectComment(*serve.Context c) (
   )
   edited.comment = commentResponse(edited.comment.assert(object), contextString(c, "username"))
   edited.comment.playtimeMs = authorPublicPlaytime(c.param("id"), edited.comment.author.toStr())
-  siteBroadcastProject(c.param("id"), {
-    type: "comment_edited",
-    projectId: c.param("id"),
-    comment: edited.comment,
-    actor: contextString(c, "username")
-  })
+  if !commentAuthorShadowed(edited.comment.assert(object)) (
+    siteBroadcastProject(c.param("id"), {
+      type: "comment_edited",
+      projectId: c.param("id"),
+      comment: edited.comment,
+      actor: contextString(c, "username")
+    })
+  )
   c.json(200, edited)
 )
 
@@ -703,12 +711,14 @@ def handlePinProjectComment(*serve.Context c) (
   )
   updated.comment = commentResponse(updated.comment.assert(object), contextString(c, "username"))
   updated.comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), updated.comment.author.toStr())
-  siteBroadcastProject(project.id.toStr(), {
-    type: "comment_edited",
-    projectId: project.id,
-    comment: updated.comment,
-    actor: contextString(c, "username")
-  })
+  if !commentAuthorShadowed(updated.comment.assert(object)) (
+    siteBroadcastProject(project.id.toStr(), {
+      type: "comment_edited",
+      projectId: project.id,
+      comment: updated.comment,
+      actor: contextString(c, "username")
+    })
+  )
   c.json(200, updated)
 )
 
@@ -737,7 +747,7 @@ def handleSetProjectCommentIssue(*serve.Context c) (
   )
   object comment = commentResponse(updated.comment.assert(object), actor)
   comment.playtimeMs = authorPublicPlaytime(project.id.toStr(), comment.author.toStr())
-  if updated.changed == true (
+  if updated.changed == true and !commentAuthorShadowed(comment) (
     siteBroadcastProject(project.id.toStr(), {
       type: "comment_edited",
       projectId: project.id,

@@ -3,6 +3,7 @@ export {
   commentIssueCounts,
   commentIssueState,
   commentMatchesIssueFilter,
+  nextCommentIssueNumber,
   validIssueFilter,
   validIssueState
 }
@@ -63,21 +64,27 @@ def applyCommentIssue(object comment, array comments, string state, string reque
   )
   boolean isAuthor = normalizeUsername(comment.author.toStr()) == normalizeUsername(requester)
   if !isAuthor and !canTriage (
-    return {ok: false, error: "not allowed", status: 403}
+    return {ok: false, error: "comment not found", status: 404}
   )
   string current = commentIssueState(comment)
-  if state == "none" (
-    if comment.contains("issue") (
-      comment.delete("issue")
-    )
-    return {ok: true, comment: comment, changed: current != ""}
+  if current == "" and state == "none" (
+    return {ok: true, comment: comment, changed: false}
   )
   if current == state (
     return {ok: true, comment: comment, changed: false}
   )
+  number reserved = 0
+  if comment.contains("issue") and comment.issue != null (
+    object stored = comment.issue.assert(object)
+    if stored.contains("number") and stored.number != null (
+      reserved = stored.number.toNum()
+    )
+  )
   object issue = {}
   if current != "" (
     issue = comment.issue.assert(object)
+  ) else if reserved > 0 (
+    issue = {number: reserved, openedBy: requester, openedAt: now}
   ) else (
     issue = {number: nextCommentIssueNumber(comments), openedBy: requester, openedAt: now}
   )
@@ -85,6 +92,15 @@ def applyCommentIssue(object comment, array comments, string state, string reque
   if state == "done" (
     issue.closedBy = requester
     issue.closedAt = now
+  ) else if state == "none" (
+    issue.removedBy = requester
+    issue.removedAt = now
+    if issue.contains("closedBy") (
+      issue.delete("closedBy")
+    )
+    if issue.contains("closedAt") (
+      issue.delete("closedAt")
+    )
   ) else (
     if issue.contains("closedBy") (
       issue.delete("closedBy")
