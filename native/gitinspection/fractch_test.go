@@ -298,6 +298,24 @@ func TestInspectChangesSummarisesCommit(t *testing.T) {
 		}
 	}
 
+	summary := decodeResult(t, Inspect(path, second, "summary", "", second))
+	if summary["ok"] != true || summary["initial"] != false || summary["spriteCount"] != float64(2) {
+		t.Fatalf("unexpected summary: %v", summary)
+	}
+	if names := summary["sprites"].([]any); len(names) != 2 || names[0] != "Cat" || names[1] != "Stage" {
+		t.Fatalf("unexpected summary sprites: %v", names)
+	}
+	if summary["totals"].(map[string]any)["scripts"].(map[string]any)["changed"] != float64(1) {
+		t.Fatalf("summary totals differ from the changes view: %v", summary["totals"])
+	}
+	if _, inlined := summary["files"]; inlined {
+		t.Fatalf("a summary should not carry file contents: %v", summary)
+	}
+	firstSummary := decodeResult(t, Inspect(path, first, "summary", "", second))
+	if firstSummary["initial"] != true {
+		t.Fatalf("the first commit should be marked initial: %v", firstSummary)
+	}
+
 	initial := decodeResult(t, Inspect(path, first, "changes", "", second))
 	initialTotals := initial["totals"].(map[string]any)
 	if initialTotals["scripts"].(map[string]any)["added"] != float64(3) || initialTotals["stateOnly"] != false {

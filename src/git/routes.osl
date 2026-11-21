@@ -5,6 +5,7 @@ export {
 
 def registerGitRoutes(*serve.Router api) (
   api.GET("/projects/:id/commits", handleGetCommits)
+  api.GET("/projects/:id/commit-summaries", handleGetCommitSummaries)
   api.GET("/projects/:id/branches", handleListProjectBranches)
   api.POST("/projects/:id/branches", requireAuth, handleCreateProjectBranch)
   api.PATCH("/projects/:id/branches", requireAuth, handleRenameProjectBranch)

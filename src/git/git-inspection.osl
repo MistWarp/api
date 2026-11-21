@@ -285,3 +285,64 @@ def handleGetCommitFile(*serve.Context c) (
   )
   gitInspectionResponse(c, res.project.assert(object), c.param("sha"), "file", (c.query("path") ?? ""))
 )
+
+def commitSummaryLimit() number (
+  return 50
+)
+
+def requestedCommitShas(string raw) array (
+  array shas = []
+  object seen = {}
+  for entry in raw.split(",") (
+    string sha = entry.toStr().trim()
+    if validGitObjectId(sha) and !seen.contains(sha) and shas.len < commitSummaryLimit() (
+      seen[sha] = true
+      shas.append(sha)
+    )
+  )
+  return shas
+)
+
+def handleGetCommitSummaries(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  if !canSeeInsideProject(project, c) (
+    c.notFound("project not found")
+    return
+  )
+  array shas = requestedCommitShas((c.query("shas") ?? ""))
+  object summaries = {}
+  if shas.len == 0 (
+    c.json(200, {ok: true, summaries: summaries})
+    return
+  )
+  string allowedHeads = projectGitAllowedHeadsString(project)
+  if allowedHeads == "" (
+    c.json(200, {ok: true, summaries: summaries})
+    return
+  )
+  string workspacePath = cachedProjectWorkspacePath(project)
+  if workspacePath == "" (
+    c.notFound("workspace not found")
+    return
+  )
+  for i shas.len (
+    string sha = shas[i].toStr()
+    if projectRecordsCommit(project, sha) (
+      auto parsed = json.parse(cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, "summary", "", allowedHeads), {type: "object"})
+      if !parsed.isErr() (
+        object summary = parsed.unwrap().assert(object)
+        if summary.contains("ok") and summary.ok == true (
+          summaries[sha] = summary
+        )
+      )
+    )
+  )
+  c.json(200, {ok: true, summaries: summaries})
+)
