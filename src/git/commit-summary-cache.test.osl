@@ -32,3 +32,6 @@ for i commitSummaryCacheLimit() (
   full["k" ++ i.toStr()] = {ok: true}
 )
 testing.assert(mergedCommitSummaryCache(full, computed).len == 1, "a full cache starts again from this request")
+object retried = {}
+retried["k1"] = {ok: true}
+testing.assert(mergedCommitSummaryCache(full, retried).len == commitSummaryCacheLimit(), "replacing stored entries does not count toward the limit")

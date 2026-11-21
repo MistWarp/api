@@ -20,7 +20,7 @@ def commitSummaryCacheLimit() number (
 )
 
 def commitSummaryRetryMs() number (
-  return 3600000
+  return 600000
 )
 
 def cachedCommitSummary(object cached, string sha, number now) object (
@@ -39,10 +39,16 @@ def cachedCommitSummary(object cached, string sha, number now) object (
 
 def mergedCommitSummaryCache(object cached, object computed) object (
   object merged = cached
-  if cached.len + computed.len > commitSummaryCacheLimit() (
+  array keys = computed.getKeys()
+  number added = 0
+  for i keys.len (
+    if !cached.contains(keys[i].toStr()) (
+      added += 1
+    )
+  )
+  if cached.len + added > commitSummaryCacheLimit() (
     merged = {}
   )
-  array keys = computed.getKeys()
   for i keys.len (
     string sha = keys[i].toStr()
     merged[sha] = computed[sha]
