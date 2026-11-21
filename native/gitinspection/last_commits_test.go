@@ -93,3 +93,27 @@ func TestInspectLastCommitsStopsAtTheWalkLimit(t *testing.T) {
 		t.Fatalf("stable.txt should be unknown past the walk limit, got %v", paths["stable.txt"])
 	}
 }
+
+func TestInspectLastCommitsReportsAnExhaustedParseBudget(t *testing.T) {
+	repo := newTestRepository()
+	first := repo.commit(repo.nestedTree(map[string]string{
+		"Cat/main.fractch": repo.object("blob", []byte(fractchBase)),
+		"notes.txt":        repo.object("blob", []byte("one\n")),
+	}), "", "Initial version")
+	head := repo.commit(repo.nestedTree(map[string]string{
+		"Cat/main.fractch": repo.object("blob", []byte(strings.Replace(fractchBase, "turn 15;", "turn 45;", 1))),
+		"notes.txt":        repo.object("blob", []byte("two\n")),
+	}), first, "Change the cat")
+	previous := maxLastCommitParseBytes
+	maxLastCommitParseBytes = 1
+	defer func() { maxLastCommitParseBytes = previous }()
+
+	result := decodeResult(t, Inspect(repo.write(t), head, "last-commits", "", head))
+	if result["ok"] != true || result["complete"] != false {
+		t.Fatalf("expected an incomplete result, got %#v", result)
+	}
+	paths := result["paths"].(map[string]any)
+	if len(paths) != 0 {
+		t.Fatalf("nothing should be attributed once the budget runs out, got %#v", paths)
+	}
+}

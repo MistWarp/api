@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-const (
-	maxLastCommitWalk       = 2000
-	maxLastCommitParseBytes = 64 << 20
-)
+const maxLastCommitWalk = 2000
+
+var maxLastCommitParseBytes = 64 << 20
 
 type treeEntry struct {
 	OID string
@@ -82,10 +81,11 @@ func joinTreePath(prefix, name string) string {
 }
 
 type lastCommitWalk struct {
-	archive archive
-	wanted  map[string]bool
-	budget  int
-	visit   func(string)
+	archive   archive
+	wanted    map[string]bool
+	budget    int
+	exhausted bool
+	visit     func(string)
 }
 
 func (w *lastCommitWalk) fractchChanged(beforeOID, afterOID string) bool {
@@ -95,7 +95,8 @@ func (w *lastCommitWalk) fractchChanged(beforeOID, afterOID string) bool {
 		return true
 	}
 	if w.budget+len(before)+len(after) > maxLastCommitParseBytes {
-		return true
+		w.exhausted = true
+		return false
 	}
 	w.budget += len(before) + len(after)
 	changes := compareFractch(string(before), string(after))
@@ -193,6 +194,15 @@ func (a archive) inspectLastCommits(sha string, commit gitCommit) string {
 		}
 		if _, ok := walk.changedPaths(currentCommit.Tree, parentTree, "", 0); !ok {
 			return failure("commit tree is invalid")
+		}
+		if walk.exhausted {
+			complete = false
+			for path, owner := range paths {
+				if owner == current {
+					delete(paths, path)
+				}
+			}
+			break
 		}
 		if used {
 			commits[current] = map[string]any{
