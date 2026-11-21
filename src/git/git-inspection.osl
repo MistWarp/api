@@ -1,6 +1,9 @@
 export {
   cachedProjectWorkspacePath,
+  cachedRemixArchiveDivergence,
   projectRecordsCommit,
+  projectRemixDivergence,
+  projectUncommittedSummary,
   projectWorkspaceFingerprint,
   validGitObjectId,
   writeForkHistoryArchive
@@ -178,7 +181,7 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
   if fs.exists(cachePath) and fs.size(cachePath).unwrapOr(0) <= 33554432 (
     return fs.readFile(cachePath).unwrapOr("")
   )
-  string resultJson = gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
+  string resultJson = if sha == "worktree" then gitinspection.InspectWorktree(workspacePath, projectGitHead(project), operation, requestedPath, allowedHeads) else gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
   if resultJson.toBytes().len <= 1048576 and gitinspection.InspectionError(resultJson) == "" (
     string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
     if !fs.writeFile(temporaryPath, resultJson) or !fs.rename(temporaryPath, cachePath) (
@@ -188,21 +191,122 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
   return resultJson
 )
 
+def projectUncommittedSummary(object project) object (
+  if !projectHasWorkspace(project) (
+    return {}
+  )
+  string head = projectGitHead(project)
+  string allowedHeads = projectGitAllowedHeadsString(project)
+  if head == "" or allowedHeads == "" (
+    return {}
+  )
+  string workspacePath = cachedProjectWorkspacePath(project)
+  if workspacePath == "" (
+    return {}
+  )
+  string raw = cachedWorkspaceGitInspectionJSON(project, workspacePath, "worktree", "summary", "", allowedHeads)
+  auto parsed = json.parse(raw, {type: "object"})
+  if parsed.isErr() (
+    return {}
+  )
+  object payload = parsed.unwrap().assert(object)
+  if (payload.ok ?? false) != true or (payload.dirty ?? false) != true (
+    return {}
+  )
+  string branch = "main"
+  if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" (
+    branch = project.gitBranch.toStr()
+  )
+  return {
+    head: head,
+    branch: branch,
+    date: project.edited ?? 0,
+    author: project.owner ?? "",
+    files: (payload.changedFiles ?? 0).toNum(),
+    summary: (payload.summary ?? {}).assertElse(object, {})
+  }
+)
+
+def cachedRemixArchiveDivergence(object child, object parent) object (
+  if !projectHasWorkspace(child) or !projectHasWorkspace(parent) (
+    return {known: false}
+  )
+  string childHead = projectGitHead(child)
+  string parentHead = projectGitHead(parent)
+  if childHead == "" or parentHead == "" (
+    return {known: false}
+  )
+  string cacheDir = tmpDir ++ "git-inspection-results/"
+  void fs.mkdir(cacheDir, {recursive: true})
+  string cacheKey = "divergence." ++ projectWorkspaceFingerprint(child) ++ "." ++ childHead ++ "." ++ projectWorkspaceFingerprint(parent) ++ "." ++ parentHead
+  string cacheName = gitInspectionCacheVersion() ++ "." ++ cacheKey.hashSHA256() ++ ".json"
+  pruneGitInspectionCache(cacheDir, cacheName)
+  string cachePath = cacheDir ++ cacheName
+  string raw = ""
+  if fs.exists(cachePath) and fs.size(cachePath).unwrapOr(0) <= 65536 (
+    raw = fs.readFile(cachePath).unwrapOr("")
+  )
+  if raw == "" (
+    string childPath = cachedProjectWorkspacePath(child)
+    string parentPath = cachedProjectWorkspacePath(parent)
+    if childPath == "" or parentPath == "" (
+      return {known: false}
+    )
+    raw = gitinspection.CompareDivergence(childPath, childHead, parentPath, parentHead)
+    if raw.toBytes().len <= 65536 and gitinspection.InspectionError(raw) == "" (
+      string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
+      if !fs.writeFile(temporaryPath, raw) or !fs.rename(temporaryPath, cachePath) (
+        void fs.remove(temporaryPath)
+      )
+    )
+  )
+  auto parsed = json.parse(raw, {type: "object"})
+  if parsed.isErr() (
+    return {known: false}
+  )
+  object payload = parsed.unwrap().assert(object)
+  if (payload.ok ?? false) != true or (payload.commonAncestor ?? false) != true (
+    return {known: false}
+  )
+  return {
+    known: true,
+    ahead: (payload.ahead ?? 0).toNum(),
+    behind: (payload.behind ?? 0).toNum()
+  }
+)
+
+def projectRemixDivergence(object child, object parent) object (
+  string childHead = projectGitHead(child)
+  string parentHead = projectGitHead(parent)
+  object childGraph = if child.contains("gitGraph") and child.gitGraph != null then child.gitGraph.assertElse(object, {}) else {}
+  object parentGraph = if parent.contains("gitGraph") and parent.gitGraph != null then parent.gitGraph.assertElse(object, {}) else {}
+  object quick = remixGraphDivergence(childHead, childGraph, parentHead, parentGraph)
+  if (quick.resolved ?? false) == true (
+    return quick
+  )
+  return cachedRemixArchiveDivergence(child, parent)
+)
+
 def gitInspectionResponse(*serve.Context c, object project, string sha, string operation, string requestedPath) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
   string pullIndex = (c.query("pull") ?? "")
   string pullTarget = (c.query("pullTarget") ?? "")
-  boolean pullCommit = pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
+  boolean isWorktree = sha == "worktree" and pullIndex == "" and pullTarget == "" and operation != "last-commits"
+  boolean pullCommit = !isWorktree and pullIndex != "" and pullTarget != "" and canAccessPullProjectCommit(project, pullTarget, pullIndex, sha, c)
   if !canSeeInsideProject(project, c) and !pullCommit (
     c.notFound("commit not found")
     return
   )
-  if !validGitObjectId(sha) (
+  if !isWorktree and !validGitObjectId(sha) (
     c.notFound("commit not found")
     return
   )
-  if !projectRecordsCommit(project, sha) and !pullCommit (
+  if !isWorktree and !projectRecordsCommit(project, sha) and !pullCommit (
+    c.notFound("commit not found")
+    return
+  )
+  if isWorktree and projectGitHead(project) == "" (
     c.notFound("commit not found")
     return
   )
@@ -231,7 +335,12 @@ def gitInspectionResponse(*serve.Context c, object project, string sha, string o
     c.notFound("workspace not found")
     return
   )
-  string resultJson = if operation == "file" then gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads) else cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
+  string resultJson = ""
+  if operation == "file" (
+    resultJson = if isWorktree then gitinspection.InspectWorktree(workspacePath, projectGitHead(project), operation, requestedPath, allowedHeads) else gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
+  ) else (
+    resultJson = cachedWorkspaceGitInspectionJSON(project, workspacePath, sha, operation, requestedPath, allowedHeads)
+  )
   string problem = gitinspection.InspectionError(resultJson)
   if problem == "could not inspect project history" (
     c.internalError(problem)

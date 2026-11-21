@@ -1,0 +1,75 @@
+import "std:testing"
+import "./remix-divergence.osl"
+
+object emptyGraph = {nodes: []}
+object missingHead = remixGraphDivergence("", emptyGraph, "a", emptyGraph)
+testing.assert(missingHead.resolved == true and missingHead.known == false, "missing head resolves as unknown")
+
+object sameHead = remixGraphDivergence("a", emptyGraph, "a", emptyGraph)
+testing.assert(sameHead.resolved == true and sameHead.known == true and sameHead.ahead == 0 and sameHead.behind == 0, "equal heads are 0 ahead and 0 behind")
+
+object parentGraph = {
+  nodes: [
+    {sha: "p2", parents: ["p1"]},
+    {sha: "p1", parents: ["base"]},
+    {sha: "base", parents: []}
+  ]
+}
+object childGraph = {
+  nodes: [
+    {sha: "c3", parents: ["c2"]},
+    {sha: "c2", parents: ["c1"]},
+    {sha: "c1", parents: ["base"]},
+    {sha: "base", parents: []}
+  ]
+}
+object diverged = remixGraphDivergence("c3", childGraph, "p2", parentGraph)
+testing.assert(diverged.resolved == true and diverged.known == true and diverged.ahead == 3 and diverged.behind == 2, "diverged remix counts commits ahead and behind")
+
+object aheadOnly = remixGraphDivergence("c2", childGraph, "base", parentGraph)
+testing.assert(aheadOnly.resolved == true and aheadOnly.known == true and aheadOnly.ahead == 2 and aheadOnly.behind == 0, "ahead-only remix counts 0 behind")
+
+object behindOnly = remixGraphDivergence("base", childGraph, "p2", parentGraph)
+testing.assert(behindOnly.resolved == true and behindOnly.known == true and behindOnly.ahead == 0 and behindOnly.behind == 2, "behind-only remix counts 0 ahead")
+
+object mergedChildGraph = {
+  nodes: [
+    {sha: "m1", parents: ["c1", "p1"]},
+    {sha: "c1", parents: ["base"]},
+    {sha: "p1", parents: ["base"]},
+    {sha: "base", parents: []}
+  ]
+}
+object afterMerge = remixGraphDivergence("m1", mergedChildGraph, "p2", parentGraph)
+testing.assert(afterMerge.resolved == true and afterMerge.known == true and afterMerge.ahead == 2 and afterMerge.behind == 1, "merged upstream commit is excluded from behind count")
+
+object truncatedParent = {
+  nodes: [
+    {sha: "p2", parents: ["p1"]},
+    {sha: "p1", parents: ["missing-old"]}
+  ]
+}
+object truncatedChild = {
+  nodes: [
+    {sha: "c1", parents: ["p1"]},
+    {sha: "p1", parents: ["missing-old"]}
+  ]
+}
+object sharedTruncated = remixGraphDivergence("c1", truncatedChild, "p2", truncatedParent)
+testing.assert(sharedTruncated.resolved == true and sharedTruncated.known == true and sharedTruncated.ahead == 1 and sharedTruncated.behind == 1, "shared truncation below common ancestor still resolves accurately")
+
+object disjointTruncatedChild = {
+  nodes: [
+    {sha: "c1", parents: ["missing-child-anc"]}
+  ]
+}
+object unresolved = remixGraphDivergence("c1", disjointTruncatedChild, "p2", truncatedParent)
+testing.assert(unresolved.resolved == false, "truncated history without shared ancestor falls back to archive check")
+
+object unrelatedGraph = {
+  nodes: [
+    {sha: "u1", parents: []}
+  ]
+}
+object unrelated = remixGraphDivergence("u1", unrelatedGraph, "p2", parentGraph)
+testing.assert(unrelated.resolved == true and unrelated.known == false, "complete unrelated histories resolve as unknown without archive check")

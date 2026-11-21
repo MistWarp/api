@@ -216,7 +216,8 @@ def handleGetCommits(*serve.Context c) (
   )
   object project = res.project.assert(object)
   object history = projectVersionHistory(project)
-  string etag = "\"project-history-" ++ projectWorkspaceFingerprint(project) ++ "-" ++ projectGitHead(project) ++ "-" ++ json.stringify(history).hashSHA256() ++ "\""
+  boolean canSeeInside = canSeeInsideProject(project, c)
+  string etag = "\"project-history-v2-" ++ projectWorkspaceFingerprint(project) ++ "-" ++ projectGitHead(project) ++ "-" ++ (project.edited ?? 0).toStr() ++ "-" ++ (if canSeeInside then "1" else "0") ++ "-" ++ json.stringify(history).hashSHA256() ++ "\""
   c.setHeader("ETag", etag)
   c.setHeader("Vary", "Authorization, Cookie")
   c.setHeader("Cache-Control", "private, no-store")
@@ -225,14 +226,21 @@ def handleGetCommits(*serve.Context c) (
     c.status(304)
     return
   )
-  c.json(200, {
+  object response = {
     ok: true,
     head: projectGitHead(project),
     branch: history.branch,
     commits: history.commits,
     graph: history.graph,
     virtual: history.virtual
-  })
+  }
+  if canSeeInside and projectHasWorkspace(project) (
+    object uncommitted = projectUncommittedSummary(project)
+    if uncommitted.len > 0 (
+      response.uncommitted = uncommitted
+    )
+  )
+  c.json(200, response)
 )
 
 def projectBranchHead(object project, string branch) string (

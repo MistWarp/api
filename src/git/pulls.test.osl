@@ -101,6 +101,9 @@ def projectVersionHistory(object project) object (
 def projectWorkspaceFingerprint(object project) string (
   return ""
 )
+def projectUncommittedSummary(object project) object (
+  return {}
+)
 def requestJSON(*serve.Context c) object (
   return {}
 )
