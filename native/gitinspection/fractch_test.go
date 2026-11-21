@@ -308,6 +308,9 @@ func TestInspectChangesSummarisesCommit(t *testing.T) {
 	if summary["totals"].(map[string]any)["scripts"].(map[string]any)["changed"] != float64(1) {
 		t.Fatalf("summary totals differ from the changes view: %v", summary["totals"])
 	}
+	if summary["authoredFiles"] != float64(1) || summary["tooLarge"] != false {
+		t.Fatalf("summary should count the readme and nothing else: %v", summary)
+	}
 	if _, inlined := summary["files"]; inlined {
 		t.Fatalf("a summary should not carry file contents: %v", summary)
 	}

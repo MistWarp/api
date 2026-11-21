@@ -275,15 +275,20 @@ const maxSummarySprites = 5
 
 func summarizeComputed(computed commitChanges) map[string]any {
 	assetDirs := map[string]bool{}
+	files := 0
 	for _, file := range computed.others {
 		path, _ := file["path"].(string)
 		if isAssetPath(path) {
 			assetDirs[spriteDir(path)] = true
+		} else if path != "fractch.json" {
+			files++
 		}
 	}
 	sprites := []string{}
 	count := 0
+	tooLarge := false
 	for _, target := range computed.targets {
+		tooLarge = tooLarge || target.TooLarge
 		if len(target.Scripts) == 0 && len(target.Items) == 0 && !target.TooLarge && !assetDirs[target.Path] {
 			continue
 		}
@@ -304,7 +309,10 @@ func summarizeComputed(computed commitChanges) map[string]any {
 			sprites = append(sprites, summaryName(dir, ""))
 		}
 	}
-	return map[string]any{"legacy": computed.legacy, "totals": computed.totals, "sprites": sprites, "spriteCount": count}
+	return map[string]any{
+		"legacy": computed.legacy, "totals": computed.totals, "sprites": sprites, "spriteCount": count,
+		"authoredFiles": files, "tooLarge": tooLarge,
+	}
 }
 
 func summaryName(dir, name string) string {
