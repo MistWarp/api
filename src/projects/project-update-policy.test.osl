@@ -53,6 +53,10 @@ testing.assert(!isRefused(applyCredits(credited, {credits: [{who: "Ada"}, {who: 
 object flagged = {id: "p1"}
 applyProjectFlags(flagged, {commentsOff: "yes", remixable: 0, seeInside: false})
 testing.assert(flagged.commentsOff == false and flagged.remixable == true and flagged.seeInside == false, "flags only switch on an exact boolean")
+applyProjectFlags(flagged, {issuesOff: true})
+testing.assert(flagged.issuesOff == true, "owners can turn issues off")
+applyProjectFlags(flagged, {issuesOff: "yes"})
+testing.assert(flagged.issuesOff == false, "issues only switch off on an exact boolean")
 testing.assert(projectSaleRefusal({price: 5}).body.code == "project_sales_ended" and !isRefused(projectSaleRefusal({price: 0})) and !isRefused(projectSaleRefusal({})), "only a non-zero price is refused")
 testing.assert(applyRemixShare(flagged, 51).status == 400 and isRefused(applyRemixShare(flagged, -1)), "remix shares are 0 to 50")
 testing.assert(!isRefused(applyRemixShare(flagged, 50)) and flagged.remixShare == 50, "remix shares are saved")

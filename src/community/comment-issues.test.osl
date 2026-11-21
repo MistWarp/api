@@ -1,0 +1,68 @@
+import "std:testing"
+import "std:crypto"
+import "std:regex"
+import "std:fs"
+import "std:json"
+import "go:mistwarp.local/storagefs"
+import "../core/utils.osl"
+import "./comment-issues.osl"
+
+array comments = [
+  {id: "c1", author: "Sam", content: "The jump is too high", parent: ""},
+  {id: "c2", author: "mist", content: "Fixed in the next save", parent: "c1"},
+  {id: "c3", author: "Ana", content: "Love it", parent: ""}
+]
+
+object denied = applyCommentIssue(comments[3].assert(object), comments, "open", "Sam", false, 10)
+testing.assert(denied.ok == false and denied.status == 404, "people cannot turn someone else's comment into an issue, and cannot tell it exists")
+
+object reply = applyCommentIssue(comments[2].assert(object), comments, "open", "mist", true, 10)
+testing.assert(reply.ok == false and reply.status == 400, "replies cannot become issues")
+
+object badState = applyCommentIssue(comments[1].assert(object), comments, "closed", "Sam", false, 10)
+testing.assert(badState.ok == false and badState.status == 400, "unknown states are refused")
+
+object opened = applyCommentIssue(comments[1].assert(object), comments, "open", "sam", false, 10)
+testing.assert(opened.ok == true and opened.changed == true, "authors can turn their own comment into an issue, ignoring case")
+object first = opened.comment.assert(object)
+testing.assert(first.issue.number == 1 and first.issue.state == "open" and first.issue.openedBy == "sam" and first.issue.openedAt == 10, "the first issue is number 1")
+comments[1] = first
+
+object again = applyCommentIssue(first, comments, "open", "Sam", false, 11)
+testing.assert(again.ok == true and again.changed == false, "opening an open issue changes nothing")
+
+object triaged = applyCommentIssue(comments[3].assert(object), comments, "done", "mist", true, 12)
+testing.assert(triaged.ok == true and triaged.comment.issue.number == 2 and triaged.comment.issue.state == "done", "people with write access can mark any comment as done")
+testing.assert(triaged.comment.issue.closedBy == "mist" and triaged.comment.issue.closedAt == 12, "closing records who closed it and when")
+comments[3] = triaged.comment
+
+object closed = applyCommentIssue(first, comments, "done", "Sam", false, 13)
+testing.assert(closed.ok == true and closed.comment.issue.number == 1 and closed.comment.issue.state == "done", "authors can close their own issue and it keeps its number")
+object reopened = applyCommentIssue(closed.comment.assert(object), comments, "open", "Sam", false, 14)
+object reopenedIssue = reopened.comment.assert(object).issue.assert(object)
+testing.assert(reopened.ok == true and reopenedIssue.state == "open" and !reopenedIssue.contains("closedBy") and !reopenedIssue.contains("closedAt"), "reopening clears the closing details")
+comments[1] = reopened.comment
+
+testing.assert(commentIssueState(comments[1].assert(object)) == "open", "the state reads back as open")
+testing.assert(commentIssueState({id: "x", issue: {state: "weird"}}) == "", "unknown stored states are not issues")
+testing.assert(commentMatchesIssueFilter(comments[1].assert(object), "open", 0), "an open issue matches the open filter")
+testing.assert(!commentMatchesIssueFilter(comments[1].assert(object), "done", 0), "an open issue does not match the done filter")
+testing.assert(commentMatchesIssueFilter(comments[3].assert(object), "any", 2), "the number filter finds issue 2")
+testing.assert(!commentMatchesIssueFilter(comments[3].assert(object), "any", 1), "the number filter skips other issues")
+testing.assert(!commentMatchesIssueFilter(comments[2].assert(object), "any", 0), "plain comments are not issues")
+
+object counts = commentIssueCounts([comments[1], comments[3], {id: "c4", author: "Lee", parent: ""}])
+testing.assert(counts.open == 1 and counts.done == 1, "counts split open and done issues")
+
+object removed = applyCommentIssue(comments[3].assert(object), comments, "none", "mist", true, 15)
+testing.assert(removed.ok == true and removed.changed == true and commentIssueState(removed.comment.assert(object)) == "", "an issue can go back to a plain comment")
+comments[3] = removed.comment
+testing.assert(nextCommentIssueNumber(comments) == 3, "a removed issue keeps its number reserved")
+testing.assert(!commentMatchesIssueFilter(comments[3].assert(object), "any", 0), "removed issues are not listed")
+object counted = commentIssueCounts([comments[1], comments[3]])
+testing.assert(counted.open == 1 and counted.done == 0, "removed issues are not counted")
+object retracked = applyCommentIssue(comments[3].assert(object), comments, "open", "Ana", false, 16)
+testing.assert(retracked.ok == true and retracked.comment.issue.number == 2 and retracked.comment.issue.state == "open", "tracking a removed issue again brings back its number")
+object plainNone = applyCommentIssue({id: "c9", author: "Lee", content: "hi", parent: ""}, comments, "none", "Lee", false, 17)
+testing.assert(plainNone.ok == true and plainNone.changed == false and !plainNone.comment.assert(object).contains("issue"), "removing an issue from a plain comment changes nothing")
+testing.assert(validIssueFilter("any") and !validIssueFilter("none"), "none is a state, not a filter")

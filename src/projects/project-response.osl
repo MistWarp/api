@@ -123,6 +123,7 @@ def projectResponse(object project,*serve.Context c) object (
   if project.contains("commentsOff") and project.commentsOff == true (
     commentsOff = true
   )
+  boolean issuesOff = project.contains("issuesOff") and project.issuesOff == true
   array tags = []
   if project.contains("tags") and project.tags != null (
     tags = project.tags.assert(array)
@@ -194,6 +195,7 @@ def projectResponse(object project,*serve.Context c) object (
     brokenHeartCount: broken.len,
     myReaction: myReaction,
     commentsOff: commentsOff,
+    issuesOff: issuesOff,
     sizeBytes: projectSizeBytes(project),
     isOwner: isOwner
   }
