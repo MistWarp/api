@@ -1,0 +1,57 @@
+def commitSummaryLimit() number (
+  return 50
+)
+
+def requestedCommitShas(string raw) array (
+  array shas = []
+  object seen = {}
+  for entry in raw.split(",") (
+    string sha = entry.toStr().trim()
+    if regex.match("^[a-f0-9]{40}$", sha) and !seen.contains(sha) and shas.len < commitSummaryLimit() (
+      seen[sha] = true
+      shas.append(sha)
+    )
+  )
+  return shas
+)
+
+def commitSummaryCacheLimit() number (
+  return 2000
+)
+
+def commitSummaryRetryMs() number (
+  return 600000
+)
+
+def cachedCommitSummary(object cached, string sha, number now) object (
+  if !cached.contains(sha) or cached[sha] == null (
+    return {}
+  )
+  object entry = cached[sha].assertElse(object, {})
+  if entry.contains("ok") and entry.ok == true (
+    return entry
+  )
+  if entry.contains("failedAt") and now - entry.failedAt.toNum() < commitSummaryRetryMs() (
+    return {ok: false}
+  )
+  return {}
+)
+
+def mergedCommitSummaryCache(object cached, object computed) object (
+  object merged = cached
+  array keys = computed.getKeys()
+  number added = 0
+  for i keys.len (
+    if !cached.contains(keys[i].toStr()) (
+      added += 1
+    )
+  )
+  if cached.len + added > commitSummaryCacheLimit() (
+    merged = {}
+  )
+  for i keys.len (
+    string sha = keys[i].toStr()
+    merged[sha] = computed[sha]
+  )
+  return merged
+)

@@ -216,14 +216,32 @@ func treeFiles(source archive, tree string) (map[string]gitFile, bool) {
 	return files, true
 }
 
-func changesBetween(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
+type commitChanges struct {
+	legacy     bool
+	targets    []fractchTargetChanges
+	others     []map[string]any
+	totals     changeTotals
+	spriteDirs map[string]bool
+}
+
+func spriteDirsOf(trees ...map[string]gitFile) map[string]bool {
+	dirs := map[string]bool{}
+	for _, files := range trees {
+		for dir := range fractchFilesByDir(files) {
+			dirs[dir] = true
+		}
+	}
+	return dirs
+}
+
+func computeChanges(baseArchive archive, baseCommit gitCommit, headArchive archive, headCommit gitCommit, inline bool) (commitChanges, string) {
 	parentFiles, ok := treeFiles(baseArchive, baseCommit.Tree)
 	if !ok {
-		return failure("parent commit tree is invalid")
+		return commitChanges{}, "parent commit tree is invalid"
 	}
 	currentFiles, ok := treeFiles(headArchive, headCommit.Tree)
 	if !ok || headCommit.Tree == "" {
-		return failure("commit tree is invalid")
+		return commitChanges{}, "commit tree is invalid"
 	}
 	changes := []map[string]any{}
 	legacy := false
@@ -247,11 +265,99 @@ func changesBetween(baseArchive archive, baseSHA string, baseCommit gitCommit, h
 	}
 	sortChanges(changes)
 	targets, others, totals := structuredChanges(changes, baseArchive, parentFiles, headArchive, currentFiles)
-	inlineDiffContent(others, baseArchive, parentFiles, headArchive, currentFiles)
+	if inline {
+		inlineDiffContent(others, baseArchive, parentFiles, headArchive, currentFiles)
+	}
+	return commitChanges{legacy: legacy, targets: targets, others: others, totals: totals, spriteDirs: spriteDirsOf(parentFiles, currentFiles)}, ""
+}
+
+func changesBetween(baseArchive archive, baseSHA string, baseCommit gitCommit, headArchive archive, headSHA string, headCommit gitCommit) string {
+	computed, problem := computeChanges(baseArchive, baseCommit, headArchive, headCommit, true)
+	if problem != "" {
+		return failure(problem)
+	}
 	return encode(map[string]any{
-		"ok": true, "sha": headSHA, "parent": baseSHA, "commit": headCommit, "legacy": legacy,
-		"targets": targets, "files": others, "totals": totals,
+		"ok": true, "sha": headSHA, "parent": baseSHA, "commit": headCommit, "legacy": computed.legacy,
+		"targets": computed.targets, "files": computed.others, "totals": computed.totals,
 	}, "could not encode commit changes")
+}
+
+const maxSummarySprites = 5
+
+func summarizeComputed(computed commitChanges) map[string]any {
+	assetDirs := map[string]bool{}
+	files := 0
+	for _, file := range computed.others {
+		path, _ := file["path"].(string)
+		if isAssetPath(path) {
+			if dir := spriteDir(path); dir != "" && computed.spriteDirs[dir] {
+				assetDirs[dir] = true
+			}
+		} else if path != "fractch.json" {
+			files++
+		}
+	}
+	sprites := []string{}
+	count := 0
+	tooLarge := false
+	for _, target := range computed.targets {
+		tooLarge = tooLarge || target.TooLarge
+		if len(target.Scripts) == 0 && len(target.Items) == 0 && !target.TooLarge && !assetDirs[target.Path] {
+			continue
+		}
+		delete(assetDirs, target.Path)
+		count++
+		if len(sprites) < maxSummarySprites {
+			sprites = append(sprites, summaryName(target.Path, target.Name))
+		}
+	}
+	remaining := make([]string, 0, len(assetDirs))
+	for dir := range assetDirs {
+		remaining = append(remaining, dir)
+	}
+	sort.Strings(remaining)
+	for _, dir := range remaining {
+		count++
+		if len(sprites) < maxSummarySprites {
+			sprites = append(sprites, summaryName(dir, ""))
+		}
+	}
+	return map[string]any{
+		"legacy": computed.legacy, "totals": computed.totals, "sprites": sprites, "spriteCount": count,
+		"authoredFiles": files, "tooLarge": tooLarge,
+	}
+}
+
+func summaryName(dir, name string) string {
+	if dir == "Stage" {
+		return "Stage"
+	}
+	if name != "" {
+		return name
+	}
+	return dir
+}
+
+func (a archive) inspectCommitSummary(sha string, commit gitCommit) string {
+	base := archive{objects: map[string]*zip.File{}}
+	parentCommit := gitCommit{}
+	initial := len(commit.Parents) == 0
+	if !initial {
+		parsed, ok := a.parseCommit(commit.Parents[0])
+		if !ok {
+			return failure("parent commit is unavailable")
+		}
+		base, parentCommit = a, parsed
+	}
+	computed, problem := computeChanges(base, parentCommit, a, commit, false)
+	if problem != "" {
+		return failure(problem)
+	}
+	summary := summarizeComputed(computed)
+	summary["ok"] = true
+	summary["sha"] = sha
+	summary["initial"] = initial
+	return encode(summary, "could not encode commit summary")
 }
 
 func (a archive) inspectCommitChanges(sha string, commit gitCommit) string {

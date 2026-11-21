@@ -591,6 +591,10 @@ def upload_flow(server, step, ids, steps):
     head, edited = head_and_edited()
     upload("upload live editor", {"expectedEdited": edited}, who="alice")
 
+    private_head, _ = head_and_edited()
+    step("commit summaries of a private project signed out", "GET", path + "/commit-summaries?shas=" + private_head)
+    step("commit summaries of a private project as a stranger", "GET", path + "/commit-summaries?shas=" + private_head, "bob")
+    step("commit summaries of a private project as an editor", "GET", path + "/commit-summaries?shas=" + private_head, "alice")
     step("share history", "POST", path + "/visibility", "sam", {"visibility": "public"})
     status, remixed = step("remix history", "POST", path + "/remix", "alice", {})
     remix_id = str(remixed.get("id", "") or (remixed.get("project") or {}).get("id", "")) if isinstance(remixed, dict) else ""
@@ -644,6 +648,10 @@ def upload_flow(server, step, ids, steps):
     step("commit changes", "GET", path + "/commits/" + head + "/changes", "sam")
     step("commit changes signed out", "GET", path + "/commits/" + head + "/changes")
     step("changes of unknown commit", "GET", path + "/commits/" + "1" * 40 + "/changes", "sam")
+    step("commit summaries", "GET", path + "/commit-summaries?shas=" + head + ",nothex," + "1" * 40 + "," + head, "sam")
+    step("commit summaries signed out", "GET", path + "/commit-summaries?shas=" + head)
+    step("commit summaries from cache", "GET", path + "/commit-summaries?shas=" + head, "sam")
+    step("commit summaries without shas", "GET", path + "/commit-summaries", "sam")
     step("rename branch", "PATCH", path + "/branches", "sam", {"branch": "feature", "name": "feature-two"})
     step("rename branch as stranger", "PATCH", path + "/branches", "bob", {"branch": "feature-two", "name": "x"})
     step("delete branch", "DELETE", path + "/branches", "sam", {"branch": "feature-two"})
