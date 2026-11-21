@@ -16,6 +16,7 @@ def registerGitRoutes(*serve.Router api) (
 
   api.GET("/projects/:id/commits/:sha/tree", handleGetCommitTree)
   api.GET("/projects/:id/commits/:sha/file", handleGetCommitFile)
+  api.GET("/projects/:id/commits/:sha/last-commits", handleGetCommitLastCommits)
   api.GET("/projects/:id/pulls", handleListPulls)
   api.POST("/projects/:id/pulls", requireAuth, handleCreatePull)
   api.GET("/projects/:id/pulls/:index", handleGetPull)

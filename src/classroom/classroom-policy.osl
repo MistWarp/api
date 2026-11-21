@@ -211,7 +211,7 @@ array studentReadRoutes = [
   "^/projects/[^/]+/(project\\.json|trusted-extensions|editor|workspace\\.mwp|card\\.svg|commits|branches|game-inventory-config|me/save|me/inventory)$",
   "^/projects/[^/]+/releases/[^/]+/project\\.json$",
   "^/projects/[^/]+/extensions/[^/]+/source$",
-  "^/projects/[^/]+/commits/[^/]+(/(tree|file|co-authors|collaborators))?$"
+  "^/projects/[^/]+/commits/[^/]+(/(tree|file|last-commits|co-authors|collaborators))?$"
 ]
 
 def studentRouteAllowed(string method, string rawPath) boolean (
