@@ -296,7 +296,7 @@ def editCommentLocked(string key, string cid, string requester, string trimmed) 
 )
 
 def commentAuthorShadowed(object comment) boolean (
-  return ownerInBannedSet(shadowBannedSet(), (comment.author ?? "").toStr(), (comment.authorId ?? "").toStr())
+  return userShadowBanned((comment.author ?? "").toStr())
 )
 
 def commentResponse(object comment, string username) object (
