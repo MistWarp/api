@@ -418,6 +418,8 @@ func TestCamelIdentifiers(t *testing.T) {
 		"// keep_this\nset_x 1;":         "// keep_this\nsetX 1;",
 		"strings.menu_textCase(x)":       "strings.menuTextCase(x)",
 		"say `${costume_name} x_y`;":     "say `${costumeName} x_y`;",
+		"say `${a_b \\":                  "say `${aB \\",
+		"say `${\"x_y":                   "say `${\"x_y",
 		"say `a ${f(\"}\", b_c)} ${d_e`": "say `a ${f(\"}\", bC)} ${dE`",
 		"say `\\${not_this}`;":           "say `\\${not_this}`;",
 	}
