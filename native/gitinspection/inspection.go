@@ -351,6 +351,8 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 		return archive.inspectCommitChanges(sha, commit)
 	case "summary":
 		return archive.inspectCommitSummary(sha, commit)
+	case "last-commits":
+		return archive.inspectLastCommits(sha, commit)
 	default:
 		return archive.inspectCommit(sha, commit, false)
 	}

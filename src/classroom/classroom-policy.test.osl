@@ -70,6 +70,7 @@ testing.assert(studentRouteAllowed("GET", "/v1/classroom/join/ABC"), "the class 
 testing.assert(studentRouteAllowed("GET", "/v1/projects/p1"), "students can open a project they have a role on")
 testing.assert(studentRouteAllowed("GET", "/v1/projects/p1/project.json"), "students can load their project")
 testing.assert(studentRouteAllowed("GET", "/v1/projects/p1/commits/abc/tree"), "students can read their history")
+testing.assert(studentRouteAllowed("GET", "/v1/projects/p1/commits/abc/last-commits"), "students can see when their files last changed")
 testing.assert(studentRouteAllowed("OPTIONS", "/v1/anything"), "preflight requests pass")
 testing.assert(studentRouteAllowed("GET", "/v1/me/backpack"), "students can load their synced backpack")
 testing.assert(studentRouteAllowed("GET", "/v1/projects/p1/trusted-extensions"), "the editor can read a class project's trusted extensions")
