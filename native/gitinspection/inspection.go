@@ -347,6 +347,8 @@ func Inspect(workspacePath, sha, operation, requestedPath, allowedHeads string) 
 		return failure("file was not found at this commit")
 	case "commit-inline":
 		return archive.inspectCommit(sha, commit, true)
+	case "changes":
+		return archive.inspectCommitChanges(sha, commit)
 	default:
 		return archive.inspectCommit(sha, commit, false)
 	}

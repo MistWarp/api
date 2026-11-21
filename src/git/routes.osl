@@ -11,6 +11,7 @@ def registerGitRoutes(*serve.Router api) (
   api.DELETE("/projects/:id/branches", requireAuth, handleDeleteProjectBranch)
   api.POST("/projects/:id/branches/merge", requireAuth, handlePrepareBranchMerge)
   api.GET("/projects/:id/commits/:sha", handleGetCommitInspection)
+  api.GET("/projects/:id/commits/:sha/changes", handleGetCommitChanges)
 
   api.GET("/projects/:id/commits/:sha/tree", handleGetCommitTree)
   api.GET("/projects/:id/commits/:sha/file", handleGetCommitFile)

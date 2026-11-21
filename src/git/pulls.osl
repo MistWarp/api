@@ -685,6 +685,16 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
   return canInspectPull(pull, target, c)
 )
 
+def pullInspectionJSON(string view, string inline, string targetWorkspacePath, string baseCommit, string sourceWorkspacePath, string headCommit) string (
+  if view == "changes" (
+    return gitinspection.CompareArchivesChangesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+  )
+  if inline == "1" (
+    return gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+  )
+  return gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+)
+
 def handleGetPullDiff(*serve.Context c) (
   c.setHeader("Cache-Control", "private, no-store")
   c.setHeader("CDN-Cache-Control", "private, no-store")
@@ -713,7 +723,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   string baseCommit = pull.baseCommit.toStr()
   string headCommit = pull.headCommit.toStr()
-  string inspectionJson = if (c.query("inline") ?? "") == "1" then gitinspection.CompareArchivesInlineJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit) else gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
+  string inspectionJson = pullInspectionJSON((c.query("view") ?? ""), (c.query("inline") ?? ""), targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
   auto parsedInspection = json.parse(inspectionJson, {type: "object"})
   if parsedInspection.isErr() (
     c.internalError("could not inspect pull request changes")
