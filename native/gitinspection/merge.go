@@ -26,6 +26,7 @@ type prepareMergeResult struct {
 	Error         string        `json:"error,omitempty"`
 	BaseHead      string        `json:"baseHead,omitempty"`
 	AlreadyMerged bool          `json:"alreadyMerged,omitempty"`
+	FastForward   bool          `json:"fastForward,omitempty"`
 	Changes       []mergeChange `json:"changes,omitempty"`
 	Conflicts     []string      `json:"conflicts,omitempty"`
 }
@@ -56,8 +57,12 @@ func ancestorDistances(repository archive, head string) map[string]int {
 }
 
 func mergeBase(repository archive, targetHead, sourceHead string) (string, bool) {
-	targetAncestors := ancestorDistances(repository, targetHead)
-	sourceAncestors := ancestorDistances(repository, sourceHead)
+	return crossMergeBase(repository, targetHead, repository, sourceHead)
+}
+
+func crossMergeBase(target archive, targetHead string, source archive, sourceHead string) (string, bool) {
+	targetAncestors := ancestorDistances(target, targetHead)
+	sourceAncestors := ancestorDistances(source, sourceHead)
 	best := ""
 	bestDistance := int(^uint(0) >> 1)
 	for oid, targetDistance := range targetAncestors {
@@ -110,6 +115,10 @@ func PrepareMerge(targetPath, targetHead, sourcePath, sourceHead, baseHead strin
 		return prepareMergeResult{Error: "source workspace archive is unavailable"}
 	}
 	defer sourceReader.Close()
+	return prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead)
+}
+
+func prepareArchiveMerge(target archive, targetHead string, source archive, sourceHead, baseHead string) prepareMergeResult {
 	baseFiles, ok := filesAtCommit(target, baseHead)
 	if !ok {
 		return prepareMergeResult{Error: "pull request base is unavailable"}
@@ -212,4 +221,56 @@ func PrepareBranchMerge(path, targetHead, sourceHead string) prepareMergeResult 
 func PrepareBranchMergeJSON(path, targetHead, sourceHead string) string {
 	encoded, _ := json.Marshal(PrepareBranchMerge(path, targetHead, sourceHead))
 	return string(encoded)
+}
+
+func PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead string) prepareMergeResult {
+	targetReader, target, err := openArchive(targetPath)
+	if err != nil {
+		return prepareMergeResult{Error: "target workspace archive is unavailable"}
+	}
+	defer targetReader.Close()
+	sourceReader, source, err := openArchive(sourcePath)
+	if err != nil {
+		return prepareMergeResult{Error: "source workspace archive is unavailable"}
+	}
+	defer sourceReader.Close()
+	baseHead, ok := crossMergeBase(target, targetHead, source, sourceHead)
+	if !ok {
+		return prepareMergeResult{Error: "the two projects do not share a common commit"}
+	}
+	if baseHead == sourceHead {
+		return prepareMergeResult{OK: true, BaseHead: baseHead, AlreadyMerged: true, Changes: []mergeChange{}, Conflicts: []string{}}
+	}
+	result := prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead)
+	result.BaseHead = baseHead
+	result.FastForward = result.OK && baseHead == targetHead
+	return result
+}
+
+func PrepareRemixMergeJSON(targetPath, targetHead, sourcePath, sourceHead string) string {
+	encoded, _ := json.Marshal(PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead))
+	return string(encoded)
+}
+
+func RemixMergeBase(targetPath, targetHead, sourcePath, sourceHead string) string {
+	if len(targetHead) != 40 || len(sourceHead) != 40 {
+		return failure("both heads are required")
+	}
+	releaseSlot := acquireInspectionSlot()
+	defer releaseSlot()
+	targetShared, err := acquireSharedArchive(targetPath)
+	if err != nil {
+		return failure("target workspace archive is unavailable")
+	}
+	defer targetShared.release()
+	sourceShared, err := acquireSharedArchive(sourcePath)
+	if err != nil {
+		return failure("source workspace archive is unavailable")
+	}
+	defer sourceShared.release()
+	baseHead, ok := crossMergeBase(targetShared.archive, targetHead, sourceShared.archive, sourceHead)
+	if !ok {
+		return failure("the two projects do not share a common commit")
+	}
+	return encode(map[string]any{"ok": true, "base": baseHead}, "could not encode merge base")
 }

@@ -1,0 +1,72 @@
+export {
+  canSyncRemixFrom,
+  loadRemixSyncOriginal
+}
+
+def loadRemixSyncOriginal(object project) object? (
+  string parentId = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
+  if parentId == "" or parentId == project.id.toStr() (
+    return null
+  )
+  auto parentResult = loadProject(parentId)
+  if !parentResult.ok (
+    return null
+  )
+  return parentResult.project.assert(object)
+)
+
+def canSyncRemixFrom(object project, object original,*serve.Context c) boolean (
+  if !canEditProject(project, c) or !canSeeInsideProject(project, c) (
+    return false
+  )
+  return canViewProject(original, c) and canSeeInsideProject(original, c)
+)
+
+def handlePrepareRemixSync(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
+  auto res = loadProject(c.param("id"))
+  if !res.ok or !canViewProject(res.project.assert(object), c) (
+    c.notFound("project not found")
+    return
+  )
+  object project = res.project.assert(object)
+  object? original = loadRemixSyncOriginal(project)
+  if original == null (
+    c.notFound("this project is not a remix of a project that still exists")
+    return
+  )
+  if !canSyncRemixFrom(project, original, c) (
+    c.forbidden("only the remix's maintainers can sync it, and only while they can see inside the original")
+    return
+  )
+  string projectHead = projectGitHead(project)
+  string originalHead = projectGitHead(original)
+  if projectHead == "" or originalHead == "" (
+    c.json(409, {ok: false, error: "both projects need MistWarp history before they can be synced", code: "sync_history_unavailable"})
+    return
+  )
+  string projectWorkspacePath = cachedProjectWorkspacePath(project)
+  string originalWorkspacePath = cachedProjectWorkspacePath(original)
+  if projectWorkspacePath == "" or originalWorkspacePath == "" (
+    c.internalError("could not assemble project history")
+    return
+  )
+  string mergeJson = gitinspection.PrepareRemixMergeJSON(projectWorkspacePath, projectHead, originalWorkspacePath, originalHead)
+  auto parsedMerge = json.parse(mergeJson, {type: "object"})
+  if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
+    string message = if parsedMerge.isErr() then "could not prepare the sync" else (parsedMerge.unwrap().assert(object).error ?? "could not prepare the sync").toStr()
+    c.json(409, {ok: false, error: message, code: "sync_unavailable"})
+    return
+  )
+  c.json(200, {
+    ok: true,
+    merge: parsedMerge.unwrap(),
+    targetProjectId: project.id,
+    sourceProjectId: original.id,
+    sourceTitle: original.title,
+    sourceHead: originalHead,
+    targetHead: projectHead,
+    expectedHead: projectHead
+  })
+)

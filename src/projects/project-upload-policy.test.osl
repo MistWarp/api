@@ -125,6 +125,38 @@ testing.assert(isRefused(pullMergeRefusal(branch, openPull, "p2")), "a pull into
 testing.assert(isRefused(pullMergeRefusal(branch, {}, "p1")), "a missing pull cannot merge")
 testing.assert(isRefused(pullMergeRefusal(request(), openPull, "p1")), "a merge without a pull id or branches is refused")
 
+UploadRequest pullFromRemix = request()
+pullFromRemix.pullId = "1"
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB)), "older clients that send no remix head merge the live head")
+pullFromRemix.mergeSourceHead = headB
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB)), "the remix head the merge was prepared from can merge")
+testing.assert(pullSourceHeadRefusal(pullFromRemix, headA).body.code == "pull_head_changed", "a remix that moved after preparing stops the merge")
+
+UploadRequest sync = request()
+testing.assert(!isRemixSync(sync) and !isRefused(remixSyncRequestRefusal(sync)), "ordinary saves are not syncs")
+sync.syncHead = headB
+testing.assert(isRemixSync(sync), "an original head makes a sync with the original")
+testing.assert(remixSyncRequestRefusal(sync).body.code == "head_changed", "a sync must name the remix head it was prepared from")
+sync.expectedHead = headA
+testing.assert(!isRefused(remixSyncRequestRefusal(sync)), "a sync with both heads can continue")
+testing.assert(liveContributorRefusal(sync, false).status == 403, "live contributors cannot sync a remix")
+testing.assert(!isRefused(liveContributorRefusal(sync, true)), "maintainers can sync a remix")
+testing.assert(!isRefused(remixSyncHeadRefusal(sync, headB)), "an unchanged original head can sync")
+testing.assert(remixSyncHeadRefusal(sync, headA).body.code == "original_changed", "a moved original head stops the sync")
+testing.assert(isRefused(remixSyncHeadRefusal(sync, "")), "an original without history stops the sync")
+UploadRequest syncAndPull = request()
+syncAndPull.syncHead = headB
+syncAndPull.expectedHead = headA
+syncAndPull.pullId = "3"
+testing.assert(remixSyncRequestRefusal(syncAndPull).status == 400, "a sync cannot also merge a pull request")
+UploadRequest syncAndReplace = request()
+syncAndReplace.syncHead = headB
+syncAndReplace.expectedHead = headA
+syncAndReplace.replaceHistory = true
+testing.assert(isRefused(remixSyncRequestRefusal(syncAndReplace)) and isRefused(staleUploadRefusal(syncAndReplace, {edited: 1}, headA)), "a sync cannot replace history")
+testing.assert(remixSyncCommitMessage("Meowing Simulator") == "Merge changes from Meowing Simulator", "sync commits name the original")
+testing.assert(remixSyncCommitMessage("  ") == "Merge changes from the original project", "untitled originals get a generic message")
+
 HistoryIdentity fresh = historyIdentity({id: "p1", remixParent: null})
 testing.assert(fresh.projectId == "p1" and fresh.remixParent == "" and fresh.baseCommit == "" and fresh.branch == "main", "missing identity fields fall back")
 HistoryIdentity forked = historyIdentity({id: "p2", remixParent: "p1", remixBaseCommit: headA, gitBranch: "dev"})

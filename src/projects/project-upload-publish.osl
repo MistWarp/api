@@ -119,7 +119,7 @@ def projectWithUploadHistory(object project) object (
 )
 
 def completeUploadPull(object project, UploadRequest request, string username) Refusal (
-  if request.pullId != "" and !completeNativePull(project, request.pullId, request.expectedHead, username) (
+  if request.pullId != "" and !completeNativePull(project, request.pullId, request.expectedHead, request.mergeSourceHead, username) (
     return refuseWithBody(409, {ok: false, error: "the project saved, but the pull request could not be closed", code: "pull_not_closed"})
   )
   return noRefusal()

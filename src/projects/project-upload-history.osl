@@ -83,12 +83,26 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
   object mergeSource = project
   string mergeSourceHead = request.mergeSourceHead
   string mergeTargetHead = request.mergeTargetHead
+  string mergeMessage = mergeCommitMessage(request, branchMerge)
   if branchMerge (
     Refusal branchChanged = branchMergeRefusal(request, projectBranchHead(project, request.mergeSourceBranch), projectBranchHead(project, request.mergeTargetBranch))
     if isRefused(branchChanged) (
       return branchChanged
     )
     history.baseHead = mergeTargetHead
+  ) else if isRemixSync(request) (
+    object? original = loadRemixSyncOriginal(project)
+    if original == null (
+      return refuse(404, "the original project was not found")
+    )
+    Refusal originalChanged = remixSyncHeadRefusal(request, projectGitHead(original))
+    if isRefused(originalChanged) (
+      return originalChanged
+    )
+    mergeSource = original
+    mergeSourceHead = request.syncHead
+    mergeTargetHead = history.currentHead
+    mergeMessage = remixSyncCommitMessage((original.title ?? "").toStr())
   ) else (
     object mergePull = pullDocument(project.id.toStr(), request.pullId)
     Refusal pullClosed = pullMergeRefusal(request, mergePull, project.id.toStr())
@@ -100,7 +114,13 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
       return refuse(404, "merge source project not found")
     )
     mergeSource = mergeSourceResult.project.assert(object)
-    mergeSourceHead = mergePull.headCommit.toStr()
+    string liveSourceHead = livePullHead(mergePull, mergeSource)
+    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead)
+    if isRefused(sourceMoved) (
+      return sourceMoved
+    )
+    mergeSourceHead = liveSourceHead
+    request.mergeSourceHead = liveSourceHead
     mergeTargetHead = history.currentHead
   )
   if !isSafeHistoryArchive(history.mergeTree, archive, false) (
@@ -118,7 +138,7 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
   number mergeTimestamp = timestamp
   string mergeJson = ""
   if mergeReady (
-    mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, mergeBranch, uploader, mergeCommitMessage(request, branchMerge), mergeTimestamp / 1000)
+    mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, mergeBranch, uploader, mergeMessage, mergeTimestamp / 1000)
   )
   object merged = parsedGeneratedHistory(mergeJson)
   if !mergeReady or merged.len == 0 (

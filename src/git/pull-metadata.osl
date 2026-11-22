@@ -101,3 +101,18 @@ def canonicalHistoryHead(object metadata) string (
   )
   return ""
 )
+
+def livePullHeadFrom(object pull, string branchHead, string currentBranch, string currentHead) string (
+  string stored = (pull.headCommit ?? "").toStr()
+  if (pull.state ?? "").toStr() != "open" (
+    return stored
+  )
+  if branchHead != "" (
+    return branchHead
+  )
+  string sourceBranch = (pull.sourceBranch ?? "main").toStr()
+  if currentHead != "" and sourceBranch == currentBranch (
+    return currentHead
+  )
+  return stored
+)

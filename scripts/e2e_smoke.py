@@ -1,4 +1,5 @@
 import argparse
+import base64
 import concurrent.futures
 import difflib
 import gzip
@@ -963,6 +964,99 @@ def concurrent_flow(server, step, steps, ids):
     }})
 
 
+def history_commit(server, ids, alias, who, name, content):
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, alias), who))
+    tree = history.tree_with(history.tree_of(history.head()), name, content.encode())
+    head = history.commit(tree, [history.head()], "Change " + name)
+    return head, history.archive(head, False), json.dumps(history.metadata(head, False))
+
+
+def project_head(server, ids, alias, who):
+    project = server.call("GET", "/v1/projects/" + real_id(ids, alias), who)[1]
+    return str(project.get("gitHead") or (project.get("project") or {}).get("gitHead") or ""), project.get("remixFrom") or (project.get("project") or {}).get("remixFrom") or {}
+
+
+def synced_tree(server, ids, alias, who, head, merge):
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, alias), who))
+    files = history.files(history.tree_of(head))
+    for change in merge.get("changes") or []:
+        if change.get("deleted"):
+            files.pop(change["path"], None)
+        else:
+            files[change["path"]] = base64.b64decode(change.get("content") or "")
+    return zip_files(files)
+
+
+def remix_sync_flow(server, step, steps, ids):
+    plain = sb3_archive(project_with_costumes([]))
+    status, created = step("sync original create", "POST", "/v1/projects", "sam", {"title": "Sync original"})
+    ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<sync-original>"
+    original = "/v1/projects/<sync-original>"
+    step("sync original first save", "POST", original + "/upload", "sam", form=({}, {"project": plain}))
+    step("sync original share", "POST", original + "/visibility", "sam", {"visibility": "public"})
+    status, remixed = step("sync remix create", "POST", original + "/remix", "alice", {})
+    ids[str(remixed.get("id", "") or (remixed.get("project") or {}).get("id", "")) if isinstance(remixed, dict) else ""] = "<sync-remix>"
+    remix = "/v1/projects/<sync-remix>"
+    step("sync with nothing new", "POST", remix + "/remix/sync", "alice", {})
+
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "from the original")
+    step("sync original change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    first, archive, metadata = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "first remix change")
+    step("sync remix change", "POST", remix + "/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    status, pull = step("sync remix pull", "POST", original + "/pulls", "alice", {"sourceProjectId": real_id(ids, "<sync-remix>"), "title": "Remix notes", "body": ""})
+    pull_path = original + "/pulls/" + str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    second, archive, metadata = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "second remix change")
+    step("sync remix second change", "POST", remix + "/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    status, opened = step("sync pull after a new remix commit", "GET", pull_path, "sam")
+    status, diff = step("sync pull diff after a new remix commit", "GET", pull_path + "/diff?view=changes", "sam")
+    status, remix_project = server.call("GET", "/v1/projects/" + real_id(ids, "<sync-remix>"), "alice")[:2]
+    remix_from = remix_project.get("remixFrom") or (remix_project.get("project") or {}).get("remixFrom") or {}
+    steps.append({"step": "sync pull follows the remix", "status": 0, "body": {
+        "pullHeadIsLatest": (opened.get("pull") or {}).get("headCommit") == second,
+        "diffHeadIsLatest": ((diff.get("pull") or {}).get("headCommit") == second) if isinstance(diff, dict) else False,
+        "firstWasRecorded": (pull.get("pull") or {}).get("headCommit") == first,
+        "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
+    }})
+
+    step("sync by a stranger", "POST", remix + "/remix/sync", "bob", {})
+    step("sync a project that is not a remix", "POST", original + "/remix/sync", "sam", {})
+    step("sync signed out", "POST", remix + "/remix/sync", None, {})
+    status, prepared = step("sync prepare", "POST", remix + "/remix/sync", "alice", {})
+    merge = prepared.get("merge") or {} if isinstance(prepared, dict) else {}
+    steps.append({"step": "sync prepared heads", "status": 0, "body": {
+        "sourceIsOriginal": prepared.get("sourceHead") == upstream, "targetIsRemix": prepared.get("expectedHead") == second,
+        "paths": sorted(change.get("path") for change in merge.get("changes") or []),
+    }})
+    tree = synced_tree(server, ids, "<sync-remix>", "alice", second, merge)
+    step("sync upload without the remix head", "POST", remix + "/upload", "alice", form=({"syncHead": upstream}, {"project": plain, "mergeTree": tree}))
+    step("sync upload with a moved original", "POST", remix + "/upload", "alice", form=({"syncHead": ZERO_HEAD, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    step("sync upload by a stranger", "POST", remix + "/upload", "bob", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    step("sync upload with a pull", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second, "pullId": "1"}, {"project": plain, "mergeTree": tree}))
+    step("sync upload", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    synced, remix_from = project_head(server, ids, "<sync-remix>", "alice")
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
+    parents = [line.decode()[len("parent "):] for line in history.read(synced)[1].split(b"\n") if line.startswith(b"parent ")]
+    message = history.read(synced)[1].split(b"\n\n", 1)[1].decode().strip()
+    files = history.files(history.tree_of(synced))
+    steps.append({"step": "sync result", "status": 0, "body": {
+        "parentsAreRemixThenOriginal": parents == [second, upstream], "message": message,
+        "hasOriginalFile": files.get("original-notes.txt") == b"from the original",
+        "keepsRemixFile": files.get("remix-notes.txt") == b"second remix change",
+        "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
+    }})
+    step("sync again", "POST", remix + "/remix/sync", "alice", {})
+
+    status, merged = step("sync pull merge after syncing", "POST", pull_path + "/merge", "sam", {})
+    status, closed = step("sync pull after merging", "GET", pull_path, "sam")
+    original_head = project_head(server, ids, "<sync-original>", "sam")[0]
+    steps.append({"step": "sync pull merge result", "status": 0, "body": {
+        "fastForwarded": isinstance(merged, dict) and merged.get("merged") is True,
+        "recordsMergedHead": (closed.get("pull") or {}).get("headCommit") == synced,
+        "originalHasRemixFile": History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).files(
+            History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).tree_of(original_head)).get("remix-notes.txt") == b"second remix change",
+    }})
+
+
 def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
         return {("<hex>" if HEX.match(k) else k): normalize(v, ids, k, key) for k, v in sorted(value.items())}
@@ -1060,6 +1154,7 @@ def run(binary, sb3, keep):
         slow_rotur_flow(server, step, steps, ids)
         slow_ledger_flow(server, step, steps, ids)
         locks_flow(server, step, steps, ids)
+        remix_sync_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):

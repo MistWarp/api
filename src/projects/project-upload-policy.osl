@@ -11,6 +11,7 @@ class UploadRequest (
   string mergeTargetBranch = ""
   string mergeSourceHead = ""
   string mergeTargetHead = ""
+  string syncHead = ""
   string git = ""
   string extensions = ""
   string workspaceToken = ""
@@ -46,7 +47,7 @@ def liveContributorRefusal(UploadRequest request, boolean canEdit) Refusal (
   if canEdit (
     return noRefusal()
   )
-  if request.expectedEdited == "" or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "" or request.replaceHistory (
+  if request.expectedEdited == "" or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "" or request.syncHead != "" or request.replaceHistory (
     return refuse(403, "live contributors can save the current project; history and publishing require a maintainer")
   )
   return noRefusal()
@@ -59,7 +60,7 @@ def staleUploadRefusal(UploadRequest request, object project, string currentHead
   if request.expectedHead != "" and request.expectedHead != currentHead (
     return refuseWithBody(409, {ok: false, error: "the project changed while you were merging", code: "head_changed", currentHead: currentHead})
   )
-  if request.replaceHistory and (request.expectedHead != currentHead or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "") (
+  if request.replaceHistory and (request.expectedHead != currentHead or request.restoreCommit != "" or request.pullId != "" or request.mergeSourceBranch != "" or request.syncHead != "") (
     return refuseWithBody(409, {ok: false, error: "history replacement requires the current saved head and a full workspace", code: "head_changed"})
   )
   return noRefusal()
@@ -131,6 +132,42 @@ def isBranchMerge(UploadRequest request) boolean (
 def branchMergeRefusal(UploadRequest request, string latestSourceHead, string latestTargetHead) Refusal (
   if request.mergeSourceBranch == request.mergeTargetBranch or latestSourceHead == "" or latestTargetHead == "" or latestSourceHead != request.mergeSourceHead or latestTargetHead != request.mergeTargetHead (
     return refuseWithBody(409, {ok: false, error: "a branch changed while this merge was processing", code: "branch_head_changed"})
+  )
+  return noRefusal()
+)
+
+def isRemixSync(UploadRequest request) boolean (
+  return request.syncHead != ""
+)
+
+def remixSyncRequestRefusal(UploadRequest request) Refusal (
+  if !isRemixSync(request) (
+    return noRefusal()
+  )
+  if request.pullId != "" or request.mergeSourceBranch != "" or request.restoreCommit != "" or request.replaceHistory (
+    return refuse(400, "a sync with the original project cannot be combined with another merge")
+  )
+  if request.expectedHead == "" (
+    return refuseWithBody(409, {ok: false, error: "refresh the project before syncing it with the original", code: "head_changed"})
+  )
+  return noRefusal()
+)
+
+def remixSyncHeadRefusal(UploadRequest request, string latestOriginalHead) Refusal (
+  if latestOriginalHead == "" or latestOriginalHead != request.syncHead (
+    return refuseWithBody(409, {ok: false, error: "the original project changed while this sync was processing", code: "original_changed"})
+  )
+  return noRefusal()
+)
+
+def remixSyncCommitMessage(string originalTitle) string (
+  string title = originalTitle.strip()
+  return if title == "" then "Merge changes from the original project" else "Merge changes from " ++ title
+)
+
+def pullSourceHeadRefusal(UploadRequest request, string liveSourceHead) Refusal (
+  if request.mergeSourceHead != "" and request.mergeSourceHead != liveSourceHead (
+    return refuseWithBody(409, {ok: false, error: "the remix changed while this merge was processing", code: "pull_head_changed"})
   )
   return noRefusal()
 )

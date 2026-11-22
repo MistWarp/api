@@ -23,3 +23,11 @@ object staleProject = {
 testing.assert(canonicalHistoryHead(staleProject) == branchHead, "the current branch tip wins over a stale stored head")
 testing.assert(canonicalHistoryHead({head: staleHead, branch: "main", graph: {branchLogs: [{branch: "main", oids: [branchHead]}]}}) == branchHead, "uploaded history uses its branch tip")
 testing.assert(canonicalHistoryHead({gitHead: staleHead}) == staleHead, "stored heads remain the fallback without branch metadata")
+
+object openPull = {state: "open", headCommit: staleHead, sourceBranch: "main"}
+testing.assert(livePullHeadFrom(openPull, branchHead, "main", branchHead) == branchHead, "open pulls follow the source branch tip")
+testing.assert(livePullHeadFrom(openPull, "", "main", branchHead) == branchHead, "open pulls fall back to the current head of the same branch")
+testing.assert(livePullHeadFrom(openPull, "", "other", branchHead) == staleHead, "a missing source branch keeps the recorded head")
+testing.assert(livePullHeadFrom({state: "merged", headCommit: staleHead, sourceBranch: "main"}, branchHead, "main", branchHead) == staleHead, "merged pulls keep the head they merged")
+testing.assert(livePullHeadFrom({state: "closed", headCommit: staleHead}, branchHead, "main", branchHead) == staleHead, "closed pulls keep their recorded head")
+testing.assert(livePullHeadFrom({state: "open", headCommit: staleHead}, "", "main", branchHead) == branchHead, "legacy pulls without a source branch use main")
