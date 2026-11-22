@@ -546,6 +546,7 @@ def handleGetPull(*serve.Context c) (
   object target = targetResult.project.assert(object)
   response.canClose = canClosePull(pull, target, c)
   response.canInspect = canInspectPull(pull, target, c)
+  response.baseBranchMissing = pullTargetBranchRefusalCode(pullTargetBranch(pull), projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing"
   if response.canInspect == true (
     auto liveSourceResult = loadProject(pull.sourceProjectId.toStr())
     if liveSourceResult.ok (
@@ -741,8 +742,13 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
   if pull.len == 0 (
     return false
   )
-  boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha or projectRecordsCommit(project, sha))
-  boolean matchingSource = pull.sourceProjectId.toStr() == project.id.toStr() and (pull.headCommit.toStr() == sha or projectRecordsCommit(project, sha))
+  boolean isTarget = pull.targetProjectId.toStr() == project.id.toStr()
+  boolean isSource = pull.sourceProjectId.toStr() == project.id.toStr()
+  boolean matchingTarget = isTarget and ((pull.baseCommit ?? "").toStr() == sha or (pull.targetHead ?? "").toStr() == sha or projectRecordsCommit(project, sha))
+  boolean matchingSource = isSource and ((pull.headCommit ?? "").toStr() == sha or projectRecordsCommit(project, sha) or livePullHead(pull, project) == sha)
+  if isTarget and !matchingTarget (
+    matchingTarget = isLivePullBase(pull, project, sha)
+  )
   if !matchingTarget and !matchingSource (
     return false
   )
@@ -752,6 +758,23 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
   )
   object target = targetResult.project.assert(object)
   return canInspectPull(pull, target, c)
+)
+
+def isLivePullBase(object pull, object target, string sha) boolean (
+  if (pull.state ?? "").toStr() != "open" (
+    return false
+  )
+  auto sourceResult = loadProject((pull.sourceProjectId ?? "").toStr())
+  if !sourceResult.ok (
+    return false
+  )
+  object source = sourceResult.project.assert(object)
+  string targetWorkspacePath = cachedProjectWorkspacePath(target)
+  string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+  if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+    return false
+  )
+  return livePullBase(pull, targetWorkspacePath, pullTargetHead(pull, target), sourceWorkspacePath, livePullHead(pull, source)) == sha
 )
 
 def pullInspectionJSON(string view, string inline, string targetWorkspacePath, string baseCommit, string sourceWorkspacePath, string headCommit) string (

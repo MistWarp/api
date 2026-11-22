@@ -41,6 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
+CHECK_STEPS = {"sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1210,7 +1211,14 @@ def main():
             with open(os.path.join(args.out, os.path.basename(binary) + ".json"), "w") as handle:
                 handle.write(text)
         failures = [s for s in steps if s["status"] >= 500 and s["step"] not in EXPECTED_ERRORS]
-        print("%s: %d steps, %d server errors" % (binary, len(steps), len(failures)))
+        failed_checks = [s for s in steps if s["step"] in CHECK_STEPS and any(value is False for value in (s.get("body") or {}).values())]
+        missing_checks = CHECK_STEPS - {s["step"] for s in steps}
+        print("%s: %d steps, %d server errors, %d failed checks" % (binary, len(steps), len(failures), len(failed_checks) + len(missing_checks)))
+        for record in failed_checks:
+            print("  check failed: %s %s" % (record["step"], json.dumps(record.get("body"), sort_keys=True)))
+        for name in sorted(missing_checks):
+            print("  check missing: %s" % name)
+        failures = failures + failed_checks + [{"step": name} for name in missing_checks]
         for record in steps:
             print("  %3d %s" % (record["status"], record["step"]))
         broken = broken or bool(failures)
