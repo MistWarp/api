@@ -110,6 +110,7 @@ func rememberMergeBase(key, base string) {
 	mergeBaseCacheMu.Lock()
 	defer mergeBaseCacheMu.Unlock()
 	if _, ok := mergeBaseCache[key]; ok {
+		mergeBaseCache[key] = base
 		return
 	}
 	if len(mergeBaseOrder) >= mergeBaseCacheLimit {

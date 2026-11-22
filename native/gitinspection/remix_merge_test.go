@@ -200,4 +200,13 @@ func TestRemixMergeBaseIsRememberedForTheSameHeads(t *testing.T) {
 	if stale := RemixMergeBase(remixPath, own, originalPath, missingHead); strings.Contains(stale, `"ok":true`) {
 		t.Fatalf("a cached base missing from the archives was trusted: %s", stale)
 	}
+	mergeBaseCacheMu.Lock()
+	mergeBaseCache[own+":"+upstream] = strings.Repeat("f", 40)
+	mergeBaseCacheMu.Unlock()
+	if healed := RemixMergeBase(remixPath, own, originalPath, upstream); !strings.Contains(healed, base) {
+		t.Fatalf("a stale cached base changed the answer: %s", healed)
+	}
+	if cached, _ := cachedMergeBase(own + ":" + upstream); cached != base {
+		t.Fatalf("a stale cached base was not replaced: %q", cached)
+	}
 }

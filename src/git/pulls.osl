@@ -703,7 +703,7 @@ def handleEditPullComment(*serve.Context c) (
 )
 
 def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) boolean (
-  if !sourcePolicyAllowsViewer(project, c) (
+  if !sourcePolicyAllowsViewer(project, c) or !contextBool(c, "authenticated") (
     return false
   )
   array matches = []
@@ -725,7 +725,7 @@ def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) bo
       auto targetResult = loadProject(pull.targetProjectId.toStr())
       if targetResult.ok (
         object target = targetResult.project.assert(object)
-        if canInspectPull(pull, target, c) (
+        if canInspectPull(pull, target, c) and (canEditProject(target, c) or isPullSourceOwner(pull, c)) (
           return true
         )
       )
@@ -744,20 +744,27 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
   )
   boolean isTarget = pull.targetProjectId.toStr() == project.id.toStr()
   boolean isSource = pull.sourceProjectId.toStr() == project.id.toStr()
-  boolean matchingTarget = isTarget and ((pull.baseCommit ?? "").toStr() == sha or (pull.targetHead ?? "").toStr() == sha or projectRecordsCommit(project, sha))
-  boolean matchingSource = isSource and ((pull.headCommit ?? "").toStr() == sha or projectRecordsCommit(project, sha) or livePullHead(pull, project) == sha)
-  if isTarget and !matchingTarget (
-    matchingTarget = isLivePullBase(pull, project, sha)
-  )
-  if !matchingTarget and !matchingSource (
+  if !isTarget and !isSource (
     return false
   )
-  auto targetResult = loadProject(pull.targetProjectId.toStr())
-  if !targetResult.ok (
+  object target = project
+  if !isTarget (
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    if !targetResult.ok (
+      return false
+    )
+    target = targetResult.project.assert(object)
+  )
+  if !canInspectPull(pull, target, c) (
     return false
   )
-  object target = targetResult.project.assert(object)
-  return canInspectPull(pull, target, c)
+  if pullCommitRecordedFor(pull, isTarget, isSource, sha) (
+    return true
+  )
+  if isSource (
+    return livePullHead(pull, project) == sha
+  )
+  return isLivePullBase(pull, project, sha)
 )
 
 def isLivePullBase(object pull, object target, string sha) boolean (

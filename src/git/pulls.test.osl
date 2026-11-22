@@ -42,6 +42,9 @@ def livePullHeadFrom(object pull, string sourceBranch, string branchHead, string
 def pullTargetBranchRefusalCode(string targetBranch, string currentBranch, array branchNames) string (
   return ""
 )
+def pullCommitRecordedFor(object pull, boolean isTarget, boolean isSource, string sha) boolean (
+  return false
+)
 def pullSourceBranch(object pull, array branchNames) string (
   return (pull.sourceBranch ?? "main").toStr()
 )

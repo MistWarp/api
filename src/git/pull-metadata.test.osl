@@ -47,3 +47,13 @@ testing.assert(pullTargetBranchRefusalCode("", "main", ["main"]) == "", "pulls w
 testing.assert(pullPreparedSourceHead({headCommit: staleHead, preparedSourceHead: branchHead}) == branchHead, "older clients merge the head the server last prepared")
 testing.assert(pullPreparedSourceHead({headCommit: staleHead}) == staleHead, "without a prepared head the recorded head is used")
 testing.assert(pullPreparedSourceHead({headCommit: staleHead, preparedSourceHead: ""}) == staleHead, "an empty prepared head falls back to the recorded head")
+
+object readablePull = {baseCommit: "1" * 40, targetHead: "2" * 40, headCommit: "3" * 40, preparedSourceHead: "4" * 40}
+testing.assert(pullCommitRecordedFor(readablePull, true, false, "1" * 40), "the target side serves the recorded base")
+testing.assert(pullCommitRecordedFor(readablePull, true, false, "2" * 40), "the target side serves the recorded target head")
+testing.assert(!pullCommitRecordedFor(readablePull, true, false, "3" * 40), "the target side does not serve the source head")
+testing.assert(pullCommitRecordedFor(readablePull, false, true, "3" * 40), "the source side serves the recorded head")
+testing.assert(pullCommitRecordedFor(readablePull, false, true, "4" * 40), "the source side serves the prepared head")
+testing.assert(!pullCommitRecordedFor(readablePull, false, true, "1" * 40), "the source side does not serve the target base")
+testing.assert(!pullCommitRecordedFor(readablePull, true, true, "5" * 40), "any other commit is not served")
+testing.assert(!pullCommitRecordedFor({}, true, true, ""), "an empty sha is never served")

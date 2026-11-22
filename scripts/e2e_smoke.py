@@ -41,7 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty"}
+CHECK_STEPS = {"sync pull reads stay inside the pull", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1056,6 +1056,24 @@ def remix_sync_flow(server, step, steps, ids):
         "headIsSynced": synced_diff_pull.get("headCommit") == synced,
     }})
 
+    pull_index = str((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else ""
+    remix_id, original_id = real_id(ids, "<sync-remix>"), real_id(ids, "<sync-original>")
+
+    def pull_read(sha, who):
+        path = "/v1/projects/%s/commits/%s/file?path=remix-notes.txt&pull=%s&pullTarget=%s" % (remix_id, sha, pull_index, original_id)
+        return server.call("GET", path, who)[0]
+
+    def pull_archive(who):
+        return server.call("GET", "/v1/projects/%s/workspace.mwp?pull=%s" % (remix_id, pull_index), who)[0]
+
+    steps.append({"step": "sync pull reads stay inside the pull", "status": 0, "body": {
+        "recordedHeadReadable": pull_read(first, None) == 200,
+        "liveHeadReadable": pull_read(synced, None) == 200,
+        "archiveRefusedSignedOut": pull_archive(None) == 404,
+        "archiveRefusedToOtherViewers": pull_archive("bob") == 404,
+        "archiveAllowedToTheOwner": pull_archive("sam") == 200,
+    }})
+
     status, merged = step("sync pull merge after syncing", "POST", pull_path + "/merge", "sam", {})
     status, closed = step("sync pull after merging", "GET", pull_path, "sam")
     original_head = project_head(server, ids, "<sync-original>", "sam")[0]
@@ -1064,6 +1082,10 @@ def remix_sync_flow(server, step, steps, ids):
         "recordsMergedHead": (closed.get("pull") or {}).get("headCommit") == synced,
         "originalHasRemixFile": History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).files(
             History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).tree_of(original_head)).get("remix-notes.txt") == b"second remix change",
+    }})
+    steps.append({"step": "sync merged pull reads stay inside the pull", "status": 0, "body": {
+        "mergedHeadReadable": pull_read(synced, None) == 200,
+        "otherRemixCommitRefused": pull_read(second, None) == 404,
     }})
 
     history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))

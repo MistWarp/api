@@ -1,4 +1,5 @@
 export {
+  pullCommitRecordedFor,
   canonicalHistoryHead,
   pullPreparedSourceHead
 }
@@ -113,6 +114,16 @@ def pullTargetBranchRefusalCode(string targetBranch, string currentBranch, array
     )
   )
   return "target_branch_missing"
+)
+
+def pullCommitRecordedFor(object pull, boolean isTarget, boolean isSource, string sha) boolean (
+  if sha == "" (
+    return false
+  )
+  if isTarget and ((pull.baseCommit ?? "").toStr() == sha or (pull.targetHead ?? "").toStr() == sha) (
+    return true
+  )
+  return isSource and ((pull.headCommit ?? "").toStr() == sha or (pull.preparedSourceHead ?? "").toStr() == sha)
 )
 
 def pullPreparedSourceHead(object pull) string (
