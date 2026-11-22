@@ -395,7 +395,7 @@ class History:
         lines += [b"author " + SMOKE_AUTHOR, b"committer " + SMOKE_AUTHOR]
         return self.add("commit", b"\n".join(lines) + b"\n\n" + message.encode() + b"\n")
 
-    def archive(self, head, delta, extra=None):
+    def archive(self, head, delta, extra=None, worktree=None):
         refs = dict(self.refs) if not delta else {}
         refs[self.branch] = head
         manifest = self.metadata(head, delta)
@@ -410,6 +410,8 @@ class History:
             objects = dict(self.added) if delta else dict(self.objects, **self.added)
             for oid, compressed in sorted(objects.items()):
                 archive.writestr(".git/objects/%s/%s" % (oid[:2], oid[2:]), compressed)
+            for name, content in sorted((worktree or {}).items()):
+                archive.writestr(name, content)
         return buffer.getvalue()
 
     def metadata(self, head, delta):
@@ -1055,6 +1057,20 @@ def remix_sync_flow(server, step, steps, ids):
         "originalHasRemixFile": History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).files(
             History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).tree_of(original_head)).get("remix-notes.txt") == b"second remix change",
     }})
+
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
+    worktree = dict(history.files(history.tree_of(history.head())), **{"remix-notes.txt": b"not committed yet"})
+    manifest = dict(history.metadata(history.head(), False), worktree=True)
+    step("sync remix save without a commit", "POST", remix + "/upload", "alice", form=({"git": json.dumps(manifest)}, {
+        "project": plain, "workspace": history.archive(history.head(), False, {"worktree": True}, worktree),
+    }))
+    status, commits = step("sync remix uncommitted state", "GET", remix + "/commits", "alice")
+    steps.append({"step": "sync remix is dirty", "status": 0, "body": {"uncommitted": bool(isinstance(commits, dict) and commits.get("uncommitted"))}})
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
+    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    head = project_head(server, ids, "<sync-remix>", "alice")[0]
+    step("sync with uncommitted changes", "POST", remix + "/remix/sync", "alice", {})
+    step("sync upload with uncommitted changes", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}))
 
 
 def normalize(value, ids, key="", parent=""):

@@ -48,6 +48,9 @@ def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest reque
   if !canSyncRemixFrom(project, original, c) (
     return refuse(403, "only the remix's maintainers can sync it, and only while they can see inside the original")
   )
+  if remixHasUncommittedChanges(project) (
+    return refuseWithBody(409, {ok: false, error: "commit the changes saved in this remix before syncing it with the original", code: "uncommitted_changes"})
+  )
   return noRefusal()
 )
 

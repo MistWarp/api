@@ -1,7 +1,12 @@
 export {
   canSyncRemixFrom,
-  loadRemixSyncOriginal
+  loadRemixSyncOriginal,
+  remixHasUncommittedChanges
 }
+
+def remixHasUncommittedChanges(object project) boolean (
+  return projectUncommittedSummary(project).len > 0
+)
 
 def loadRemixSyncOriginal(object project) object? (
   string parentId = if project.contains("remixParent") and project.remixParent != null then project.remixParent.toStr() else ""
@@ -44,6 +49,10 @@ def handlePrepareRemixSync(*serve.Context c) (
   string originalHead = projectGitHead(original)
   if projectHead == "" or originalHead == "" (
     c.json(409, {ok: false, error: "both projects need MistWarp history before they can be synced", code: "sync_history_unavailable"})
+    return
+  )
+  if remixHasUncommittedChanges(project) (
+    c.json(409, {ok: false, error: "commit the changes saved in this remix before syncing it with the original", code: "uncommitted_changes"})
     return
   )
   string projectWorkspacePath = cachedProjectWorkspacePath(project)
