@@ -115,10 +115,15 @@ func PrepareMerge(targetPath, targetHead, sourcePath, sourceHead, baseHead strin
 		return prepareMergeResult{Error: "source workspace archive is unavailable"}
 	}
 	defer sourceReader.Close()
-	return prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead)
+	return prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead, mergeLabels{ours: "target", theirs: "pull request"})
 }
 
-func prepareArchiveMerge(target archive, targetHead string, source archive, sourceHead, baseHead string) prepareMergeResult {
+type mergeLabels struct {
+	ours   string
+	theirs string
+}
+
+func prepareArchiveMerge(target archive, targetHead string, source archive, sourceHead, baseHead string, labels mergeLabels) prepareMergeResult {
 	baseFiles, ok := filesAtCommit(target, baseHead)
 	if !ok {
 		return prepareMergeResult{Error: "pull request base is unavailable"}
@@ -177,7 +182,7 @@ func prepareArchiveMerge(target archive, targetHead string, source archive, sour
 			result.Conflicts = append(result.Conflicts, path)
 			continue
 		}
-		merged, mergeErr := diff3.Merge(bytes.NewReader(oursContent), bytes.NewReader(baseContent), bytes.NewReader(theirsContent), true, "target", "pull request")
+		merged, mergeErr := diff3.Merge(bytes.NewReader(oursContent), bytes.NewReader(baseContent), bytes.NewReader(theirsContent), true, labels.ours, labels.theirs)
 		if mergeErr != nil {
 			return prepareMergeResult{Error: "could not merge text file"}
 		}
@@ -223,7 +228,7 @@ func PrepareBranchMergeJSON(path, targetHead, sourceHead string) string {
 	return string(encoded)
 }
 
-func PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead string) prepareMergeResult {
+func PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead, oursLabel, theirsLabel string) prepareMergeResult {
 	targetReader, target, err := openArchive(targetPath)
 	if err != nil {
 		return prepareMergeResult{Error: "target workspace archive is unavailable"}
@@ -241,14 +246,14 @@ func PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead string) pr
 	if baseHead == sourceHead {
 		return prepareMergeResult{OK: true, BaseHead: baseHead, AlreadyMerged: true, Changes: []mergeChange{}, Conflicts: []string{}}
 	}
-	result := prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead)
+	result := prepareArchiveMerge(target, targetHead, source, sourceHead, baseHead, mergeLabels{ours: oursLabel, theirs: theirsLabel})
 	result.BaseHead = baseHead
 	result.FastForward = result.OK && baseHead == targetHead
 	return result
 }
 
-func PrepareRemixMergeJSON(targetPath, targetHead, sourcePath, sourceHead string) string {
-	encoded, _ := json.Marshal(PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead))
+func PrepareRemixMergeJSON(targetPath, targetHead, sourcePath, sourceHead, oursLabel, theirsLabel string) string {
+	encoded, _ := json.Marshal(PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead, oursLabel, theirsLabel))
 	return string(encoded)
 }
 

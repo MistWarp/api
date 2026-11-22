@@ -36,7 +36,7 @@ func TestPrepareRemixMergeBringsOriginalChangesIntoRemix(t *testing.T) {
 	delete(remix.objects, upstream)
 	own := remix.fileCommit("ONE\ntwo\nthree\n", base, "Remix")
 
-	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream)
+	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream, "this remix", "original")
 	if !result.OK || result.BaseHead != base || result.AlreadyMerged || result.FastForward || len(result.Conflicts) != 0 || len(result.Changes) != 1 {
 		t.Fatalf("unexpected remix merge result: %#v", result)
 	}
@@ -53,7 +53,7 @@ func TestPrepareRemixMergeMarksFastForward(t *testing.T) {
 	remix.copyFrom(original)
 	upstream := original.fileCommit("two\n", base, "Upstream")
 
-	result := PrepareRemixMerge(remix.write(t), base, original.write(t), upstream)
+	result := PrepareRemixMerge(remix.write(t), base, original.write(t), upstream, "this remix", "original")
 	if !result.OK || !result.FastForward || result.AlreadyMerged || len(result.Changes) != 1 || string(result.Changes[0].Content) != "two\n" {
 		t.Fatalf("expected a fast-forward result: %#v", result)
 	}
@@ -67,7 +67,7 @@ func TestPrepareRemixMergeDetectsAlreadyMerged(t *testing.T) {
 	remix.copyFrom(original)
 	own := remix.fileCommit("three\n", upstream, "Remix")
 
-	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream)
+	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream, "this remix", "original")
 	if !result.OK || !result.AlreadyMerged || result.BaseHead != upstream {
 		t.Fatalf("expected an already-merged result: %#v", result)
 	}
@@ -79,7 +79,7 @@ func TestPrepareRemixMergeRejectsUnrelatedHistory(t *testing.T) {
 	remix := newTestRepository()
 	own := remix.fileCommit("one\n", "", "Unrelated")
 
-	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream)
+	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream, "this remix", "original")
 	if result.OK || result.Error == "" {
 		t.Fatalf("unrelated histories should not merge: %#v", result)
 	}
@@ -104,7 +104,7 @@ func TestRepairedRemixMergesThroughReconnectedBase(t *testing.T) {
 	if decoded["ok"] != true || decoded["base"] != base {
 		t.Fatalf("expected the reconnected base, got %#v", decoded)
 	}
-	result := PrepareRemixMerge(originalPath, upstream, remixPath, repaired)
+	result := PrepareRemixMerge(originalPath, upstream, remixPath, repaired, "target", "pull request")
 	if !result.OK || result.BaseHead != base || len(result.Changes) != 1 || len(result.Conflicts) != 0 {
 		t.Fatalf("unexpected pull merge result: %#v", result)
 	}
@@ -112,7 +112,7 @@ func TestRepairedRemixMergesThroughReconnectedBase(t *testing.T) {
 	if !strings.Contains(content, "ONE") || !strings.Contains(content, "THREE") {
 		t.Fatalf("the remix change was not merged: %q", content)
 	}
-	stale := PrepareRemixMerge(originalPath, upstream, remixPath, root)
+	stale := PrepareRemixMerge(originalPath, upstream, remixPath, root, "target", "pull request")
 	if stale.OK {
 		t.Fatalf("the unconnected remix root should not merge: %#v", stale)
 	}
@@ -125,5 +125,24 @@ func TestRemixMergeBaseRejectsMissingHeads(t *testing.T) {
 	decoded := decodeResult(t, RemixMergeBase(path, "", path, head))
 	if decoded["ok"] != false {
 		t.Fatalf("a missing head should fail: %#v", decoded)
+	}
+}
+
+func TestPrepareRemixMergeLabelsConflicts(t *testing.T) {
+	original := newTestRepository()
+	base := original.fileCommit("one\nmove 10\nthree\n", "", "Base")
+	upstream := original.fileCommit("one\nmove 20\nthree\n", base, "Upstream")
+	remix := newTestRepository()
+	remix.copyFrom(original)
+	delete(remix.objects, upstream)
+	own := remix.fileCommit("one\nmove 5\nthree\n", base, "Remix")
+
+	result := PrepareRemixMerge(remix.write(t), own, original.write(t), upstream, "this remix", "original")
+	if !result.OK || len(result.Conflicts) != 1 {
+		t.Fatalf("expected one conflict: %#v", result)
+	}
+	content := string(result.Changes[0].Content)
+	if !strings.Contains(content, "<<<<<<< this remix") || !strings.Contains(content, ">>>>>>> original") {
+		t.Fatalf("conflict markers are not labelled: %q", content)
 	}
 }

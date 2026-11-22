@@ -819,7 +819,7 @@ def handleMergePull(*serve.Context c) (
     c.internalError("could not assemble pull request history")
     return
   )
-  string mergeJson = gitinspection.PrepareRemixMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead)
+  string mergeJson = gitinspection.PrepareRemixMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead, "target", "pull request")
   auto parsedMerge = json.parse(mergeJson, {type: "object"})
   if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
     string message = if parsedMerge.isErr() then "the pull request could not be merged on the server" else (parsedMerge.unwrap().assert(object).error ?? "the pull request could not be merged on the server").toStr()

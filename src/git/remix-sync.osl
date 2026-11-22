@@ -61,7 +61,7 @@ def handlePrepareRemixSync(*serve.Context c) (
     c.internalError("could not assemble project history")
     return
   )
-  string mergeJson = gitinspection.PrepareRemixMergeJSON(projectWorkspacePath, projectHead, originalWorkspacePath, originalHead)
+  string mergeJson = gitinspection.PrepareRemixMergeJSON(projectWorkspacePath, projectHead, originalWorkspacePath, originalHead, "this remix", "original")
   auto parsedMerge = json.parse(mergeJson, {type: "object"})
   if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
     string message = if parsedMerge.isErr() then "could not prepare the sync" else (parsedMerge.unwrap().assert(object).error ?? "could not prepare the sync").toStr()
