@@ -38,7 +38,13 @@ def pullTargetBranch(object pull) string (
 def pullTargetHead(object pull, object target) string (
   string branch = pullTargetBranch(pull)
   string branchHead = if branch == "" then "" else projectBranchHead(target, branch)
-  return if branchHead != "" then branchHead else projectGitHead(target)
+  if branchHead != "" (
+    return branchHead
+  )
+  if pullTargetBranchRefusalCode(branch, projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing" (
+    return ""
+  )
+  return projectGitHead(target)
 )
 
 def livePullBase(object pull, string targetWorkspacePath, string targetHead, string sourceWorkspacePath, string sourceHead) string (
@@ -543,14 +549,7 @@ def handleGetPull(*serve.Context c) (
   if response.canInspect == true (
     auto liveSourceResult = loadProject(pull.sourceProjectId.toStr())
     if liveSourceResult.ok (
-      object liveSource = liveSourceResult.project.assert(object)
-      string liveHead = livePullHead(pull, liveSource)
-      response.headCommit = liveHead
-      string targetWorkspacePath = cachedProjectWorkspacePath(target)
-      string sourceWorkspacePath = cachedProjectWorkspacePath(liveSource)
-      if targetWorkspacePath != "" and sourceWorkspacePath != "" (
-        response.baseCommit = livePullBase(pull, targetWorkspacePath, pullTargetHead(pull, target), sourceWorkspacePath, liveHead)
-      )
+      response.headCommit = livePullHead(pull, liveSourceResult.project.assert(object))
     )
   )
   response.canMerge = canEditProject(target, c) and response.canInspect == true
@@ -845,10 +844,6 @@ def handleMergePull(*serve.Context c) (
     c.json(409, branchRefusal)
     return
   )
-  if projectUncommittedSummary(target).len > 0 (
-    c.json(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
-    return
-  )
   string sourceHead = livePullHead(pull, source)
   string targetWorkspacePath = cachedProjectWorkspacePath(target)
   string sourceWorkspacePath = cachedProjectWorkspacePath(source)
@@ -864,6 +859,10 @@ def handleMergePull(*serve.Context c) (
   object merge = prepared
   if (merge.alreadyMerged ?? false) == true (
     closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
+    return
+  )
+  if projectUncommittedSummary(target).len > 0 (
+    c.json(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
     return
   )
   boolean sourceClean = projectUncommittedSummary(source).len == 0
@@ -943,6 +942,10 @@ def closeAlreadyMergedPullLocked(*serve.Context c, object pull, string targetId,
   )
   object latest = latestResult.project.assert(object)
   if !completeNativePull(latest, pull.index.toStr(), expectedHead, sourceHead, canEditProject(latest, c)) (
+    if (pullDocument(targetId, pull.index.toStr()).state ?? "").toStr() == "open" (
+      c.internalError("these changes are already in this project, but the pull request could not be closed")
+      return
+    )
     c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
     return
   )
@@ -1094,6 +1097,10 @@ def handleClosePull(*serve.Context c) (
     return
   )
   object closed = closePullLocked(target.id.toStr(), pull.index.toStr())
+  if (closed.writeFailed ?? false) == true (
+    c.internalError("could not close pull request")
+    return
+  )
   if closed.len == 0 (
     c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
     return
@@ -1115,7 +1122,7 @@ def closePullLocked(string targetId, string pullIndex) object (
   latest.state = "closed"
   latest.updated = timestamp
   if !putDocument(pullDocs, latest["_id"].toStr(), latest) (
-    return {}
+    return {writeFailed: true}
   )
   return latest
 )
@@ -1134,7 +1141,9 @@ def markPullMergedLocked(object project, string pullIndex, string mergedHead) ob
     pull.headCommit = mergedHead
   )
   pull.updated = timestamp
-  putDocument(pullDocs, pull["_id"].toStr(), pull)
+  if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
+    return {}
+  )
   return pull
 )
 

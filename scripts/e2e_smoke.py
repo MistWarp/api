@@ -1047,6 +1047,13 @@ def remix_sync_flow(server, step, steps, ids):
         "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
     }})
     step("sync again", "POST", remix + "/remix/sync", "alice", {})
+    status, synced_diff = step("sync pull diff after syncing", "GET", pull_path + "/diff?view=changes", "sam")
+    synced_diff_pull = (synced_diff.get("pull") or {}) if isinstance(synced_diff, dict) else {}
+    steps.append({"step": "sync pull diff uses the live base", "status": 0, "body": {
+        "baseIsOriginalHead": synced_diff_pull.get("baseCommit") == upstream,
+        "baseMovedFromRecorded": synced_diff_pull.get("baseCommit") != (pull.get("pull") or {}).get("baseCommit"),
+        "headIsSynced": synced_diff_pull.get("headCommit") == synced,
+    }})
 
     status, merged = step("sync pull merge after syncing", "POST", pull_path + "/merge", "sam", {})
     status, closed = step("sync pull after merging", "GET", pull_path, "sam")
