@@ -3,6 +3,7 @@ export {
   completeNativePull,
   createNativePull,
   livePullHead,
+  pullTargetBranchRefusal,
   projectBranchHead,
   projectGitHead,
   projectHasWorkspace,
@@ -830,10 +831,9 @@ def handleMergePull(*serve.Context c) (
     return
   )
   string currentTargetHead = projectGitHead(target)
-  string targetBranch = pullTargetBranch(pull)
-  string currentBranch = if target.contains("gitBranch") and target.gitBranch != null and target.gitBranch.toStr() != "" then target.gitBranch.toStr() else "main"
-  if targetBranch != "" and targetBranch != currentBranch and projectBranchHead(target, targetBranch) != "" (
-    c.json(409, {ok: false, error: "Switch this project to the " ++ targetBranch ++ " branch before merging this pull request.", code: "target_branch_changed", branch: targetBranch})
+  object branchRefusal = pullTargetBranchRefusal(pull, target)
+  if branchRefusal.len > 0 (
+    c.json(409, branchRefusal)
     return
   )
   if projectUncommittedSummary(target).len > 0 (
@@ -854,11 +854,7 @@ def handleMergePull(*serve.Context c) (
   )
   object merge = prepared
   if (merge.alreadyMerged ?? false) == true (
-    if !completeNativePull(target, pull.index.toStr(), currentTargetHead, sourceHead, contextString(c, "username")) (
-      c.internalError("these changes are already in this project, but the pull request could not be closed")
-      return
-    )
-    c.json(200, {ok: true, merged: true, alreadyMerged: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: currentTargetHead})
+    closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
     return
   )
   boolean sourceClean = projectUncommittedSummary(source).len == 0
@@ -883,16 +879,65 @@ def handleMergePull(*serve.Context c) (
     c.json(200, {ok: true, merged: true, fastForward: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
     return
   )
+  recordPreparedPullHead(target.id.toStr(), pull.index.toStr(), sourceHead)
   c.json(200, {
     ok: true,
     merged: false,
-    pull: livePullResponse(pull, (merge.baseHead ?? pull.baseCommit).toStr(), sourceHead),
+    pull: livePullResponse(pull, (merge.baseHead ?? pull.baseCommit ?? "").toStr(), sourceHead),
     merge: merge,
     expectedHead: currentTargetHead,
     sourceHead: sourceHead,
     targetProjectId: target.id,
     sourceProjectId: source.id
   })
+)
+
+def projectCurrentBranch(object project) string (
+  return if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" then project.gitBranch.toStr() else "main"
+)
+
+def pullTargetBranchRefusal(object pull, object target) object (
+  string targetBranch = pullTargetBranch(pull)
+  string code = pullTargetBranchRefusalCode(targetBranch, projectCurrentBranch(target), projectBranchNames(target))
+  if code == "target_branch_changed" (
+    return {ok: false, error: "Switch this project to the " ++ targetBranch ++ " branch before merging this pull request.", code: code, branch: targetBranch}
+  )
+  if code == "target_branch_missing" (
+    return {ok: false, error: "This pull request targets the " ++ targetBranch ++ " branch, which no longer exists.", code: code, branch: targetBranch}
+  )
+  return {}
+)
+
+def recordPreparedPullHead(string targetId, string pullIndex, string sourceHead) (
+  string saveLock = "project-history-" ++ targetId
+  sync.lock(saveLock)
+  defer sync.unlock(saveLock)
+  string pullLock = "pull-comment-count:" ++ targetId ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
+  object latest = pullDocument(targetId, pullIndex)
+  if latest.len == 0 or (latest.state ?? "").toStr() != "open" or (latest.preparedSourceHead ?? "").toStr() == sourceHead (
+    return
+  )
+  latest.preparedSourceHead = sourceHead
+  putDocument(pullDocs, latest["_id"].toStr(), latest)
+)
+
+def closeAlreadyMergedPullLocked(*serve.Context c, object pull, string targetId, string expectedHead, string sourceHead) (
+  string saveLock = "project-history-" ++ targetId
+  sync.lock(saveLock)
+  defer sync.unlock(saveLock)
+  auto latestResult = loadProject(targetId)
+  if !latestResult.ok or projectGitHead(latestResult.project.assert(object)) != expectedHead (
+    c.json(409, {ok: false, error: "This project changed while the merge was processing. Merge again to include the latest changes.", code: "head_changed"})
+    return
+  )
+  object latest = latestResult.project.assert(object)
+  if !completeNativePull(latest, pull.index.toStr(), expectedHead, sourceHead, contextString(c, "username")) (
+    c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+    return
+  )
+  c.json(200, {ok: true, merged: true, alreadyMerged: true, pull: pullResponse(pullDocument(targetId, pull.index.toStr())), head: expectedHead})
 )
 
 def preparePullMerge(object pull, string targetWorkspacePath, string targetHead, string sourceWorkspacePath, string sourceHead) object (
@@ -1051,17 +1096,13 @@ def handleClosePull(*serve.Context c) (
   c.json(200, {ok: true, pull: response})
 )
 
-def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, string username) boolean (
+def markPullMergedLocked(object project, string pullIndex, string mergedHead) object (
+  string pullLock = "pull-comment-count:" ++ project.id.toStr() ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
   object pull = pullDocument(project.id.toStr(), pullIndex)
-  if pull.len == 0 or pull.state.toStr() != "open" (
-    return false
-  )
-  string role = projectRole(project, username)
-  if role != "owner" and role != "maintainer" (
-    return false
-  )
-  if expectedHead == "" (
-    return false
+  if pull.len == 0 or (pull.state ?? "").toStr() != "open" (
+    return {}
   )
   pull.state = "merged"
   pull.mergedCommit = projectGitHead(project)
@@ -1070,6 +1111,21 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
   )
   pull.updated = timestamp
   putDocument(pullDocs, pull["_id"].toStr(), pull)
+  return pull
+)
+
+def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, string username) boolean (
+  string role = projectRole(project, username)
+  if role != "owner" and role != "maintainer" (
+    return false
+  )
+  if expectedHead == "" (
+    return false
+  )
+  object pull = markPullMergedLocked(project, pullIndex, mergedHead)
+  if pull.len == 0 (
+    return false
+  )
 
   number acceptedChanges = 0
   if project.contains("acceptedChanges") and project.acceptedChanges != null (

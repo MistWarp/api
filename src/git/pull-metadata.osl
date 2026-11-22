@@ -1,5 +1,6 @@
 export {
-  canonicalHistoryHead
+  canonicalHistoryHead,
+  pullPreparedSourceHead
 }
 
 def storedPullCommentCount(object pull) number (
@@ -100,6 +101,23 @@ def canonicalHistoryHead(object metadata) string (
     )
   )
   return ""
+)
+
+def pullTargetBranchRefusalCode(string targetBranch, string currentBranch, array branchNames) string (
+  if targetBranch == "" or targetBranch == currentBranch or branchNames.len == 0 (
+    return ""
+  )
+  for i branchNames.len (
+    if branchNames[i].toStr() == targetBranch (
+      return "target_branch_changed"
+    )
+  )
+  return "target_branch_missing"
+)
+
+def pullPreparedSourceHead(object pull) string (
+  string prepared = (pull.preparedSourceHead ?? "").toStr()
+  return if prepared != "" then prepared else (pull.headCommit ?? "").toStr()
 )
 
 def pullSourceBranch(object pull, array branchNames) string (

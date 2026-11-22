@@ -275,6 +275,8 @@ func PrepareBranchMergeJSON(path, targetHead, sourceHead string) string {
 }
 
 func PrepareRemixMerge(targetPath, targetHead, sourcePath, sourceHead, oursLabel, theirsLabel string) prepareMergeResult {
+	releaseSlot := acquireInspectionSlot()
+	defer releaseSlot()
 	targetReader, target, err := openArchive(targetPath)
 	if err != nil {
 		return prepareMergeResult{Error: "target workspace archive is unavailable"}
@@ -307,10 +309,6 @@ func RemixMergeBase(targetPath, targetHead, sourcePath, sourceHead string) strin
 	if len(targetHead) != 40 || len(sourceHead) != 40 {
 		return failure("both heads are required")
 	}
-	key := targetHead + ":" + sourceHead
-	if baseHead, ok := cachedMergeBase(key); ok {
-		return encode(map[string]any{"ok": true, "base": baseHead}, "could not encode merge base")
-	}
 	releaseSlot := acquireInspectionSlot()
 	defer releaseSlot()
 	targetShared, err := acquireSharedArchive(targetPath)
@@ -323,6 +321,14 @@ func RemixMergeBase(targetPath, targetHead, sourcePath, sourceHead string) strin
 		return failure("source workspace archive is unavailable")
 	}
 	defer sourceShared.release()
+	key := targetHead + ":" + sourceHead
+	if baseHead, ok := cachedMergeBase(key); ok {
+		_, inTarget := targetShared.archive.parseCommit(baseHead)
+		_, inSource := sourceShared.archive.parseCommit(baseHead)
+		if inTarget && inSource {
+			return encode(map[string]any{"ok": true, "base": baseHead}, "could not encode merge base")
+		}
+	}
 	baseHead, ok, complete := walkMergeBase(targetShared.archive, targetHead, sourceShared.archive, sourceHead)
 	if !ok {
 		return failure("the two projects do not share a common commit")

@@ -151,6 +151,17 @@ syncWithTree.hasMergeTree = true
 testing.assert(!isRefused(remixSyncTreeRefusal(sync, syncWithTree)), "a sync carrying the merged tree can continue")
 testing.assert(remixSyncTreeRefusal(sync, newUploadHistory(sync, headA)).status == 400, "a sync without the merged tree is refused")
 testing.assert(!isRefused(remixSyncTreeRefusal(request(), newUploadHistory(request(), headA))), "ordinary saves need no merged tree")
+UploadRequest pullUpload = request()
+pullUpload.pullId = "4"
+UploadHistory pullTree = newUploadHistory(pullUpload, headA)
+pullTree.hasMergeTree = true
+testing.assert(!isRefused(pullUploadShapeRefusal(pullUpload, pullTree)), "a pull merge with only the merged tree can continue")
+testing.assert(pullUploadShapeRefusal(pullUpload, newUploadHistory(pullUpload, headA)).status == 400, "a pull merge without the merged tree is refused")
+UploadHistory pullWithWorkspace = newUploadHistory(pullUpload, headA)
+pullWithWorkspace.hasMergeTree = true
+pullWithWorkspace.hasWorkspace = true
+testing.assert(pullUploadShapeRefusal(pullUpload, pullWithWorkspace).status == 400, "a pull merge that also carries a workspace is refused")
+testing.assert(!isRefused(pullUploadShapeRefusal(request(), newUploadHistory(request(), headA))), "ordinary saves are not pull merges")
 UploadRequest syncAndPull = request()
 syncAndPull.syncHead = headB
 syncAndPull.expectedHead = headA

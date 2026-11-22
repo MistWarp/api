@@ -38,3 +38,12 @@ testing.assert(pullSourceBranch({state: "open", sourceBranch: "dev"}, ["main", "
 testing.assert(pullSourceBranch(legacyPull, ["dev"]) == "dev", "legacy pulls from a one-branch remix follow that branch")
 testing.assert(pullSourceBranch(legacyPull, []) == "main", "legacy pulls from a remix without branch metadata follow main")
 testing.assert(pullSourceBranch(legacyPull, ["main", "dev"]) == "", "legacy pulls from a remix with several branches keep the recorded head")
+
+testing.assert(pullTargetBranchRefusalCode("main", "main", ["main", "dev"]) == "", "a project on the target branch can merge")
+testing.assert(pullTargetBranchRefusalCode("dev", "main", ["main", "dev"]) == "target_branch_changed", "a project on another branch must switch first")
+testing.assert(pullTargetBranchRefusalCode("dev", "main", ["main"]) == "target_branch_missing", "a deleted target branch stops the merge")
+testing.assert(pullTargetBranchRefusalCode("dev", "main", []) == "", "projects without branch metadata merge as before")
+testing.assert(pullTargetBranchRefusalCode("", "main", ["main"]) == "", "pulls without a recorded target branch merge as before")
+testing.assert(pullPreparedSourceHead({headCommit: staleHead, preparedSourceHead: branchHead}) == branchHead, "older clients merge the head the server last prepared")
+testing.assert(pullPreparedSourceHead({headCommit: staleHead}) == staleHead, "without a prepared head the recorded head is used")
+testing.assert(pullPreparedSourceHead({headCommit: staleHead, preparedSourceHead: ""}) == staleHead, "an empty prepared head falls back to the recorded head")

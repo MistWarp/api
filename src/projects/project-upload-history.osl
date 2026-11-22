@@ -80,6 +80,10 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
   if isRefused(syncTree) (
     return syncTree
   )
+  Refusal pullShape = pullUploadShapeRefusal(request, history)
+  if isRefused(pullShape) (
+    return pullShape
+  )
   if !needsMergeCommit(request, history) (
     return noRefusal()
   )
@@ -120,9 +124,13 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
     if !mergeSourceResult.ok (
       return refuse(404, "merge source project not found")
     )
+    object branchRefusal = pullTargetBranchRefusal(mergePull, project)
+    if branchRefusal.len > 0 (
+      return refuseWithBody(409, branchRefusal)
+    )
     mergeSource = mergeSourceResult.project.assert(object)
     string liveSourceHead = livePullHead(mergePull, mergeSource)
-    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead, (mergePull.headCommit ?? "").toStr())
+    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead, pullPreparedSourceHead(mergePull))
     if isRefused(sourceMoved) (
       return sourceMoved
     )

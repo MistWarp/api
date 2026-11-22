@@ -183,12 +183,21 @@ func TestRemixMergeBaseIsRememberedForTheSameHeads(t *testing.T) {
 	delete(remix.objects, upstream)
 	own := remix.fileCommit("mine\n", base, "Remix")
 
-	first := RemixMergeBase(remix.write(t), own, original.write(t), upstream)
+	remixPath := remix.write(t)
+	originalPath := original.write(t)
+	first := RemixMergeBase(remixPath, own, originalPath, upstream)
 	if !strings.Contains(first, base) {
 		t.Fatalf("unexpected merge base: %s", first)
 	}
-	cached := RemixMergeBase(t.TempDir()+"/missing.mwp", own, t.TempDir()+"/missing.mwp", upstream)
-	if cached != first {
-		t.Fatalf("second lookup was not served from the cache: %s", cached)
+	if cached, ok := cachedMergeBase(own + ":" + upstream); !ok || cached != base {
+		t.Fatalf("merge base was not remembered: %q %v", cached, ok)
+	}
+	if again := RemixMergeBase(remixPath, own, originalPath, upstream); again != first {
+		t.Fatalf("cached lookup changed the answer: %s", again)
+	}
+	missingHead := strings.Repeat("e", 40)
+	rememberMergeBase(own+":"+missingHead, strings.Repeat("f", 40))
+	if stale := RemixMergeBase(remixPath, own, originalPath, missingHead); strings.Contains(stale, `"ok":true`) {
+		t.Fatalf("a cached base missing from the archives was trusted: %s", stale)
 	}
 }

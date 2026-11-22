@@ -161,6 +161,13 @@ def remixSyncTreeRefusal(UploadRequest request, UploadHistory history) Refusal (
   return noRefusal()
 )
 
+def pullUploadShapeRefusal(UploadRequest request, UploadHistory history) Refusal (
+  if request.pullId != "" and (!history.hasMergeTree or history.hasWorkspace or request.restoreCommit != "" or request.mergeSourceBranch != "") (
+    return refuse(400, "a pull request merge needs the merged project tree and nothing else")
+  )
+  return noRefusal()
+)
+
 def remixSyncHeadRefusal(UploadRequest request, string latestOriginalHead) Refusal (
   if latestOriginalHead == "" or latestOriginalHead != request.syncHead (
     return refuseWithBody(409, {ok: false, error: "the original project changed while this sync was processing", code: "original_changed"})
