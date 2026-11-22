@@ -155,6 +155,9 @@ UploadRequest pullUpload = request()
 pullUpload.pullId = "4"
 UploadHistory pullTree = newUploadHistory(pullUpload, headA)
 pullTree.hasMergeTree = true
+testing.assert(pullExpectedHeadRefusal(pullUpload).body.code == "head_changed", "a pull merge must name the target head it was prepared from")
+pullUpload.expectedHead = headA
+testing.assert(!isRefused(pullExpectedHeadRefusal(pullUpload)), "a pull merge naming the target head can continue")
 testing.assert(!isRefused(pullUploadShapeRefusal(pullUpload, pullTree)), "a pull merge with only the merged tree can continue")
 testing.assert(pullUploadShapeRefusal(pullUpload, newUploadHistory(pullUpload, headA)).status == 400, "a pull merge without the merged tree is refused")
 UploadHistory pullWithWorkspace = newUploadHistory(pullUpload, headA)

@@ -540,9 +540,18 @@ def handleGetPull(*serve.Context c) (
   object target = targetResult.project.assert(object)
   response.canClose = canClosePull(pull, target, c)
   response.canInspect = canInspectPull(pull, target, c)
-  auto liveSourceResult = loadProject(pull.sourceProjectId.toStr())
-  if response.canInspect == true and liveSourceResult.ok (
-    response.headCommit = livePullHead(pull, liveSourceResult.project.assert(object))
+  if response.canInspect == true (
+    auto liveSourceResult = loadProject(pull.sourceProjectId.toStr())
+    if liveSourceResult.ok (
+      object liveSource = liveSourceResult.project.assert(object)
+      string liveHead = livePullHead(pull, liveSource)
+      response.headCommit = liveHead
+      string targetWorkspacePath = cachedProjectWorkspacePath(target)
+      string sourceWorkspacePath = cachedProjectWorkspacePath(liveSource)
+      if targetWorkspacePath != "" and sourceWorkspacePath != "" (
+        response.baseCommit = livePullBase(pull, targetWorkspacePath, pullTargetHead(pull, target), sourceWorkspacePath, liveHead)
+      )
+    )
   )
   response.canMerge = canEditProject(target, c) and response.canInspect == true
   c.json(200, {ok: true, pull: response})
@@ -933,7 +942,7 @@ def closeAlreadyMergedPullLocked(*serve.Context c, object pull, string targetId,
     return
   )
   object latest = latestResult.project.assert(object)
-  if !completeNativePull(latest, pull.index.toStr(), expectedHead, sourceHead, contextString(c, "username")) (
+  if !completeNativePull(latest, pull.index.toStr(), expectedHead, sourceHead, canEditProject(latest, c)) (
     c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
     return
   )
@@ -1061,7 +1070,7 @@ def fastForwardPullLocked(*serve.Context c, object pull, object target, object s
   )
   upsertIndexEntry(target)
   storageSettleProject(target)
-  if !completeNativePull(target, pull.index.toStr(), currentTargetHead, currentSourceHead, contextString(c, "username")) (
+  if !completeNativePull(target, pull.index.toStr(), currentTargetHead, currentSourceHead, canEditProject(target, c)) (
     c.internalError("the project merged, but the pull request could not be closed")
     return {ok: false}
   )
@@ -1084,16 +1093,31 @@ def handleClosePull(*serve.Context c) (
     c.forbidden("only the fork owner and project maintainers can close this pull request")
     return
   )
-  pull.state = "closed"
-  pull.updated = timestamp
-  if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
-    c.internalError("could not close pull request")
+  object closed = closePullLocked(target.id.toStr(), pull.index.toStr())
+  if closed.len == 0 (
+    c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
     return
   )
-  object response = pullResponse(pull)
+  object response = pullResponse(closed)
   response.canClose = true
   response.canMerge = canEditProject(target, c)
   c.json(200, {ok: true, pull: response})
+)
+
+def closePullLocked(string targetId, string pullIndex) object (
+  string pullLock = "pull-comment-count:" ++ targetId ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
+  object latest = pullDocument(targetId, pullIndex)
+  if latest.len == 0 or (latest.state ?? "").toStr() != "open" (
+    return {}
+  )
+  latest.state = "closed"
+  latest.updated = timestamp
+  if !putDocument(pullDocs, latest["_id"].toStr(), latest) (
+    return {}
+  )
+  return latest
 )
 
 def markPullMergedLocked(object project, string pullIndex, string mergedHead) object (
@@ -1114,12 +1138,8 @@ def markPullMergedLocked(object project, string pullIndex, string mergedHead) ob
   return pull
 )
 
-def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, string username) boolean (
-  string role = projectRole(project, username)
-  if role != "owner" and role != "maintainer" (
-    return false
-  )
-  if expectedHead == "" (
+def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, boolean canMerge) boolean (
+  if !canMerge or expectedHead == "" (
     return false
   )
   object pull = markPullMergedLocked(project, pullIndex, mergedHead)

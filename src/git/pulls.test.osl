@@ -240,15 +240,18 @@ object openForMerge = {"_id": "p9:1", targetProjectId: "p9", index: 1, state: "o
 void putDocument(pullDocs, "p9:1", openForMerge)
 recordPreparedPullHead("p9", "1", pullBaseB)
 testing.assert(pullDocument("p9", "1").preparedSourceHead == pullBaseB and lockIsFree("project-history-p9"), "a prepared merge records the remix head it used")
-testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, "sam"), "only owners and maintainers can complete a pull")
-stubRole = "maintainer"
-testing.assert(completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, "sam"), "a maintainer completes the pull")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, false), "only people who can edit the project can complete a pull")
+testing.assert(completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, true), "an editor completes the pull")
 object mergedPull = pullDocument("p9", "1")
 testing.assert(mergedPull.state == "merged" and mergedPull.headCommit == pullBaseB and mergedPull.mergedCommit == pullBaseB and lockIsFree("pull-comment-count:p9:1"), "a completed pull records the merged remix head and the merge commit")
-testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, "sam"), "a pull is only completed once")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, true), "a pull is only completed once")
+testing.assert(closePullLocked("p9", "1").len == 0 and pullDocument("p9", "1").state == "merged" and lockIsFree("pull-comment-count:p9:1"), "closing a merged pull leaves it merged")
+object openToClose = {"_id": "p9:2", targetProjectId: "p9", index: 2, state: "open", headCommit: pullBaseA}
+void putDocument(pullDocs, "p9:2", openToClose)
+testing.assert(closePullLocked("p9", "2").state == "closed" and pullDocument("p9", "2").state == "closed" and lockIsFree("pull-comment-count:p9:2"), "an open pull closes")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "2", pullBaseA, pullBaseB, true), "a closed pull cannot be merged")
 recordPreparedPullHead("p9", "1", pullBaseA)
 testing.assert(pullDocument("p9", "1").preparedSourceHead == pullBaseB, "a merged pull keeps its prepared head")
-stubRole = ""
 
 def handleTestMerge(*serve.Context c) (
   void fastForwardPullLocked(c, {index: 1}, {id: "p1"}, {id: "p2"}, "", "", "h1", "h2")

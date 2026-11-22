@@ -58,10 +58,10 @@ app.GET("/ready", def(*serve.Context c) -> (
   c.json(200, {ok: true})
 ))
 def runApp() (
-  app.run(":18354")
+  app.run(":18363")
 )
 thread.new(runApp)
-string base = "http://127.0.0.1:18354"
+string base = "http://127.0.0.1:18363"
 for i 50 (
   if requests.get(base ++ "/ready").isOk() (
     break

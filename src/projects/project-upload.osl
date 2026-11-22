@@ -122,7 +122,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   archive.discard()
 
   project = projectWithUploadHistory(project)
-  if refused(c, completeUploadPull(project, request, contextString(c, "username"))) return
+  if refused(c, completeUploadPull(project, request, canEditProject(project, c))) return
   c.json(200, uploadResponse(project, uploadResult))
 )
 

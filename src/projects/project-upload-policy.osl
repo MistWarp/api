@@ -162,8 +162,15 @@ def remixSyncTreeRefusal(UploadRequest request, UploadHistory history) Refusal (
 )
 
 def pullUploadShapeRefusal(UploadRequest request, UploadHistory history) Refusal (
-  if request.pullId != "" and (!history.hasMergeTree or history.hasWorkspace or request.restoreCommit != "" or request.mergeSourceBranch != "") (
+  if request.pullId != "" and (!history.hasMergeTree or history.hasWorkspace or request.restoreCommit != "" or request.mergeSourceBranch != "" or request.mergeTargetBranch != "") (
     return refuse(400, "a pull request merge needs the merged project tree and nothing else")
+  )
+  return noRefusal()
+)
+
+def pullExpectedHeadRefusal(UploadRequest request) Refusal (
+  if request.pullId != "" and request.expectedHead == "" (
+    return refuseWithBody(409, {ok: false, error: "refresh the project before merging this pull request", code: "head_changed"})
   )
   return noRefusal()
 )

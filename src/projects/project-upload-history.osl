@@ -117,6 +117,10 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
     if isRefused(pullClosed) (
       return pullClosed
     )
+    Refusal pullHead = pullExpectedHeadRefusal(request)
+    if isRefused(pullHead) (
+      return pullHead
+    )
     if projectUncommittedSummary(project).len > 0 (
       return refuseWithBody(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
     )
