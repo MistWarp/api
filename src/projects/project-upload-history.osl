@@ -76,6 +76,10 @@ def unchangedVersionCheck(object project, UploadRequest request, UploadHistory h
 )
 
 def createMergeCommit(object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+  Refusal syncTree = remixSyncTreeRefusal(request, history)
+  if isRefused(syncTree) (
+    return syncTree
+  )
   if !needsMergeCommit(request, history) (
     return noRefusal()
   )
@@ -109,18 +113,21 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
     if isRefused(pullClosed) (
       return pullClosed
     )
+    if projectUncommittedSummary(project).len > 0 (
+      return refuseWithBody(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
+    )
     auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
     if !mergeSourceResult.ok (
       return refuse(404, "merge source project not found")
     )
     mergeSource = mergeSourceResult.project.assert(object)
     string liveSourceHead = livePullHead(mergePull, mergeSource)
-    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead)
+    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead, (mergePull.headCommit ?? "").toStr())
     if isRefused(sourceMoved) (
       return sourceMoved
     )
     mergeSourceHead = liveSourceHead
-    request.mergeSourceHead = liveSourceHead
+    request.mergedPullHead = liveSourceHead
     mergeTargetHead = history.currentHead
   )
   if !isSafeHistoryArchive(history.mergeTree, archive, false) (

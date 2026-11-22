@@ -12,6 +12,7 @@ class UploadRequest (
   string mergeSourceHead = ""
   string mergeTargetHead = ""
   string syncHead = ""
+  string mergedPullHead = ""
   string git = ""
   string extensions = ""
   string workspaceToken = ""
@@ -153,6 +154,13 @@ def remixSyncRequestRefusal(UploadRequest request) Refusal (
   return noRefusal()
 )
 
+def remixSyncTreeRefusal(UploadRequest request, UploadHistory history) Refusal (
+  if isRemixSync(request) and (!history.hasMergeTree or history.hasWorkspace) (
+    return refuse(400, "a sync with the original project needs the merged project tree")
+  )
+  return noRefusal()
+)
+
 def remixSyncHeadRefusal(UploadRequest request, string latestOriginalHead) Refusal (
   if latestOriginalHead == "" or latestOriginalHead != request.syncHead (
     return refuseWithBody(409, {ok: false, error: "the original project changed while this sync was processing", code: "original_changed"})
@@ -165,8 +173,9 @@ def remixSyncCommitMessage(string originalTitle) string (
   return if title == "" then "Merge changes from the original project" else "Merge changes from " ++ title
 )
 
-def pullSourceHeadRefusal(UploadRequest request, string liveSourceHead) Refusal (
-  if request.mergeSourceHead != "" and request.mergeSourceHead != liveSourceHead (
+def pullSourceHeadRefusal(UploadRequest request, string liveSourceHead, string recordedHead) Refusal (
+  string preparedHead = if request.mergeSourceHead != "" then request.mergeSourceHead else recordedHead
+  if liveSourceHead == "" or preparedHead != liveSourceHead (
     return refuseWithBody(409, {ok: false, error: "the remix changed while this merge was processing", code: "pull_head_changed"})
   )
   return noRefusal()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"sort"
+	"sync"
 
 	"github.com/epiclabs-io/diff3"
 )
@@ -31,7 +32,7 @@ type prepareMergeResult struct {
 	Conflicts     []string      `json:"conflicts,omitempty"`
 }
 
-func ancestorDistances(repository archive, head string) map[string]int {
+func ancestorDistances(repository archive, head string) (map[string]int, bool) {
 	distances := map[string]int{}
 	type queuedCommit struct {
 		oid      string
@@ -53,7 +54,7 @@ func ancestorDistances(repository archive, head string) map[string]int {
 			queue = append(queue, queuedCommit{oid: parent, distance: candidate.distance + 1})
 		}
 	}
-	return distances
+	return distances, len(queue) == 0
 }
 
 func mergeBase(repository archive, targetHead, sourceHead string) (string, bool) {
@@ -61,17 +62,62 @@ func mergeBase(repository archive, targetHead, sourceHead string) (string, bool)
 }
 
 func crossMergeBase(target archive, targetHead string, source archive, sourceHead string) (string, bool) {
-	targetAncestors := ancestorDistances(target, targetHead)
-	sourceAncestors := ancestorDistances(source, sourceHead)
+	base, ok, _ := walkMergeBase(target, targetHead, source, sourceHead)
+	return base, ok
+}
+
+func walkMergeBase(target archive, targetHead string, source archive, sourceHead string) (string, bool, bool) {
+	targetAncestors, targetComplete := ancestorDistances(target, targetHead)
+	sourceAncestors, sourceComplete := ancestorDistances(source, sourceHead)
+	complete := targetComplete && sourceComplete
 	best := ""
-	bestDistance := int(^uint(0) >> 1)
+	bestDistance := 0
+	bestTargetDistance := 0
 	for oid, targetDistance := range targetAncestors {
-		if sourceDistance, common := sourceAncestors[oid]; common && targetDistance+sourceDistance < bestDistance {
+		sourceDistance, common := sourceAncestors[oid]
+		if !common {
+			continue
+		}
+		distance := targetDistance + sourceDistance
+		closer := best == "" || distance < bestDistance ||
+			(distance == bestDistance && targetDistance < bestTargetDistance) ||
+			(distance == bestDistance && targetDistance == bestTargetDistance && oid < best)
+		if closer {
 			best = oid
-			bestDistance = targetDistance + sourceDistance
+			bestDistance = distance
+			bestTargetDistance = targetDistance
 		}
 	}
-	return best, best != ""
+	return best, best != "", complete
+}
+
+const mergeBaseCacheLimit = 512
+
+var (
+	mergeBaseCacheMu sync.Mutex
+	mergeBaseCache   = map[string]string{}
+	mergeBaseOrder   []string
+)
+
+func cachedMergeBase(key string) (string, bool) {
+	mergeBaseCacheMu.Lock()
+	defer mergeBaseCacheMu.Unlock()
+	base, ok := mergeBaseCache[key]
+	return base, ok
+}
+
+func rememberMergeBase(key, base string) {
+	mergeBaseCacheMu.Lock()
+	defer mergeBaseCacheMu.Unlock()
+	if _, ok := mergeBaseCache[key]; ok {
+		return
+	}
+	if len(mergeBaseOrder) >= mergeBaseCacheLimit {
+		delete(mergeBaseCache, mergeBaseOrder[0])
+		mergeBaseOrder = mergeBaseOrder[1:]
+	}
+	mergeBaseCache[key] = base
+	mergeBaseOrder = append(mergeBaseOrder, key)
 }
 
 func filesAtCommit(repository archive, sha string) (map[string]gitFile, bool) {
@@ -261,6 +307,10 @@ func RemixMergeBase(targetPath, targetHead, sourcePath, sourceHead string) strin
 	if len(targetHead) != 40 || len(sourceHead) != 40 {
 		return failure("both heads are required")
 	}
+	key := targetHead + ":" + sourceHead
+	if baseHead, ok := cachedMergeBase(key); ok {
+		return encode(map[string]any{"ok": true, "base": baseHead}, "could not encode merge base")
+	}
 	releaseSlot := acquireInspectionSlot()
 	defer releaseSlot()
 	targetShared, err := acquireSharedArchive(targetPath)
@@ -273,9 +323,12 @@ func RemixMergeBase(targetPath, targetHead, sourcePath, sourceHead string) strin
 		return failure("source workspace archive is unavailable")
 	}
 	defer sourceShared.release()
-	baseHead, ok := crossMergeBase(targetShared.archive, targetHead, sourceShared.archive, sourceHead)
+	baseHead, ok, complete := walkMergeBase(targetShared.archive, targetHead, sourceShared.archive, sourceHead)
 	if !ok {
 		return failure("the two projects do not share a common commit")
+	}
+	if complete {
+		rememberMergeBase(key, baseHead)
 	}
 	return encode(map[string]any{"ok": true, "base": baseHead}, "could not encode merge base")
 }

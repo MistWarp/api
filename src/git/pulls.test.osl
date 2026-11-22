@@ -36,8 +36,11 @@ def lockIsFree(string lockName) boolean (
 def canonicalHistoryHead(object project) string (
   return (project.gitHead ?? "").toStr()
 )
-def livePullHeadFrom(object pull, string branchHead, string currentBranch, string currentHead) string (
+def livePullHeadFrom(object pull, string sourceBranch, string branchHead, string currentBranch, string currentHead) string (
   return (pull.headCommit ?? "").toStr()
+)
+def pullSourceBranch(object pull, array branchNames) string (
+  return (pull.sourceBranch ?? "main").toStr()
 )
 def storedPullCommentCount(object pull) number (
   return if pull.contains("commentCount") then pull.commentCount.toNum() else -1

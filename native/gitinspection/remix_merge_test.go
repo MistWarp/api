@@ -146,3 +146,49 @@ func TestPrepareRemixMergeLabelsConflicts(t *testing.T) {
 		t.Fatalf("conflict markers are not labelled: %q", content)
 	}
 }
+
+func TestCrossMergeBaseBreaksTiesTheSameWayEveryTime(t *testing.T) {
+	repo := newTestRepository()
+	root := repo.fileCommit("root\n", "", "Root")
+	left := repo.fileCommit("left\n", root, "Left")
+	right := repo.fileCommit("right\n", root, "Right")
+	leftTree := repo.tree("main.fractch", repo.object("blob", []byte("left merge\n")))
+	rightTree := repo.tree("main.fractch", repo.object("blob", []byte("right merge\n")))
+	targetHead := repo.mergeCommit(leftTree, "Target merge", left, right)
+	sourceHead := repo.mergeCommit(rightTree, "Source merge", right, left)
+	path := repo.write(t)
+	reader, archive, err := openArchive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	want := left
+	if right < left {
+		want = right
+	}
+	for attempt := 0; attempt < 50; attempt++ {
+		base, ok := crossMergeBase(archive, targetHead, archive, sourceHead)
+		if !ok || base != want {
+			t.Fatalf("attempt %d chose %s, want %s", attempt, base, want)
+		}
+	}
+}
+
+func TestRemixMergeBaseIsRememberedForTheSameHeads(t *testing.T) {
+	original := newTestRepository()
+	base := original.fileCommit("one\n", "", "Base")
+	upstream := original.fileCommit("two\n", base, "Upstream")
+	remix := newTestRepository()
+	remix.copyFrom(original)
+	delete(remix.objects, upstream)
+	own := remix.fileCommit("mine\n", base, "Remix")
+
+	first := RemixMergeBase(remix.write(t), own, original.write(t), upstream)
+	if !strings.Contains(first, base) {
+		t.Fatalf("unexpected merge base: %s", first)
+	}
+	cached := RemixMergeBase(t.TempDir()+"/missing.mwp", own, t.TempDir()+"/missing.mwp", upstream)
+	if cached != first {
+		t.Fatalf("second lookup was not served from the cache: %s", cached)
+	}
+}

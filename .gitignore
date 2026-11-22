@@ -6,3 +6,5 @@ main
 
 !data/agreement.json
 !data/agreement.md
+__pycache__/
+*.pyc

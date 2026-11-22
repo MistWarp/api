@@ -127,10 +127,12 @@ testing.assert(isRefused(pullMergeRefusal(request(), openPull, "p1")), "a merge 
 
 UploadRequest pullFromRemix = request()
 pullFromRemix.pullId = "1"
-testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB)), "older clients that send no remix head merge the live head")
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB, headB)), "older clients that send no remix head merge the recorded head")
+testing.assert(pullSourceHeadRefusal(pullFromRemix, headB, headA).body.code == "pull_head_changed", "older clients cannot merge a remix that moved past the recorded head")
 pullFromRemix.mergeSourceHead = headB
-testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB)), "the remix head the merge was prepared from can merge")
-testing.assert(pullSourceHeadRefusal(pullFromRemix, headA).body.code == "pull_head_changed", "a remix that moved after preparing stops the merge")
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB, headA)), "the remix head the merge was prepared from can merge")
+testing.assert(pullSourceHeadRefusal(pullFromRemix, headA, headA).body.code == "pull_head_changed", "a remix that moved after preparing stops the merge")
+testing.assert(isRefused(pullSourceHeadRefusal(pullFromRemix, "", headB)), "a remix with no head cannot merge")
 
 UploadRequest sync = request()
 testing.assert(!isRemixSync(sync) and !isRefused(remixSyncRequestRefusal(sync)), "ordinary saves are not syncs")
@@ -144,6 +146,11 @@ testing.assert(!isRefused(liveContributorRefusal(sync, true)), "maintainers can 
 testing.assert(!isRefused(remixSyncHeadRefusal(sync, headB)), "an unchanged original head can sync")
 testing.assert(remixSyncHeadRefusal(sync, headA).body.code == "original_changed", "a moved original head stops the sync")
 testing.assert(isRefused(remixSyncHeadRefusal(sync, "")), "an original without history stops the sync")
+UploadHistory syncWithTree = newUploadHistory(sync, headA)
+syncWithTree.hasMergeTree = true
+testing.assert(!isRefused(remixSyncTreeRefusal(sync, syncWithTree)), "a sync carrying the merged tree can continue")
+testing.assert(remixSyncTreeRefusal(sync, newUploadHistory(sync, headA)).status == 400, "a sync without the merged tree is refused")
+testing.assert(!isRefused(remixSyncTreeRefusal(request(), newUploadHistory(request(), headA))), "ordinary saves need no merged tree")
 UploadRequest syncAndPull = request()
 syncAndPull.syncHead = headB
 syncAndPull.expectedHead = headA

@@ -72,8 +72,8 @@ def handleUploadProjectLocked(*serve.Context c) (
   if refused(c, editorReplaceRefusal(c, request, project)) return
   UploadHistory history = newUploadHistory(request, projectGitHead(project))
   if refused(c, liveContributorRefusal(request, canEditProject(project, c))) return
-  if refused(c, staleUploadRefusal(request, project, history.currentHead)) return
   if refused(c, remixSyncRequestRefusal(request)) return
+  if refused(c, staleUploadRefusal(request, project, history.currentHead)) return
   if refused(c, remixSyncAccessRefusal(c, project, request)) return
   if refused(c, readUploadGitMetadata(history, projectHasWorkspace(project))) return
   if refused(c, restoreCommitRefusal(request)) return
