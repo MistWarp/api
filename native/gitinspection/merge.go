@@ -39,6 +39,7 @@ func ancestorDistances(repository archive, head string) (map[string]int, bool) {
 		distance int
 	}
 	queue := []queuedCommit{{oid: head}}
+	complete := true
 	for len(queue) > 0 && len(distances) <= maxReachable {
 		candidate := queue[0]
 		queue = queue[1:]
@@ -47,6 +48,7 @@ func ancestorDistances(repository archive, head string) (map[string]int, bool) {
 		}
 		commit, ok := repository.parseCommit(candidate.oid)
 		if !ok {
+			complete = false
 			continue
 		}
 		distances[candidate.oid] = candidate.distance
@@ -54,7 +56,7 @@ func ancestorDistances(repository archive, head string) (map[string]int, bool) {
 			queue = append(queue, queuedCommit{oid: parent, distance: candidate.distance + 1})
 		}
 	}
-	return distances, len(queue) == 0
+	return distances, complete && len(queue) == 0
 }
 
 func mergeBase(repository archive, targetHead, sourceHead string) (string, bool) {

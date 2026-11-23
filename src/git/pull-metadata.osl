@@ -1,5 +1,4 @@
 export {
-  pullCommitRecordedFor,
   canonicalHistoryHead,
   pullPreparedSourceHead
 }

@@ -41,7 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull reads stay inside the pull", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty"}
+CHECK_STEPS = {"sync pull reads stay inside the pull", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1021,9 +1021,9 @@ def remix_sync_flow(server, step, steps, ids):
         "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
     }})
 
-    step("sync by a stranger", "POST", remix + "/remix/sync", "bob", {})
-    step("sync a project that is not a remix", "POST", original + "/remix/sync", "sam", {})
-    step("sync signed out", "POST", remix + "/remix/sync", None, {})
+    stranger_status, _ = step("sync by a stranger", "POST", remix + "/remix/sync", "bob", {})
+    not_remix_status, _ = step("sync a project that is not a remix", "POST", original + "/remix/sync", "sam", {})
+    signed_out_status, _ = step("sync signed out", "POST", remix + "/remix/sync", None, {})
     status, prepared = step("sync prepare", "POST", remix + "/remix/sync", "alice", {})
     merge = prepared.get("merge") or {} if isinstance(prepared, dict) else {}
     steps.append({"step": "sync prepared heads", "status": 0, "body": {
@@ -1031,10 +1031,19 @@ def remix_sync_flow(server, step, steps, ids):
         "paths": sorted(change.get("path") for change in merge.get("changes") or []),
     }})
     tree = synced_tree(server, ids, "<sync-remix>", "alice", second, merge)
-    step("sync upload without the remix head", "POST", remix + "/upload", "alice", form=({"syncHead": upstream}, {"project": plain, "mergeTree": tree}))
-    step("sync upload with a moved original", "POST", remix + "/upload", "alice", form=({"syncHead": ZERO_HEAD, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
-    step("sync upload by a stranger", "POST", remix + "/upload", "bob", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
-    step("sync upload with a pull", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second, "pullId": "1"}, {"project": plain, "mergeTree": tree}))
+    no_head_status, no_head_body = step("sync upload without the remix head", "POST", remix + "/upload", "alice", form=({"syncHead": upstream}, {"project": plain, "mergeTree": tree}))
+    moved_orig_status, moved_orig_body = step("sync upload with a moved original", "POST", remix + "/upload", "alice", form=({"syncHead": ZERO_HEAD, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    stranger_up_status, _ = step("sync upload by a stranger", "POST", remix + "/upload", "bob", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    with_pull_status, _ = step("sync upload with a pull", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second, "pullId": "1"}, {"project": plain, "mergeTree": tree}))
+    steps.append({"step": "sync refusals are enforced", "status": 0, "body": {
+        "strangerSyncRefused": stranger_status == 404,
+        "notRemixNotFound": not_remix_status == 404,
+        "signedOutUnauthorized": signed_out_status == 401,
+        "missingExpectedHeadConflict": no_head_status == 409 and isinstance(no_head_body, dict) and no_head_body.get("code") == "head_changed",
+        "movedOriginalConflict": moved_orig_status == 409 and isinstance(moved_orig_body, dict) and moved_orig_body.get("code") == "original_changed",
+        "strangerUploadForbidden": stranger_up_status == 403,
+        "combinedPullBadRequest": with_pull_status == 400,
+    }})
     step("sync upload", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
     synced, remix_from = project_head(server, ids, "<sync-remix>", "alice")
     history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
@@ -1099,8 +1108,12 @@ def remix_sync_flow(server, step, steps, ids):
     upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
     step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     head = project_head(server, ids, "<sync-remix>", "alice")[0]
-    step("sync with uncommitted changes", "POST", remix + "/remix/sync", "alice", {})
-    step("sync upload with uncommitted changes", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}))
+    dirty_sync_status, dirty_sync_body = step("sync with uncommitted changes", "POST", remix + "/remix/sync", "alice", {})
+    dirty_upload_status, dirty_upload_body = step("sync upload with uncommitted changes", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}))
+    steps.append({"step": "sync dirty refusals are enforced", "status": 0, "body": {
+        "prepareRefused": dirty_sync_status == 409 and isinstance(dirty_sync_body, dict) and dirty_sync_body.get("code") == "uncommitted_changes",
+        "uploadRefused": dirty_upload_status == 409 and isinstance(dirty_upload_body, dict) and dirty_upload_body.get("code") == "uncommitted_changes",
+    }})
 
 
 def normalize(value, ids, key="", parent=""):

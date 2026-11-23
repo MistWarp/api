@@ -209,4 +209,28 @@ func TestRemixMergeBaseIsRememberedForTheSameHeads(t *testing.T) {
 	if cached, _ := cachedMergeBase(own + ":" + upstream); cached != base {
 		t.Fatalf("a stale cached base was not replaced: %q", cached)
 	}
+
+	root := original.fileCommit("zero\n", "", "Root")
+	side := original.fileCommit("side\n", root, "Side")
+	middle := original.fileCommit("mid\n", root, "Middle")
+	tip := original.fileCommit("tip\n", middle, "Tip")
+	fork := newTestRepository()
+	fork.copyFrom(original)
+	forkCommit := fork.fileCommit("fork\n", middle, "Fork")
+	mergeCommit := original.mergeCommit(original.tree("main.fractch", original.object("blob", []byte("merged\n"))), "Merge", tip, side)
+	partial := newTestRepository()
+	partial.copyFrom(original)
+	delete(partial.objects, middle)
+	partialPath := partial.write(t)
+	forkPath := fork.write(t)
+	if fallback := RemixMergeBase(partialPath, mergeCommit, forkPath, forkCommit); !strings.Contains(fallback, root) {
+		t.Fatalf("expected fallback base %s, got %s", root, fallback)
+	}
+	if cached, ok := cachedMergeBase(mergeCommit + ":" + forkCommit); ok {
+		t.Fatalf("truncated walk should not be cached, got %q", cached)
+	}
+	repairedPath := original.write(t)
+	if repaired := RemixMergeBase(repairedPath, mergeCommit, forkPath, forkCommit); !strings.Contains(repaired, middle) {
+		t.Fatalf("repaired archive kept truncated base: %s (want %s)", repaired, middle)
+	}
 }
