@@ -577,10 +577,14 @@ def handleGetPullTimeline(*serve.Context c) (
   for i comments.len (
     comments[i] = commentResponse(comments[i].assert(object), contextString(c, "username"))
   )
-  array targetHistory = projectVersionHistory(target).commits.assert(array)
-  array sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
-  sourceCommits = commitsNotIn(sourceCommits, targetHistory)
-  array targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
+  array sourceCommits = []
+  array targetCommits = []
+  if canInspectPull(pull, target, c) (
+    array targetHistory = projectVersionHistory(target).commits.assert(array)
+    sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
+    sourceCommits = commitsNotIn(sourceCommits, targetHistory)
+    targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
+  )
   c.json(200, {
     ok: true,
     comments: comments,
@@ -870,7 +874,7 @@ def handleMergePull(*serve.Context c) (
   )
   string currentTargetHead = projectGitHead(target)
   object branchRefusal = pullTargetBranchRefusal(pull, target)
-  if branchRefusal.len > 0 (
+  if branchRefusal.len > 0 and (branchRefusal.code ?? "").toStr() != "target_branch_missing" (
     c.json(409, branchRefusal)
     return
   )
@@ -878,19 +882,27 @@ def handleMergePull(*serve.Context c) (
   string targetWorkspacePath = cachedProjectWorkspacePath(target)
   string sourceWorkspacePath = cachedProjectWorkspacePath(source)
   if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+    if branchRefusal.len > 0 (
+      c.json(409, branchRefusal)
+      return
+    )
     c.internalError("could not assemble pull request history")
     return
   )
   object prepared = preparePullMerge(pull, targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead)
+  if prepared.ok == true and (prepared.alreadyMerged ?? false) == true (
+    closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
+    return
+  )
+  if branchRefusal.len > 0 (
+    c.json(409, branchRefusal)
+    return
+  )
   if prepared.ok != true (
     c.json(409, {ok: false, error: prepared.error.toStr(), code: "pull_merge_unavailable"})
     return
   )
   object merge = prepared
-  if (merge.alreadyMerged ?? false) == true (
-    closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
-    return
-  )
   if projectUncommittedSummary(target).len > 0 (
     c.json(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
     return

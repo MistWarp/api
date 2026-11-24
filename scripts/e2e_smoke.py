@@ -41,7 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull reads stay inside the pull", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
+CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1083,6 +1083,19 @@ def remix_sync_flow(server, step, steps, ids):
         "archiveAllowedToTheOwner": pull_archive("sam") == 200,
     }})
 
+    server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": False})
+    timeline_status, hidden_timeline = server.call("GET", "/v1/projects/%s/pulls/%s/timeline" % (original_id, pull_index), None)[:2]
+    diff_status = server.call("GET", "/v1/projects/%s/pulls/%s/diff?view=changes" % (original_id, pull_index), "sam")[0]
+    file_hidden_status = pull_read(synced, None)
+    server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": True})
+    steps.append({"step": "sync pull hides remix commits when seeInside is off", "status": 0, "body": {
+        "timelineOk": timeline_status == 200,
+        "commitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("commits") == [],
+        "targetCommitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("targetCommits") == [],
+        "diffForbidden": diff_status == 403,
+        "fileHidden": file_hidden_status == 404,
+    }})
+
     status, merged = step("sync pull merge after syncing", "POST", pull_path + "/merge", "sam", {})
     status, closed = step("sync pull after merging", "GET", pull_path, "sam")
     original_head = project_head(server, ids, "<sync-original>", "sam")[0]
@@ -1097,6 +1110,19 @@ def remix_sync_flow(server, step, steps, ids):
         "otherRemixCommitRefused": pull_read(second, None) == 404,
     }})
 
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
+    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    head = project_head(server, ids, "<sync-remix>", "alice")[0]
+    server.call("POST", "/v1/projects/%s/publish" % remix_id, "alice", {})
+    public_stranger_sync_status = server.call("POST", "/v1/projects/%s/remix/sync" % remix_id, "bob", {})[0]
+    server.call("POST", "/v1/projects/%s/unpublish" % original_id, "sam", {})
+    closed_original_sync_status = server.call("POST", "/v1/projects/%s/remix/sync" % remix_id, "alice", {})[0]
+    closed_original_upload_status, closed_original_upload_body = step(
+        "sync upload when original source is closed", "POST", remix + "/upload", "alice",
+        form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}),
+    )
+    server.call("POST", "/v1/projects/%s/publish" % original_id, "sam", {})
+
     history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
     worktree = dict(history.files(history.tree_of(history.head())), **{"remix-notes.txt": b"not committed yet"})
     manifest = dict(history.metadata(history.head(), False), worktree=True)
@@ -1105,14 +1131,14 @@ def remix_sync_flow(server, step, steps, ids):
     }))
     status, commits = step("sync remix uncommitted state", "GET", remix + "/commits", "alice")
     steps.append({"step": "sync remix is dirty", "status": 0, "body": {"uncommitted": bool(isinstance(commits, dict) and commits.get("uncommitted"))}})
-    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
-    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
-    head = project_head(server, ids, "<sync-remix>", "alice")[0]
     dirty_sync_status, dirty_sync_body = step("sync with uncommitted changes", "POST", remix + "/remix/sync", "alice", {})
     dirty_upload_status, dirty_upload_body = step("sync upload with uncommitted changes", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}))
     steps.append({"step": "sync dirty refusals are enforced", "status": 0, "body": {
         "prepareRefused": dirty_sync_status == 409 and isinstance(dirty_sync_body, dict) and dirty_sync_body.get("code") == "uncommitted_changes",
         "uploadRefused": dirty_upload_status == 409 and isinstance(dirty_upload_body, dict) and dirty_upload_body.get("code") == "uncommitted_changes",
+        "publicStrangerSyncForbidden": public_stranger_sync_status == 403,
+        "closedOriginalSyncForbidden": closed_original_sync_status == 403,
+        "closedOriginalUploadForbidden": closed_original_upload_status == 403 and isinstance(closed_original_upload_body, dict) and "original" in str(closed_original_upload_body.get("error", "")),
     }})
 
 
