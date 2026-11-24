@@ -104,9 +104,8 @@ def identityMatches(string storedId, string storedUsername, string userId, strin
 def projectHiddenFrom(object project,*serve.Context c) boolean (
   return false
 )
-string stubRole = ""
 def projectRole(object project, string username) string (
-  return stubRole
+  return ""
 )
 def projectVersionHistory(object project) object (
   return {}
