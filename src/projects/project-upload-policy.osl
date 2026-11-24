@@ -31,6 +31,7 @@ class UploadHistory (
   byte[] mergeTree = []
   boolean generated = false
   byte[] generatedWorkspace = []
+  object syncOriginal = {}
 )
 
 class HistoryIdentity (

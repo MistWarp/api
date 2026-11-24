@@ -183,9 +183,6 @@ def ensureProjectJsonSnapshot(object project) object (
 def ensureProjectWorkspaceSnapshots(object project) object (
   return {}
 )
-def projectRecordsCommit(object project, string sha) boolean (
-  return false
-)
 def projectSizeBytes(object project) number (
   return 0
 )

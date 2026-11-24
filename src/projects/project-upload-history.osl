@@ -75,7 +75,7 @@ def unchangedVersionCheck(object project, UploadRequest request, UploadHistory h
   return noRefusal()
 )
 
-def createMergeCommit(object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+def createMergeCommit(*serve.Context c, object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
   Refusal syncTree = remixSyncTreeRefusal(request, history)
   if isRefused(syncTree) (
     return syncTree
@@ -99,7 +99,7 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
     )
     history.baseHead = mergeTargetHead
   ) else if isRemixSync(request) (
-    object? original = loadRemixSyncOriginal(project)
+    object? original = if history.syncOriginal.len > 0 then history.syncOriginal else loadRemixSyncOriginal(project)
     if original == null (
       return refuse(404, "the original project was not found")
     )
@@ -128,11 +128,14 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
     if !mergeSourceResult.ok (
       return refuse(404, "merge source project not found")
     )
+    mergeSource = mergeSourceResult.project.assert(object)
+    if !canInspectPullWithSource(mergePull, project, mergeSource, c) (
+      return refuse(403, "source code is not visible")
+    )
     object branchRefusal = pullTargetBranchRefusal(mergePull, project)
     if branchRefusal.len > 0 (
       return refuseWithBody(409, branchRefusal)
     )
-    mergeSource = mergeSourceResult.project.assert(object)
     string liveSourceHead = livePullHead(mergePull, mergeSource)
     Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead, pullPreparedSourceHead(mergePull))
     if isRefused(sourceMoved) (

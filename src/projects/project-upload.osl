@@ -37,7 +37,7 @@ def handleCheckProjectAssets(*serve.Context c) (
   c.json(200, {ok: true, missing: missing})
 )
 
-def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest request) Refusal (
+def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest request, UploadHistory history) Refusal (
   if !isRemixSync(request) (
     return noRefusal()
   )
@@ -51,6 +51,7 @@ def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest reque
   if remixHasUncommittedChanges(project) (
     return refuseWithBody(409, {ok: false, error: "commit the changes saved in this remix before syncing it with the original", code: "uncommitted_changes"})
   )
+  history.syncOriginal = original
   return noRefusal()
 )
 
@@ -74,7 +75,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   if refused(c, liveContributorRefusal(request, canEditProject(project, c))) return
   if refused(c, remixSyncRequestRefusal(request)) return
   if refused(c, staleUploadRefusal(request, project, history.currentHead)) return
-  if refused(c, remixSyncAccessRefusal(c, project, request)) return
+  if refused(c, remixSyncAccessRefusal(c, project, request, history)) return
   if refused(c, readUploadGitMetadata(history, projectHasWorkspace(project))) return
   if refused(c, restoreCommitRefusal(request)) return
 
@@ -91,7 +92,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   if refused(c, archive.discardOn(unchangedVersionCheck(project, request, history, archive))) return
   object extensionResult = collectProjectExtensions(archive.extractDir ++ "/project.json", request.extensions)
   if refused(c, archive.discardOn(extensionRefusal(extensionResult))) return
-  if refused(c, archive.discardOn(createMergeCommit(project, request, history, archive, uploader))) return
+  if refused(c, archive.discardOn(createMergeCommit(c, project, request, history, archive, uploader))) return
   if refused(c, archive.discardOn(createRestoreCommit(project, request, history, archive, uploader))) return
   if refused(c, archive.discardOn(checkGeneratedHistory(project, history))) return
 
