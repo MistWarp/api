@@ -166,6 +166,10 @@ def isPullSourceOwner(object pull,*serve.Context c) boolean (
   return isPullSourceOwnerWithSource(pull, source, c)
 )
 
+def canClosePullWithSource(object pull, object target, object source,*serve.Context c) boolean (
+  return canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)
+)
+
 def canClosePull(object pull, object target,*serve.Context c) boolean (
   return canEditProject(target, c) or isPullSourceOwner(pull, c)
 )
@@ -543,6 +547,8 @@ def handleCreatePull(*serve.Context c) (
 )
 
 def handleGetPull(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
   object pull = pullDocument(c.param("id"), c.param("index"))
   if pull.len == 0 (
     c.notFound("pull request not found")
@@ -553,13 +559,11 @@ def handleGetPull(*serve.Context c) (
     c.notFound("pull request not found")
     return
   )
-  c.setHeader("Cache-Control", "private, no-store")
-  c.setHeader("CDN-Cache-Control", "private, no-store")
   object response = pullResponse(pull)
   object target = targetResult.project.assert(object)
   auto sourceResult = loadProject(pull.sourceProjectId.toStr())
   object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
-  response.canClose = canClosePull(pull, target, c)
+  response.canClose = canClosePullWithSource(pull, target, source, c)
   response.canInspect = canInspectPullWithSource(pull, target, source, c)
   response.baseBranchMissing = pullTargetBranchRefusalCode(pullTargetBranch(pull), projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing"
   if response.canInspect == true and source.len > 0 (

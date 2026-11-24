@@ -1118,6 +1118,16 @@ def remix_sync_flow(server, step, steps, ids):
     already_merge_status, already_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_pull_idx), "sam", {})[:2]
     rename_back_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})[0]
 
+    already_dirty_pull_status, already_dirty_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Already in dirty target", "body": ""})[:2]
+    already_dirty_pull_idx = str(((already_dirty_pull.get("pull") or {}).get("index", "")) if isinstance(already_dirty_pull, dict) else "")
+    orig_history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam"))
+    orig_worktree = dict(orig_history.files(orig_history.tree_of(orig_history.head())), **{"original-notes.txt": b"dirty target worktree"})
+    orig_dirty_manifest = dict(orig_history.metadata(orig_history.head(), False), worktree=True)
+    server.form("/v1/projects/%s/upload" % original_id, "sam", {"git": json.dumps(orig_dirty_manifest)}, {
+        "project": plain, "workspace": orig_history.archive(orig_history.head(), False, {"worktree": True}, orig_worktree),
+    })
+    already_dirty_merge_status, already_dirty_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_dirty_pull_idx), "sam", {})[:2]
+
     upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
     step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     _, remix_third_archive, remix_third_meta = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "third remix change")
@@ -1127,11 +1137,31 @@ def remix_sync_flow(server, step, steps, ids):
     server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})
     missing_branch_status, missing_branch_body = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, unmerged_pull_idx), "sam", {})[:2]
     server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})
+
+    orig_history2 = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam"))
+    orig_worktree2 = dict(orig_history2.files(orig_history2.tree_of(orig_history2.head())), **{"original-notes.txt": b"dirty target before pull merge"})
+    orig_dirty_manifest2 = dict(orig_history2.metadata(orig_history2.head(), False), worktree=True)
+    server.form("/v1/projects/%s/upload" % original_id, "sam", {"git": json.dumps(orig_dirty_manifest2)}, {
+        "project": plain, "workspace": orig_history2.archive(orig_history2.head(), False, {"worktree": True}, orig_worktree2),
+    })
+    dirty_pull_merge_status, dirty_pull_merge_body = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, unmerged_pull_idx), "sam", {})[:2]
+    dirty_pull_upload_status, dirty_pull_upload_body = server.form(
+        "/v1/projects/%s/upload" % original_id, "sam",
+        {"pullId": unmerged_pull_idx, "expectedHead": upstream, "mergeSourceHead": project_head(server, ids, "<sync-remix>", "alice")[0]},
+        {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})},
+    )[:2]
+    orig_clean_manifest2 = dict(orig_history2.metadata(orig_history2.head(), False), worktree=False)
+    server.form("/v1/projects/%s/upload" % original_id, "sam", {"git": json.dumps(orig_clean_manifest2)}, {
+        "project": plain, "workspace": orig_history2.archive(orig_history2.head(), False, {"worktree": False}),
+    })
     steps.append({"step": "sync pull already merged completes even if base branch was renamed", "status": 0, "body": {
         "opened": already_pull_status == 201 and bool(already_pull_idx),
         "renamed": rename_out_status == 200 and rename_back_status == 200,
         "completed": already_merge_status == 200 and isinstance(already_merged, dict) and already_merged.get("merged") is True and already_merged.get("alreadyMerged") is True,
+        "completedWhenTargetDirty": already_dirty_pull_status == 201 and already_dirty_merge_status == 200 and isinstance(already_dirty_merged, dict) and already_dirty_merged.get("merged") is True and already_dirty_merged.get("alreadyMerged") is True,
         "unmergedRefusedWhenBranchMissing": missing_branch_status == 409 and isinstance(missing_branch_body, dict) and missing_branch_body.get("code") == "target_branch_missing" and missing_branch_body.get("branch") == "main",
+        "unmergedRefusedWhenTargetDirty": dirty_pull_merge_status == 409 and isinstance(dirty_pull_merge_body, dict) and dirty_pull_merge_body.get("code") == "uncommitted_changes",
+        "uploadRefusedWhenTargetDirty": dirty_pull_upload_status == 409 and isinstance(dirty_pull_upload_body, dict) and dirty_pull_upload_body.get("code") == "uncommitted_changes",
     }})
     head = project_head(server, ids, "<sync-remix>", "alice")[0]
     server.call("POST", "/v1/projects/%s/publish" % remix_id, "alice", {})
