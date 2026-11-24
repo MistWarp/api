@@ -99,16 +99,11 @@ def createMergeCommit(*serve.Context c, object project, UploadRequest request, U
     )
     history.baseHead = mergeTargetHead
   ) else if isRemixSync(request) (
-    object? original = loadRemixSyncOriginal(project)
-    if original == null (
-      return refuse(404, "the original project was not found")
-    )
-    if !canSyncRemixFrom(project, original, c) (
-      return refuse(403, "only the remix's maintainers can sync it, and only while they can see inside the original")
-    )
-    Refusal originalChanged = remixSyncHeadRefusal(request, projectGitHead(original))
-    if isRefused(originalChanged) (
-      return originalChanged
+    object? loadedOriginal = loadRemixSyncOriginal(project)
+    object original = if loadedOriginal != null then loadedOriginal else {}
+    Refusal syncRefusal = remixSyncMergeRefusal(request, loadedOriginal != null, loadedOriginal != null and canSyncRemixFrom(project, original, c), projectGitHead(original))
+    if isRefused(syncRefusal) (
+      return syncRefusal
     )
     mergeSource = original
     mergeSourceHead = request.syncHead

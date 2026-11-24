@@ -182,6 +182,16 @@ def remixSyncHeadRefusal(UploadRequest request, string latestOriginalHead) Refus
   return noRefusal()
 )
 
+def remixSyncMergeRefusal(UploadRequest request, boolean originalFound, boolean canSync, string latestOriginalHead) Refusal (
+  if !originalFound (
+    return refuse(404, "the original project was not found")
+  )
+  if !canSync (
+    return refuse(403, "only the remix's maintainers can sync it, and only while they can see inside the original")
+  )
+  return remixSyncHeadRefusal(request, latestOriginalHead)
+)
+
 def remixSyncCommitMessage(string originalTitle) string (
   string title = originalTitle.strip()
   return if title == "" then "Merge changes from the original project" else "Merge changes from " ++ title

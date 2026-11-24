@@ -741,14 +741,25 @@ def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) bo
   )
   for i matches.len (
     object pull = matches[i].assert(object)
-    boolean related = pull.sourceProjectId.toStr() == project.id.toStr() or pull.targetProjectId.toStr() == project.id.toStr()
-    if related (
-      auto targetResult = loadProject(pull.targetProjectId.toStr())
-      if targetResult.ok (
-        object target = targetResult.project.assert(object)
-        if canInspectPull(pull, target, c) and (canEditProject(target, c) or isPullSourceOwner(pull, c)) (
-          return true
+    boolean isTarget = pull.targetProjectId.toStr() == project.id.toStr()
+    boolean isSource = pull.sourceProjectId.toStr() == project.id.toStr()
+    if isTarget or isSource (
+      object target = project
+      boolean targetOk = true
+      if !isTarget (
+        auto targetResult = loadProject(pull.targetProjectId.toStr())
+        targetOk = targetResult.ok
+        if targetOk (
+          target = targetResult.project.assert(object)
         )
+      )
+      object source = project
+      if !isSource (
+        auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+        source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+      )
+      if targetOk and canInspectPullWithSource(pull, target, source, c) and (canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)) (
+        return true
       )
     )
   )
@@ -776,27 +787,30 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
     )
     target = targetResult.project.assert(object)
   )
-  if !canInspectPull(pull, target, c) (
+  object source = project
+  if !isSource (
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !sourceResult.ok (
+      return false
+    )
+    source = sourceResult.project.assert(object)
+  )
+  if !canInspectPullWithSource(pull, target, source, c) (
     return false
   )
   if pullCommitRecordedFor(pull, isTarget, isSource, sha) (
     return true
   )
   if isSource (
-    return livePullHead(pull, project) == sha
+    return livePullHead(pull, source) == sha
   )
-  return isLivePullBase(pull, project, sha)
+  return isLivePullBase(pull, target, source, sha)
 )
 
-def isLivePullBase(object pull, object target, string sha) boolean (
+def isLivePullBase(object pull, object target, object source, string sha) boolean (
   if (pull.state ?? "").toStr() != "open" (
     return false
   )
-  auto sourceResult = loadProject((pull.sourceProjectId ?? "").toStr())
-  if !sourceResult.ok (
-    return false
-  )
-  object source = sourceResult.project.assert(object)
   string targetWorkspacePath = cachedProjectWorkspacePath(target)
   string sourceWorkspacePath = cachedProjectWorkspacePath(source)
   if targetWorkspacePath == "" or sourceWorkspacePath == "" (

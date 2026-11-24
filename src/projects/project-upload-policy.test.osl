@@ -146,6 +146,10 @@ testing.assert(!isRefused(liveContributorRefusal(sync, true)), "maintainers can 
 testing.assert(!isRefused(remixSyncHeadRefusal(sync, headB)), "an unchanged original head can sync")
 testing.assert(remixSyncHeadRefusal(sync, headA).body.code == "original_changed", "a moved original head stops the sync")
 testing.assert(isRefused(remixSyncHeadRefusal(sync, "")), "an original without history stops the sync")
+testing.assert(remixSyncMergeRefusal(sync, false, false, "").status == 404, "a missing original refuses the post-body merge check with 404")
+testing.assert(remixSyncMergeRefusal(sync, true, false, headB).status == 403, "an original whose source became hidden while the upload streamed refuses the post-body merge check with 403")
+testing.assert(remixSyncMergeRefusal(sync, true, true, headA).body.code == "original_changed", "an original that moved while the upload streamed refuses the post-body merge check with 409 original_changed")
+testing.assert(!isRefused(remixSyncMergeRefusal(sync, true, true, headB)), "a visible, unchanged original passes the post-body merge check")
 UploadHistory syncWithTree = newUploadHistory(sync, headA)
 syncWithTree.hasMergeTree = true
 testing.assert(!isRefused(remixSyncTreeRefusal(sync, syncWithTree)), "a sync carrying the merged tree can continue")
