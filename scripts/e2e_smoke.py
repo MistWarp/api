@@ -1117,14 +1117,22 @@ def remix_sync_flow(server, step, steps, ids):
     rename_out_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})[0]
     already_merge_status, already_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_pull_idx), "sam", {})[:2]
     rename_back_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})[0]
+
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
+    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    _, remix_third_archive, remix_third_meta = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "third remix change")
+    server.form("/v1/projects/%s/upload" % remix_id, "alice", {"git": remix_third_meta}, {"project": plain, "workspace": remix_third_archive})
+    unmerged_pull_status, unmerged_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Not in target", "body": ""})[:2]
+    unmerged_pull_idx = str(((unmerged_pull.get("pull") or {}).get("index", "")) if isinstance(unmerged_pull, dict) else "")
+    server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})
+    missing_branch_status, missing_branch_body = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, unmerged_pull_idx), "sam", {})[:2]
+    server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})
     steps.append({"step": "sync pull already merged completes even if base branch was renamed", "status": 0, "body": {
         "opened": already_pull_status == 201 and bool(already_pull_idx),
         "renamed": rename_out_status == 200 and rename_back_status == 200,
         "completed": already_merge_status == 200 and isinstance(already_merged, dict) and already_merged.get("merged") is True and already_merged.get("alreadyMerged") is True,
+        "unmergedRefusedWhenBranchMissing": missing_branch_status == 409 and isinstance(missing_branch_body, dict) and missing_branch_body.get("code") == "target_branch_missing" and missing_branch_body.get("branch") == "main",
     }})
-
-    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
-    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
     head = project_head(server, ids, "<sync-remix>", "alice")[0]
     server.call("POST", "/v1/projects/%s/publish" % remix_id, "alice", {})
     public_stranger_sync_status = server.call("POST", "/v1/projects/%s/remix/sync" % remix_id, "bob", {})[0]

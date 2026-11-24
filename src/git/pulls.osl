@@ -557,14 +557,13 @@ def handleGetPull(*serve.Context c) (
   c.setHeader("CDN-Cache-Control", "private, no-store")
   object response = pullResponse(pull)
   object target = targetResult.project.assert(object)
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
   response.canClose = canClosePull(pull, target, c)
-  response.canInspect = canInspectPull(pull, target, c)
+  response.canInspect = canInspectPullWithSource(pull, target, source, c)
   response.baseBranchMissing = pullTargetBranchRefusalCode(pullTargetBranch(pull), projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing"
-  if response.canInspect == true (
-    auto liveSourceResult = loadProject(pull.sourceProjectId.toStr())
-    if liveSourceResult.ok (
-      response.headCommit = livePullHead(pull, liveSourceResult.project.assert(object))
-    )
+  if response.canInspect == true and source.len > 0 (
+    response.headCommit = livePullHead(pull, source)
   )
   response.canMerge = canEditProject(target, c) and response.canInspect == true
   c.json(200, {ok: true, pull: response})
