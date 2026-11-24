@@ -142,12 +142,11 @@ def pullResponse(object pull) object (
   }
 )
 
-def isPullSourceOwner(object pull,*serve.Context c) boolean (
+def isPullSourceOwnerWithSource(object pull, object source,*serve.Context c) boolean (
   if !contextBool(c, "authenticated") (
     return false
   )
-  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
-  if sourceResult.ok and projectRole(sourceResult.project.assert(object), contextString(c, "username")) == "owner" (
+  if source.len > 0 and projectRole(source, contextString(c, "username")) == "owner" (
     return true
   )
   return identityMatches(
@@ -158,16 +157,24 @@ def isPullSourceOwner(object pull,*serve.Context c) boolean (
   )
 )
 
+def isPullSourceOwner(object pull,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+  return isPullSourceOwnerWithSource(pull, source, c)
+)
+
 def canClosePull(object pull, object target,*serve.Context c) boolean (
   return canEditProject(target, c) or isPullSourceOwner(pull, c)
 )
 
-def canInspectPull(object pull, object target,*serve.Context c) boolean (
+def canInspectPullWithSource(object pull, object target, object source,*serve.Context c) boolean (
   if !sourcePolicyAllowsViewer(target, c) or projectHiddenFrom(target, c) (
     return false
   )
-  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
-  if !sourceResult.ok or !sourcePolicyAllowsViewer(sourceResult.project.assert(object), c) or projectHiddenFrom(sourceResult.project.assert(object), c) (
+  if source.len == 0 or !sourcePolicyAllowsViewer(source, c) or projectHiddenFrom(source, c) (
     return false
   )
   if canSeeInsideProject(target, c) (
@@ -176,7 +183,13 @@ def canInspectPull(object pull, object target,*serve.Context c) boolean (
   if !contextBool(c, "authenticated") (
     return false
   )
-  return canEditProject(target, c) or isPullSourceOwner(pull, c)
+  return canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)
+)
+
+def canInspectPull(object pull, object target,*serve.Context c) boolean (
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+  return canInspectPullWithSource(pull, target, source, c)
 )
 
 def createNativePull(*serve.Context c, object target, object source, string title, string description, string bountyId) object (
@@ -579,7 +592,7 @@ def handleGetPullTimeline(*serve.Context c) (
   )
   array sourceCommits = []
   array targetCommits = []
-  if canInspectPull(pull, target, c) (
+  if canInspectPullWithSource(pull, target, source, c) (
     array targetHistory = projectVersionHistory(target).commits.assert(array)
     sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
     sourceCommits = commitsNotIn(sourceCommits, targetHistory)
@@ -814,7 +827,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   object target = targetResult.project.assert(object)
   object source = sourceResult.project.assert(object)
-  if !canInspectPull(pull, target, c) (
+  if !canInspectPullWithSource(pull, target, source, c) (
     c.forbidden("only the fork owner and project maintainers can inspect this pull request")
     return
   )
@@ -850,6 +863,14 @@ def handleGetPullDiff(*serve.Context c) (
   })
 )
 
+def pullMergeRefusesBeforePrepare(object branchRefusal) boolean (
+  return branchRefusal.len > 0 and (branchRefusal.code ?? "").toStr() != "target_branch_missing"
+)
+
+def pullMergeAlreadyMerged(object prepared) boolean (
+  return prepared.ok == true and (prepared.alreadyMerged ?? false) == true
+)
+
 def handleMergePull(*serve.Context c) (
   object pull = pullDocument(c.param("id"), c.param("index"))
   if pull.len == 0 or pull.state.toStr() != "open" (
@@ -868,13 +889,13 @@ def handleMergePull(*serve.Context c) (
     return
   )
   object source = sourceResult.project.assert(object)
-  if !canInspectPull(pull, target, c) (
+  if !canInspectPullWithSource(pull, target, source, c) (
     c.forbidden("project source is restricted to its owner")
     return
   )
   string currentTargetHead = projectGitHead(target)
   object branchRefusal = pullTargetBranchRefusal(pull, target)
-  if branchRefusal.len > 0 and (branchRefusal.code ?? "").toStr() != "target_branch_missing" (
+  if pullMergeRefusesBeforePrepare(branchRefusal) (
     c.json(409, branchRefusal)
     return
   )
@@ -890,7 +911,7 @@ def handleMergePull(*serve.Context c) (
     return
   )
   object prepared = preparePullMerge(pull, targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead)
-  if prepared.ok == true and (prepared.alreadyMerged ?? false) == true (
+  if pullMergeAlreadyMerged(prepared) (
     closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
     return
   )

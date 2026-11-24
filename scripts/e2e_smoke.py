@@ -41,7 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
+CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1083,12 +1083,14 @@ def remix_sync_flow(server, step, steps, ids):
         "archiveAllowedToTheOwner": pull_archive("sam") == 200,
     }})
 
-    server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": False})
+    hide_status = server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": False})[0]
     timeline_status, hidden_timeline = server.call("GET", "/v1/projects/%s/pulls/%s/timeline" % (original_id, pull_index), None)[:2]
     diff_status = server.call("GET", "/v1/projects/%s/pulls/%s/diff?view=changes" % (original_id, pull_index), "sam")[0]
     file_hidden_status = pull_read(synced, None)
-    server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": True})
+    unhide_status = server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": True})[0]
     steps.append({"step": "sync pull hides remix commits when seeInside is off", "status": 0, "body": {
+        "hideOk": hide_status == 200,
+        "unhideOk": unhide_status == 200,
         "timelineOk": timeline_status == 200,
         "commitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("commits") == [],
         "targetCommitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("targetCommits") == [],
@@ -1108,6 +1110,17 @@ def remix_sync_flow(server, step, steps, ids):
     steps.append({"step": "sync merged pull reads stay inside the pull", "status": 0, "body": {
         "mergedHeadReadable": pull_read(synced, None) == 200,
         "otherRemixCommitRefused": pull_read(second, None) == 404,
+    }})
+
+    already_pull_status, already_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Already in target", "body": ""})[:2]
+    already_pull_idx = str(((already_pull.get("pull") or {}).get("index", "")) if isinstance(already_pull, dict) else "")
+    rename_out_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})[0]
+    already_merge_status, already_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_pull_idx), "sam", {})[:2]
+    rename_back_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})[0]
+    steps.append({"step": "sync pull already merged completes even if base branch was renamed", "status": 0, "body": {
+        "opened": already_pull_status == 201 and bool(already_pull_idx),
+        "renamed": rename_out_status == 200 and rename_back_status == 200,
+        "completed": already_merge_status == 200 and isinstance(already_merged, dict) and already_merged.get("merged") is True and already_merged.get("alreadyMerged") is True,
     }})
 
     upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
