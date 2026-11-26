@@ -36,6 +36,7 @@ def readUploadRequest(*serve.Context c) UploadRequest (
   request.mergeTargetBranch = uploadFormValue(c, "mergeTargetBranch")
   request.mergeSourceHead = uploadFormValue(c, "mergeSourceHead")
   request.mergeTargetHead = uploadFormValue(c, "mergeTargetHead")
+  request.syncHead = uploadFormValue(c, "syncHead")
   request.git = (c.formValue("git") ?? "")
   request.extensions = (c.formValue("extensions") ?? "")
   request.workspaceToken = (c.formValue("workspaceToken") ?? "")

@@ -1,7 +1,10 @@
 export {
   canAccessPullWorkspace,
+  canInspectPullWithSource,
   completeNativePull,
   createNativePull,
+  livePullHead,
+  pullTargetBranchRefusal,
   projectBranchHead,
   projectGitHead,
   projectHasWorkspace,
@@ -15,6 +18,57 @@ def projectGitHead(object project) string (
 
 def projectHasWorkspace(object project) boolean (
   return projectWorkspaceKeys(project).len > 0 and projectGitHead(project) != ""
+)
+
+def projectBranchNames(object project) array (
+  object graph = projectVersionHistory(project).graph.assertElse(object, {})
+  return if graph.contains("branches") then graph.branches.assertElse(array, []) else []
+)
+
+def livePullHead(object pull, object source) string (
+  string sourceBranch = pullSourceBranch(pull, projectBranchNames(source))
+  string currentBranch = if source.contains("gitBranch") and source.gitBranch != null and source.gitBranch.toStr() != "" then source.gitBranch.toStr() else "main"
+  string branchHead = if sourceBranch == "" then "" else projectBranchHead(source, sourceBranch)
+  return livePullHeadFrom(pull, sourceBranch, branchHead, currentBranch, projectGitHead(source))
+)
+
+def pullTargetBranch(object pull) string (
+  return (pull.targetBranch ?? "").toStr()
+)
+
+def pullTargetHead(object pull, object target) string (
+  string branch = pullTargetBranch(pull)
+  string branchHead = if branch == "" then "" else projectBranchHead(target, branch)
+  if branchHead != "" (
+    return branchHead
+  )
+  if pullTargetBranchRefusalCode(branch, projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing" (
+    return ""
+  )
+  return projectGitHead(target)
+)
+
+def livePullBase(object pull, string targetWorkspacePath, string targetHead, string sourceWorkspacePath, string sourceHead) string (
+  string stored = (pull.baseCommit ?? "").toStr()
+  if (pull.state ?? "").toStr() != "open" or targetHead == "" or sourceHead == "" (
+    return stored
+  )
+  auto parsed = json.parse(gitinspection.RemixMergeBase(targetWorkspacePath, targetHead, sourceWorkspacePath, sourceHead), {type: "object"})
+  if parsed.isErr() (
+    return stored
+  )
+  object found = parsed.unwrap().assert(object)
+  if found.ok != true (
+    return stored
+  )
+  return (found.base ?? stored).toStr()
+)
+
+def livePullResponse(object pull, string baseCommit, string headCommit) object (
+  object response = pullResponse(pull)
+  response.baseCommit = baseCommit
+  response.headCommit = headCommit
+  return response
 )
 
 def pullDocument(string targetId, string index) object (
@@ -89,12 +143,11 @@ def pullResponse(object pull) object (
   }
 )
 
-def isPullSourceOwner(object pull,*serve.Context c) boolean (
+def isPullSourceOwnerWithSource(object pull, object source,*serve.Context c) boolean (
   if !contextBool(c, "authenticated") (
     return false
   )
-  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
-  if sourceResult.ok and projectRole(sourceResult.project.assert(object), contextString(c, "username")) == "owner" (
+  if source.len > 0 and projectRole(source, contextString(c, "username")) == "owner" (
     return true
   )
   return identityMatches(
@@ -105,16 +158,28 @@ def isPullSourceOwner(object pull,*serve.Context c) boolean (
   )
 )
 
+def isPullSourceOwner(object pull,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+  return isPullSourceOwnerWithSource(pull, source, c)
+)
+
+def canClosePullWithSource(object pull, object target, object source,*serve.Context c) boolean (
+  return canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)
+)
+
 def canClosePull(object pull, object target,*serve.Context c) boolean (
   return canEditProject(target, c) or isPullSourceOwner(pull, c)
 )
 
-def canInspectPull(object pull, object target,*serve.Context c) boolean (
+def canInspectPullWithSource(object pull, object target, object source,*serve.Context c) boolean (
   if !sourcePolicyAllowsViewer(target, c) or projectHiddenFrom(target, c) (
     return false
   )
-  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
-  if !sourceResult.ok or !sourcePolicyAllowsViewer(sourceResult.project.assert(object), c) or projectHiddenFrom(sourceResult.project.assert(object), c) (
+  if source.len == 0 or !sourcePolicyAllowsViewer(source, c) or projectHiddenFrom(source, c) (
     return false
   )
   if canSeeInsideProject(target, c) (
@@ -123,7 +188,13 @@ def canInspectPull(object pull, object target,*serve.Context c) boolean (
   if !contextBool(c, "authenticated") (
     return false
   )
-  return canEditProject(target, c) or isPullSourceOwner(pull, c)
+  return canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)
+)
+
+def canInspectPull(object pull, object target,*serve.Context c) boolean (
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+  return canInspectPullWithSource(pull, target, source, c)
 )
 
 def createNativePull(*serve.Context c, object target, object source, string title, string description, string bountyId) object (
@@ -477,6 +548,8 @@ def handleCreatePull(*serve.Context c) (
 )
 
 def handleGetPull(*serve.Context c) (
+  c.setHeader("Cache-Control", "private, no-store")
+  c.setHeader("CDN-Cache-Control", "private, no-store")
   object pull = pullDocument(c.param("id"), c.param("index"))
   if pull.len == 0 (
     c.notFound("pull request not found")
@@ -489,8 +562,14 @@ def handleGetPull(*serve.Context c) (
   )
   object response = pullResponse(pull)
   object target = targetResult.project.assert(object)
-  response.canClose = canClosePull(pull, target, c)
-  response.canInspect = canInspectPull(pull, target, c)
+  auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+  object source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+  response.canClose = canClosePullWithSource(pull, target, source, c)
+  response.canInspect = canInspectPullWithSource(pull, target, source, c)
+  response.baseBranchMissing = pullTargetBranchRefusalCode(pullTargetBranch(pull), projectCurrentBranch(target), projectBranchNames(target)) == "target_branch_missing"
+  if response.canInspect == true and source.len > 0 (
+    response.headCommit = livePullHead(pull, source)
+  )
   response.canMerge = canEditProject(target, c) and response.canInspect == true
   c.json(200, {ok: true, pull: response})
 )
@@ -515,10 +594,14 @@ def handleGetPullTimeline(*serve.Context c) (
   for i comments.len (
     comments[i] = commentResponse(comments[i].assert(object), contextString(c, "username"))
   )
-  array targetHistory = projectVersionHistory(target).commits.assert(array)
-  array sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
-  sourceCommits = commitsNotIn(sourceCommits, targetHistory)
-  array targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
+  array sourceCommits = []
+  array targetCommits = []
+  if canInspectPullWithSource(pull, target, source, c) (
+    array targetHistory = projectVersionHistory(target).commits.assert(array)
+    sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
+    sourceCommits = commitsNotIn(sourceCommits, targetHistory)
+    targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
+  )
   c.json(200, {
     ok: true,
     comments: comments,
@@ -641,7 +724,7 @@ def handleEditPullComment(*serve.Context c) (
 )
 
 def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) boolean (
-  if !sourcePolicyAllowsViewer(project, c) (
+  if !sourcePolicyAllowsViewer(project, c) or !contextBool(c, "authenticated") (
     return false
   )
   array matches = []
@@ -658,14 +741,25 @@ def canAccessPullWorkspace(object project, string pullIndex,*serve.Context c) bo
   )
   for i matches.len (
     object pull = matches[i].assert(object)
-    boolean related = pull.sourceProjectId.toStr() == project.id.toStr() or pull.targetProjectId.toStr() == project.id.toStr()
-    if related (
-      auto targetResult = loadProject(pull.targetProjectId.toStr())
-      if targetResult.ok (
-        object target = targetResult.project.assert(object)
-        if canInspectPull(pull, target, c) (
-          return true
+    boolean isTarget = pull.targetProjectId.toStr() == project.id.toStr()
+    boolean isSource = pull.sourceProjectId.toStr() == project.id.toStr()
+    if isTarget or isSource (
+      object target = project
+      boolean targetOk = true
+      if !isTarget (
+        auto targetResult = loadProject(pull.targetProjectId.toStr())
+        targetOk = targetResult.ok
+        if targetOk (
+          target = targetResult.project.assert(object)
         )
+      )
+      object source = project
+      if !isSource (
+        auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+        source = if sourceResult.ok then sourceResult.project.assert(object) else {}
+      )
+      if targetOk and canInspectPullWithSource(pull, target, source, c) and (canEditProject(target, c) or isPullSourceOwnerWithSource(pull, source, c)) (
+        return true
       )
     )
   )
@@ -680,17 +774,49 @@ def canAccessPullProjectCommit(object project, string targetId, string pullIndex
   if pull.len == 0 (
     return false
   )
-  boolean matchingTarget = pull.targetProjectId.toStr() == project.id.toStr() and (pull.baseCommit.toStr() == sha or pull.targetHead.toStr() == sha or projectRecordsCommit(project, sha))
-  boolean matchingSource = pull.sourceProjectId.toStr() == project.id.toStr() and (pull.headCommit.toStr() == sha or projectRecordsCommit(project, sha))
-  if !matchingTarget and !matchingSource (
+  boolean isTarget = pull.targetProjectId.toStr() == project.id.toStr()
+  boolean isSource = pull.sourceProjectId.toStr() == project.id.toStr()
+  if !isTarget and !isSource (
     return false
   )
-  auto targetResult = loadProject(pull.targetProjectId.toStr())
-  if !targetResult.ok (
+  object target = project
+  if !isTarget (
+    auto targetResult = loadProject(pull.targetProjectId.toStr())
+    if !targetResult.ok (
+      return false
+    )
+    target = targetResult.project.assert(object)
+  )
+  object source = project
+  if !isSource (
+    auto sourceResult = loadProject(pull.sourceProjectId.toStr())
+    if !sourceResult.ok (
+      return false
+    )
+    source = sourceResult.project.assert(object)
+  )
+  if !canInspectPullWithSource(pull, target, source, c) (
     return false
   )
-  object target = targetResult.project.assert(object)
-  return canInspectPull(pull, target, c)
+  if pullCommitRecordedFor(pull, isTarget, isSource, sha) (
+    return true
+  )
+  if isSource (
+    return livePullHead(pull, source) == sha
+  )
+  return isLivePullBase(pull, target, source, sha)
+)
+
+def isLivePullBase(object pull, object target, object source, string sha) boolean (
+  if (pull.state ?? "").toStr() != "open" (
+    return false
+  )
+  string targetWorkspacePath = cachedProjectWorkspacePath(target)
+  string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+  if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+    return false
+  )
+  return livePullBase(pull, targetWorkspacePath, pullTargetHead(pull, target), sourceWorkspacePath, livePullHead(pull, source)) == sha
 )
 
 def pullInspectionJSON(string view, string inline, string targetWorkspacePath, string baseCommit, string sourceWorkspacePath, string headCommit) string (
@@ -719,7 +845,7 @@ def handleGetPullDiff(*serve.Context c) (
   )
   object target = targetResult.project.assert(object)
   object source = sourceResult.project.assert(object)
-  if !canInspectPull(pull, target, c) (
+  if !canInspectPullWithSource(pull, target, source, c) (
     c.forbidden("only the fork owner and project maintainers can inspect this pull request")
     return
   )
@@ -729,8 +855,8 @@ def handleGetPullDiff(*serve.Context c) (
     c.internalError("could not assemble pull request history")
     return
   )
-  string baseCommit = pull.baseCommit.toStr()
-  string headCommit = pull.headCommit.toStr()
+  string headCommit = livePullHead(pull, source)
+  string baseCommit = livePullBase(pull, targetWorkspacePath, pullTargetHead(pull, target), sourceWorkspacePath, headCommit)
   string inspectionJson = pullInspectionJSON((c.query("view") ?? ""), (c.query("inline") ?? ""), targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
   auto parsedInspection = json.parse(inspectionJson, {type: "object"})
   if parsedInspection.isErr() (
@@ -745,7 +871,7 @@ def handleGetPullDiff(*serve.Context c) (
   string suffix = "?pull=" ++ pull.index.toStr()
   c.json(200, {
     ok: true,
-    pull: pullResponse(pull),
+    pull: livePullResponse(pull, baseCommit, headCommit),
     inspection: inspection,
     targetProjectId: target.id,
     sourceProjectId: source.id,
@@ -753,6 +879,14 @@ def handleGetPullDiff(*serve.Context c) (
     sourceWorkspaceUrl: appURL ++ "/v1/projects/" ++ source.id.toStr() ++ "/workspace.mwp" ++ suffix,
     expectedHead: projectGitHead(target)
   })
+)
+
+def pullMergeRefusesBeforePrepare(object branchRefusal) boolean (
+  return branchRefusal.len > 0 and (branchRefusal.code ?? "").toStr() != "target_branch_missing"
+)
+
+def pullMergeAlreadyMerged(object prepared) boolean (
+  return prepared.ok == true and (prepared.alreadyMerged ?? false) == true
 )
 
 def handleMergePull(*serve.Context c) (
@@ -773,28 +907,48 @@ def handleMergePull(*serve.Context c) (
     return
   )
   object source = sourceResult.project.assert(object)
-  if !canInspectPull(pull, target, c) (
+  if !canInspectPullWithSource(pull, target, source, c) (
     c.forbidden("project source is restricted to its owner")
     return
   )
   string currentTargetHead = projectGitHead(target)
-  string currentSourceHead = projectGitHead(source)
-  if currentTargetHead == pull.baseCommit.toStr() and currentSourceHead == pull.headCommit.toStr() (
-    string targetWorkspacePath = cachedProjectWorkspacePath(target)
-    string sourceWorkspacePath = cachedProjectWorkspacePath(source)
-    if targetWorkspacePath == "" or sourceWorkspacePath == "" (
-      c.internalError("could not assemble pull request history")
+  object branchRefusal = pullTargetBranchRefusal(pull, target)
+  if pullMergeRefusesBeforePrepare(branchRefusal) (
+    c.json(409, branchRefusal)
+    return
+  )
+  string sourceHead = livePullHead(pull, source)
+  string targetWorkspacePath = cachedProjectWorkspacePath(target)
+  string sourceWorkspacePath = cachedProjectWorkspacePath(source)
+  if targetWorkspacePath == "" or sourceWorkspacePath == "" (
+    if branchRefusal.len > 0 (
+      c.json(409, branchRefusal)
       return
     )
-    string baseCommit = pull.baseCommit.toStr()
-    string headCommit = pull.headCommit.toStr()
-    string inspectionJson = gitinspection.CompareArchivesJSON(targetWorkspacePath, baseCommit, sourceWorkspacePath, headCommit)
-    auto parsedInspection = json.parse(inspectionJson, {type: "object"})
-    if parsedInspection.isErr() or parsedInspection.unwrap().assert(object).ok != true (
-      c.json(409, {ok: false, error: "the pull request history is unavailable", code: "pull_history_unavailable"})
-      return
-    )
-    object merged = fastForwardPullLocked(c, pull, target, source, targetWorkspacePath, sourceWorkspacePath, currentTargetHead, currentSourceHead)
+    c.internalError("could not assemble pull request history")
+    return
+  )
+  object prepared = preparePullMerge(pull, targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead)
+  if pullMergeAlreadyMerged(prepared) (
+    closeAlreadyMergedPullLocked(c, pull, target.id.toStr(), currentTargetHead, sourceHead)
+    return
+  )
+  if branchRefusal.len > 0 (
+    c.json(409, branchRefusal)
+    return
+  )
+  if prepared.ok != true (
+    c.json(409, {ok: false, error: prepared.error.toStr(), code: "pull_merge_unavailable"})
+    return
+  )
+  object merge = prepared
+  if projectUncommittedSummary(target).len > 0 (
+    c.json(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
+    return
+  )
+  boolean sourceClean = projectUncommittedSummary(source).len == 0
+  if (merge.fastForward ?? false) == true and sourceClean and sourceHead == projectGitHead(source) (
+    object merged = fastForwardPullLocked(c, pull, target, source, targetWorkspacePath, sourceWorkspacePath, currentTargetHead, sourceHead)
     if merged.ok != true (
       return
     )
@@ -811,32 +965,90 @@ def handleMergePull(*serve.Context c) (
         removeProjectStorageKeyIfOrphaned(previousWorkspaceKey, target.id.toStr(), true)
       )
     )
-    c.json(200, {ok: true, merged: true, fastForward: false, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
+    c.json(200, {ok: true, merged: true, fastForward: true, pull: pullResponse(pullDocument(target.id.toStr(), pull.index.toStr())), head: projectGitHead(target)})
     return
   )
-  string targetWorkspacePath = cachedProjectWorkspacePath(target)
-  string sourceWorkspacePath = cachedProjectWorkspacePath(source)
-  if targetWorkspacePath == "" or sourceWorkspacePath == "" (
-    c.internalError("could not assemble pull request history")
-    return
-  )
-  string sourceHead = pull.headCommit.toStr()
-  string baseHead = pull.baseCommit.toStr()
-  string mergeJson = gitinspection.PrepareMergeJSON(targetWorkspacePath, currentTargetHead, sourceWorkspacePath, sourceHead, baseHead)
-  auto parsedMerge = json.parse(mergeJson, {type: "object"})
-  if parsedMerge.isErr() or parsedMerge.unwrap().assert(object).ok != true (
-    c.json(409, {ok: false, error: "the pull request could not be merged on the server", code: "pull_merge_unavailable"})
-    return
-  )
+  recordPreparedPullHead(target.id.toStr(), pull.index.toStr(), sourceHead)
   c.json(200, {
     ok: true,
     merged: false,
-    pull: pullResponse(pull),
-    merge: parsedMerge.unwrap(),
+    pull: livePullResponse(pull, (merge.baseHead ?? pull.baseCommit ?? "").toStr(), sourceHead),
+    merge: merge,
     expectedHead: currentTargetHead,
+    sourceHead: sourceHead,
     targetProjectId: target.id,
     sourceProjectId: source.id
   })
+)
+
+def projectCurrentBranch(object project) string (
+  return if project.contains("gitBranch") and project.gitBranch != null and project.gitBranch.toStr() != "" then project.gitBranch.toStr() else "main"
+)
+
+def pullTargetBranchRefusal(object pull, object target) object (
+  string targetBranch = pullTargetBranch(pull)
+  string code = pullTargetBranchRefusalCode(targetBranch, projectCurrentBranch(target), projectBranchNames(target))
+  if code == "target_branch_changed" (
+    return {ok: false, error: "Switch this project to the " ++ targetBranch ++ " branch before merging this pull request.", code: code, branch: targetBranch}
+  )
+  if code == "target_branch_missing" (
+    return {ok: false, error: "This pull request targets the " ++ targetBranch ++ " branch, which no longer exists.", code: code, branch: targetBranch}
+  )
+  return {}
+)
+
+def recordPreparedPullHead(string targetId, string pullIndex, string sourceHead) (
+  string saveLock = "project-history-" ++ targetId
+  sync.lock(saveLock)
+  defer sync.unlock(saveLock)
+  string pullLock = "pull-comment-count:" ++ targetId ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
+  object latest = pullDocument(targetId, pullIndex)
+  if latest.len == 0 or (latest.state ?? "").toStr() != "open" or (latest.preparedSourceHead ?? "").toStr() == sourceHead (
+    return
+  )
+  latest.preparedSourceHead = sourceHead
+  putDocument(pullDocs, latest["_id"].toStr(), latest)
+)
+
+def closeAlreadyMergedPullLocked(*serve.Context c, object pull, string targetId, string expectedHead, string sourceHead) (
+  string saveLock = "project-history-" ++ targetId
+  sync.lock(saveLock)
+  defer sync.unlock(saveLock)
+  auto latestResult = loadProject(targetId)
+  if !latestResult.ok or projectGitHead(latestResult.project.assert(object)) != expectedHead (
+    c.json(409, {ok: false, error: "This project changed while the merge was processing. Merge again to include the latest changes.", code: "head_changed"})
+    return
+  )
+  object latest = latestResult.project.assert(object)
+  if !completeNativePull(latest, pull.index.toStr(), expectedHead, sourceHead, canEditProject(latest, c)) (
+    if (pullDocument(targetId, pull.index.toStr()).state ?? "").toStr() == "open" (
+      c.internalError("these changes are already in this project, but the pull request could not be closed")
+      return
+    )
+    c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+    return
+  )
+  c.json(200, {ok: true, merged: true, alreadyMerged: true, pull: pullResponse(pullDocument(targetId, pull.index.toStr())), head: expectedHead})
+)
+
+def preparePullMerge(object pull, string targetWorkspacePath, string targetHead, string sourceWorkspacePath, string sourceHead) object (
+  string fallback = "the pull request could not be merged on the server"
+  auto parsed = json.parse(gitinspection.PrepareRemixMergeJSON(targetWorkspacePath, targetHead, sourceWorkspacePath, sourceHead, "target", "pull request"), {type: "object"})
+  if !parsed.isErr() and parsed.unwrap().assert(object).ok == true (
+    return parsed.unwrap().assert(object)
+  )
+  string failureMessage = if parsed.isErr() then fallback else (parsed.unwrap().assert(object).error ?? fallback).toStr()
+  string storedBase = (pull.baseCommit ?? "").toStr()
+  if !validGitObjectId(storedBase) (
+    return {ok: false, error: failureMessage}
+  )
+  auto storedParsed = json.parse(gitinspection.PrepareMergeJSON(targetWorkspacePath, targetHead, sourceWorkspacePath, sourceHead, storedBase), {type: "object"})
+  if storedParsed.isErr() or storedParsed.unwrap().assert(object).ok != true (
+    return {ok: false, error: failureMessage}
+  )
+  return storedParsed.unwrap().assert(object)
 )
 
 def fastForwardPullLocked(*serve.Context c, object pull, object target, object source, string targetWorkspacePath, string sourceWorkspacePath, string currentTargetHead, string currentSourceHead) object (
@@ -851,6 +1063,10 @@ def fastForwardPullLocked(*serve.Context c, object pull, object target, object s
   )
   target = latestTargetResult.project.assert(object)
   source = latestSourceResult.project.assert(object)
+  if projectUncommittedSummary(target).len > 0 or projectUncommittedSummary(source).len > 0 (
+    c.json(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
+    return {ok: false}
+  )
   object sourceJsonSnapshot = ensureProjectJsonSnapshot(source)
   if !sourceJsonSnapshot.ok (
     c.internalError("could not prepare the source project")
@@ -938,7 +1154,7 @@ def fastForwardPullLocked(*serve.Context c, object pull, object target, object s
   )
   upsertIndexEntry(target)
   storageSettleProject(target)
-  if !completeNativePull(target, pull.index.toStr(), currentTargetHead, contextString(c, "username")) (
+  if !completeNativePull(target, pull.index.toStr(), currentTargetHead, currentSourceHead, canEditProject(target, c)) (
     c.internalError("the project merged, but the pull request could not be closed")
     return {ok: false}
   )
@@ -961,34 +1177,65 @@ def handleClosePull(*serve.Context c) (
     c.forbidden("only the fork owner and project maintainers can close this pull request")
     return
   )
-  pull.state = "closed"
-  pull.updated = timestamp
-  if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
+  object closed = closePullLocked(target.id.toStr(), pull.index.toStr())
+  if (closed.writeFailed ?? false) == true (
     c.internalError("could not close pull request")
     return
   )
-  object response = pullResponse(pull)
+  if closed.len == 0 (
+    c.json(409, {ok: false, error: "the pull request is no longer open", code: "pull_not_open"})
+    return
+  )
+  object response = pullResponse(closed)
   response.canClose = true
   response.canMerge = canEditProject(target, c)
   c.json(200, {ok: true, pull: response})
 )
 
-def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
+def closePullLocked(string targetId, string pullIndex) object (
+  string pullLock = "pull-comment-count:" ++ targetId ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
+  object latest = pullDocument(targetId, pullIndex)
+  if latest.len == 0 or (latest.state ?? "").toStr() != "open" (
+    return {}
+  )
+  latest.state = "closed"
+  latest.updated = timestamp
+  if !putDocument(pullDocs, latest["_id"].toStr(), latest) (
+    return {writeFailed: true}
+  )
+  return latest
+)
+
+def markPullMergedLocked(object project, string pullIndex, string mergedHead) object (
+  string pullLock = "pull-comment-count:" ++ project.id.toStr() ++ ":" ++ pullIndex
+  sync.lock(pullLock)
+  defer sync.unlock(pullLock)
   object pull = pullDocument(project.id.toStr(), pullIndex)
-  if pull.len == 0 or pull.state.toStr() != "open" (
-    return false
-  )
-  string role = projectRole(project, username)
-  if role != "owner" and role != "maintainer" (
-    return false
-  )
-  if expectedHead == "" (
-    return false
+  if pull.len == 0 or (pull.state ?? "").toStr() != "open" (
+    return {}
   )
   pull.state = "merged"
   pull.mergedCommit = projectGitHead(project)
+  if mergedHead != "" (
+    pull.headCommit = mergedHead
+  )
   pull.updated = timestamp
-  putDocument(pullDocs, pull["_id"].toStr(), pull)
+  if !putDocument(pullDocs, pull["_id"].toStr(), pull) (
+    return {}
+  )
+  return pull
+)
+
+def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, boolean canMerge) boolean (
+  if !canMerge or expectedHead == "" (
+    return false
+  )
+  object pull = markPullMergedLocked(project, pullIndex, mergedHead)
+  if pull.len == 0 (
+    return false
+  )
 
   number acceptedChanges = 0
   if project.contains("acceptedChanges") and project.acceptedChanges != null (

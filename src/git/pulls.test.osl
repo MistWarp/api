@@ -36,6 +36,18 @@ def lockIsFree(string lockName) boolean (
 def canonicalHistoryHead(object project) string (
   return (project.gitHead ?? "").toStr()
 )
+def livePullHeadFrom(object pull, string sourceBranch, string branchHead, string currentBranch, string currentHead) string (
+  return (pull.headCommit ?? "").toStr()
+)
+def pullTargetBranchRefusalCode(string targetBranch, string currentBranch, array branchNames) string (
+  return ""
+)
+def pullCommitRecordedFor(object pull, boolean isTarget, boolean isSource, string sha) boolean (
+  return false
+)
+def pullSourceBranch(object pull, array branchNames) string (
+  return (pull.sourceBranch ?? "main").toStr()
+)
 def storedPullCommentCount(object pull) number (
   return if pull.contains("commentCount") then pull.commentCount.toNum() else -1
 )
@@ -170,9 +182,6 @@ def ensureProjectJsonSnapshot(object project) object (
 def ensureProjectWorkspaceSnapshots(object project) object (
   return {}
 )
-def projectRecordsCommit(object project, string sha) boolean (
-  return false
-)
 def projectSizeBytes(object project) number (
   return 0
 )
@@ -217,6 +226,38 @@ failing = true
 testing.assert(try(countCreated()).isErr() and lockIsFree("pull-comment-count:p1:1"), "the comment count lock is released when counting a new comment throws")
 testing.assert(try(countDeleted()).isErr() and lockIsFree("pull-comment-count:p1:1"), "the comment count lock is released when counting a deleted comment throws")
 failing = false
+
+string pullBaseA = "a" * 40
+string pullBaseB = "b" * 40
+object closedForBase = {state: "closed", baseCommit: pullBaseA}
+testing.assert(livePullBase(closedForBase, "", pullBaseB, "", pullBaseB) == pullBaseA, "closed pulls keep their recorded base")
+testing.assert(livePullBase({state: "open", baseCommit: pullBaseA}, "", "", "", pullBaseB) == pullBaseA, "a missing target head keeps the recorded base")
+testing.assert(livePullBase({state: "open", baseCommit: pullBaseA}, tmpDir ++ "none.mwp", pullBaseB, tmpDir ++ "none.mwp", pullBaseB) == pullBaseA, "unreadable histories keep the recorded base")
+testing.assert(livePullBase({state: "open"}, "", "", "", "") == "", "a pull without a base reports none rather than null")
+
+object openForMerge = {"_id": "p9:1", targetProjectId: "p9", index: 1, state: "open", headCommit: pullBaseA, sourceOwner: "mist"}
+void putDocument(pullDocs, "p9:1", openForMerge)
+recordPreparedPullHead("p9", "1", pullBaseB)
+testing.assert(pullDocument("p9", "1").preparedSourceHead == pullBaseB and lockIsFree("project-history-p9"), "a prepared merge records the remix head it used")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, false), "only people who can edit the project can complete a pull")
+testing.assert(completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, true), "an editor completes the pull")
+object mergedPull = pullDocument("p9", "1")
+testing.assert(mergedPull.state == "merged" and mergedPull.headCommit == pullBaseB and mergedPull.mergedCommit == pullBaseB and lockIsFree("pull-comment-count:p9:1"), "a completed pull records the merged remix head and the merge commit")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "1", pullBaseA, pullBaseB, true), "a pull is only completed once")
+testing.assert(closePullLocked("p9", "1").len == 0 and pullDocument("p9", "1").state == "merged" and lockIsFree("pull-comment-count:p9:1"), "closing a merged pull leaves it merged")
+object openToClose = {"_id": "p9:2", targetProjectId: "p9", index: 2, state: "open", headCommit: pullBaseA}
+void putDocument(pullDocs, "p9:2", openToClose)
+testing.assert(closePullLocked("p9", "2").state == "closed" and pullDocument("p9", "2").state == "closed" and lockIsFree("pull-comment-count:p9:2"), "an open pull closes")
+testing.assert(!completeNativePull({id: "p9", gitHead: pullBaseB}, "2", pullBaseA, pullBaseB, true), "a closed pull cannot be merged")
+recordPreparedPullHead("p9", "1", pullBaseA)
+testing.assert(pullDocument("p9", "1").preparedSourceHead == pullBaseB, "a merged pull keeps its prepared head")
+
+testing.assert(!pullMergeRefusesBeforePrepare({}), "an empty target branch refusal allows preparePullMerge")
+testing.assert(pullMergeRefusesBeforePrepare({code: "target_branch_changed"}), "target_branch_changed refuses before preparePullMerge")
+testing.assert(!pullMergeRefusesBeforePrepare({code: "target_branch_missing"}), "target_branch_missing defers refusal until after preparePullMerge checks alreadyMerged")
+testing.assert(pullMergeAlreadyMerged({ok: true, alreadyMerged: true}), "an already-merged preparation is recognized")
+testing.assert(!pullMergeAlreadyMerged({ok: true, alreadyMerged: false}), "a non-merged preparation is not treated as already merged")
+testing.assert(!pullMergeAlreadyMerged({ok: false, alreadyMerged: true}), "a failed preparation is not treated as already merged")
 
 def handleTestMerge(*serve.Context c) (
   void fastForwardPullLocked(c, {index: 1}, {id: "p1"}, {id: "p2"}, "", "", "h1", "h2")

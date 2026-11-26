@@ -1,4 +1,5 @@
 import argparse
+import base64
 import concurrent.futures
 import difflib
 import gzip
@@ -40,6 +41,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
+CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -394,7 +396,7 @@ class History:
         lines += [b"author " + SMOKE_AUTHOR, b"committer " + SMOKE_AUTHOR]
         return self.add("commit", b"\n".join(lines) + b"\n\n" + message.encode() + b"\n")
 
-    def archive(self, head, delta, extra=None):
+    def archive(self, head, delta, extra=None, worktree=None):
         refs = dict(self.refs) if not delta else {}
         refs[self.branch] = head
         manifest = self.metadata(head, delta)
@@ -409,6 +411,8 @@ class History:
             objects = dict(self.added) if delta else dict(self.objects, **self.added)
             for oid, compressed in sorted(objects.items()):
                 archive.writestr(".git/objects/%s/%s" % (oid[:2], oid[2:]), compressed)
+            for name, content in sorted((worktree or {}).items()):
+                archive.writestr(name, content)
         return buffer.getvalue()
 
     def metadata(self, head, delta):
@@ -963,6 +967,230 @@ def concurrent_flow(server, step, steps, ids):
     }})
 
 
+def history_commit(server, ids, alias, who, name, content):
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, alias), who))
+    tree = history.tree_with(history.tree_of(history.head()), name, content.encode())
+    head = history.commit(tree, [history.head()], "Change " + name)
+    return head, history.archive(head, False), json.dumps(history.metadata(head, False))
+
+
+def project_head(server, ids, alias, who):
+    project = server.call("GET", "/v1/projects/" + real_id(ids, alias), who)[1]
+    return str(project.get("gitHead") or (project.get("project") or {}).get("gitHead") or ""), project.get("remixFrom") or (project.get("project") or {}).get("remixFrom") or {}
+
+
+def synced_tree(server, ids, alias, who, head, merge):
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, alias), who))
+    files = history.files(history.tree_of(head))
+    for change in merge.get("changes") or []:
+        if change.get("deleted"):
+            files.pop(change["path"], None)
+        else:
+            files[change["path"]] = base64.b64decode(change.get("content") or "")
+    return zip_files(files)
+
+
+def remix_sync_flow(server, step, steps, ids):
+    plain = sb3_archive(project_with_costumes([]))
+    status, created = step("sync original create", "POST", "/v1/projects", "sam", {"title": "Sync original"})
+    ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<sync-original>"
+    original = "/v1/projects/<sync-original>"
+    step("sync original first save", "POST", original + "/upload", "sam", form=({}, {"project": plain}))
+    step("sync original share", "POST", original + "/visibility", "sam", {"visibility": "public"})
+    status, remixed = step("sync remix create", "POST", original + "/remix", "alice", {})
+    ids[str(remixed.get("id", "") or (remixed.get("project") or {}).get("id", "")) if isinstance(remixed, dict) else ""] = "<sync-remix>"
+    remix = "/v1/projects/<sync-remix>"
+    step("sync with nothing new", "POST", remix + "/remix/sync", "alice", {})
+
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "from the original")
+    step("sync original change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    first, archive, metadata = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "first remix change")
+    step("sync remix change", "POST", remix + "/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    status, pull = step("sync remix pull", "POST", original + "/pulls", "alice", {"sourceProjectId": real_id(ids, "<sync-remix>"), "title": "Remix notes", "body": ""})
+    pull_path = original + "/pulls/" + str(((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else "")
+    second, archive, metadata = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "second remix change")
+    step("sync remix second change", "POST", remix + "/upload", "alice", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    status, opened = step("sync pull after a new remix commit", "GET", pull_path, "sam")
+    status, diff = step("sync pull diff after a new remix commit", "GET", pull_path + "/diff?view=changes", "sam")
+    status, remix_project = server.call("GET", "/v1/projects/" + real_id(ids, "<sync-remix>"), "alice")[:2]
+    remix_from = remix_project.get("remixFrom") or (remix_project.get("project") or {}).get("remixFrom") or {}
+    steps.append({"step": "sync pull follows the remix", "status": 0, "body": {
+        "pullHeadIsLatest": (opened.get("pull") or {}).get("headCommit") == second,
+        "diffHeadIsLatest": ((diff.get("pull") or {}).get("headCommit") == second) if isinstance(diff, dict) else False,
+        "firstWasRecorded": (pull.get("pull") or {}).get("headCommit") == first,
+        "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
+    }})
+
+    stranger_status, _ = step("sync by a stranger", "POST", remix + "/remix/sync", "bob", {})
+    not_remix_status, _ = step("sync a project that is not a remix", "POST", original + "/remix/sync", "sam", {})
+    signed_out_status, _ = step("sync signed out", "POST", remix + "/remix/sync", None, {})
+    status, prepared = step("sync prepare", "POST", remix + "/remix/sync", "alice", {})
+    merge = prepared.get("merge") or {} if isinstance(prepared, dict) else {}
+    steps.append({"step": "sync prepared heads", "status": 0, "body": {
+        "sourceIsOriginal": prepared.get("sourceHead") == upstream, "targetIsRemix": prepared.get("expectedHead") == second,
+        "paths": sorted(change.get("path") for change in merge.get("changes") or []),
+    }})
+    tree = synced_tree(server, ids, "<sync-remix>", "alice", second, merge)
+    no_head_status, no_head_body = step("sync upload without the remix head", "POST", remix + "/upload", "alice", form=({"syncHead": upstream}, {"project": plain, "mergeTree": tree}))
+    moved_orig_status, moved_orig_body = step("sync upload with a moved original", "POST", remix + "/upload", "alice", form=({"syncHead": ZERO_HEAD, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    stranger_up_status, _ = step("sync upload by a stranger", "POST", remix + "/upload", "bob", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    with_pull_status, _ = step("sync upload with a pull", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second, "pullId": "1"}, {"project": plain, "mergeTree": tree}))
+    steps.append({"step": "sync refusals are enforced", "status": 0, "body": {
+        "strangerSyncRefused": stranger_status == 404,
+        "notRemixNotFound": not_remix_status == 404,
+        "signedOutUnauthorized": signed_out_status == 401,
+        "missingExpectedHeadConflict": no_head_status == 409 and isinstance(no_head_body, dict) and no_head_body.get("code") == "head_changed",
+        "movedOriginalConflict": moved_orig_status == 409 and isinstance(moved_orig_body, dict) and moved_orig_body.get("code") == "original_changed",
+        "strangerUploadForbidden": stranger_up_status == 403,
+        "combinedPullBadRequest": with_pull_status == 400,
+    }})
+    step("sync upload", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": second}, {"project": plain, "mergeTree": tree}))
+    synced, remix_from = project_head(server, ids, "<sync-remix>", "alice")
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
+    parents = [line.decode()[len("parent "):] for line in history.read(synced)[1].split(b"\n") if line.startswith(b"parent ")]
+    message = history.read(synced)[1].split(b"\n\n", 1)[1].decode().strip()
+    files = history.files(history.tree_of(synced))
+    steps.append({"step": "sync result", "status": 0, "body": {
+        "parentsAreRemixThenOriginal": parents == [second, upstream], "message": message,
+        "hasOriginalFile": files.get("original-notes.txt") == b"from the original",
+        "keepsRemixFile": files.get("remix-notes.txt") == b"second remix change",
+        "ahead": remix_from.get("ahead"), "behind": remix_from.get("behind"),
+    }})
+    step("sync again", "POST", remix + "/remix/sync", "alice", {})
+    status, synced_diff = step("sync pull diff after syncing", "GET", pull_path + "/diff?view=changes", "sam")
+    synced_diff_pull = (synced_diff.get("pull") or {}) if isinstance(synced_diff, dict) else {}
+    steps.append({"step": "sync pull diff uses the live base", "status": 0, "body": {
+        "baseIsOriginalHead": synced_diff_pull.get("baseCommit") == upstream,
+        "baseMovedFromRecorded": synced_diff_pull.get("baseCommit") != (pull.get("pull") or {}).get("baseCommit"),
+        "headIsSynced": synced_diff_pull.get("headCommit") == synced,
+    }})
+
+    pull_index = str((pull.get("pull") or {}).get("index", "")) if isinstance(pull, dict) else ""
+    remix_id, original_id = real_id(ids, "<sync-remix>"), real_id(ids, "<sync-original>")
+
+    def pull_read(sha, who):
+        path = "/v1/projects/%s/commits/%s/file?path=remix-notes.txt&pull=%s&pullTarget=%s" % (remix_id, sha, pull_index, original_id)
+        return server.call("GET", path, who)[0]
+
+    def pull_archive(who):
+        return server.call("GET", "/v1/projects/%s/workspace.mwp?pull=%s" % (remix_id, pull_index), who)[0]
+
+    steps.append({"step": "sync pull reads stay inside the pull", "status": 0, "body": {
+        "recordedHeadReadable": pull_read(first, None) == 200,
+        "liveHeadReadable": pull_read(synced, None) == 200,
+        "archiveRefusedSignedOut": pull_archive(None) == 404,
+        "archiveRefusedToOtherViewers": pull_archive("bob") == 404,
+        "archiveAllowedToTheOwner": pull_archive("sam") == 200,
+    }})
+
+    hide_status = server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": False})[0]
+    timeline_status, hidden_timeline = server.call("GET", "/v1/projects/%s/pulls/%s/timeline" % (original_id, pull_index), None)[:2]
+    diff_status = server.call("GET", "/v1/projects/%s/pulls/%s/diff?view=changes" % (original_id, pull_index), "sam")[0]
+    pull_merge_hidden_status = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, pull_index), "sam", {})[0]
+    pull_upload_hidden_status = server.form(
+        "/v1/projects/%s/upload" % original_id, "sam",
+        {"pullId": str(pull_index), "expectedHead": project_head(server, ids, "<sync-original>", "sam")[0], "mergeSourceHead": synced},
+        {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})},
+    )[0]
+    file_hidden_status = pull_read(synced, None)
+    unhide_status = server.call("PUT", "/v1/projects/" + remix_id, "alice", {"seeInside": True})[0]
+    steps.append({"step": "sync pull hides remix commits when seeInside is off", "status": 0, "body": {
+        "hideOk": hide_status == 200,
+        "unhideOk": unhide_status == 200,
+        "timelineOk": timeline_status == 200,
+        "commitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("commits") == [],
+        "targetCommitsHidden": isinstance(hidden_timeline, dict) and hidden_timeline.get("targetCommits") == [],
+        "diffForbidden": diff_status == 403,
+        "mergeForbidden": pull_merge_hidden_status == 403,
+        "uploadForbidden": pull_upload_hidden_status == 403,
+        "fileHidden": file_hidden_status == 404,
+    }})
+
+    status, merged = step("sync pull merge after syncing", "POST", pull_path + "/merge", "sam", {})
+    status, closed = step("sync pull after merging", "GET", pull_path, "sam")
+    original_head = project_head(server, ids, "<sync-original>", "sam")[0]
+    steps.append({"step": "sync pull merge result", "status": 0, "body": {
+        "fastForwarded": isinstance(merged, dict) and merged.get("merged") is True,
+        "recordsMergedHead": (closed.get("pull") or {}).get("headCommit") == synced,
+        "originalHasRemixFile": History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).files(
+            History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam")).tree_of(original_head)).get("remix-notes.txt") == b"second remix change",
+    }})
+    steps.append({"step": "sync merged pull reads stay inside the pull", "status": 0, "body": {
+        "mergedHeadReadable": pull_read(synced, None) == 200,
+        "otherRemixCommitRefused": pull_read(second, None) == 404,
+    }})
+
+    already_pull_status, already_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Already in target", "body": ""})[:2]
+    already_pull_idx = str(((already_pull.get("pull") or {}).get("index", "")) if isinstance(already_pull, dict) else "")
+    rename_out_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})[0]
+    already_merge_status, already_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_pull_idx), "sam", {})[:2]
+    rename_back_status = server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})[0]
+
+    already_dirty_pull_status, already_dirty_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Already in dirty target", "body": ""})[:2]
+    already_dirty_pull_idx = str(((already_dirty_pull.get("pull") or {}).get("index", "")) if isinstance(already_dirty_pull, dict) else "")
+    orig_history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-original>"), "sam"))
+    orig_worktree = dict(orig_history.files(orig_history.tree_of(orig_history.head())), **{"original-notes.txt": b"dirty target worktree"})
+    orig_dirty_manifest = dict(orig_history.metadata(orig_history.head(), False), worktree=True)
+    server.form("/v1/projects/%s/upload" % original_id, "sam", {"git": json.dumps(orig_dirty_manifest)}, {
+        "project": plain, "workspace": orig_history.archive(orig_history.head(), False, {"worktree": True}, orig_worktree),
+    })
+    already_dirty_merge_status, already_dirty_merged = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, already_dirty_pull_idx), "sam", {})[:2]
+
+    _, remix_third_archive, remix_third_meta = history_commit(server, ids, "<sync-remix>", "alice", "remix-notes.txt", "third remix change")
+    server.form("/v1/projects/%s/upload" % remix_id, "alice", {"git": remix_third_meta}, {"project": plain, "workspace": remix_third_archive})
+    unmerged_pull_status, unmerged_pull = server.call("POST", "/v1/projects/%s/pulls" % original_id, "alice", {"sourceProjectId": remix_id, "title": "Not in target", "body": ""})[:2]
+    unmerged_pull_idx = str(((unmerged_pull.get("pull") or {}).get("index", "")) if isinstance(unmerged_pull, dict) else "")
+    dirty_pull_merge_status, dirty_pull_merge_body = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, unmerged_pull_idx), "sam", {})[:2]
+    dirty_pull_upload_status, dirty_pull_upload_body = server.form(
+        "/v1/projects/%s/upload" % original_id, "sam",
+        {"pullId": unmerged_pull_idx, "expectedHead": orig_history.head(), "mergeSourceHead": project_head(server, ids, "<sync-remix>", "alice")[0]},
+        {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})},
+    )[:2]
+
+    upstream, archive, metadata = history_commit(server, ids, "<sync-original>", "sam", "original-notes.txt", "second original change")
+    step("sync original second change", "POST", original + "/upload", "sam", form=({"git": metadata}, {"project": plain, "workspace": archive}))
+    server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "main", "name": "release"})
+    missing_branch_status, missing_branch_body = server.call("POST", "/v1/projects/%s/pulls/%s/merge" % (original_id, unmerged_pull_idx), "sam", {})[:2]
+    server.call("PATCH", "/v1/projects/%s/branches" % original_id, "sam", {"branch": "release", "name": "main"})
+    steps.append({"step": "sync pull already merged completes even if base branch was renamed", "status": 0, "body": {
+        "opened": already_pull_status == 201 and bool(already_pull_idx),
+        "renamed": rename_out_status == 200 and rename_back_status == 200,
+        "completed": already_merge_status == 200 and isinstance(already_merged, dict) and already_merged.get("merged") is True and already_merged.get("alreadyMerged") is True,
+        "completedWhenTargetDirty": already_dirty_pull_status == 201 and already_dirty_merge_status == 200 and isinstance(already_dirty_merged, dict) and already_dirty_merged.get("merged") is True and already_dirty_merged.get("alreadyMerged") is True,
+        "unmergedRefusedWhenBranchMissing": missing_branch_status == 409 and isinstance(missing_branch_body, dict) and missing_branch_body.get("code") == "target_branch_missing" and missing_branch_body.get("branch") == "main",
+        "unmergedRefusedWhenTargetDirty": dirty_pull_merge_status == 409 and isinstance(dirty_pull_merge_body, dict) and dirty_pull_merge_body.get("code") == "uncommitted_changes",
+        "uploadRefusedWhenTargetDirty": dirty_pull_upload_status == 409 and isinstance(dirty_pull_upload_body, dict) and dirty_pull_upload_body.get("code") == "uncommitted_changes",
+    }})
+    head = project_head(server, ids, "<sync-remix>", "alice")[0]
+    server.call("POST", "/v1/projects/%s/publish" % remix_id, "alice", {})
+    public_stranger_sync_status = server.call("POST", "/v1/projects/%s/remix/sync" % remix_id, "bob", {})[0]
+    server.call("POST", "/v1/projects/%s/unpublish" % original_id, "sam", {})
+    closed_original_sync_status = server.call("POST", "/v1/projects/%s/remix/sync" % remix_id, "alice", {})[0]
+    closed_original_upload_status, closed_original_upload_body = step(
+        "sync upload when original source is closed", "POST", remix + "/upload", "alice",
+        form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}),
+    )
+    server.call("POST", "/v1/projects/%s/publish" % original_id, "sam", {})
+
+    history = History(raw_get(server, "/v1/projects/%s/workspace.mwp" % real_id(ids, "<sync-remix>"), "alice"))
+    worktree = dict(history.files(history.tree_of(history.head())), **{"remix-notes.txt": b"not committed yet"})
+    manifest = dict(history.metadata(history.head(), False), worktree=True)
+    step("sync remix save without a commit", "POST", remix + "/upload", "alice", form=({"git": json.dumps(manifest)}, {
+        "project": plain, "workspace": history.archive(history.head(), False, {"worktree": True}, worktree),
+    }))
+    status, commits = step("sync remix uncommitted state", "GET", remix + "/commits", "alice")
+    steps.append({"step": "sync remix is dirty", "status": 0, "body": {"uncommitted": bool(isinstance(commits, dict) and commits.get("uncommitted"))}})
+    dirty_sync_status, dirty_sync_body = step("sync with uncommitted changes", "POST", remix + "/remix/sync", "alice", {})
+    dirty_upload_status, dirty_upload_body = step("sync upload with uncommitted changes", "POST", remix + "/upload", "alice", form=({"syncHead": upstream, "expectedHead": head}, {"project": plain, "mergeTree": zip_files({"original-notes.txt": b"x"})}))
+    steps.append({"step": "sync dirty refusals are enforced", "status": 0, "body": {
+        "prepareRefused": dirty_sync_status == 409 and isinstance(dirty_sync_body, dict) and dirty_sync_body.get("code") == "uncommitted_changes",
+        "uploadRefused": dirty_upload_status == 409 and isinstance(dirty_upload_body, dict) and dirty_upload_body.get("code") == "uncommitted_changes",
+        "publicStrangerSyncForbidden": public_stranger_sync_status == 403,
+        "closedOriginalSyncForbidden": closed_original_sync_status == 403,
+        "closedOriginalUploadForbidden": closed_original_upload_status == 403 and isinstance(closed_original_upload_body, dict) and "original" in str(closed_original_upload_body.get("error", "")),
+    }})
+
+
 def normalize(value, ids, key="", parent=""):
     if isinstance(value, dict):
         return {("<hex>" if HEX.match(k) else k): normalize(v, ids, k, key) for k, v in sorted(value.items())}
@@ -1060,6 +1288,7 @@ def run(binary, sb3, keep):
         slow_rotur_flow(server, step, steps, ids)
         slow_ledger_flow(server, step, steps, ids)
         locks_flow(server, step, steps, ids)
+        remix_sync_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):
@@ -1092,7 +1321,14 @@ def main():
             with open(os.path.join(args.out, os.path.basename(binary) + ".json"), "w") as handle:
                 handle.write(text)
         failures = [s for s in steps if s["status"] >= 500 and s["step"] not in EXPECTED_ERRORS]
-        print("%s: %d steps, %d server errors" % (binary, len(steps), len(failures)))
+        failed_checks = [s for s in steps if s["step"] in CHECK_STEPS and any(value is False for value in (s.get("body") or {}).values())]
+        missing_checks = CHECK_STEPS - {s["step"] for s in steps}
+        print("%s: %d steps, %d server errors, %d failed checks" % (binary, len(steps), len(failures), len(failed_checks) + len(missing_checks)))
+        for record in failed_checks:
+            print("  check failed: %s %s" % (record["step"], json.dumps(record.get("body"), sort_keys=True)))
+        for name in sorted(missing_checks):
+            print("  check missing: %s" % name)
+        failures = failures + failed_checks + [{"step": name} for name in missing_checks]
         for record in steps:
             print("  %3d %s" % (record["status"], record["step"]))
         broken = broken or bool(failures)

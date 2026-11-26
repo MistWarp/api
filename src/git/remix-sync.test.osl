@@ -1,0 +1,88 @@
+import "std:testing"
+import "std:json"
+import "std:requests"
+import "std:serve"
+import "std:thread"
+import "go:mistwarp.local/gitinspection"
+
+object projects = {
+  plain: {id: "plain", viewable: true, editable: true, seeInside: true, gitHead: "h-plain"},
+  orphan: {id: "orphan", remixParent: "gone", viewable: true, editable: true, seeInside: true, gitHead: "h-orphan"},
+  hidden: {id: "hidden", remixParent: "original", viewable: false, editable: true, seeInside: true, gitHead: "h-hidden"},
+  viewer: {id: "viewer", remixParent: "original", viewable: true, editable: false, seeInside: true, gitHead: "h-viewer"},
+  locked: {id: "locked", remixParent: "secret", viewable: true, editable: true, seeInside: true, gitHead: "h-locked"},
+  fresh: {id: "fresh", remixParent: "original", viewable: true, editable: true, seeInside: true, gitHead: ""},
+  dirty: {id: "dirty", remixParent: "original", viewable: true, editable: true, seeInside: true, gitHead: "h-dirty", uncommitted: {files: 2}},
+  clean: {id: "clean", remixParent: "original", viewable: true, editable: true, seeInside: true, gitHead: "h-clean"},
+  self: {id: "self", remixParent: "self", viewable: true, editable: true, seeInside: true, gitHead: "h-self"},
+  original: {id: "original", title: "Space Cat", viewable: true, editable: false, seeInside: true, gitHead: "h-original"},
+  secret: {id: "secret", title: "Secret", viewable: true, editable: false, seeInside: false, gitHead: "h-secret"}
+}
+
+def loadProject(string id) object (
+  if !projects.contains(id) (
+    return {ok: false, missing: true}
+  )
+  return {ok: true, project: projects[id]}
+)
+def canViewProject(object project,*serve.Context c) boolean (
+  return project.viewable == true
+)
+def canEditProject(object project,*serve.Context c) boolean (
+  return project.editable == true
+)
+def canSeeInsideProject(object project,*serve.Context c) boolean (
+  return project.seeInside == true
+)
+def projectUncommittedSummary(object project) object (
+  return (project.uncommitted ?? {}).assertElse(object, {})
+)
+def projectGitHead(object project) string (
+  return (project.gitHead ?? "").toStr()
+)
+def cachedProjectWorkspacePath(object project) string (
+  return ""
+)
+
+import "./remix-sync.osl"
+
+testing.assert(loadRemixSyncOriginal(projects.plain) == null, "a project that is not a remix has no original")
+testing.assert(loadRemixSyncOriginal(projects.orphan) == null, "a remix of a deleted project has no original")
+testing.assert(loadRemixSyncOriginal(projects.self) == null, "a project cannot be its own original")
+testing.assert(loadRemixSyncOriginal(projects.clean).id == "original", "a remix loads its original")
+testing.assert(remixHasUncommittedChanges(projects.dirty) and !remixHasUncommittedChanges(projects.clean), "uncommitted changes are detected")
+
+*serve.Router app = serve.new()
+app.POST("/projects/:id/remix/sync", handlePrepareRemixSync)
+app.GET("/ready", def(*serve.Context c) -> (
+  c.json(200, {ok: true})
+))
+def runApp() (
+  app.run(":18363")
+)
+thread.new(runApp)
+string base = "http://127.0.0.1:18363"
+for i 50 (
+  if requests.get(base ++ "/ready").isOk() (
+    break
+  )
+  wait 0.1
+)
+
+def syncResponse(string id) object (
+  object response = requests.post(base ++ "/projects/" ++ id ++ "/remix/sync", {body: "{}"}).unwrapOr({status: 0, body: "{}"})
+  object body = json.parse(response.body.toStr(), {type: "object"}).unwrapOr({}).assertElse(object, {})
+  return {status: response.status.toNum(), code: (body.code ?? "").toStr()}
+)
+
+testing.assert(syncResponse("missing").status == 404, "a missing project cannot sync")
+testing.assert(syncResponse("hidden").status == 404, "a project the viewer cannot see answers as missing")
+testing.assert(syncResponse("plain").status == 404, "a project that is not a remix cannot sync")
+testing.assert(syncResponse("orphan").status == 404, "a remix of a deleted project cannot sync")
+testing.assert(syncResponse("viewer").status == 403, "only maintainers of the remix can sync it")
+testing.assert(syncResponse("locked").status == 403, "a remix cannot pull in an original the viewer cannot see inside")
+object fresh = syncResponse("fresh")
+testing.assert(fresh.status == 409 and fresh.code == "sync_history_unavailable", "a remix without history cannot sync")
+object dirty = syncResponse("dirty")
+testing.assert(dirty.status == 409 and dirty.code == "uncommitted_changes", "a remix with uncommitted changes cannot sync")
+testing.assert(syncResponse("clean").status == 500, "a clean remix reaches the history merge")

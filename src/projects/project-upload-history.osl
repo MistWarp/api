@@ -75,7 +75,15 @@ def unchangedVersionCheck(object project, UploadRequest request, UploadHistory h
   return noRefusal()
 )
 
-def createMergeCommit(object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+def createMergeCommit(*serve.Context c, object project, UploadRequest request, UploadHistory history, UploadArchive archive, string uploader) Refusal (
+  Refusal syncTree = remixSyncTreeRefusal(request, history)
+  if isRefused(syncTree) (
+    return syncTree
+  )
+  Refusal pullShape = pullUploadShapeRefusal(request, history)
+  if isRefused(pullShape) (
+    return pullShape
+  )
   if !needsMergeCommit(request, history) (
     return noRefusal()
   )
@@ -83,24 +91,56 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
   object mergeSource = project
   string mergeSourceHead = request.mergeSourceHead
   string mergeTargetHead = request.mergeTargetHead
+  string mergeMessage = mergeCommitMessage(request, branchMerge)
   if branchMerge (
     Refusal branchChanged = branchMergeRefusal(request, projectBranchHead(project, request.mergeSourceBranch), projectBranchHead(project, request.mergeTargetBranch))
     if isRefused(branchChanged) (
       return branchChanged
     )
     history.baseHead = mergeTargetHead
+  ) else if isRemixSync(request) (
+    object? loadedOriginal = loadRemixSyncOriginal(project)
+    object original = if loadedOriginal != null then loadedOriginal else {}
+    Refusal syncRefusal = remixSyncMergeRefusal(request, loadedOriginal != null, loadedOriginal != null and canSyncRemixFrom(project, original, c), projectGitHead(original))
+    if isRefused(syncRefusal) (
+      return syncRefusal
+    )
+    mergeSource = original
+    mergeSourceHead = request.syncHead
+    mergeTargetHead = history.currentHead
+    mergeMessage = remixSyncCommitMessage((original.title ?? "").toStr())
   ) else (
     object mergePull = pullDocument(project.id.toStr(), request.pullId)
     Refusal pullClosed = pullMergeRefusal(request, mergePull, project.id.toStr())
     if isRefused(pullClosed) (
       return pullClosed
     )
+    Refusal pullHead = pullExpectedHeadRefusal(request)
+    if isRefused(pullHead) (
+      return pullHead
+    )
+    if projectUncommittedSummary(project).len > 0 (
+      return refuseWithBody(409, {ok: false, error: "Commit the changes saved in this project before merging this pull request.", code: "uncommitted_changes"})
+    )
     auto mergeSourceResult = loadProject(mergePull.sourceProjectId.toStr())
     if !mergeSourceResult.ok (
       return refuse(404, "merge source project not found")
     )
     mergeSource = mergeSourceResult.project.assert(object)
-    mergeSourceHead = mergePull.headCommit.toStr()
+    if !canInspectPullWithSource(mergePull, project, mergeSource, c) (
+      return refuse(403, "source code is not visible")
+    )
+    object branchRefusal = pullTargetBranchRefusal(mergePull, project)
+    if branchRefusal.len > 0 (
+      return refuseWithBody(409, branchRefusal)
+    )
+    string liveSourceHead = livePullHead(mergePull, mergeSource)
+    Refusal sourceMoved = pullSourceHeadRefusal(request, liveSourceHead, pullPreparedSourceHead(mergePull))
+    if isRefused(sourceMoved) (
+      return sourceMoved
+    )
+    mergeSourceHead = liveSourceHead
+    request.mergedPullHead = liveSourceHead
     mergeTargetHead = history.currentHead
   )
   if !isSafeHistoryArchive(history.mergeTree, archive, false) (
@@ -118,7 +158,7 @@ def createMergeCommit(object project, UploadRequest request, UploadHistory histo
   number mergeTimestamp = timestamp
   string mergeJson = ""
   if mergeReady (
-    mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, mergeBranch, uploader, mergeCommitMessage(request, branchMerge), mergeTimestamp / 1000)
+    mergeJson = gitinspection.CreateMergeArchiveJSON(mergeTargetPath, mergeTargetHead, mergeSourcePath, mergeSourceHead, mergeTreePath, mergeDeltaPath, identity.projectId, identity.remixParent, identity.baseCommit, mergeBranch, uploader, mergeMessage, mergeTimestamp / 1000)
   )
   object merged = parsedGeneratedHistory(mergeJson)
   if !mergeReady or merged.len == 0 (

@@ -37,6 +37,23 @@ def handleCheckProjectAssets(*serve.Context c) (
   c.json(200, {ok: true, missing: missing})
 )
 
+def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest request) Refusal (
+  if !isRemixSync(request) (
+    return noRefusal()
+  )
+  object? original = loadRemixSyncOriginal(project)
+  if original == null (
+    return refuse(404, "the original project was not found")
+  )
+  if !canSyncRemixFrom(project, original, c) (
+    return refuse(403, "only the remix's maintainers can sync it, and only while they can see inside the original")
+  )
+  if remixHasUncommittedChanges(project) (
+    return refuseWithBody(409, {ok: false, error: "commit the changes saved in this remix before syncing it with the original", code: "uncommitted_changes"})
+  )
+  return noRefusal()
+)
+
 def handleUploadProject(*serve.Context c) (
   runLocked(projectSaveLock(c.param("id")), def() -> (
     handleUploadProjectLocked(c)
@@ -55,7 +72,9 @@ def handleUploadProjectLocked(*serve.Context c) (
   if refused(c, editorReplaceRefusal(c, request, project)) return
   UploadHistory history = newUploadHistory(request, projectGitHead(project))
   if refused(c, liveContributorRefusal(request, canEditProject(project, c))) return
+  if refused(c, remixSyncRequestRefusal(request)) return
   if refused(c, staleUploadRefusal(request, project, history.currentHead)) return
+  if refused(c, remixSyncAccessRefusal(c, project, request)) return
   if refused(c, readUploadGitMetadata(history, projectHasWorkspace(project))) return
   if refused(c, restoreCommitRefusal(request)) return
 
@@ -72,7 +91,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   if refused(c, archive.discardOn(unchangedVersionCheck(project, request, history, archive))) return
   object extensionResult = collectProjectExtensions(archive.extractDir ++ "/project.json", request.extensions)
   if refused(c, archive.discardOn(extensionRefusal(extensionResult))) return
-  if refused(c, archive.discardOn(createMergeCommit(project, request, history, archive, uploader))) return
+  if refused(c, archive.discardOn(createMergeCommit(c, project, request, history, archive, uploader))) return
   if refused(c, archive.discardOn(createRestoreCommit(project, request, history, archive, uploader))) return
   if refused(c, archive.discardOn(checkGeneratedHistory(project, history))) return
 
@@ -103,7 +122,7 @@ def handleUploadProjectLocked(*serve.Context c) (
   archive.discard()
 
   project = projectWithUploadHistory(project)
-  if refused(c, completeUploadPull(project, request, contextString(c, "username"))) return
+  if refused(c, completeUploadPull(project, request, canEditProject(project, c))) return
   c.json(200, uploadResponse(project, uploadResult))
 )
 

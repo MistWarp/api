@@ -125,6 +125,63 @@ testing.assert(isRefused(pullMergeRefusal(branch, openPull, "p2")), "a pull into
 testing.assert(isRefused(pullMergeRefusal(branch, {}, "p1")), "a missing pull cannot merge")
 testing.assert(isRefused(pullMergeRefusal(request(), openPull, "p1")), "a merge without a pull id or branches is refused")
 
+UploadRequest pullFromRemix = request()
+pullFromRemix.pullId = "1"
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB, headB)), "older clients that send no remix head merge the recorded head")
+testing.assert(pullSourceHeadRefusal(pullFromRemix, headB, headA).body.code == "pull_head_changed", "older clients cannot merge a remix that moved past the recorded head")
+pullFromRemix.mergeSourceHead = headB
+testing.assert(!isRefused(pullSourceHeadRefusal(pullFromRemix, headB, headA)), "the remix head the merge was prepared from can merge")
+testing.assert(pullSourceHeadRefusal(pullFromRemix, headA, headA).body.code == "pull_head_changed", "a remix that moved after preparing stops the merge")
+testing.assert(isRefused(pullSourceHeadRefusal(pullFromRemix, "", headB)), "a remix with no head cannot merge")
+
+UploadRequest sync = request()
+testing.assert(!isRemixSync(sync) and !isRefused(remixSyncRequestRefusal(sync)), "ordinary saves are not syncs")
+sync.syncHead = headB
+testing.assert(isRemixSync(sync), "an original head makes a sync with the original")
+testing.assert(remixSyncRequestRefusal(sync).body.code == "head_changed", "a sync must name the remix head it was prepared from")
+sync.expectedHead = headA
+testing.assert(!isRefused(remixSyncRequestRefusal(sync)), "a sync with both heads can continue")
+testing.assert(liveContributorRefusal(sync, false).status == 403, "live contributors cannot sync a remix")
+testing.assert(!isRefused(liveContributorRefusal(sync, true)), "maintainers can sync a remix")
+testing.assert(!isRefused(remixSyncHeadRefusal(sync, headB)), "an unchanged original head can sync")
+testing.assert(remixSyncHeadRefusal(sync, headA).body.code == "original_changed", "a moved original head stops the sync")
+testing.assert(isRefused(remixSyncHeadRefusal(sync, "")), "an original without history stops the sync")
+testing.assert(remixSyncMergeRefusal(sync, false, false, "").status == 404, "a missing original refuses the post-body merge check with 404")
+testing.assert(remixSyncMergeRefusal(sync, true, false, headB).status == 403, "an original whose source became hidden while the upload streamed refuses the post-body merge check with 403")
+testing.assert(remixSyncMergeRefusal(sync, true, true, headA).body.code == "original_changed", "an original that moved while the upload streamed refuses the post-body merge check with 409 original_changed")
+testing.assert(!isRefused(remixSyncMergeRefusal(sync, true, true, headB)), "a visible, unchanged original passes the post-body merge check")
+UploadHistory syncWithTree = newUploadHistory(sync, headA)
+syncWithTree.hasMergeTree = true
+testing.assert(!isRefused(remixSyncTreeRefusal(sync, syncWithTree)), "a sync carrying the merged tree can continue")
+testing.assert(remixSyncTreeRefusal(sync, newUploadHistory(sync, headA)).status == 400, "a sync without the merged tree is refused")
+testing.assert(!isRefused(remixSyncTreeRefusal(request(), newUploadHistory(request(), headA))), "ordinary saves need no merged tree")
+UploadRequest pullUpload = request()
+pullUpload.pullId = "4"
+UploadHistory pullTree = newUploadHistory(pullUpload, headA)
+pullTree.hasMergeTree = true
+testing.assert(pullExpectedHeadRefusal(pullUpload).body.code == "head_changed", "a pull merge must name the target head it was prepared from")
+pullUpload.expectedHead = headA
+testing.assert(!isRefused(pullExpectedHeadRefusal(pullUpload)), "a pull merge naming the target head can continue")
+testing.assert(!isRefused(pullUploadShapeRefusal(pullUpload, pullTree)), "a pull merge with only the merged tree can continue")
+testing.assert(pullUploadShapeRefusal(pullUpload, newUploadHistory(pullUpload, headA)).status == 400, "a pull merge without the merged tree is refused")
+UploadHistory pullWithWorkspace = newUploadHistory(pullUpload, headA)
+pullWithWorkspace.hasMergeTree = true
+pullWithWorkspace.hasWorkspace = true
+testing.assert(pullUploadShapeRefusal(pullUpload, pullWithWorkspace).status == 400, "a pull merge that also carries a workspace is refused")
+testing.assert(!isRefused(pullUploadShapeRefusal(request(), newUploadHistory(request(), headA))), "ordinary saves are not pull merges")
+UploadRequest syncAndPull = request()
+syncAndPull.syncHead = headB
+syncAndPull.expectedHead = headA
+syncAndPull.pullId = "3"
+testing.assert(remixSyncRequestRefusal(syncAndPull).status == 400, "a sync cannot also merge a pull request")
+UploadRequest syncAndReplace = request()
+syncAndReplace.syncHead = headB
+syncAndReplace.expectedHead = headA
+syncAndReplace.replaceHistory = true
+testing.assert(isRefused(remixSyncRequestRefusal(syncAndReplace)) and isRefused(staleUploadRefusal(syncAndReplace, {edited: 1}, headA)), "a sync cannot replace history")
+testing.assert(remixSyncCommitMessage("Meowing Simulator") == "Merge changes from Meowing Simulator", "sync commits name the original")
+testing.assert(remixSyncCommitMessage("  ") == "Merge changes from the original project", "untitled originals get a generic message")
+
 HistoryIdentity fresh = historyIdentity({id: "p1", remixParent: null})
 testing.assert(fresh.projectId == "p1" and fresh.remixParent == "" and fresh.baseCommit == "" and fresh.branch == "main", "missing identity fields fall back")
 HistoryIdentity forked = historyIdentity({id: "p2", remixParent: "p1", remixBaseCommit: headA, gitBranch: "dev"})

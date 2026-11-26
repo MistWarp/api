@@ -84,7 +84,7 @@ def projectHasWorkspace(object project) boolean (
 def ensureUploadedProjectHistory(object project) object (
   return {ok: true, project: project}
 )
-def completeNativePull(object project, string pullIndex, string expectedHead, string username) boolean (
+def completeNativePull(object project, string pullIndex, string expectedHead, string mergedHead, boolean canMerge) boolean (
   return true
 )
 def projectGitHead(object project) string (
