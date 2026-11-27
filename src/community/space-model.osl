@@ -124,9 +124,6 @@ def canManageSpace(object space,*serve.Context c) boolean (
   if isSpaceOwner(space, c) (
     return true
   )
-  if canManageOrgContent(space, c) (
-    return true
-  )
   return stringArrayContainsUser(spaceManagers(space), username)
 )
 

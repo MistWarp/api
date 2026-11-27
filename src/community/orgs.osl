@@ -120,19 +120,19 @@ def creationOwner(*serve.Context c, object body, string noun) object (
   )
   object snapshot = roturOrgSnapshot(requestedOrg)
   if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
-    return {ok: false, status: 503, error: "Rotur can't be reached right now. Try again soon."}
+    return {ok: false, status: 503, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."}
   )
   if !snapshot.ok (
-    return {ok: false, status: 400, error: "organisation not found"}
+    return {ok: false, status: 400, code: "org_not_found", error: "organisation not found"}
   )
   if !contextBool(c, "isAdmin") and !orgMemberCanPublish(snapshot, contextString(c, "userId"), contextString(c, "username")) (
-    return {ok: false, status: 403, error: "you cannot create " ++ noun ++ " for this organisation"}
+    return {ok: false, status: 403, code: "org_forbidden", error: "you cannot create " ++ noun ++ " for this organisation"}
   )
   object org = snapshot.org.assertElse(object, {})
   string orgId = (org.id ?? "").toStr()
   string orgName = (org.username ?? "").toStr()
   if orgId == "" or orgName == "" (
-    return {ok: false, status: 503, error: "Rotur can't be reached right now. Try again soon."}
+    return {ok: false, status: 503, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."}
   )
   return {ok: true, owner: orgName, ownerId: orgId, ownerType: "org"}
 )
@@ -162,7 +162,8 @@ def orgPublisherNames(object snapshot) array (
   for i members.len (
     object member = members[i].assertElse(object, {})
     string username = (member.username ?? "").toStr().strip()
-    if username != "" and orgMemberCanPublish(snapshot, (member.id ?? "").toStr(), username) and !stringArrayContainsUser(names, username) (
+    boolean publishes = member.admin == true or orgPermsAllowPublishing((member.perms ?? []).assertElse(array, []))
+    if username != "" and publishes and !stringArrayContainsUser(names, username) (
       names.append(username)
     )
   )
@@ -189,7 +190,7 @@ def roturUserOrgs(string userId) object (
   if response.status != 200 (
     return {ok: false}
   )
-  auto parsed = json.parse(response.body, {type: "object"})
+  auto parsed = json.parse(response.body ?? "", {type: "object"})
   if parsed.isErr() (
     return {ok: false}
   )

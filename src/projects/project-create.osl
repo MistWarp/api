@@ -2,7 +2,7 @@ def handleCreateProject(*serve.Context c) (
   object body = requestJSON(c)
   object owner = creationOwner(c, body, "projects")
   if !owner.ok (
-    c.json(owner.status.toNum(), {ok: false, error: owner.error})
+    c.json(owner.status.toNum(), {ok: false, code: owner.code, error: owner.error})
     return
   )
   number projectLimit = mistwarpBenefitsForUserId(owner.ownerId.toStr()).maxProjects.toNum()

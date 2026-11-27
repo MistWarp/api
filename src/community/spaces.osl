@@ -102,7 +102,7 @@ def handleCreateSpace(*serve.Context c) (
   object body = requestJSON(c)
   object owner = creationOwner(c, body, "spaces")
   if !owner.ok (
-    c.json(owner.status.toNum(), {ok: false, error: owner.error})
+    c.json(owner.status.toNum(), {ok: false, code: owner.code, error: owner.error})
     return
   )
   number ownedSpaces = spaceDocs.where("ownerId", "==", owner.ownerId.toStr()).count()
@@ -437,8 +437,12 @@ def handleAddSpaceProject(*serve.Context c) (
       submissions.append({projectId: project.id, owner: project.owner, submittedAt: timestamp})
       space.submissions = submissions
       array participants = challengeArray(space, "participants")
-      if !stringArrayContainsUser(participants, project.owner.toStr()) (
-        participants.append(project.owner)
+      string participant = project.owner.toStr()
+      if isOrgOwned(project) (
+        participant = if ownsProject then contextString(c, "username") else ""
+      )
+      if participant != "" and !stringArrayContainsUser(participants, participant) (
+        participants.append(participant)
       )
       space.participants = participants
     )

@@ -464,7 +464,7 @@ def backfillOwnerIdForUserProjects(string userId, string username) (
   array matches = projectSearchDocs.where("ownerKey", "==", ownerKey).all()
   for i matches.len (
     object entry = matches[i].assert(object)
-    if (entry.ownerId ?? "").toStr() != userId (
+    if (entry.ownerType ?? "").toStr() != "org" and (entry.ownerId ?? "").toStr() != userId (
       entry.ownerId = userId
       putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
       auto loaded = loadProject(entry.id.toStr())

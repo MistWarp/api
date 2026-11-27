@@ -170,6 +170,7 @@ testing.assert(orgMemberPerms(snapshot, "", "BEA") == ["apps"], "a member is fou
 testing.assert(orgMemberPerms(snapshot, "u_zed", "zed") == [], "someone outside the org has none")
 testing.assert(orgHasMember(snapshot, "", "dee") and !orgHasMember(snapshot, "", "zed"), "membership includes private members")
 testing.assert(orgPublicMemberNames(snapshot) == ["ada", "cal"], "only public members are named")
+testing.assert(orgPublisherNames(snapshot) == ["ada", "bea"], "publishers are the admins and app members, private ones included")
 testing.assert(orgMemberCanPublish(snapshot, "u_bea", "bea") and orgMemberCanPublish(snapshot, "u_ada", "ada"), "apps and admin may publish")
 testing.assert(!orgMemberCanPublish(snapshot, "u_cal", "cal") and !orgMemberCanPublish(snapshot, "u_dee", "dee"), "billing and plain members may not")
 

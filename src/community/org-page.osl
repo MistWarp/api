@@ -43,7 +43,7 @@ def handleGetMistWarpOrg(*serve.Context c) (
   array all = snapshot.members.assertElse(array, [])
   for i all.len (
     object member = all[i].assertElse(object, {})
-    if member.public == true or isMember (
+    if member.public == true or isMember or contextBool(c, "isAdmin") (
       members.append(orgMemberResponse(member))
     )
   )
