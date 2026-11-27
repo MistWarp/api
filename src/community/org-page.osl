@@ -66,10 +66,10 @@ def orgProjectEntries(object org, boolean canManage) array (
   if orgId == "" (
     return owned
   )
-  array entries = ownerIndexEntries((org.username ?? "").toStr(), canManage)
+  array entries = projectSearchDocs.where("ownerId", "==", orgId).sort("edited", "desc").all()
   for i entries.len (
     object entry = entries[i].assertElse(object, {})
-    if (entry.ownerType ?? "").toStr() == "org" and (entry.ownerId ?? "").toStr() == orgId (
+    if (entry.ownerType ?? "").toStr() == "org" and (entry.shared == true or canManage) (
       owned.append(entry)
     )
   )

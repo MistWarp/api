@@ -36,7 +36,7 @@ def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
     return false
   )
   if isStudentUserId((conn.Get("userId") ?? "").toStr()) (
-    return projectRole(project, conn.Get("username").toStr()) != ""
+    return projectRoleForName(project, conn.Get("username").toStr()) != ""
   )
   if projectIsViewable(project) (
     return true
@@ -45,7 +45,7 @@ def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
     return true
   )
   if conn.Get("authenticated") == true (
-    return projectRole(project, conn.Get("username").toStr()) != ""
+    return projectRoleForName(project, conn.Get("username").toStr()) != ""
   )
   return false
 )

@@ -146,9 +146,16 @@ testing.assert(loadNotifications("owner").len == 2, "and classroom rules, not Ro
 roturStatus = 200
 askedRotur = []
 notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p5"})
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
 testing.assert(askedRotur.len == 1 and askedRotur[1].toStr().contains("ada") and !askedRotur[1].toStr().contains("\"studio\""), "a love on an org's project goes to its other publishers, not the org account")
 askedRotur = []
 notifyContentOwner({owner: "studio", ownerId: "o_taken", ownerType: "org"}, "zed", "love", {projectId: "p6"})
+wait 0.3
 testing.assert(askedRotur.len == 0, "content left by an org whose name was taken notifies nobody")
 notifyContentOwner({owner: "sam", ownerType: ""}, "zed", "love", {projectId: "p7"})
 testing.assert(askedRotur.len == 1, "a person's content notifies them as before")

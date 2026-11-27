@@ -456,13 +456,21 @@ def notifyContentOwner(object content, string actor, string notifType, object ex
     addNotification(owner, actor, notifType, extra)
     return
   )
+  thread.new(notifyOrgPublishers, owner, (content.ownerId ?? "").toStr(), actor, notifType, extra)
+)
+
+number orgNotificationLimit = 25
+
+def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra) (
   object snapshot = roturOrgSnapshot(owner)
-  string ownerId = (content.ownerId ?? "").toStr()
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return
   )
   array names = orgPublisherNames(snapshot)
   for i names.len (
+    if i > orgNotificationLimit (
+      return
+    )
     addNotification(names[i].toStr(), actor, notifType, extra)
   )
 )

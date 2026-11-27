@@ -51,7 +51,7 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
     for i keyMatches.len (
       object entry = keyMatches[i].assert(object)
       string pid = entry.id.toStr()
-      if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId (
+      if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId and (entry.ownerType ?? "").toStr() != "org" (
         entry.ownerId = ownerId
         putDocument(projectSearchDocs, entry["_id"].toStr(), entry)
         auto loaded = loadProject(pid)
@@ -391,7 +391,7 @@ def handleUpdateProfile(*serve.Context c) (
         return
       )
       object project = res.project.assert(object)
-      if projectRole(project, username) != "owner" (
+      if projectRoleFor(project, c) != "owner" (
         c.forbidden("not your project")
         return
       )

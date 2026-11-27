@@ -5,9 +5,11 @@ export {
   canViewProjectJson,
   ensureViewKey,
   projectJsonAccess,
+  projectModerator,
   projectMustStayPrivate,
   projectRole,
   projectRoleFor,
+  projectRoleForName,
   removeString
 }
 
@@ -70,6 +72,26 @@ def projectRoleFor(object project,*serve.Context c) string (
     return "owner"
   )
   return role
+)
+
+def projectModerator(object project,*serve.Context c) string (
+  if canManageOrgContent(project, c) (
+    return contextString(c, "username")
+  )
+  return project.owner.toStr()
+)
+
+def projectRoleForName(object project, string username) string (
+  string role = projectRole(project, username)
+  if role == "owner" or username == "" or !isOrgOwned(project) (
+    return role
+  )
+  object snapshot = roturOrgSnapshot(project.owner.toStr())
+  string ownerId = (project.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return role
+  )
+  return if orgMemberCanPublish(snapshot, "", username) then "owner" else role
 )
 
 def canViewForkProject(object project,*serve.Context c) boolean (

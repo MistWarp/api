@@ -734,6 +734,8 @@ def handleReactSpaceLocked(*serve.Context c) (
     c.internalError("could not save reaction")
     return
   )
-  notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
+  if !isOrgOwned(space) (
+    notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
+  )
   c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: if hadReaction then "" else reactionType})
 )

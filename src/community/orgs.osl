@@ -12,6 +12,7 @@ export {
 }
 
 *cache.Cache orgSnapshotCache = cache.new({capacity: 10000, ttl: 60000})
+*cache.Cache orgUnavailableCache = cache.new({capacity: 10000, ttl: 15000})
 *cache.Cache userOrgsCache = cache.new({capacity: 10000, ttl: 60000})
 
 def roturServiceGet(string path) object (
@@ -28,7 +29,7 @@ def roturOrgSnapshot(string rawName) object (
   if cached.contains("ok") (
     return cached
   )
-  if commerceServiceKey == "" (
+  if commerceServiceKey == "" or orgUnavailableCache.get(name).assertElse(boolean, false) (
     return {ok: false, unavailable: true}
   )
   object response = roturServiceGet("/v2/integrations/mistwarp/orgs/" ++ url.escape(name))
@@ -37,15 +38,10 @@ def roturOrgSnapshot(string rawName) object (
     orgSnapshotCache.set(name, missing)
     return missing
   )
-  if response.status != 200 (
-    return {ok: false, unavailable: true}
-  )
-  auto parsed = json.parse(response.body, {type: "object"})
-  if parsed.isErr() (
-    return {ok: false, unavailable: true}
-  )
-  object data = parsed.unwrap().assert(object)
+  auto parsed = json.parse(response.body ?? "", {type: "object"})
+  object data = if response.status == 200 and parsed.isOk() then parsed.unwrap().assert(object) else {}
   if (data.id ?? "").toStr() == "" or (data.username ?? "").toStr() == "" (
+    orgUnavailableCache.set(name, true)
     return {ok: false, unavailable: true}
   )
   object snapshot = {ok: true, org: data, members: (data.members ?? []).assertElse(array, [])}
@@ -223,7 +219,7 @@ def handleGetMyOrgs(*serve.Context c) (
       username: (org.username ?? "").toStr(),
       displayName: (org.display_name ?? "").toStr(),
       perms: perms,
-      canPublish: orgPermsAllowPublishing(perms)
+      canPublish: org.admin == true or orgPermsAllowPublishing(perms)
     })
   )
   c.json(200, {ok: true, orgs: orgs})

@@ -39,7 +39,7 @@ def liveSession(object project, string branch) object (
   if session.getKeys().len == 0 or session.expires.toNum() <= timestamp (
     return {}
   )
-  string role = projectRole(project, session.host.toStr())
+  string role = projectRoleForName(project, session.host.toStr())
   if !isSharedEditorRole(role) (
     return {}
   )
@@ -92,7 +92,7 @@ def handleLiveCollaboration(*serve.Context c) (
   object session = liveSession(project, branch)
   object editors = projectEditorPresence.get(project.id.toStr()).assertElse(object, {})
   for key in editors.getKeys() (
-    if editors[key].expires.toNum() <= timestamp or projectRole(project, editors[key].username.toStr()) == "" (
+    if editors[key].expires.toNum() <= timestamp or projectRoleForName(project, editors[key].username.toStr()) == "" (
       editors.delete(key)
     )
   )
@@ -108,7 +108,7 @@ def handleLiveCollaboration(*serve.Context c) (
   if session.getKeys().len != 0 (
     object activeMembers = session.members.assert(object)
     for key in activeMembers.getKeys() (
-      string memberRole = projectRole(project, key)
+      string memberRole = projectRoleForName(project, key)
       if activeMembers[key].expires.toNum() <= timestamp or memberRole == "" (
         activeMembers.delete(key)
       )

@@ -64,17 +64,11 @@ void spaceDocs.insertOne({_id: "s_pub", ownerId: "org_studio", visibility: "publ
 void spaceDocs.insertOne({_id: "s_unl", ownerId: "org_studio", visibility: "unlisted", edited: 2})
 void spaceDocs.insertOne({_id: "s_pri", ownerId: "org_studio", visibility: "private", edited: 1})
 
-def ownerIndexEntries(string owner, boolean includeUnshared) array (
-  array entries = [
-    {id: "p_org", ownerId: "org_studio", ownerType: "org", shared: true},
-    {id: "p_old", ownerId: "org_gone", ownerType: "org", shared: true},
-    {id: "p_person", ownerId: "u_studio", ownerType: "", shared: true}
-  ]
-  if includeUnshared (
-    entries.append({id: "p_draft", ownerId: "org_studio", ownerType: "org", shared: false})
-  )
-  return entries
-)
+*db.Collection projectSearchDocs = orgPageDb.collection("projects")
+void projectSearchDocs.insertOne({_id: "p_org", id: "p_org", ownerId: "org_studio", ownerKey: "studio", ownerType: "org", shared: true, edited: 4})
+void projectSearchDocs.insertOne({_id: "p_old", id: "p_old", ownerId: "org_gone", ownerKey: "studio", ownerType: "org", shared: true, edited: 3})
+void projectSearchDocs.insertOne({_id: "p_person", id: "p_person", ownerId: "u_studio", ownerKey: "studio", ownerType: "", shared: true, edited: 2})
+void projectSearchDocs.insertOne({_id: "p_draft", id: "p_draft", ownerId: "org_studio", ownerKey: "studio", ownerType: "org", shared: false, edited: 1})
 
 def projectsVisibleTo(array entries,*serve.Context c) array (
   return entries
@@ -187,7 +181,7 @@ orgStatus = 500
 object down = roturOrgSnapshot("busy")
 testing.assert(!down.ok and down.unavailable == true, "a Rotur error is reported as unavailable")
 void roturOrgSnapshot("busy")
-testing.assert(askedRotur.len == 4, "an unavailable answer is not cached")
+testing.assert(askedRotur.len == 3, "an unavailable answer is remembered briefly, so a list of spaces doesn't ask again for each")
 orgStatus = 200
 
 testing.assert(isOrgOwned({ownerType: "org"}) and !isOrgOwned({ownerType: ""}) and !isOrgOwned({}), "only content marked as org-owned is")

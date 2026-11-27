@@ -649,7 +649,7 @@ def handleDeleteProjectComment(*serve.Context c) (
   object project = res.project.assert(object)
 
   boolean requesterIsAdmin = contextBool(c, "isAdmin")
-  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), requesterIsAdmin)
+  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), projectModerator(project, c), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -704,7 +704,7 @@ def handlePinProjectComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"), pinned)
+  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), projectModerator(project, c), contextBool(c, "isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return
