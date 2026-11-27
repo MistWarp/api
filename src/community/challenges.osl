@@ -61,9 +61,8 @@ def challengeJudges(object space) array (
     return []
   )
   array judges = challengeArray(space, "judges")
-  string tag = groupTagOf(space)
-  if tag != "" (
-    array members = groupMemberNames(roturGroupSnapshot(tag))
+  if isOrgOwned(space) (
+    array members = orgPublicMemberNames(roturOrgSnapshot((space.owner ?? "").toStr()))
     for i members.len (
       string member = members[i].toStr()
       if !stringArrayContainsUser(judges, member) (
@@ -75,7 +74,10 @@ def challengeJudges(object space) array (
 )
 
 def isChallengeJudge(object space, string username) boolean (
-  return stringArrayContainsUser(challengeJudges(space), username)
+  if stringArrayContainsUser(challengeJudges(space), username) (
+    return true
+  )
+  return !challengeAudienceJudged(space) and isOrgOwned(space) and orgHasMember(roturOrgSnapshot((space.owner ?? "").toStr()), "", username)
 )
 
 def isChallengeJudgeInvitee(object space, string username) boolean (

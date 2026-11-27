@@ -1,0 +1,196 @@
+export {
+  canManageOrgContent,
+  canPublishForOrg,
+  creationOwner,
+  isOrgOwned,
+  orgHasMember,
+  orgPublicMemberNames,
+  roturOrgSnapshot
+}
+
+*cache.Cache orgSnapshotCache = cache.new({capacity: 10000, ttl: 60000})
+*cache.Cache userOrgsCache = cache.new({capacity: 10000, ttl: 60000})
+
+def roturServiceGet(string path) object (
+  object failed = {body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false}
+  return requests.get(roturBase ++ path, {headers: {"X-Commerce-Key": commerceServiceKey}}).unwrapOr(failed)
+)
+
+def roturOrgSnapshot(string rawName) object (
+  string name = normalizeUsername(rawName)
+  if name == "" or !isSafePathPart(name) (
+    return {ok: false, notOrg: true}
+  )
+  if orgSnapshotCache.has(name) (
+    return orgSnapshotCache.get(name).assertElse(object, {ok: false, unavailable: true})
+  )
+  if commerceServiceKey == "" (
+    return {ok: false, unavailable: true}
+  )
+  object response = roturServiceGet("/v2/integrations/mistwarp/orgs/" ++ url.escape(name))
+  if response.status == 404 (
+    object missing = {ok: false, notOrg: true}
+    orgSnapshotCache.set(name, missing)
+    return missing
+  )
+  if response.status != 200 (
+    return {ok: false, unavailable: true}
+  )
+  auto parsed = json.parse(response.body, {type: "object"})
+  if parsed.isErr() (
+    return {ok: false, unavailable: true}
+  )
+  object data = parsed.unwrap().assert(object)
+  object snapshot = {ok: true, org: data, members: (data.members ?? []).assertElse(array, [])}
+  orgSnapshotCache.set(name, snapshot)
+  return snapshot
+)
+
+def orgMemberPerms(object snapshot, string userId, string username) array (
+  if !snapshot.ok (
+    return []
+  )
+  array members = snapshot.members.assertElse(array, [])
+  for i members.len (
+    object member = members[i].assertElse(object, {})
+    if identityMatches((member.id ?? "").toStr(), (member.username ?? "").toStr(), userId, username) (
+      if member.admin == true (
+        return ["admin"]
+      )
+      return (member.perms ?? []).assertElse(array, [])
+    )
+  )
+  return []
+)
+
+def orgHasMember(object snapshot, string userId, string username) boolean (
+  if !snapshot.ok or (userId == "" and username == "") (
+    return false
+  )
+  array members = snapshot.members.assertElse(array, [])
+  for i members.len (
+    object member = members[i].assertElse(object, {})
+    if identityMatches((member.id ?? "").toStr(), (member.username ?? "").toStr(), userId, username) (
+      return true
+    )
+  )
+  return false
+)
+
+def orgPermsAllowPublishing(array perms) boolean (
+  return perms.contains("admin") or perms.contains("apps")
+)
+
+def orgMemberCanPublish(object snapshot, string userId, string username) boolean (
+  return orgPermsAllowPublishing(orgMemberPerms(snapshot, userId, username))
+)
+
+def canPublishForOrg(string name,*serve.Context c) boolean (
+  if !contextBool(c, "authenticated") (
+    return false
+  )
+  object snapshot = roturOrgSnapshot(name)
+  if !snapshot.ok (
+    return false
+  )
+  if contextBool(c, "isAdmin") (
+    return true
+  )
+  return orgMemberCanPublish(snapshot, contextString(c, "userId"), contextString(c, "username"))
+)
+
+def isOrgOwned(object value) boolean (
+  return (value.ownerType ?? "").toStr() == "org"
+)
+
+def canManageOrgContent(object value,*serve.Context c) boolean (
+  return isOrgOwned(value) and canPublishForOrg((value.owner ?? "").toStr(), c)
+)
+
+def creationOwner(*serve.Context c, object body, string noun) object (
+  string requestedOrg = (body.org ?? "").toStr().strip()
+  if requestedOrg == "" (
+    return {ok: true, owner: contextString(c, "username"), ownerId: contextString(c, "userId"), ownerType: ""}
+  )
+  object snapshot = roturOrgSnapshot(requestedOrg)
+  if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
+    return {ok: false, status: 503, error: "Rotur can't be reached right now. Try again soon."}
+  )
+  if !snapshot.ok (
+    return {ok: false, status: 400, error: "organisation not found"}
+  )
+  if !canPublishForOrg(requestedOrg, c) (
+    return {ok: false, status: 403, error: "you cannot create " ++ noun ++ " for this organisation"}
+  )
+  object org = snapshot.org.assertElse(object, {})
+  string orgId = (org.id ?? "").toStr()
+  string orgName = (org.username ?? "").toStr()
+  if orgId == "" or orgName == "" (
+    return {ok: false, status: 503, error: "Rotur can't be reached right now. Try again soon."}
+  )
+  return {ok: true, owner: orgName, ownerId: orgId, ownerType: "org"}
+)
+
+def orgPublicMemberNames(object snapshot) array (
+  array names = []
+  if !snapshot.ok (
+    return names
+  )
+  array members = snapshot.members.assertElse(array, [])
+  for i members.len (
+    object member = members[i].assertElse(object, {})
+    string username = (member.username ?? "").toStr().strip()
+    if member.public == true and username != "" and !stringArrayContainsUser(names, username) (
+      names.append(username)
+    )
+  )
+  return names
+)
+
+def roturUserOrgs(string userId) object (
+  if userId == "" or !isSafePathPart(userId) (
+    return {ok: true, orgs: []}
+  )
+  if userOrgsCache.has(userId) (
+    return userOrgsCache.get(userId).assertElse(object, {ok: false})
+  )
+  if commerceServiceKey == "" (
+    return {ok: false}
+  )
+  object response = roturServiceGet("/v2/integrations/mistwarp/users/" ++ url.escape(userId) ++ "/orgs")
+  if response.status == 404 (
+    return {ok: true, orgs: []}
+  )
+  if response.status != 200 (
+    return {ok: false}
+  )
+  auto parsed = json.parse(response.body, {type: "object"})
+  if parsed.isErr() (
+    return {ok: false}
+  )
+  object data = parsed.unwrap().assert(object)
+  object found = {ok: true, orgs: (data.orgs ?? []).assertElse(array, [])}
+  userOrgsCache.set(userId, found)
+  return found
+)
+
+def handleGetMyOrgs(*serve.Context c) (
+  object found = roturUserOrgs(contextString(c, "userId"))
+  if !found.ok (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  array orgs = []
+  array entries = found.orgs.assertElse(array, [])
+  for i entries.len (
+    object org = entries[i].assertElse(object, {})
+    array perms = (org.perms ?? []).assertElse(array, [])
+    orgs.append({
+      username: (org.username ?? "").toStr(),
+      displayName: (org.display_name ?? "").toStr(),
+      perms: perms,
+      canPublish: orgPermsAllowPublishing(perms)
+    })
+  )
+  c.json(200, {ok: true, orgs: orgs})
+)

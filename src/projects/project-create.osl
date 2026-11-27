@@ -1,22 +1,14 @@
 def handleCreateProject(*serve.Context c) (
   object body = requestJSON(c)
-  string username = contextString(c, "username")
-  number projectLimit = mistwarpBenefitsForUserId(contextString(c, "userId")).maxProjects.toNum()
-  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(contextString(c, "userId"), username) >= projectLimit (
-    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+  object owner = creationOwner(c, body, "projects")
+  if !owner.ok (
+    c.json(owner.status.toNum(), {ok: false, error: owner.error})
     return
   )
-  string groupTag = ""
-  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
-    groupTag = normalizeGroupTag(body.groupTag.toStr())
-    if groupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    )
-    if !canManageGroupTag(groupTag, c) (
-      c.forbidden("you cannot create projects for this group")
-      return
-    )
+  number projectLimit = mistwarpBenefitsForUserId(owner.ownerId.toStr()).maxProjects.toNum()
+  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(owner.ownerId.toStr(), owner.owner.toStr()) >= projectLimit (
+    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+    return
   )
 
   string title = body.title.toStr().strip()
@@ -51,9 +43,9 @@ def handleCreateProject(*serve.Context c) (
   string id = generateId()
   object project = {
     id: id,
-    owner: username,
-    ownerId: contextString(c, "userId"),
-    groupTag: groupTag,
+    owner: owner.owner,
+    ownerId: owner.ownerId,
+    ownerType: owner.ownerType,
     branding: {},
     vanitySlug: "",
     title: title,

@@ -21,7 +21,8 @@ def registerCommunityRoutes(*serve.Router api) (
 
   api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 
-  api.GET("/groups/:tag", handleGetMistWarpGroup)
+  api.GET("/orgs/:name", handleGetMistWarpOrg)
+  api.GET("/me/orgs", requireAuth, handleGetMyOrgs)
 
   api.GET("/development/pulls", handleDevelopmentPulls)
   api.GET("/roadmap", handleListIdeas)

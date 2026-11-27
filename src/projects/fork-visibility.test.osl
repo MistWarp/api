@@ -28,7 +28,7 @@ def isBannedUser(string username) boolean (
   return false
 )
 
-def canManageGroupContent(object project, object ctx) boolean (
+def canManageOrgContent(object project, object ctx) boolean (
   return false
 )
 
@@ -102,7 +102,7 @@ def canEditProjectTest(object project, object ctx) boolean (
   if ctx.isAdmin (
     return true
   )
-  if canManageGroupContent(project, ctx) (
+  if canManageOrgContent(project, ctx) (
     return true
   )
   string role = projectRole(project, ctx.username.toStr())

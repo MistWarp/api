@@ -578,7 +578,7 @@ def discoverUserIdentityOutcome(string username) object (
   )
   ensureUserIdentity(userId, currentUsername)
   identityRefreshCache.set(userId, currentUsername)
-  return {id: userId, outcome: "found"}
+  return {id: userId, outcome: "found", accountType: (profile.account_type ?? "").toStr()}
 )
 
 def usernameForId(string userId) string (

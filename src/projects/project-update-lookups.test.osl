@@ -26,11 +26,11 @@ def vanityEligibility(object project) string (
   asked.append("vanity " ++ project.id.toStr())
   return "yes"
 )
-def canManageGroupTag(string tag, *serve.Context c) boolean (
+def canPublishForOrg(string name, *serve.Context c) boolean (
   return true
 )
-def groupTagOf(object value) string (
-  return (value.groupTag ?? "").toStr()
+def isOrgOwned(object value) boolean (
+  return (value.ownerType ?? "").toStr() == "org"
 )
 def noStorageHold() object (
   return {ok: true, reservations: []}

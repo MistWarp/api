@@ -115,7 +115,7 @@ def spaceListResponse(object space,*serve.Context c) object (
     kind: space.kind,
     visibility: space.visibility,
     owner: space.owner,
-    groupTag: groupTagOf(space),
+    ownerType: if isOrgOwned(space) then "org" else "",
     edited: space.edited,
     startsAt: space.startsAt,
     endsAt: space.endsAt,

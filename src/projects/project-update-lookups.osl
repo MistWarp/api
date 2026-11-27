@@ -65,20 +65,19 @@ def lookupVanityEligibility(UpdateLookups lookups, object holder) string (
   return lookups.answers[key].toStr()
 )
 
-def lookupGroupManager(UpdateLookups lookups, *serve.Context c, string tag) boolean (
-  string key = "group:" ++ tag
+def lookupOrgPublisher(UpdateLookups lookups, *serve.Context c, string name) boolean (
+  string key = "org-publisher:" ++ name.toLower().strip()
   if !lookupKnown(lookups, key) (
     if lookups.replay (
       return false
     )
-    lookups.answers[key] = canManageGroupTag(tag, c)
+    lookups.answers[key] = canPublishForOrg(name, c)
   )
   return lookups.answers[key] == true
 )
 
-def lookupGroupContentManager(UpdateLookups lookups, *serve.Context c, object project) boolean (
-  string tag = groupTagOf(project)
-  return tag != "" and lookupGroupManager(lookups, c, tag)
+def lookupOrgContentManager(UpdateLookups lookups, *serve.Context c, object project) boolean (
+  return isOrgOwned(project) and lookupOrgPublisher(lookups, c, (project.owner ?? "").toStr())
 )
 
 def storageHoldKey(string userId, object changes, boolean enforce) string (

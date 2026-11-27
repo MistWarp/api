@@ -193,7 +193,7 @@ def projectResponse(object project,*serve.Context c) object (
   object response = {
     id: project.id,
     owner: project.owner,
-    groupTag: groupTagOf(project),
+    ownerType: if isOrgOwned(project) then "org" else "",
     branding: if project.contains("branding") then project.branding else {},
     vanitySlug: activeVanity.slug.toStr(),
     title: project.title,

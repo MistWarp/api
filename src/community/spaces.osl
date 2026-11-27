@@ -100,22 +100,15 @@ def handleGetSpace(*serve.Context c) (
 
 def handleCreateSpace(*serve.Context c) (
   object body = requestJSON(c)
-  number ownedSpaces = spaceDocs.where("ownerId", "==", contextString(c, "userId")).count()
-  if !contextBool(c, "isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(contextString(c, "userId")).maxSpaces.toNum() (
-    c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+  object owner = creationOwner(c, body, "spaces")
+  if !owner.ok (
+    c.json(owner.status.toNum(), {ok: false, error: owner.error})
     return
   )
-  string groupTag = ""
-  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
-    groupTag = normalizeGroupTag(body.groupTag.toStr())
-    if groupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    )
-    if !canManageGroupTag(groupTag, c) (
-      c.forbidden("you cannot create spaces for this group")
-      return
-    )
+  number ownedSpaces = spaceDocs.where("ownerId", "==", owner.ownerId.toStr()).count()
+  if !contextBool(c, "isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(owner.ownerId.toStr()).maxSpaces.toNum() (
+    c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+    return
   )
   string title = body.title.toStr().strip()
   string kind = body.kind.toStr().toLower().strip()
@@ -170,9 +163,9 @@ def handleCreateSpace(*serve.Context c) (
     description: description,
     kind: kind,
     visibility: visibility,
-    owner: contextString(c, "username"),
-    ownerId: contextString(c, "userId"),
-    groupTag: groupTag,
+    owner: owner.owner,
+    ownerId: owner.ownerId,
+    ownerType: owner.ownerType,
     managers: [],
     curatorInvites: [],
     projects: [],
@@ -215,13 +208,18 @@ def handleUpdateSpace(*serve.Context c) (
   )
   object body = requestJSON(c)
   if body.contains("owner") (
-    boolean canTransfer = isSpaceOwner(space, c) or canManageGroupContent(space, c)
+    boolean canTransfer = isSpaceOwner(space, c) or canManageOrgContent(space, c)
     if !canTransfer (
       c.forbidden("you cannot transfer this space")
       return
     )
     string requestedOwner = body.owner.toStr().strip()
-    string nextOwnerId = discoverUserIdentity(requestedOwner)
+    object identity = discoverUserIdentityOutcome(requestedOwner)
+    if identity.outcome == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
+      return
+    )
+    string nextOwnerId = identity.id.toStr()
     if nextOwnerId == "" (
       c.badRequest("Rotur user not found")
       return
@@ -231,29 +229,20 @@ def handleUpdateSpace(*serve.Context c) (
       c.badRequest("Rotur user not found")
       return
     )
+    boolean sameOwner = identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner)
     number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxSpaces.toNum()
-    if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
+    if !sameOwner and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
       c.badRequest("the new owner has reached their space limit")
+      return
+    )
+    boolean nextOwnerIsOrg = (identity.accountType ?? "").toStr() == "org"
+    if nextOwnerIsOrg and !sameOwner and !canPublishForOrg(nextOwner, c) (
+      c.forbidden("you cannot move this space into that organisation")
       return
     )
     space.owner = nextOwner
     space.ownerId = nextOwnerId
-    if !body.contains("keepGroup") or body.keepGroup != true (
-      space.groupTag = ""
-    )
-  )
-  if body.contains("groupTag") (
-    string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
-    if body.groupTag.toStr().strip() == "" (
-      nextGroupTag = ""
-    ) else if nextGroupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    ) else if !canManageGroupTag(nextGroupTag, c) (
-      c.forbidden("you cannot move this space into that group")
-      return
-    )
-    space.groupTag = nextGroupTag
+    space.ownerType = if nextOwnerIsOrg then "org" else ""
   )
   if body.contains("title") (
     string title = body.title.toStr().strip()
@@ -525,8 +514,8 @@ def handleMySpaces(*serve.Context c) (
     string spaceId = space["_id"].toStr()
     if !seen.contains(spaceId) (
       boolean include = isSpaceOwner(space, c)
-      if !include and groupTagOf(space) != "" (
-        include = canManageGroupContent(space, c)
+      if !include and isOrgOwned(space) (
+        include = canManageOrgContent(space, c)
       )
       if include (
         seen[spaceId] = true

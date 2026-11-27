@@ -56,7 +56,7 @@ def canEditProject(object project,*serve.Context c) boolean (
   if contextBool(c, "isAdmin") (
     return true
   )
-  if canManageGroupContent(project, c) (
+  if canManageOrgContent(project, c) (
     return true
   )
   string role = projectRole(project, contextString(c, "username"))

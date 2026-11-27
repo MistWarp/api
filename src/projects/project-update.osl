@@ -91,8 +91,6 @@ def applyAccessChanges(*serve.Context c, object project, object body, UpdateLook
   if isRefused(refusal) return refusal
   refusal = applyOwnerTransfer(c, project, body, transfer, lookups)
   if isRefused(refusal) return refusal
-  refusal = applyGroupTag(c, project, body, lookups)
-  if isRefused(refusal) return refusal
   object creatorBenefits = lookupProjectBenefits(lookups, project)
   refusal = applyBranding(project, body, creatorBenefits)
   if isRefused(refusal) return refusal
@@ -128,7 +126,7 @@ def canEditProjectWith(*serve.Context c, object project, UpdateLookups lookups) 
   if !contextBool(c, "authenticated") (
     return false
   )
-  if contextBool(c, "isAdmin") or lookupGroupContentManager(lookups, c, project) (
+  if contextBool(c, "isAdmin") or lookupOrgContentManager(lookups, c, project) (
     return true
   )
   string role = projectRole(project, contextString(c, "username"))
@@ -153,7 +151,7 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !body.contains("owner") (
     return noRefusal()
   )
-  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupGroupContentManager(lookups, c, project)
+  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupOrgContentManager(lookups, c, project)
   if !canTransfer (
     return refuse(403, "you cannot transfer this project")
   )
@@ -175,33 +173,19 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !sameOwner and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
     return refuse(400, "the new owner has reached their project limit")
   )
+  boolean nextOwnerIsOrg = (identity.accountType ?? "").toStr() == "org"
+  if nextOwnerIsOrg and !sameOwner and !lookupOrgPublisher(lookups, c, nextOwner) (
+    return refuse(403, "you cannot move this project into that organisation")
+  )
   if !sameOwner (
     transfer.fromId = projectOwnerId(project)
   )
   project.owner = nextOwner
   project.ownerId = nextOwnerId
-  if !body.contains("keepGroup") or body.keepGroup != true (
-    project.groupTag = ""
-  )
+  project.ownerType = if nextOwnerIsOrg then "org" else ""
   return noRefusal()
 )
 
-def applyGroupTag(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
-  if !body.contains("groupTag") (
-    return noRefusal()
-  )
-  string requestedGroupTag = (body.groupTag ?? "").toStr()
-  string nextGroupTag = normalizeGroupTag(requestedGroupTag)
-  if requestedGroupTag.strip() == "" (
-    nextGroupTag = ""
-  ) else if nextGroupTag == "" (
-    return refuse(400, "invalid group tag")
-  ) else if !lookupGroupManager(lookups, c, nextGroupTag) (
-    return refuse(403, "you cannot move this project into that group")
-  )
-  project.groupTag = nextGroupTag
-  return noRefusal()
-)
 
 def vanitySlugHeldElsewhere(object project, string slug, UpdateLookups lookups) boolean (
   array matches = vanityClaimEntries(slug)

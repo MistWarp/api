@@ -34,6 +34,16 @@ PROJECT_JSON = {
 
 USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena"}
 FULL_STORAGE = {"u_dee"}
+ORGS = {
+    "studio": {
+        "id": "o_studio", "username": "studio", "display_name": "Smoke Studio", "bio": "Games", "member_count": 3,
+        "members": [
+            {"id": "u_sam", "username": "sam", "admin": True, "perms": ["admin"], "public": True},
+            {"id": "u_alice", "username": "alice", "admin": False, "perms": ["billing"], "public": True},
+            {"id": "u_dee", "username": "dee", "admin": False, "perms": ["apps"], "public": False},
+        ],
+    },
+}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
@@ -89,7 +99,13 @@ class FakeRotur(BaseHTTPRequestHandler):
         if self.path.startswith("/v2/storage-ledger/"):
             self.answer(404, {"code": "not_found"})
             return
+        if self.path.startswith("/v2/integrations/mistwarp/"):
+            self.answer_org_integration()
+            return
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
+        if name in ORGS:
+            self.answer(200, {"id": ORGS[name]["id"], "username": name, "account_type": "org"})
+            return
         if name in GONE_USERS:
             self.answer(404, {"error": "User not found"})
             return
@@ -107,6 +123,25 @@ class FakeRotur(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         self.answer(200, {"id": USERS[name], "username": name})
+
+    def answer_org_integration(self):
+        if self.headers.get("X-Commerce-Key") != "smoke":
+            self.answer(403, {"error": "invalid service key"})
+            return
+        parts = self.path.split("?", 1)[0].split("/")
+        if parts[4] == "orgs" and len(parts) == 6:
+            org = ORGS.get(urllib.parse.unquote(parts[5]))
+            self.answer(200, org) if org else self.answer(404, {"code": "not_org", "not_org": True})
+            return
+        if parts[4] == "users" and len(parts) == 7 and parts[6] == "orgs":
+            mine = []
+            for org in ORGS.values():
+                for member in org["members"]:
+                    if member["id"] == parts[5]:
+                        mine.append({"id": org["id"], "username": org["username"], "display_name": org["display_name"], "perms": member["perms"]})
+            self.answer(200, {"orgs": mine})
+            return
+        self.answer(404, {"code": "not_found"})
 
     def do_POST(self):
         if not self.path.startswith("/v2/storage-ledger/"):
@@ -149,7 +184,7 @@ class Server:
         os.makedirs(os.path.join(data, "sessions"))
         with open(os.path.join(self.dir, ".env"), "w") as env:
             rotur = "http://127.0.0.1:%d" % self.rotur.server_address[1]
-            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=%s\nROTUR_LOCAL_API_URL=%s\nROTUR_SERVICE_SECRET=smoke\n" % (self.port, self.port, rotur, rotur))
+            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=%s\nROTUR_LOCAL_API_URL=%s\nROTUR_SERVICE_SECRET=smoke\nCOMMERCE_SERVICE_KEY=smoke\n" % (self.port, self.port, rotur, rotur))
         with open(os.path.join(data, "agreement.json"), "w") as handle:
             json.dump({"version": 1, "text": "", "updatedAt": 1700000000000}, handle)
         with open(os.path.join(data, "agreement.md"), "w") as handle:
@@ -777,10 +812,7 @@ def update_flow(server, step, ids):
     patch("patch vanity without plan", {"vanitySlug": "smoke-game"})
     patch("patch null vanity", {"vanitySlug": None})
     patch("patch vanity cleared", {"vanitySlug": ""})
-    patch("patch group tag invalid", {"groupTag": "!!!"})
-    patch("patch group tag not managed", {"groupTag": "somegroup"})
-    patch("patch null group tag", {"groupTag": None})
-    patch("patch group tag cleared", {"groupTag": "  "})
+    patch("patch group tag ignored", {"groupTag": "somegroup"})
     patch("patch nameless teammate", {"collaborators": [{"role": "editor"}]})
     patch("patch team share too high", {"collaborators": [{"username": "alice", "role": "editor", "share": 60}]})
     patch("patch team unknown user", {"collaborators": [{"username": "ghost_user", "role": "editor"}]})
@@ -802,7 +834,7 @@ def update_flow(server, step, ids):
     patch("patch editor session refused", {"collaborators": []}, who="sam_editor")
     patch("patch transfer as maintainer", {"owner": "bob"}, who="alice")
     patch("patch transfer unknown", {"owner": "ghost_user"})
-    patch("patch transfer", {"owner": "bob", "keepGroup": True, "title": "Given away"})
+    patch("patch transfer", {"owner": "bob", "title": "Given away"})
     patch("patch after transfer", {"title": "Mine again"})
     step("get updated project", "GET", path, "bob")
     for name, body in (
@@ -988,6 +1020,29 @@ def synced_tree(server, ids, alias, who, head, merge):
         else:
             files[change["path"]] = base64.b64decode(change.get("content") or "")
     return zip_files(files)
+
+
+def org_flow(server, step, steps, ids):
+    step("org page for a person", "GET", "/v1/orgs/bob")
+    step("my orgs", "GET", "/v1/me/orgs", "alice")
+    step("org create refused for billing", "POST", "/v1/projects", "alice", {"title": "Not allowed", "org": "studio"})
+    step("org create for a person", "POST", "/v1/projects", "dee", {"title": "Not an org", "org": "bob"})
+    status, created = step("org create", "POST", "/v1/projects", "dee", {"title": "Studio game", "org": "studio"})
+    ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<org-project>"
+    path = "/v1/projects/<org-project>"
+    step("org project as publisher", "GET", path, "sam")
+    step("org project edit as publisher", "PUT", path, "sam", {"title": "Studio game 2"})
+    step("org project edit as billing", "PUT", path, "alice", {"title": "Nope"})
+    status, mine = step("org own create", "POST", "/v1/projects", "bob", {"title": "Bob's game"})
+    ids[str(mine.get("id", "")) if isinstance(mine, dict) else ""] = "<bob-project>"
+    step("org transfer refused for an outsider", "PUT", "/v1/projects/<bob-project>", "bob", {"owner": "studio"})
+    status, given = step("org transfer by member", "POST", "/v1/projects", "dee", {"title": "Dee's game"})
+    ids[str(given.get("id", "")) if isinstance(given, dict) else ""] = "<dee-project>"
+    step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
+    step("org transfer back", "PUT", "/v1/projects/<dee-project>", "sam", {"owner": "dee"})
+    step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
+    step("org page", "GET", "/v1/orgs/studio")
+    step("org page as member", "GET", "/v1/orgs/studio", "dee")
 
 
 def remix_sync_flow(server, step, steps, ids):
@@ -1289,6 +1344,7 @@ def run(binary, sb3, keep):
         slow_ledger_flow(server, step, steps, ids)
         locks_flow(server, step, steps, ids)
         remix_sync_flow(server, step, steps, ids)
+        org_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):

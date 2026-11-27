@@ -114,7 +114,7 @@ def handleGetClaim(*serve.Context c) (
 def moveProjectOwner(object project, string username, string userId) (
   project.owner = username
   project.ownerId = userId
-  project.groupTag = ""
+  project.ownerType = ""
   project.edited = timestamp
   saveProject(project)
   upsertIndexEntry(project)
