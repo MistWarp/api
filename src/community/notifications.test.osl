@@ -4,6 +4,7 @@ import "std:json"
 import "std:requests"
 import "std:serve"
 import "std:thread"
+import "std:cache"
 
 string notificationsDir = "notifications/"
 string editorOrigin = "https://mistwarp.org"
@@ -159,3 +160,15 @@ wait 0.3
 testing.assert(askedRotur.len == 0, "content left by an org whose name was taken notifies nobody")
 notifyContentOwner({owner: "sam", ownerType: ""}, "zed", "love", {projectId: "p7"})
 testing.assert(askedRotur.len == 1, "a person's content notifies them as before")
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p5"})
+wait 0.3
+testing.assert(askedRotur.len == 0, "the same love toggled again soon doesn't fan out to the publishers twice")
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p8"})
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
+testing.assert(askedRotur.len == 1, "a love on another of the org's projects still fans out")

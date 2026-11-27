@@ -1253,7 +1253,13 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
   project.mergedContributors = mergedContributors
   saveProject(project)
   upsertIndexEntry(project)
-  addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", {projectId: project.id, projectTitle: project.title, pull: pull.index})
+  object mergedNotice = {projectId: project.id, projectTitle: project.title, pull: pull.index}
+  object sourceLoad = loadProject((pull.sourceProjectId ?? "").toStr())
+  if sourceLoad.ok and identityMatches((pull.sourceOwnerId ?? "").toStr(), pull.sourceOwner.toStr(), (sourceLoad.project.ownerId ?? "").toStr(), (sourceLoad.project.owner ?? "").toStr()) (
+    notifyContentOwner(sourceLoad.project.assert(object), project.owner.toStr(), "contribution_merged", mergedNotice)
+  ) else (
+    addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", mergedNotice)
+  )
   if pull.contains("bountyId") and pull.bountyId != null and pull.bountyId.toStr() != "" (
     boolean bountyPaid = awardContributionBounty(pull.bountyId.toStr(), project.id.toStr(), pull.sourceOwner.toStr())
     if !bountyPaid (

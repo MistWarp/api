@@ -1,6 +1,5 @@
 export {
   canManageOrgContent,
-  canPublishForOrg,
   creationOwner,
   isOrgOwned,
   orgAccess,
@@ -104,10 +103,6 @@ def orgAccess(string name, string expectedOrgId,*serve.Context c) string (
     return "no"
   )
   return if orgMemberCanPublish(snapshot, contextString(c, "userId"), contextString(c, "username")) then "yes" else "no"
-)
-
-def canPublishForOrg(string name,*serve.Context c) boolean (
-  return orgAccess(name, "", c) == "yes"
 )
 
 def isOrgOwned(object value) boolean (

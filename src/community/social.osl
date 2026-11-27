@@ -391,7 +391,7 @@ def handleUpdateProfile(*serve.Context c) (
         return
       )
       object project = res.project.assert(object)
-      if projectRoleFor(project, c) != "owner" (
+      if projectRole(project, username) != "owner" (
         c.forbidden("not your project")
         return
       )

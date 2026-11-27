@@ -122,7 +122,7 @@ def handleFakeUserOrgs(*serve.Context c) (
 )
 
 def handleCheckPublish(*serve.Context c) (
-  c.json(200, {ok: canPublishForOrg(c.param("name"), c)})
+  c.json(200, {ok: orgAccess(c.param("name"), "", c) == "yes"})
 )
 
 def handleCheckContent(*serve.Context c) (

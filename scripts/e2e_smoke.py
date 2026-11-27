@@ -44,13 +44,14 @@ ORGS = {
         ],
     },
 }
+GHOST_ORGS = {"ghoststudio": "o_ghost"}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
-EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
+EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure", "org transfer to an org Rotur can't vouch for", "org space move to an org Rotur can't vouch for"}
 CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
@@ -105,6 +106,9 @@ class FakeRotur(BaseHTTPRequestHandler):
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
         if name in ORGS:
             self.answer(200, {"id": ORGS[name]["id"], "username": name, "account_type": "org"})
+            return
+        if name in GHOST_ORGS:
+            self.answer(200, {"id": GHOST_ORGS[name], "username": name, "account_type": "org"})
             return
         if name in GONE_USERS:
             self.answer(404, {"error": "User not found"})
@@ -1036,6 +1040,7 @@ def org_flow(server, step, steps, ids):
     status, mine = step("org own create", "POST", "/v1/projects", "bob", {"title": "Bob's game"})
     ids[str(mine.get("id", "")) if isinstance(mine, dict) else ""] = "<bob-project>"
     step("org transfer refused for an outsider", "PUT", "/v1/projects/<bob-project>", "bob", {"owner": "studio"})
+    step("org transfer to an org Rotur can't vouch for", "PUT", "/v1/projects/<bob-project>", "bob", {"owner": "ghoststudio"})
     status, given = step("org transfer by member", "POST", "/v1/projects", "dee", {"title": "Dee's game"})
     ids[str(given.get("id", "")) if isinstance(given, dict) else ""] = "<dee-project>"
     step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
@@ -1045,6 +1050,7 @@ def org_flow(server, step, steps, ids):
     own_space = own_space.get("space", {}) if isinstance(own_space, dict) else {}
     ids[str(own_space.get("_id", own_space.get("id", "")))] = "<sam-space>"
     step("org space move refused for billing", "PUT", "/v1/spaces/<sam-space>", "alice", {"owner": "studio"})
+    step("org space move to an org Rotur can't vouch for", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "ghoststudio"})
     step("org space move", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "studio"})
     step("org space managed by publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"title": "Studio collection"})
     step("org page", "GET", "/v1/orgs/studio")

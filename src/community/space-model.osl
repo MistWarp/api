@@ -102,7 +102,7 @@ def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
   if project.contains("ownerId") and project.ownerId != null (
     ownerId = project.ownerId.toStr()
   )
-  return identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+  return identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) or canManageOrgContent(project, c)
 )
 
 def isSpaceInvitee(object space,*serve.Context c) boolean (

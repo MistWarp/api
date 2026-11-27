@@ -177,8 +177,7 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
     return refuse(400, "the new owner has reached their project limit")
   )
   object nextOrg = lookupOrgSnapshot(lookups, nextOwner)
-  boolean nextOrgUnknown = !nextOrg.ok and nextOrg.contains("unavailable") and nextOrg.unavailable == true
-  if nextOrgUnknown and (identity.accountType ?? "").toStr() == "org" (
+  if !nextOrg.ok and (identity.accountType ?? "").toStr() == "org" (
     return roturUnavailableRefusal(requestedOwner)
   )
   boolean nextOwnerIsOrg = nextOrg.ok

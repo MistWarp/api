@@ -456,10 +456,17 @@ def notifyContentOwner(object content, string actor, string notifType, object ex
     addNotification(owner, actor, notifType, extra)
     return
   )
-  thread.new(notifyOrgPublishers, owner, (content.ownerId ?? "").toStr(), actor, notifType, extra)
+  string ownerId = (content.ownerId ?? "").toStr()
+  string fanOutKey = ownerId ++ ":" ++ owner ++ ":" ++ actor ++ ":" ++ notifType ++ ":" ++ extra.toStr()
+  if recentOrgFanOuts.get(fanOutKey).assertElse(boolean, false) (
+    return
+  )
+  recentOrgFanOuts.set(fanOutKey, true)
+  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra)
 )
 
 number orgNotificationLimit = 25
+*cache.Cache recentOrgFanOuts = cache.new({capacity: 10000, ttl: 600000})
 
 def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra) (
   object snapshot = roturOrgSnapshot(owner)
