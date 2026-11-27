@@ -21,8 +21,8 @@ def registerCommunityRoutes(*serve.Router api) (
 
   api.GET("/me/purchases", requireAuth, handleGetMyPurchases)
 
-  api.GET("/orgs/:name", handleGetMistWarpOrg)
-  api.GET("/me/orgs", requireAuth, handleGetMyOrgs)
+  api.GET("/orgs/:name", serve.rateLimit({requests: 120, window: date.minute}), handleGetMistWarpOrg)
+  api.GET("/me/orgs", requireAuth, serve.rateLimit({requests: 120, window: date.minute}), handleGetMyOrgs)
 
   api.GET("/development/pulls", handleDevelopmentPulls)
   api.GET("/roadmap", handleListIdeas)

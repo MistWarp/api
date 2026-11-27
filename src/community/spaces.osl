@@ -203,12 +203,16 @@ def handleUpdateSpace(*serve.Context c) (
     return
   )
   if !canManageSpace(space, c) (
+    if isOrgOwned(space) and orgAccess(space.owner.toStr(), (space.ownerId ?? "").toStr(), c) == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
     c.forbidden("you cannot manage this space")
     return
   )
   object body = requestJSON(c)
   if body.contains("owner") (
-    boolean canTransfer = isSpaceOwner(space, c) or canManageOrgContent(space, c)
+    boolean canTransfer = isSpaceOwner(space, c)
     if !canTransfer (
       c.forbidden("you cannot transfer this space")
       return
@@ -235,10 +239,23 @@ def handleUpdateSpace(*serve.Context c) (
       c.badRequest("the new owner has reached their space limit")
       return
     )
-    boolean nextOwnerIsOrg = (identity.accountType ?? "").toStr() == "org"
-    if nextOwnerIsOrg and !sameOwner and !canPublishForOrg(nextOwner, c) (
-      c.forbidden("you cannot move this space into that organisation")
+    object nextOrg = roturOrgSnapshot(nextOwner)
+    boolean nextOrgUnknown = !nextOrg.ok and nextOrg.contains("unavailable") and nextOrg.unavailable == true
+    boolean nextOwnerIsOrg = nextOrg.ok
+    if (nextOrgUnknown and (identity.accountType ?? "").toStr() == "org") or (nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId) (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
       return
+    )
+    if nextOwnerIsOrg and !sameOwner (
+      string access = orgAccess(nextOwner, nextOwnerId, c)
+      if access == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
+        return
+      )
+      if access != "yes" (
+        c.forbidden("you cannot move this space into that organisation")
+        return
+      )
     )
     space.owner = nextOwner
     space.ownerId = nextOwnerId
@@ -428,7 +445,7 @@ def handleAddSpaceProject(*serve.Context c) (
     )
     space.edited = timestamp
     putSpaceDocument(space)
-    addNotification(space.owner.toStr(), contextString(c, "username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
+    notifyContentOwner(space, contextString(c, "username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
   )
   c.json(200, {ok: true, space: spaceResponse(space, c)})
 )
@@ -513,11 +530,7 @@ def handleMySpaces(*serve.Context c) (
     object space = allSpaces[i].assert(object)
     string spaceId = space["_id"].toStr()
     if !seen.contains(spaceId) (
-      boolean include = isSpaceOwner(space, c)
-      if !include and isOrgOwned(space) (
-        include = canManageOrgContent(space, c)
-      )
-      if include (
+      if isSpaceOwner(space, c) (
         seen[spaceId] = true
         stored.append(space)
       )
@@ -624,7 +637,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
   if accepted (
     notificationType = "space_curator_accepted"
   )
-  addNotification(space.owner.toStr(), username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
+  notifyContentOwner(space, username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
   c.json(200, {ok: true, accepted: accepted})
 )
 

@@ -58,6 +58,9 @@ def saveProfile(object profile) boolean (
 def addNotification(string target, string actor, string kind, object payload) (
   return
 )
+def notifyContentOwner(object content, string actor, string kind, object payload) (
+  addNotification((content.owner ?? "").toStr(), actor, kind, payload)
+)
 def saveProject(object project) boolean (
   return true
 )

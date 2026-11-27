@@ -90,9 +90,11 @@ def ownedProjectSlotCount(string userId, string username) number (
 )
 
 def projectFirstShared(object project) (
-  addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+  if !isOrgOwned(project) (
+    addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+    roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
+  )
   notifyPublishedRemix(project)
-  roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
 )
 
 def notifyPublishedRemix(object project) (
@@ -104,11 +106,13 @@ def notifyPublishedRemix(object project) (
     return
   )
   object parent = parentResult.project.assert(object)
-  addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
-  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) (
+  notifyContentOwner(parent, project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) and !isOrgOwned(parent) (
     roturBadgeEvent(parent.owner.toStr(), "remixed", 0)
   )
-  addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  if !isOrgOwned(project) (
+    addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  )
   project.remixNotified = true
   saveProject(project)
 )

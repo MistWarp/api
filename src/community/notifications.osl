@@ -1,5 +1,6 @@
 export {
   addNotification,
+  notifyContentOwner,
   loadNotifications,
   saveNotifications
 }
@@ -447,4 +448,21 @@ def markNotificationsReadLocked(string username) (
     item.read = true
   )
   saveNotifications(username, items)
+)
+
+def notifyContentOwner(object content, string actor, string notifType, object extra) (
+  string owner = (content.owner ?? "").toStr()
+  if !isOrgOwned(content) (
+    addNotification(owner, actor, notifType, extra)
+    return
+  )
+  object snapshot = roturOrgSnapshot(owner)
+  string ownerId = (content.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return
+  )
+  array names = orgPublisherNames(snapshot)
+  for i names.len (
+    addNotification(names[i].toStr(), actor, notifType, extra)
+  )
 )

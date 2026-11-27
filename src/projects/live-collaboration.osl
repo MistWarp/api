@@ -73,7 +73,7 @@ def handleLiveCollaboration(*serve.Context c) (
   )
   object project = res.project.assert(object)
   string username = normalizeUsername(contextString(c, "username"))
-  string role = projectRole(project, username)
+  string role = projectRoleFor(project, c)
   if role == "" (
     c.forbidden("only project team members can discover editing sessions")
     return

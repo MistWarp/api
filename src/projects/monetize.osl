@@ -82,7 +82,7 @@ def projectSeeInside(object project) boolean (
 )
 
 def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
-  boolean owner = contextBool(c, "authenticated") and projectRole(project, contextString(c, "username")) == "owner"
+  boolean owner = contextBool(c, "authenticated") and projectRoleFor(project, c) == "owner"
   return projectSourcePolicyAllows(project, owner)
 )
 

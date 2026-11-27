@@ -56,28 +56,66 @@ def challengeAudienceVotingEnabled(object space) boolean (
   return challengeAudienceJudged(space) or (space.contains("communityVoting") and space.communityVoting == true)
 )
 
+def challengeOrgSnapshot(object space) object (
+  if challengeAudienceJudged(space) or !isOrgOwned(space) (
+    return {ok: false}
+  )
+  object snapshot = roturOrgSnapshot((space.owner ?? "").toStr())
+  string ownerId = (space.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return {ok: false}
+  )
+  return snapshot
+)
+
+def challengeOrgJudges(object space) array (
+  object snapshot = challengeOrgSnapshot(space)
+  array listed = []
+  array publishers = orgPublisherNames(snapshot)
+  array visible = orgPublicMemberNames(snapshot)
+  for i publishers.len (
+    if stringArrayContainsUser(visible, publishers[i].toStr()) (
+      listed.append(publishers[i])
+    )
+  )
+  return listed
+)
+
 def challengeJudges(object space) array (
   if challengeAudienceJudged(space) (
     return []
   )
   array judges = challengeArray(space, "judges")
-  if isOrgOwned(space) (
-    array members = orgPublicMemberNames(roturOrgSnapshot((space.owner ?? "").toStr()))
-    for i members.len (
-      string member = members[i].toStr()
-      if !stringArrayContainsUser(judges, member) (
-        judges.append(member)
-      )
+  array members = challengeOrgJudges(space)
+  for i members.len (
+    string member = members[i].toStr()
+    if !stringArrayContainsUser(judges, member) (
+      judges.append(member)
     )
   )
   return judges
+)
+
+def challengeJudgeCount(object space) number (
+  if challengeAudienceJudged(space) (
+    return 0
+  )
+  array judges = challengeArray(space, "judges")
+  array publishers = orgPublisherNames(challengeOrgSnapshot(space))
+  number count = judges.len
+  for i publishers.len (
+    if !stringArrayContainsUser(judges, publishers[i].toStr()) (
+      count += 1
+    )
+  )
+  return count
 )
 
 def isChallengeJudge(object space, string username) boolean (
   if stringArrayContainsUser(challengeJudges(space), username) (
     return true
   )
-  return !challengeAudienceJudged(space) and isOrgOwned(space) and orgHasMember(roturOrgSnapshot((space.owner ?? "").toStr()), "", username)
+  return stringArrayContainsUser(orgPublisherNames(challengeOrgSnapshot(space)), username)
 )
 
 def isChallengeJudgeInvitee(object space, string username) boolean (
@@ -262,7 +300,7 @@ def handleJoinChallenge(*serve.Context c) (
     space.edited = timestamp
     putSpaceDocument(space)
     if !isSpaceOwner(space, c) (
-      addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+      notifyContentOwner(space, contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
     )
   )
   c.json(200, {ok: true, joined: true, participantCount: participants.len})
@@ -319,7 +357,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
       judges.append(contextString(c, "username"))
     )
     space.judges = judges
-    addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
+    notifyContentOwner(space, contextString(c, "username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
   )
   space.edited = timestamp
   putSpaceDocument(space)

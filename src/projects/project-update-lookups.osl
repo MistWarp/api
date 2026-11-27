@@ -65,19 +65,33 @@ def lookupVanityEligibility(UpdateLookups lookups, object holder) string (
   return lookups.answers[key].toStr()
 )
 
-def lookupOrgPublisher(UpdateLookups lookups, *serve.Context c, string name) boolean (
-  string key = "org-publisher:" ++ name.toLower().strip()
+def lookupOrgAccess(UpdateLookups lookups, *serve.Context c, string name, string expectedOrgId) string (
+  string key = "org-access:" ++ name.toLower().strip() ++ ":" ++ expectedOrgId
   if !lookupKnown(lookups, key) (
     if lookups.replay (
-      return false
+      return "unavailable"
     )
-    lookups.answers[key] = canPublishForOrg(name, c)
+    lookups.answers[key] = orgAccess(name, expectedOrgId, c)
   )
-  return lookups.answers[key] == true
+  return lookups.answers[key].toStr()
 )
 
-def lookupOrgContentManager(UpdateLookups lookups, *serve.Context c, object project) boolean (
-  return isOrgOwned(project) and lookupOrgPublisher(lookups, c, (project.owner ?? "").toStr())
+def lookupOrgContentAccess(UpdateLookups lookups, *serve.Context c, object project) string (
+  if !isOrgOwned(project) (
+    return "no"
+  )
+  return lookupOrgAccess(lookups, c, (project.owner ?? "").toStr(), (project.ownerId ?? "").toStr())
+)
+
+def lookupOrgSnapshot(UpdateLookups lookups, string name) object (
+  string key = "org-snapshot:" ++ name.toLower().strip()
+  if !lookupKnown(lookups, key) (
+    if lookups.replay (
+      return {ok: false, unavailable: true}
+    )
+    lookups.answers[key] = roturOrgSnapshot(name)
+  )
+  return lookups.answers[key].assertElse(object, {ok: false, unavailable: true})
 )
 
 def storageHoldKey(string userId, object changes, boolean enforce) string (

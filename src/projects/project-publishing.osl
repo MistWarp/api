@@ -194,10 +194,12 @@ def handleReactProjectLocked(*serve.Context c) (
   )
   upsertIndexEntry(project)
 
-  notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
+  if !isOrgOwned(project) (
+    notifyLikeMilestones(project.owner.toStr(), "project", project.id.toStr(), previousLikes, loves.len, "/project/" ++ project.id.toStr(), {projectId: project.id, projectTitle: project.title})
+  )
   if addedHeart (
-    addNotification(project.owner.toStr(), viewer, "love", {projectId: project.id, projectTitle: project.title})
-    if firstLove and normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) (
+    notifyContentOwner(project, viewer, "love", {projectId: project.id, projectTitle: project.title})
+    if firstLove and normalizeUsername(viewer) != normalizeUsername(project.owner.toStr()) and !isOrgOwned(project) (
       roturBadgeEvent(project.owner.toStr(), "love_received", 0)
     )
     addActivity(viewer, "love", {projectId: project.id, projectTitle: project.title, projectOwner: project.owner})

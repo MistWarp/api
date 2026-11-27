@@ -7,6 +7,7 @@ export {
   projectJsonAccess,
   projectMustStayPrivate,
   projectRole,
+  projectRoleFor,
   removeString
 }
 
@@ -61,6 +62,14 @@ def canEditProject(object project,*serve.Context c) boolean (
   )
   string role = projectRole(project, contextString(c, "username"))
   return role == "owner" or role == "maintainer"
+)
+
+def projectRoleFor(object project,*serve.Context c) string (
+  string role = projectRole(project, contextString(c, "username"))
+  if role != "owner" and canManageOrgContent(project, c) (
+    return "owner"
+  )
+  return role
 )
 
 def canViewForkProject(object project,*serve.Context c) boolean (

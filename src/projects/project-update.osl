@@ -77,6 +77,9 @@ def finishProjectUpdate(*serve.Context c, object body, UpdateOutcome outcome) (
 
 def applyProjectUpdate(*serve.Context c, object project, object body, UpdateLookups lookups, OwnerTransfer transfer) Refusal (
   if !canEditProjectWith(c, project, lookups) (
+    if contextBool(c, "authenticated") and lookupOrgContentAccess(lookups, c, project) == "unavailable" (
+      return roturUnavailableRefusal(project.owner.toStr())
+    )
     return refuse(403, "not your project")
   )
   Refusal refusal = applyAccessChanges(c, project, body, lookups, transfer)
@@ -126,7 +129,7 @@ def canEditProjectWith(*serve.Context c, object project, UpdateLookups lookups) 
   if !contextBool(c, "authenticated") (
     return false
   )
-  if contextBool(c, "isAdmin") or lookupOrgContentManager(lookups, c, project) (
+  if contextBool(c, "isAdmin") or lookupOrgContentAccess(lookups, c, project) == "yes" (
     return true
   )
   string role = projectRole(project, contextString(c, "username"))
@@ -144,14 +147,14 @@ def updateScopeRefusal(*serve.Context c, object project, object body) Refusal (
 )
 
 def isOwnerOrAdmin(*serve.Context c, object project) boolean (
-  return projectRole(project, contextString(c, "username")) == "owner" or contextBool(c, "isAdmin")
+  return projectRoleFor(project, c) == "owner" or contextBool(c, "isAdmin")
 )
 
 def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTransfer transfer, UpdateLookups lookups) Refusal (
   if !body.contains("owner") (
     return noRefusal()
   )
-  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupOrgContentManager(lookups, c, project)
+  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupOrgContentAccess(lookups, c, project) == "yes"
   if !canTransfer (
     return refuse(403, "you cannot transfer this project")
   )
@@ -173,9 +176,23 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !sameOwner and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
     return refuse(400, "the new owner has reached their project limit")
   )
-  boolean nextOwnerIsOrg = (identity.accountType ?? "").toStr() == "org"
-  if nextOwnerIsOrg and !sameOwner and !lookupOrgPublisher(lookups, c, nextOwner) (
-    return refuse(403, "you cannot move this project into that organisation")
+  object nextOrg = lookupOrgSnapshot(lookups, nextOwner)
+  boolean nextOrgUnknown = !nextOrg.ok and nextOrg.contains("unavailable") and nextOrg.unavailable == true
+  if nextOrgUnknown and (identity.accountType ?? "").toStr() == "org" (
+    return roturUnavailableRefusal(requestedOwner)
+  )
+  boolean nextOwnerIsOrg = nextOrg.ok
+  if nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId (
+    return roturUnavailableRefusal(requestedOwner)
+  )
+  if nextOwnerIsOrg and !sameOwner (
+    string access = lookupOrgAccess(lookups, c, nextOwner, nextOwnerId)
+    if access == "unavailable" (
+      return roturUnavailableRefusal(requestedOwner)
+    )
+    if access != "yes" (
+      return refuse(403, "you cannot move this project into that organisation")
+    )
   )
   if !sameOwner (
     transfer.fromId = projectOwnerId(project)

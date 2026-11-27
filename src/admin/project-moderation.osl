@@ -351,7 +351,7 @@ def hideProjectForModeration(object project, string reason, string actor) (
     ownerProfile.featuredProject = ""
     saveProfile(ownerProfile)
   )
-  addNotification(project.owner.toStr(), actor, "project_hidden", {projectId: project.id, projectTitle: project.title, reason: reason})
+  notifyContentOwner(project, actor, "project_hidden", {projectId: project.id, projectTitle: project.title, reason: reason})
 )
 
 def handleRestoreHiddenProject(*serve.Context c) (
@@ -383,6 +383,6 @@ def handleRestoreHiddenProject(*serve.Context c) (
   )
   saveProject(project)
   upsertIndexEntry(project)
-  addNotification(project.owner.toStr(), contextString(c, "username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
+  notifyContentOwner(project, contextString(c, "username"), "project_restored", {projectId: project.id, projectTitle: project.title, visibility: visibility})
   c.json(200, {ok: true, project: projectResponse(project, c)})
 )

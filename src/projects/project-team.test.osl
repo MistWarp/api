@@ -33,8 +33,11 @@ def userIdForUsername(string username) string (
 def vanityEligibility(object project) string (
   return "unknown"
 )
-def canPublishForOrg(string name, *serve.Context c) boolean (
-  return false
+def orgAccess(string name, string expectedOrgId, *serve.Context c) string (
+  return "no"
+)
+def roturOrgSnapshot(string name) object (
+  return {ok: false, notOrg: true}
 )
 def isOrgOwned(object value) boolean (
   return false

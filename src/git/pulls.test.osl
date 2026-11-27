@@ -85,6 +85,12 @@ def contextString(*serve.Context c, string key) string (
 def addNotification(string target, string actor, string kind, object payload) (
   return
 )
+def notifyContentOwner(object content, string actor, string kind, object payload) (
+  return
+)
+def projectRoleFor(object project,*serve.Context c) string (
+  return projectRole(project, contextString(c, "username"))
+)
 
 def canEditProject(object project,*serve.Context c) boolean (
   return false

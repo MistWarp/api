@@ -1,6 +1,8 @@
 import "std:testing"
 import "std:json"
 import "std:serve"
+import "std:requests"
+import "std:thread"
 import "./project-refusal.osl"
 import "./project-update-lookups.osl"
 
@@ -26,8 +28,13 @@ def vanityEligibility(object project) string (
   asked.append("vanity " ++ project.id.toStr())
   return "yes"
 )
-def canPublishForOrg(string name, *serve.Context c) boolean (
-  return true
+def orgAccess(string name, string expectedOrgId, *serve.Context c) string (
+  asked.append("org " ++ name ++ " " ++ expectedOrgId)
+  return if name == "busy" then "unavailable" else "yes"
+)
+def roturOrgSnapshot(string name) object (
+  asked.append("snapshot " ++ name)
+  return {ok: true, org: {id: "o_" ++ name}}
 )
 def isOrgOwned(object value) boolean (
   return (value.ownerType ?? "").toStr() == "org"
@@ -76,6 +83,48 @@ testing.assert(released == ["u_a"], "every hold except the one the save used is 
 released = []
 releaseStorageHolds(holds, "")
 testing.assert(released == ["u_a", "u_b"], "an unsaved update releases every hold")
+
+def handleOrgLookups(*serve.Context c) (
+  UpdateLookups orgs = UpdateLookups()
+  number before = asked.len
+  object answers = {
+    publisher: lookupOrgContentAccess(orgs, c, {owner: "Studio", ownerId: "o_studio", ownerType: "org"}),
+    person: lookupOrgContentAccess(orgs, c, {owner: "sam", ownerType: ""}),
+    busy: lookupOrgAccess(orgs, c, "busy", ""),
+    snapshot: lookupOrgSnapshot(orgs, "Studio").org.id,
+    livePassAsked: asked.len - before
+  }
+  orgs.replay = true
+  number replayBefore = asked.len
+  answers.replayed = lookupOrgAccess(orgs, c, "studio", "o_studio")
+  answers.replayedSnapshot = lookupOrgSnapshot(orgs, "studio").ok
+  answers.replayAsked = asked.len - replayBefore
+  answers.missedBefore = orgs.missed
+  answers.unknown = lookupOrgAccess(orgs, c, "other", "")
+  answers.missedAfter = orgs.missed
+  c.json(200, answers)
+)
+
+*serve.Router lookupServer = serve.new()
+lookupServer.GET("/orgs", handleOrgLookups)
+def runLookupServer() (
+  lookupServer.run(":18364")
+)
+thread.new(runLookupServer)
+object orgResult = {}
+for i 50 (
+  auto attempt = requests.get("http://127.0.0.1:18364/orgs")
+  if attempt.isOk() (
+    orgResult = json.parse(attempt.unwrap().body, {type: "object"}).unwrap().assert(object)
+    break
+  )
+  wait 0.1
+)
+testing.assert(orgResult.publisher == "yes" and orgResult.snapshot == "o_studio", "a publisher manages org content and an org is looked up")
+testing.assert(orgResult.person == "no" and orgResult.livePassAsked == 3, "a person's content never asks Rotur about orgs")
+testing.assert(orgResult.busy == "unavailable", "an unreachable Rotur is unavailable, not a refusal")
+testing.assert(orgResult.replayed == "yes" and orgResult.replayedSnapshot == true and orgResult.replayAsked == 0 and orgResult.missedBefore == false, "org answers replay by name, whatever its case")
+testing.assert(orgResult.unknown == "unavailable" and orgResult.missedAfter == true, "an org the live pass never asked about is a miss")
 
 testing.assert(roturUnavailableRefusal("alice").status == 503 and roturUnavailableRefusal("alice").body.code == "rotur_unavailable", "an unreachable Rotur is a 503")
 

@@ -53,11 +53,27 @@ def handleGetMistWarpOrg(*serve.Context c) (
     ok: true,
     org: orgProfileResponse(org),
     members: members,
-    projects: projectsVisibleTo(ownerIndexEntries((org.username ?? "").toStr(), canManage), c),
+    projects: projectsVisibleTo(orgProjectEntries(org, canManage), c),
     spaces: orgSpaces((org.id ?? "").toStr(), canManage, c),
     isMember: isMember,
     canManage: canManage
   })
+)
+
+def orgProjectEntries(object org, boolean canManage) array (
+  string orgId = (org.id ?? "").toStr()
+  array owned = []
+  if orgId == "" (
+    return owned
+  )
+  array entries = ownerIndexEntries((org.username ?? "").toStr(), canManage)
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    if (entry.ownerType ?? "").toStr() == "org" and (entry.ownerId ?? "").toStr() == orgId (
+      owned.append(entry)
+    )
+  )
+  return owned
 )
 
 def orgSpaces(string orgId,boolean canManage,*serve.Context c) array (
@@ -69,7 +85,7 @@ def orgSpaces(string orgId,boolean canManage,*serve.Context c) array (
   for i entries.len (
     object space = entries[i].assertElse(object, {})
     string visibility = (space.visibility ?? "").toStr()
-    if visibility == "public" or canManage (
+    if visibility == "public" or visibility == "unlisted" or canManage (
       spaces.append(spaceListResponse(space, c))
     )
   )

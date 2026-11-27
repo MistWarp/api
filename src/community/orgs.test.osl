@@ -5,6 +5,8 @@ import "std:serve"
 import "std:thread"
 import "std:cache"
 import "std:url"
+import "std:db"
+import "std:fs"
 
 string roturBase = "http://127.0.0.1:18351"
 string commerceServiceKey = "mw-key"
@@ -55,7 +57,35 @@ def contextBool(*serve.Context c, string key) boolean (
   return false
 )
 
+string spaceDbPath = "/tmp/mistwarp-org-page-" ++ timestamp.toStr() ++ ".db"
+*db.DB orgPageDb = db.open(spaceDbPath)
+*db.Collection spaceDocs = orgPageDb.collection("spaces")
+void spaceDocs.insertOne({_id: "s_pub", ownerId: "org_studio", visibility: "public", edited: 3})
+void spaceDocs.insertOne({_id: "s_unl", ownerId: "org_studio", visibility: "unlisted", edited: 2})
+void spaceDocs.insertOne({_id: "s_pri", ownerId: "org_studio", visibility: "private", edited: 1})
+
+def ownerIndexEntries(string owner, boolean includeUnshared) array (
+  array entries = [
+    {id: "p_org", ownerId: "org_studio", ownerType: "org", shared: true},
+    {id: "p_old", ownerId: "org_gone", ownerType: "org", shared: true},
+    {id: "p_person", ownerId: "u_studio", ownerType: "", shared: true}
+  ]
+  if includeUnshared (
+    entries.append({id: "p_draft", ownerId: "org_studio", ownerType: "org", shared: false})
+  )
+  return entries
+)
+
+def projectsVisibleTo(array entries,*serve.Context c) array (
+  return entries
+)
+
+def spaceListResponse(object space,*serve.Context c) object (
+  return {id: space["_id"]}
+)
+
 import "./orgs.osl"
+import "./org-page.osl"
 
 object studio = {
   id: "org_studio",
@@ -81,6 +111,10 @@ def handleFakeOrg(*serve.Context c) (
     c.json(orgStatus, {error: "no"})
     return
   )
+  if c.param("name") == "broken" (
+    c.json(200, {error: "half an answer"})
+    return
+  )
   if c.param("name") != "studio" (
     c.json(404, {error: "Not an organisation", code: "not_org", not_org: true})
     return
@@ -98,7 +132,7 @@ def handleCheckPublish(*serve.Context c) (
 )
 
 def handleCheckContent(*serve.Context c) (
-  c.json(200, {ok: canManageOrgContent({owner: "studio", ownerType: (c.query("kind") ?? "")}, c)})
+  c.json(200, {ok: canManageOrgContent({owner: "studio", ownerId: (c.query("id") ?? ""), ownerType: (c.query("kind") ?? "")}, c)})
 )
 
 def handleCheckCreation(*serve.Context c) (
@@ -112,6 +146,7 @@ fakeRotur.GET("/check/publish/:name", handleCheckPublish)
 fakeRotur.GET("/check/content", handleCheckContent)
 fakeRotur.GET("/check/create", handleCheckCreation)
 fakeRotur.GET("/ready", handleFakeUserOrgs)
+fakeRotur.GET("/page/:name", handleGetMistWarpOrg)
 
 def runFakeRotur() (
   fakeRotur.run(":18351")
@@ -179,3 +214,30 @@ testing.assert(orgs.ok and orgs.orgs.len == 2 and askedRotur == ["orgs of u_bea"
 void roturUserOrgs("u_bea")
 testing.assert(askedRotur.len == 1, "and are cached")
 testing.assert(orgPermsAllowPublishing(["apps"]) and !orgPermsAllowPublishing([]), "the org list says where someone can publish")
+
+testing.assert(ask("/check/content?kind=org&id=org_studio", "bea", "u_bea").ok == true, "a publisher manages content the org owns by id")
+testing.assert(ask("/check/content?kind=org&id=org_gone", "bea", "u_bea").ok == false, "but not content left by an earlier org with the same name")
+testing.assert(ask("/check/content?kind=org&id=org_gone", "zed", "u_zed").ok == false, "nor does anyone else")
+object broken = roturOrgSnapshot("broken")
+testing.assert(!broken.ok and broken.unavailable == true, "a 200 without an org in it is unavailable, not an empty org")
+
+def page(string user, string id) object (
+  return ask("/page/studio", user, id)
+)
+
+object anonymous = page("", "")
+array anonymousMembers = anonymous.members.assert(array)
+testing.assert(anonymousMembers.len == 2 and anonymousMembers[1].username == "ada" and anonymousMembers[2].username == "cal", "a visitor sees only the listed members")
+testing.assert(anonymous.isMember == false and anonymous.canManage == false, "a visitor is neither member nor publisher")
+testing.assert(anonymous.projects.assert(array).len == 1 and anonymous.projects[1].id == "p_org", "a visitor sees the org's shared projects, not an old org's or a person's")
+testing.assert(anonymous.spaces.assert(array).len == 2, "a visitor sees public and unlisted spaces")
+
+object member = page("dee", "u_dee")
+testing.assert(member.members.assert(array).len == 4 and member.isMember == true and member.canManage == false, "a member sees every member but cannot manage")
+testing.assert(member.projects.assert(array).len == 1 and member.spaces.assert(array).len == 2, "a member without apps sees what visitors see")
+
+object publisher = page("bea", "u_bea")
+testing.assert(publisher.canManage == true and publisher.projects.assert(array).len == 2 and publisher.spaces.assert(array).len == 3, "a publisher also sees drafts and private spaces")
+
+orgPageDb.close()
+void fs.remove(spaceDbPath)

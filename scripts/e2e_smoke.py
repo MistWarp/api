@@ -1041,8 +1041,16 @@ def org_flow(server, step, steps, ids):
     step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
     step("org transfer back", "PUT", "/v1/projects/<dee-project>", "sam", {"owner": "dee"})
     step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
+    status, own_space = step("org own space create", "POST", "/v1/spaces", "sam", {"title": "Sam's space", "kind": "collection"})
+    own_space = own_space.get("space", {}) if isinstance(own_space, dict) else {}
+    ids[str(own_space.get("_id", own_space.get("id", "")))] = "<sam-space>"
+    step("org space move refused for billing", "PUT", "/v1/spaces/<sam-space>", "alice", {"owner": "studio"})
+    step("org space move", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "studio"})
+    step("org space managed by publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"title": "Studio collection"})
     step("org page", "GET", "/v1/orgs/studio")
     step("org page as member", "GET", "/v1/orgs/studio", "dee")
+    step("org project delete by billing", "DELETE", path, "alice")
+    step("org project delete by publisher", "DELETE", path, "dee")
 
 
 def remix_sync_flow(server, step, steps, ids):

@@ -80,7 +80,7 @@ def spaceResponse(object space,*serve.Context c) object (
     response.phase = challengePhase(space)
     response.isJudge = isChallengeJudge(space, contextString(c, "username"))
     response.judgeInvited = isChallengeJudgeInvitee(space, contextString(c, "username"))
-    response.judgeCount = challengeJudges(space).len
+    response.judgeCount = challengeJudgeCount(space)
     response.participantCount = challengeArray(space, "participants").len
     response.joined = stringArrayContainsUser(challengeArray(space, "participants"), contextString(c, "username"))
     response.judges = challengeJudges(space)

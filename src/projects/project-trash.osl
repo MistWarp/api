@@ -116,7 +116,7 @@ def handleDeleteProject(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+  if projectRoleFor(project, c) != "owner" and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
   )
