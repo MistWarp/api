@@ -115,7 +115,7 @@ def projectWithUploadHistory(object project) object (
     log "WARNING: project " ++ project.id.toStr() ++ " uploaded without history and fallback generation failed: " ++ generatedHistory.error.toStr()
     return project
   )
-  return generatedHistory.project.assert(object)
+  return generatedHistory.project
 )
 
 def completeUploadPull(object project, UploadRequest request, boolean canMerge) Refusal (

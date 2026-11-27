@@ -151,8 +151,8 @@ def handleRemoveSchoolTeacher(*serve.Context c) (
     c.badRequest("a school needs at least one admin")
     return
   )
-  school.teacherIds = (school.teacherIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != teacherId)
-  school.adminIds = admins.filter((any id) boolean -> id.toStr() != teacherId)
+  school.teacherIds = (school.teacherIds ?? []).assertElse(array, []).filter(def(any id) boolean -> id.toStr() != teacherId)
+  school.adminIds = admins.filter(def(any id) boolean -> id.toStr() != teacherId)
   putDocument(schoolDocs, school["_id"].toStr(), school)
   invalidateClassroomPool(teacherId)
   classroomPoolCache.delete(school["_id"].toStr())
@@ -180,7 +180,7 @@ def handleSetSchoolAdmin(*serve.Context c) (
       c.badRequest("a school needs at least one admin")
       return
     )
-    admins = admins.filter((any id) boolean -> id.toStr() != teacherId)
+    admins = admins.filter(def(any id) boolean -> id.toStr() != teacherId)
     array teachers = (school.teacherIds ?? []).assertElse(array, [])
     if !teachers.contains(teacherId) (
       teachers.append(teacherId)
@@ -239,7 +239,7 @@ def handleExportSchool(*serve.Context c) (
         disabled: student.disabled == true,
         createdAt: student.createdAt,
         lastLoginAt: student.lastLoginAt ?? 0,
-        projects: ownerIndexEntries(student.username.toStr(), true).map((any entry) any -> {id: entry.id, title: entry.title, edited: entry.edited})
+        projects: ownerIndexEntries(student.username.toStr(), true).map(def(any entry) any -> {id: entry.id, title: entry.title, edited: entry.edited})
       })
     )
     classes.append({
@@ -264,7 +264,7 @@ def handleAdminListSchools(*serve.Context c) (
   for i schools.len (
     object school = schools[i].assert(object)
     string key = school["_id"].toStr()
-    rows.append({id: key, name: school.name, admins: (school.adminIds ?? []).assertElse(array, []).map((any id) any -> usernameForId(id.toStr())), plan: effectiveClassroomPlan((classroomPlanDocs.findById(key) ?? {}), timestamp)})
+    rows.append({id: key, name: school.name, admins: (school.adminIds ?? []).assertElse(array, []).map(def(any id) any -> usernameForId(id.toStr())), plan: effectiveClassroomPlan((classroomPlanDocs.findById(key) ?? {}), timestamp)})
   )
   c.json(200, {ok: true, schools: rows})
 )

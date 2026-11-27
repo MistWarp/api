@@ -338,7 +338,7 @@ def r2PutEncoded(string key, BlobBody body, string contentType, string contentEn
   if r2Local (
     string path = localBlobPath(key)
     void fs.mkdir(parentDirOf(path), {recursive: true})
-    return fs.writeFileBytes(path, body)
+    return fs.writeFileBytes(path, body).isOk()
   )
   string uploadType = if contentType == "" then "application/octet-stream" else contentType
   boolean stored = key != "" and r2Client.upload(key, body, {contentType: uploadType, contentEncoding: contentEncoding})
@@ -487,7 +487,7 @@ def copyStorageKeyToPath(string key, string outputPath) boolean (
   if existing.isErr() (
     return false
   )
-  return fs.writeFileBytes(outputPath, existing.unwrap())
+  return (fs.writeFileBytes(outputPath, existing.unwrap())).isOk()
 )
 
 def copyProjectWorkspaceToPath(object project, string outputPath) boolean (
@@ -532,7 +532,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
       )
       return copyFileReplacing(localPath, outputPath)
     )
-    return zip.gzip(localPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes})
+    return zip.gzip(localPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}).isOk()
   )
   if r2Local or project.jsonKey.toStr() == "" (
     return false
@@ -546,13 +546,13 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     if fetched.body.toStr().toBytes().len > maxStoredProjectJsonBytes (
       return false
     )
-    return fs.writeFileBytes(outputPath, fetched.body)
+    return fs.writeFileBytes(outputPath, fetched.body).isOk()
   )
   string plainPath = outputPath ++ ".plain"
   if !fs.writeFileBytes(plainPath, fetched.body) (
     return false
   )
-  boolean compressed = zip.gzip(plainPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes})
+  boolean compressed = zip.gzip(plainPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}).isOk()
   void fs.remove(plainPath)
   return compressed
 )

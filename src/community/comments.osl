@@ -356,8 +356,8 @@ def commentPage(array allComments,*serve.Context c) object (
   string issueFilter = (c.query("issue") ?? "")
   if validIssueFilter(issueFilter) (
     object threads = issueThreads(comments, roots, issueFilter, c.queryInt("number", 0))
-    comments = threads.comments.assert(array)
-    roots = threads.roots.assert(array)
+    comments = threads.comments
+    roots = threads.roots
   )
   if (c.query("sort") ?? "") == "donations" (
     for i roots.len (

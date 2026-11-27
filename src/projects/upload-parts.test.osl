@@ -19,7 +19,7 @@ def readFile(string path) object (
   return {ok: true, data: json.parse(text.unwrap()).unwrap()}
 )
 def writeFile(string path, object data) boolean (
-  return fs.writeFile(path, json.stringify(data))
+  return (fs.writeFile(path, json.stringify(data))).isOk()
 )
 def randomString(number length) string (
   return "r" * length

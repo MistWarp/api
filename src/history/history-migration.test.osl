@@ -51,7 +51,7 @@ def projectGitHead(object project) string (
 def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
   string plain = outputPath ++ ".json"
   void fs.writeFile(plain, "{\"targets\":[]}")
-  boolean ok = zip.gzip(plain, outputPath, {maxInputBytes: 1024, maxBytes: 1024})
+  boolean ok = zip.gzip(plain, outputPath, {maxInputBytes: 1024, maxBytes: 1024}).isOk()
   void fs.remove(plain)
   return ok
 )
@@ -95,7 +95,7 @@ def projectWorkspaceSnapshotKey(string hash) string (
 )
 
 def stageR2Blob(string key, byte[] data, string contentType, string encoding) boolean (
-  return fs.writeFileBytes(tmpDir ++ key, data)
+  return fs.writeFileBytes(tmpDir ++ key, data).isOk()
 )
 
 def removeProjectStorageKeyIfOrphaned(string key, string id, boolean workspace) (

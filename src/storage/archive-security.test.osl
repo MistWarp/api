@@ -35,7 +35,7 @@ def stageBytes(string kind, string name, byte[] content) (
 
 def compressFixture(string kind) byte[] (
   string outPath = fixtureDir ++ "/" ++ kind ++ ".zip"
-  testing.assert(zip.compress(fixtureDir ++ "/" ++ kind, outPath), "fixture compresses: " ++ kind)
+  testing.assert(zip.compress(fixtureDir ++ "/" ++ kind, outPath).isOk(), "fixture compresses: " ++ kind)
   return fs.readFileBytes(outPath)
 )
 

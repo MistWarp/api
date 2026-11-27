@@ -258,11 +258,11 @@ def removeBackpackItemsLocked(string userId, array ids) object (
   sync.lock(backpackLockName(userId))
   defer sync.unlock(backpackLockName(userId))
   object split = backpackWithout(loadBackpackItems(userId), ids)
-  array removed = split.removed.assert(array)
+  array removed = split.removed
   if removed.len == 0 (
     return {ok: true, removed: removed}
   )
-  if !saveBackpackItems(userId, split.kept.assert(array)) (
+  if !saveBackpackItems(userId, split.kept) (
     return {ok: false}
   )
   return {ok: true, removed: removed}

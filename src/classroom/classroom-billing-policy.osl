@@ -29,7 +29,7 @@ def stripeSignatureValid(string header, string payload, string secret, number no
     return false
   )
   string expected = crypto.hmac("sha256", secret, signedAt.toInt().toStr() ++ "." ++ payload)
-  array signatures = parts.v1.assert(array)
+  array signatures = parts.v1
   for i signatures.len (
     if crypto.constantTimeCompare(expected, signatures[i].toStr()) (
       return true

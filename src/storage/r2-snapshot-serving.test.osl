@@ -78,7 +78,7 @@ def requestSnapshot(string key, boolean gzip, string etag) object (
     gzipParam = "1"
   )
   auto res = requests.get("http://127.0.0.1:18332/snap/" ++ url.escape(key), {query: {gzip: gzipParam}, headers: {"If-None-Match": etag, "Accept-Encoding": "identity"}})
-  return {status: res.status, body: res.body, encoding: res.headers["Content-Encoding"] ?? "", type: res.headers["Content-Type"] ?? "", etag: res.headers["Etag"] ?? ""}
+  return {status: res.status, body: res.body, encoding: res.headers["Content-Encoding"], type: res.headers["Content-Type"], etag: res.headers["Etag"]}
 )
 
 string plain = "{\"targets\":[],\"meta\":{\"name\":\"burger 🍔\"}}"

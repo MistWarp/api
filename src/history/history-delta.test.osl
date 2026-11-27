@@ -49,17 +49,17 @@ object delta = {
 }
 
 object merged = mergeDeltaHistory(project, delta, base)
-array commits = merged.commits.assert(array)
+array commits = merged.commits
 testing.assert(commits.len == 4, "delta and inherited commits are combined")
 testing.assert(commits[1].sha == second and commits[2].sha == first, "new commits stay newest first")
 testing.assert(commits[3].sha == base and commits[3].message == "Base", "the inherited base metadata wins")
 testing.assert(commits[4].sha == older, "history before the base is preserved")
 
-array nodes = merged.graph.assert(object).nodes.assert(array)
+array nodes = merged.graph.nodes
 testing.assert(nodes.len == 4, "graph nodes are deduplicated")
 testing.assert(nodes[3].message == "Base", "the incoming base node does not replace inherited metadata")
 
-array mainLog = graphBranchLog(merged.graph.assert(object), "main")
+array mainLog = graphBranchLog(merged.graph, "main")
 testing.assert(mainLog.len == 4, "branch log is stitched without duplicates")
 testing.assert(mainLog[1] == second and mainLog[2] == first and mainLog[3] == base and mainLog[4] == older, "branch log spans delta and base")
 array releaseLog = graphBranchLog(merged.graph.assert(object), "release")
@@ -91,8 +91,8 @@ object mergeDelta = {
   }
 }
 object pullMerged = mergeDeltaHistory(sourceHistory, mergeDelta, base)
-array pullMergedCommits = pullMerged.commits.assert(array)
+array pullMergedCommits = pullMerged.commits
 testing.assert(pullMergedCommits.len == 3, "an explicit PR merge keeps the source commits")
 testing.assert(pullMergedCommits[1].sha == mergeHead and pullMergedCommits[2].sha == pullHead and pullMergedCommits[3].sha == base, "the PR merge is prepended to source history")
-array pullMergedLog = graphBranchLog(pullMerged.graph.assert(object), "main")
+array pullMergedLog = graphBranchLog(pullMerged.graph, "main")
 testing.assert(pullMergedLog.len == 3 and pullMergedLog[1] == mergeHead and pullMergedLog[2] == pullHead and pullMergedLog[3] == base, "the main log connects the merge commit to the accepted source history")

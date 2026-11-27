@@ -25,7 +25,7 @@ export {
 }
 
 def ensureDirectories() boolean (
-  boolean res = fs.mkdir(projectsDir, {recursive: true})
+  boolean res = fs.mkdir(projectsDir, {recursive: true}).isOk()
   res = res and fs.mkdir(usersDir, {recursive: true})
   res = res and fs.mkdir(sessionsDir, {recursive: true})
   res = res and fs.mkdir(commentsDir, {recursive: true})
@@ -285,7 +285,7 @@ def deleteProjectFile(string id) boolean (
   if !isSafePathPart(id) (
     return false
   )
-  return fs.remove(projectsDir ++ id ++ ".json")
+  return fs.remove(projectsDir ++ id ++ ".json").isOk()
 )
 
 def defaultProfile(string username) object (
@@ -405,7 +405,7 @@ def saveComments(string key, array comments) boolean (
   if !fs.writeFile(tmpPath, out) (
     return false
   )
-  boolean ok = fs.rename(tmpPath, path)
+  boolean ok = fs.rename(tmpPath, path).isOk()
   if !ok (
     void fs.remove(tmpPath)
     return false
@@ -418,5 +418,5 @@ def appendComment(string key, object comment) boolean (
   if !isSafePathPart(key) (
     return false
   )
-  return fs.appendFile(commentsDir ++ key ++ ".jsonl", json.stringify(comment) ++ "\n")
+  return (fs.appendFile(commentsDir ++ key ++ ".jsonl", json.stringify(comment) ++ "\n")).isOk()
 )

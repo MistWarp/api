@@ -4,7 +4,7 @@ def projectSaveLock(string id) string (
   return "project-history-" ++ id
 )
 
-def runLocked(string lockName, function work) (
+def runLocked(string lockName, def work) (
   sync.lock(lockName)
   defer sync.unlock(lockName)
   work()

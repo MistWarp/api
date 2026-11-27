@@ -885,7 +885,7 @@ def reconcileDeletedUsers() (
       )
     )
   )
-  ids = ids.filter((any id) boolean -> !isStudentUserId(id.toStr()))
+  ids = ids.filter(def(any id) boolean -> !isStudentUserId(id.toStr()))
   if ids.len == 0 (
     return
   )

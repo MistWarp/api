@@ -309,12 +309,12 @@ def prepareFork(object source, ForkRequest request, UpdateLookups lookups) Prepa
   if !jsonSnapshot.ok (
     return forkRefused(500, "copy_failed", "could not copy the original project, try again")
   )
-  parent = jsonSnapshot.project.assert(object)
+  parent = jsonSnapshot.project
   object workspaceSnapshots = ensureProjectWorkspaceSnapshots(parent)
   if !workspaceSnapshots.ok (
     return forkRefused(500, "history_failed", "could not prepare the original project history, try again")
   )
-  parent = workspaceSnapshots.project.assert(object)
+  parent = workspaceSnapshots.project
 
   if !projectHasWorkspace(parent) (
     return forkRefused(409, "history_unavailable", "prepare the original project's history before remixing")
@@ -324,7 +324,7 @@ def prepareFork(object source, ForkRequest request, UpdateLookups lookups) Prepa
   if archived.ok != true (
     return forkRefused(409, "history_unavailable", "requested branch history is unavailable")
   )
-  object forkHistory = archived.manifest.assert(object)
+  object forkHistory = archived.manifest
   byte[] forkBody = fs.readFileBytes(forkPath).unwrapOr("".toBytes())
   void fs.remove(forkPath)
   PreparedFork prepared = PreparedFork{parent: parent, history: forkBody, manifest: forkHistory, hold: noStorageHold()}

@@ -173,7 +173,7 @@ def leaveClassGroups(object student) (
     object group = groups[i].assert(object)
     array ids = group.studentIds.assertElse(array, [])
     if ids.contains(studentId) (
-      group.studentIds = ids.filter((any id) boolean -> id.toStr() != studentId)
+      group.studentIds = ids.filter(def(any id) boolean -> id.toStr() != studentId)
       putDocument(classroomGroupDocs, group["_id"].toStr(), group)
     )
   )
