@@ -37,7 +37,7 @@ def siteCanView(object project,*ws.Connection conn, string accessKey, boolean wa
     return false
   )
   if isStudentUserId(viewerId) (
-    return projectRoleForUser(project, viewerId, conn.Get("username").toStr(), waitForRotur) != ""
+    return projectRole(project, conn.Get("username").toStr()) != ""
   )
   if projectIsViewable(project) (
     return true

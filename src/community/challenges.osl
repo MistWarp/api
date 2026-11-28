@@ -188,33 +188,26 @@ def challengeScoreSummary(object space, string projectId, string viewer) object 
   return {judgeScore: judgeScore, judgeScoreCount: scoreCount, audienceScore: audienceScore, audienceVoteCount: audienceCount, myScore: myScore, myVote: myVote, scores: entryScores}
 )
 
-def challengeHiddenJudges(object space,*serve.Context c) array (
+def challengeShownJudges(object space,*serve.Context c) object (
   if !isOrgOwned(space) or contextBool(c, "isAdmin") (
-    return []
+    return {all: true, names: []}
   )
   object snapshot = challengeOrgSnapshot(space)
-  if orgHasMember(snapshot, contextString(c, "userId"), contextString(c, "username")) (
-    return []
+  if snapshot.ok and orgHasMember(snapshot, contextString(c, "userId"), contextString(c, "username")) (
+    return {all: true, names: []}
   )
-  array shown = challengeJudges(space)
-  array publishers = orgPublisherNames(snapshot)
-  array hidden = []
-  for i publishers.len (
-    if !stringArrayContainsUser(shown, publishers[i].toStr()) (
-      hidden.append(publishers[i].toStr())
-    )
-  )
-  return hidden
+  return {all: false, names: challengeJudges(space)}
 )
 
-def scoresWithoutJudges(array scores, array hidden) array (
-  if hidden.len == 0 (
+def scoresByShownJudges(array scores, object shown) array (
+  if shown.all == true (
     return scores
   )
+  array names = shown.names.assertElse(array, [])
   array kept = []
   for i scores.len (
     object score = scores[i].assertElse(object, {})
-    if !stringArrayContainsUser(hidden, (score.judge ?? "").toStr()) (
+    if stringArrayContainsUser(names, (score.judge ?? "").toStr()) (
       kept.append(score)
     )
   )
@@ -228,7 +221,7 @@ def challengeProjects(object space,*serve.Context c) array (
   boolean audienceJudged = challengeAudienceJudged(space)
   string phase = challengePhase(space)
   boolean revealRatings = phase == "awaiting-results" or phase == "results" or canManageSpace(space, c)
-  array hiddenJudges = if canManageSpace(space, c) then challengeHiddenJudges(space, c) else []
+  object shownJudges = if canManageSpace(space, c) then challengeShownJudges(space, c) else {all: false, names: []}
   for i ids.len (
     auto loaded = loadProject(ids[i].toStr())
     if loaded.ok == true (
@@ -246,7 +239,7 @@ def challengeProjects(object space,*serve.Context c) array (
         )
         entry.myVote = summary.myVote
         entry.myScore = if isChallengeJudge(space, contextString(c, "username")) then summary.myScore else {}
-        entry.scoreBreakdown = if canManageSpace(space, c) then scoresWithoutJudges(summary.scores, hiddenJudges) else []
+        entry.scoreBreakdown = if canManageSpace(space, c) then scoresByShownJudges(summary.scores, shownJudges) else []
         projects.append(entry)
       )
     )
