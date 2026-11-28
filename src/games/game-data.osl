@@ -397,11 +397,11 @@ def deleteGameSavesLocked(string projectId, string userId) boolean (
   boolean deleted = false
   if fs.exists(playPath) (
     removedBytes += fs.size(playPath).unwrapOr(0)
-    deleted = fs.remove(playPath) or deleted
+    deleted = fs.remove(playPath).isOk() or deleted
   )
   if fs.exists(testPath) (
     removedBytes += fs.size(testPath).unwrapOr(0)
-    deleted = fs.remove(testPath) or deleted
+    deleted = fs.remove(testPath).isOk() or deleted
   )
   if removedBytes > 0 (
     number usedBytes = storedGameSaveBytes(userId)

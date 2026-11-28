@@ -1,5 +1,5 @@
 def handleGetSpaceComments(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -10,7 +10,7 @@ def handleGetSpaceComments(*serve.Context c) (
 )
 
 def handleCreateSpaceComment(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -50,7 +50,7 @@ def handleCreateSpaceComment(*serve.Context c) (
 )
 
 def handleDeleteSpaceComment(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -74,7 +74,7 @@ def handleDeleteSpaceComment(*serve.Context c) (
 )
 
 def handleEditSpaceComment(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -93,7 +93,7 @@ def handleEditSpaceComment(*serve.Context c) (
 )
 
 def handlePinSpaceComment(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -117,7 +117,7 @@ def handlePinSpaceComment(*serve.Context c) (
 )
 
 def handleReactSpaceComment(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return

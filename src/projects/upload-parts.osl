@@ -170,7 +170,7 @@ def handleStageProjectUploadPart(*serve.Context c) (
     return
   )
   string token = randomString(32)
-  if !fs.writeFileBytes(stagedUploadPartDataPath(token), file.data) or !writeFile(stagedUploadPartMetaPath(token), {
+  if !fs.writeFileBytes(stagedUploadPartDataPath(token), file.data).isOk() or !writeFile(stagedUploadPartMetaPath(token), {
     projectId: project.id,
     kind: kind,
     userId: contextString(c, "userId"),
@@ -313,7 +313,7 @@ def handleUploadProjectPartChunk(*serve.Context c) (
     c.badRequest("upload exceeds its declared size")
     return
   )
-  if !fs.writeFileBytes(uploadPartChunkPath(token, index), chunk.data) (
+  if !fs.writeFileBytes(uploadPartChunkPath(token, index), chunk.data).isOk() (
     c.internalError("could not store upload chunk")
     return
   )

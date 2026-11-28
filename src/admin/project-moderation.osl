@@ -226,7 +226,7 @@ def handleListShadowBans(*serve.Context c) (
   for i projectIds.len (
     string id = projectIds[i].toStr()
     object entry = projects[id].assertElse(object, {})
-    object indexed = (projectSearchDocs.findById(id) ?? {})
+    object indexed = (projectSearchDocs.findById(id).unwrap() ?? {})
     projectRows.append({
       id: id,
       title: if indexed.len > 0 then indexed.title else entry.title ?? "",

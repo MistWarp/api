@@ -36,6 +36,9 @@ import "./src/community"
 import "./src/admin"
 import "./src/classroom"
 
+*ws.Server gameRealtimeSocket = ws.New()
+*ws.Server siteRealtimeSocket = ws.New()
+
 ensureDirectories()
 string thumbnailSecret = loadThumbnailSecret(thumbnailSecretFile)
 void initCommunityDatabase() catch (err) (
@@ -120,8 +123,6 @@ thread.new(developmentFeedLoop)
 thread.new(vanityLapseLoop)
 
 *serve.Router app = serve.new()
-*ws.Server gameRealtimeSocket = ws.New()
-*ws.Server siteRealtimeSocket = ws.New()
 
 app.bodyLimit(maxAppRequestBytes)
 app.use(realtimeUpgradeGuard)

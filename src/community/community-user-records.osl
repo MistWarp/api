@@ -231,7 +231,7 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
     if normalizeUsername(playtime.username.toStr()) == oldKey (
       string oldId = playtime["_id"].toStr()
       string newId = playtime.projectId.toStr() ++ ":" ++ newKey
-      object existing = (playtimeDocs.findById(newId) ?? {})
+      object existing = (playtimeDocs.findById(newId).unwrap() ?? {})
       if existing.len > 0 and newId != oldId (
         playtime.duration = playtime.duration.toNum() + existing.duration.toNum()
       )
@@ -240,7 +240,7 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
       putDocument(playtimeDocs, newId, playtime)
     )
   )
-  object session = (playtimeSessionDocs.findById(oldKey) ?? {})
+  object session = (playtimeSessionDocs.findById(oldKey).unwrap() ?? {})
   if session.len > 0 (
     session.username = newName
     void playtimeSessionDocs.deleteOne({_id: oldKey})

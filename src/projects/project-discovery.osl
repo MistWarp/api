@@ -34,7 +34,7 @@ def sharedPlayRows(array rows) object[] (
     if key != "" and !allowed.contains(key) (
       allowed[key] = playerUnbanned(username, (row.userId ?? "").toStr()) and effectiveShowRecentActivity(loadProfile(username))
     )
-    if key != "" and (allowed[key] ?? false) (
+    if key != "" and allowed[key] (
       kept.append(row)
     )
   )

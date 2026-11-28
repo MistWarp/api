@@ -6,7 +6,7 @@ def loadClassroomClaim(string code) object (
   if code == "" (
     return {}
   )
-  return (classroomClaimDocs.findById(code) ?? {})
+  return (classroomClaimDocs.findById(code).unwrap() ?? {})
 )
 
 def claimIsUsable(object claim, number now) boolean (
@@ -46,7 +46,7 @@ def handleReleaseStudent(*serve.Context c) (
   string code = ""
   for _ 20 (
     string candidate = randomFromAlphabet(classCodeAlphabet, 10)
-    if code == "" and (classroomClaimDocs.findById(candidate) ?? {}).len == 0 (
+    if code == "" and (classroomClaimDocs.findById(candidate).unwrap() ?? {}).len == 0 (
       code = candidate
     )
   )
@@ -82,7 +82,7 @@ def handleCancelStudentRelease(*serve.Context c) (
 )
 
 def usableClaimOrFail(*serve.Context c) object (
-  object claim = (classroomClaimDocs.findById(normalizeClassCode(c.param("code"))) ?? {})
+  object claim = (classroomClaimDocs.findById(normalizeClassCode(c.param("code"))).unwrap() ?? {})
   object student = {}
   if claimIsUsable(claim, timestamp) (
     student = loadStudent(claim.studentId.toStr())
@@ -173,7 +173,7 @@ def leaveClassGroups(object student) (
     object group = groups[i].assert(object)
     array ids = group.studentIds.assertElse(array, [])
     if ids.contains(studentId) (
-      group.studentIds = ids.filter((any id) boolean -> id.toStr() != studentId)
+      group.studentIds = ids.filter(def(any id) boolean -> id.toStr() != studentId)
       putDocument(classroomGroupDocs, group["_id"].toStr(), group)
     )
   )

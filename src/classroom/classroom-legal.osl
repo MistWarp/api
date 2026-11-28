@@ -3,7 +3,7 @@ export {
 }
 
 def classroomTermsRecord(string userId) object (
-  return (classroomTermsDocs.findById(userId) ?? {})
+  return (classroomTermsDocs.findById(userId).unwrap() ?? {})
 )
 
 def classroomTermsStatus(string userId) object (
@@ -87,7 +87,7 @@ def studentExportRow(object student) object (
     lastLoginAt: student.lastLoginAt ?? 0,
     failedLogins: student.failedLogins ?? 0,
     lockedUntil: student.lockedUntil ?? 0,
-    projects: ownerIndexEntries(student.username.toStr(), true).map((any entry) any -> {id: entry.id, title: entry.title, created: entry.created ?? 0, edited: entry.edited})
+    projects: ownerIndexEntries(student.username.toStr(), true).map(def(any entry) any -> {id: entry.id, title: entry.title, created: entry.created ?? 0, edited: entry.edited})
   }
 )
 
@@ -158,7 +158,7 @@ def handleExportClassStudent(*serve.Context c) (
     submissions: submissionDocs.where("studentId", "==", studentId).all(),
     groups: groups,
     activity: activity,
-    pendingRelease: classroomClaimDocs.where("studentId", "==", studentId).all().map((any claim) any -> {createdAt: claim.createdAt, expiresAt: claim.expiresAt})
+    pendingRelease: classroomClaimDocs.where("studentId", "==", studentId).all().map(def(any claim) any -> {createdAt: claim.createdAt, expiresAt: claim.expiresAt})
   })
 )
 
@@ -229,7 +229,7 @@ def handleAdminPurgeClassroom(*serve.Context c) (
   string target = ""
   string schoolId = (body.schoolId ?? "").toStr()
   if schoolId != "" (
-    object school = (schoolDocs.findById(schoolId) ?? {})
+    object school = (schoolDocs.findById(schoolId).unwrap() ?? {})
     if school.len == 0 (
       c.badRequest("school not found")
       return

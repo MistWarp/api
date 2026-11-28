@@ -37,7 +37,7 @@ testing.assert(backpackFilterType(items, "").len == 3, "an empty filter keeps ev
 object split = backpackWithout(items, ["a", "missing"])
 testing.assert(split.kept.len == 2, "unmatched ids leave items alone")
 testing.assert(split.removed.len == 1, "matched ids are removed")
-testing.assert(backpackTotalBytes(split.removed.assert(array)) == 110, "removed bytes can be freed")
+testing.assert(backpackTotalBytes(split.removed) == 110, "removed bytes can be freed")
 
 testing.assert(backpackPageSize("20") == 20, "page size is honoured")
 testing.assert(backpackPageSize("0") == maxBackpackPageSize, "zero falls back to the maximum")

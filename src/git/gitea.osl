@@ -23,7 +23,7 @@ def giteaPost(string path, object body, string sudoUser) object (
 )
 
 def parseGiteaObject(object resp) object (
-  if !resp.success (
+  if resp.status < 200 or resp.status >= 300 (
     return {ok: false, error: "gitea request failed", status: resp.status}
   )
   auto parsed = json.parse(resp.body, {type: "object"})
@@ -34,7 +34,7 @@ def parseGiteaObject(object resp) object (
 )
 
 def parseGiteaArray(object resp) object (
-  if !resp.success (
+  if resp.status < 200 or resp.status >= 300 (
     return {ok: false, error: "gitea request failed", status: resp.status}
   )
   auto parsed = json.parse(resp.body, {type: "array"})

@@ -104,7 +104,7 @@ def stageR2Blob(string key, BlobBody body, string contentType, string contentEnc
   boolean saved = true
   if !fs.exists(path) (
     void fs.mkdir(parentDirOf(path), {recursive: true})
-    saved = fs.writeFileBytes(path, body)
+    saved = fs.writeFileBytes(path, body).isOk()
   )
   if saved and !r2Local (
     saved = queueR2UploadLocked(key, contentType, contentEncoding)
@@ -165,7 +165,7 @@ def flushR2UploadQueue() (
       )
       if uploaded (
         item.uploaded = true
-        removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path)
+        removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path).isOk()
       )
     )
     if !removed (

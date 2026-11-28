@@ -57,7 +57,7 @@ def relatedProjectEntries(object[] entries, string id, string[] excluded, string
   number coPlayLimit = ownerLimit
   for i coPlayed.len (
     if pick.related.len < coPlayLimit and byId.contains(coPlayed[i]) (
-      void pickRelated(pick, byId[coPlayed[i]].assert(object))
+      void pickRelated(pick, byId[coPlayed[i]])
     )
   )
   number ownerCount = 0

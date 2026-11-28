@@ -48,7 +48,7 @@ testing.assert(holdWeight(signals, "unplayed") == 0.5, "projects nobody has play
 testing.assert(ids(coPlayedIds(signals, "bait", 5)) == "pair", "a project needs three shared players to count as co-played")
 testing.assert(ids(coPlayedIds(signals, "thin", 5)) == "", "projects with few held players get no co-plays")
 testing.assert(ids(coPlayedIds(signals, "solo", 5)) == "", "the owner's own plays never link projects")
-testing.assert((signals.players["pair"] ?? 0) == 4, "legacy rows without a user id count once under their username")
+testing.assert(signals.players["pair"] == 4, "legacy rows without a user id count once under their username")
 
 object[] tied = []
 for i 30 (

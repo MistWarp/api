@@ -34,7 +34,7 @@ def scanProjectJsonEvents(*json.Stream stream) object (
 )
 
 def inspectProjectJson(string path) object (
-  *json.Stream stream = json.open(path, maxProjectJsonBytes)
+  *json.Stream stream = json.open(path, {maxBytes: maxProjectJsonBytes})
   object inspected = scanProjectJsonEvents(stream) catch (err) (
     stream.close()
     return {ok: false}
@@ -61,7 +61,7 @@ def uploadProjectFiles(object project, string extractDir, object benefits, numbe
     return {ok: false, error: "invalid project.json", status: 400}
   )
   string gzipPath = jsonPath ++ ".gz"
-  if !zip.gzip(jsonPath, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+  if !zip.gzip(jsonPath, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}).isOk() (
     return {ok: false, error: "compressed project data exceeds the 20 MB limit", code: "project_too_large", status: 413}
   )
 

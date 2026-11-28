@@ -294,7 +294,7 @@ def classAfterTeacherErased(object classDoc, string userId) object (
     object successor = kept[1].assertElse(object, {})
     next.ownerId = (successor.userId ?? "").toStr()
     next.owner = (successor.username ?? "").toStr()
-    kept = kept.filter((any teacher) boolean -> (teacher.assertElse(object, {}).userId ?? "").toStr() != next.ownerId)
+    kept = kept.filter(def(any teacher) boolean -> (teacher.assertElse(object, {}).userId ?? "").toStr() != next.ownerId)
   )
   next.coTeachers = kept
   return next
@@ -302,8 +302,8 @@ def classAfterTeacherErased(object classDoc, string userId) object (
 
 def schoolAfterTeacherErased(object school, string userId) object (
   object next = school.clone()
-  array teachers = (school.teacherIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != userId)
-  array admins = (school.adminIds ?? []).assertElse(array, []).filter((any id) boolean -> id.toStr() != userId)
+  array teachers = (school.teacherIds ?? []).assertElse(array, []).filter(def(any id) boolean -> id.toStr() != userId)
+  array admins = (school.adminIds ?? []).assertElse(array, []).filter(def(any id) boolean -> id.toStr() != userId)
   if admins.len == 0 and teachers.len > 0 (
     admins.append(teachers[1].toStr())
   )

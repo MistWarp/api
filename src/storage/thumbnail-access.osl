@@ -9,7 +9,7 @@ def loadThumbnailSecret(string path) string (
     return stored
   )
   string secret = crypto.randomString(32)
-  if !fs.writeFile(path, secret) (
+  if !fs.writeFile(path, secret).isOk() (
     log "WARNING: could not save " ++ path ++ "; private thumbnail links will change on restart"
   )
   return secret

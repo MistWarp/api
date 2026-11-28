@@ -85,7 +85,7 @@ def storageInventory() object (
 
 def backfillProjectHistoryBytes() (
   string migrationId = "migration:project-history-bytes-v1"
-  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
+  if (diagnosticDocs.findById(migrationId).unwrap() ?? {}).len > 0 (
     return
   )
   object listing = storageInventory()
@@ -119,7 +119,7 @@ def backfillProjectHistoryBytes() (
 
 def backfillReleaseJsonBytes() boolean (
   string migrationId = "migration:release-json-bytes-v1"
-  if (diagnosticDocs.findById(migrationId) ?? {}).len > 0 (
+  if (diagnosticDocs.findById(migrationId).unwrap() ?? {}).len > 0 (
     return true
   )
   object listing = storageInventory()

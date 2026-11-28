@@ -72,7 +72,7 @@ def livePullResponse(object pull, string baseCommit, string headCommit) object (
 )
 
 def pullDocument(string targetId, string index) object (
-  return (pullDocs.findById(targetId ++ ":" ++ index) ?? {})
+  return (pullDocs.findById(targetId ++ ":" ++ index).unwrap() ?? {})
 )
 
 def pullCommentKey(object pull) string (
@@ -597,8 +597,8 @@ def handleGetPullTimeline(*serve.Context c) (
   array sourceCommits = []
   array targetCommits = []
   if canInspectPullWithSource(pull, target, source, c) (
-    array targetHistory = projectVersionHistory(target).commits.assert(array)
-    sourceCommits = commitsAfter(projectVersionHistory(source).commits.assert(array), pull.baseCommit.toStr(), pull.created.toNum())
+    array targetHistory = projectVersionHistory(target).commits
+    sourceCommits = commitsAfter(projectVersionHistory(source).commits, pull.baseCommit.toStr(), pull.created.toNum())
     sourceCommits = commitsNotIn(sourceCommits, targetHistory)
     targetCommits = commitsAfter(targetHistory, pull.targetHead.toStr(), pull.created.toNum())
   )

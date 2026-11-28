@@ -31,11 +31,11 @@ def playerKeyOf(string userId, string username) string (
 )
 
 def addHeldPlay(PlaySignals signals, string projectId, string player) (
-  signals.held[projectId] = (signals.held[projectId] ?? 0) + 1
-  string[] byProject = signals.heldBy[projectId] ?? []
+  signals.held[projectId] = signals.held[projectId] + 1
+  string[] byProject = signals.heldBy[projectId]
   byProject.append(player)
   signals.heldBy[projectId] = byProject
-  string[] byPlayer = signals.heldProjects[player] ?? []
+  string[] byPlayer = signals.heldProjects[player]
   byPlayer.append(projectId)
   signals.heldProjects[player] = byPlayer
 )
@@ -47,11 +47,11 @@ def playSignalsFrom(object[] rows, string[string] ownerKeys, number now) PlaySig
     string projectId = (row.projectId ?? "").toStr()
     string username = (row.username ?? "").toStr()
     string player = playerKeyOf((row.userId ?? "").toStr(), username)
-    string owner = ownerKeys[projectId] ?? ""
+    string owner = ownerKeys[projectId]
     boolean ownPlay = owner != "" and username.toLower().strip() == owner
     boolean recent = now - (row.updated ?? 0).toNum() <= playWindowMs
     if projectId != "" and player != "" and !ownPlay and recent (
-      signals.players[projectId] = (signals.players[projectId] ?? 0) + 1
+      signals.players[projectId] = signals.players[projectId] + 1
       if (row.duration ?? 0).toNum() >= heldPlayMs (
         addHeldPlay(signals, projectId, player)
       )
@@ -61,8 +61,8 @@ def playSignalsFrom(object[] rows, string[string] ownerKeys, number now) PlaySig
 )
 
 def holdWeight(PlaySignals signals, string projectId) number (
-  number playerCount = signals.players[projectId] ?? 0
-  number heldCount = signals.held[projectId] ?? 0
+  number playerCount = signals.players[projectId]
+  number heldCount = signals.held[projectId]
   return (heldCount + 2) / (playerCount + 4)
 )
 
@@ -102,17 +102,17 @@ def compareRankedIds(RankedId a, RankedId b) int (
 )
 
 def coPlayScores(PlaySignals signals, string projectId) object (
-  string[] sharedPlayers = signals.heldBy[projectId] ?? []
+  string[] sharedPlayers = signals.heldBy[projectId]
   string[number] scores = {}
   string[number] counts = {}
   for i sharedPlayers.len (
-    string[] playedNext = signals.heldProjects[sharedPlayers[i]] ?? []
+    string[] playedNext = signals.heldProjects[sharedPlayers[i]]
     number share = 1 / (playedNext.len.toNum().sqrt() ?? 1)
     for j playedNext.len (
       string otherId = playedNext[j]
       if otherId != projectId (
-        scores[otherId] = (scores[otherId] ?? 0) + share
-        counts[otherId] = (counts[otherId] ?? 0) + 1
+        scores[otherId] = scores[otherId] + share
+        counts[otherId] = counts[otherId] + 1
       )
     )
   )
@@ -121,16 +121,16 @@ def coPlayScores(PlaySignals signals, string projectId) object (
 
 def coPlayedIds(PlaySignals signals, string projectId, number limit) string[] (
   string[] ids = []
-  if (signals.held[projectId] ?? 0) < minHeldPlayers (
+  if signals.held[projectId] < minHeldPlayers (
     return ids
   )
   object found = coPlayScores(signals, projectId)
-  string[number] scores = found.scores.assert(string[number])
-  string[number] counts = found.counts.assert(string[number])
+  string[number] scores = found.scores
+  string[number] counts = found.counts
   RankedId[] ranked = []
   for otherId of scores (
-    if (counts[otherId] ?? 0) >= minCoPlayers (
-      ranked.append(RankedId(otherId, scores[otherId] ?? 0))
+    if counts[otherId] >= minCoPlayers (
+      ranked.append(RankedId(otherId, scores[otherId]))
     )
   )
   RankedId[] sorted = ranked.sort(compareRankedIds)

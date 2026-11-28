@@ -67,7 +67,7 @@ def cachedProjectWorkspacePath(object project) string (
     void fs.remove(temporaryPath)
     return ""
   )
-  if !fs.rename(temporaryPath, cachedPath) (
+  if !fs.rename(temporaryPath, cachedPath).isOk() (
     void fs.remove(temporaryPath)
     if !fs.exists(cachedPath) (
       return ""
@@ -184,7 +184,7 @@ def cachedWorkspaceGitInspectionJSON(object project, string workspacePath, strin
   string resultJson = if sha == "worktree" then gitinspection.InspectWorktree(workspacePath, projectGitHead(project), operation, requestedPath, allowedHeads) else gitinspection.Inspect(workspacePath, sha, operation, requestedPath, allowedHeads)
   if resultJson.toBytes().len <= 1048576 and gitinspection.InspectionError(resultJson) == "" (
     string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-    if !fs.writeFile(temporaryPath, resultJson) or !fs.rename(temporaryPath, cachePath) (
+    if !fs.writeFile(temporaryPath, resultJson).isOk() or !fs.rename(temporaryPath, cachePath).isOk() (
       void fs.remove(temporaryPath)
     )
   )
@@ -255,7 +255,7 @@ def cachedRemixArchiveDivergence(object child, object parent) object (
     raw = gitinspection.CompareDivergence(childPath, childHead, parentPath, parentHead)
     if raw.toBytes().len <= 65536 and gitinspection.InspectionError(raw) == "" (
       string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-      if !fs.writeFile(temporaryPath, raw) or !fs.rename(temporaryPath, cachePath) (
+      if !fs.writeFile(temporaryPath, raw).isOk() or !fs.rename(temporaryPath, cachePath).isOk() (
         void fs.remove(temporaryPath)
       )
     )
@@ -441,8 +441,8 @@ def storeCommitSummaries(string cacheDir, string cacheName, object computed) (
   defer sync.unlock(lockName)
   object cached = mergedCommitSummaryCache(readCommitSummaryCache(cachePath), computed)
   string temporaryPath = cachePath ++ ".tmp." ++ randomString(8)
-  if fs.writeFile(temporaryPath, json.stringify(cached)) (
-    if !fs.rename(temporaryPath, cachePath) (
+  if fs.writeFile(temporaryPath, json.stringify(cached)).isOk() (
+    if !fs.rename(temporaryPath, cachePath).isOk() (
       void fs.remove(temporaryPath)
     )
   )

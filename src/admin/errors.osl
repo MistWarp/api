@@ -336,7 +336,7 @@ def handleAdminResolveSiteError(*serve.Context c) (
 def resolveSiteErrorLocked(*serve.Context c, string id, boolean resolved) object (
   sync.lock("site-errors")
   defer sync.unlock("site-errors")
-  object entry = (errorDocs.findById(id) ?? {})
+  object entry = (errorDocs.findById(id).unwrap() ?? {})
   if entry.len == 0 (
     c.notFound("error not found")
     return {found: false}
@@ -369,7 +369,7 @@ def handleAdminDeleteSiteError(*serve.Context c) (
     c.badRequest("error id is required")
     return
   )
-  if (errorDocs.findById(id) ?? {}).len == 0 (
+  if (errorDocs.findById(id).unwrap() ?? {}).len == 0 (
     c.notFound("error not found")
     return
   )

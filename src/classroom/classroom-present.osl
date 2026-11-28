@@ -5,7 +5,7 @@ export {
 number classroomPresentationLifetimeMs = 14400000
 
 def activePresentationForProject(string projectId) object (
-  object presentation = (classroomPresentationDocs.findById(projectId) ?? {})
+  object presentation = (classroomPresentationDocs.findById(projectId).unwrap() ?? {})
   if presentation.len == 0 or (presentation.expiresAt ?? 0).toNum() <= timestamp (
     return {}
   )

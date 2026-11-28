@@ -11,7 +11,7 @@ def assetUrlForLocation(string name, boolean localExists, string localAssetsBase
 
 def removeLocalAssetAfterUpload(string path, boolean uploadedToR2) boolean (
   if uploadedToR2 and fs.exists(path) (
-    return fs.remove(path)
+    return fs.remove(path).isOk()
   )
   return true
 )

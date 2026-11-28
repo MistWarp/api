@@ -86,7 +86,7 @@ def readFile(string path) object (
 )
 
 def writeFile(string path, object data) boolean (
-  return fs.writeFile(path, json.stringify(data))
+  return (fs.writeFile(path, json.stringify(data))).isOk()
 )
 
 def quotaPath(string username) string (

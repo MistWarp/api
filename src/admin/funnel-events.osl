@@ -4,7 +4,7 @@ def recordFunnelEvent(string key, number now) (
   string id = "funnel:" ++ funnelDayKey(now)
   sync.lock("funnel-events")
   defer sync.unlock("funnel-events")
-  object doc = funnelDocs.findById(id) ?? {}
+  object doc = funnelDocs.findById(id).unwrap() ?? {}
   object counts = {}
   if doc.contains("counts") and doc.counts != null (
     counts = doc.counts.assert(object)

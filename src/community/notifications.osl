@@ -319,7 +319,7 @@ def postRoturNotification(string target, string targetId, string actor, string a
     requestBody.actor_id = actorId
   )
   object resp = requests.post(roturBase ++ "/v2/notifications", {
-    timeoutMs: 5000,
+    timeout: 5000,
     headers: notifyHeaders(),
     body: json.stringify(requestBody)
   }).unwrapOr({body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false})

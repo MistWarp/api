@@ -221,7 +221,7 @@ def userPlaytimeLibrary(string name,*serve.Context c) array (
   array library = []
   for i savedProjects.len (
     string projectId = savedProjects[i].toStr()
-    object project = (projectSearchDocs.findById(projectId) ?? {})
+    object project = (projectSearchDocs.findById(projectId).unwrap() ?? {})
     boolean libraryPublic = !hiddenProjects.contains(projectId)
     boolean include = libraryPublic and project.len > 0 and projectVisibility(project) == "public"
     if !include and project.len > 0 (
@@ -276,7 +276,7 @@ def handleGetUser(*serve.Context c) (
       )
     )
     if !featuredIncluded (
-      object featured = (projectSearchDocs.findById(featuredId) ?? {})
+      object featured = (projectSearchDocs.findById(featuredId).unwrap() ?? {})
       if featured.len > 0 and featured.shared == true and featured.ownerKey.toStr() == key and projectsVisibleTo([featured], c).len > 0 (
         projects.append(featured)
       )
@@ -500,7 +500,7 @@ def handleGetUserProjects(*serve.Context c) (
   if userIdForUsername(name) == "" (
     discoverUserIdentity(name)
   )
-  boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false)
+  boolean includeUnshared = isViewerOwner(c, name) and c.queryBool("all", false).unwrap()
   array projects = projectsVisibleTo(ownerIndexEntries(name, includeUnshared), c)
   number requestedLimit = c.queryInt("limit", 0)
   if requestedLimit > 0 (
@@ -722,7 +722,7 @@ def handleSetLibraryProjectVisibility(*serve.Context c) (
 )
 
 def activityProjectVisibility(string projectId) string (
-  object project = (projectSearchDocs.findById(projectId) ?? {})
+  object project = (projectSearchDocs.findById(projectId).unwrap() ?? {})
   if project.len > 0 and projectIsViewable(project) (
     return projectVisibility(project)
   )
@@ -777,7 +777,7 @@ def handleGetActivity(*serve.Context c) (
       string author = normalizeUsername(review.author.toStr())
       string projectId = review.projectId.toStr()
       if selectedUsers.contains(author) and activityProjectVisibility(projectId) == "public" (
-        object project = (projectSearchDocs.findById(projectId) ?? {})
+        object project = (projectSearchDocs.findById(projectId).unwrap() ?? {})
         items.append({type: "review", actor: review.author, projectId: review.projectId, projectTitle: project.title, rating: review.rating, message: review.message, created: review.edited})
         reviewItems += 1
       )
