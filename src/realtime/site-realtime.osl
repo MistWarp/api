@@ -28,15 +28,16 @@ def siteAllows(*ws.Connection conn, string field, number maximum, number windowM
   return true
 )
 
-def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
+def siteCanView(object project,*ws.Connection conn, string accessKey, boolean waitForRotur) boolean (
+  string viewerId = (conn.Get("userId") ?? "").toStr()
   if conn.Get("isAdmin") == true (
     return true
   )
   if projectOwnerBanned(project) (
     return false
   )
-  if isStudentUserId((conn.Get("userId") ?? "").toStr()) (
-    return projectRoleForNameCached(project, conn.Get("username").toStr()) != ""
+  if isStudentUserId(viewerId) (
+    return projectRoleForUser(project, viewerId, conn.Get("username").toStr(), waitForRotur) != ""
   )
   if projectIsViewable(project) (
     return true
@@ -45,7 +46,7 @@ def siteCanView(object project,*ws.Connection conn, string accessKey) boolean (
     return true
   )
   if conn.Get("authenticated") == true (
-    return projectRoleForNameCached(project, conn.Get("username").toStr()) != ""
+    return projectRoleForUser(project, viewerId, conn.Get("username").toStr(), waitForRotur) != ""
   )
   return false
 )
@@ -91,7 +92,7 @@ def siteBroadcastProject(string projectId, object message) (
   for conn in siteRealtimeSocket.Connections() (
     if !siteSubscribed(conn, projectId) continue
     string accessKey = siteProjectKey(conn, projectId)
-    if siteCanView(project, conn, accessKey) (
+    if siteCanView(project, conn, accessKey, false) (
       conn.Send(encoded)
     )
   )
@@ -120,7 +121,7 @@ def siteBroadcastStats(string projectId, string actor, object viewerState) (
   string actorKey = normalizeUsername(actor)
   for conn in siteRealtimeSocket.Connections() (
     if !siteSubscribed(conn, projectId) continue
-    if !siteCanView(project, conn, siteProjectKey(conn, projectId)) continue
+    if !siteCanView(project, conn, siteProjectKey(conn, projectId), false) continue
     if conn.Get("authenticated") == true and normalizeUsername(conn.Get("username").toStr()) == actorKey (
       conn.Send(actorMessage)
     ) else (
@@ -175,7 +176,7 @@ def siteSubscribe(*ws.Connection conn, object message) (
   string projectId = message.projectId.assertElse(string, "").strip()
   string accessKey = message.accessKey.assertElse(string, "").strip()
   auto res = loadProject(projectId)
-  if !res.ok or !siteCanView(res.project.assert(object), conn, accessKey) (
+  if !res.ok or !siteCanView(res.project.assert(object), conn, accessKey, true) (
     siteError(conn, "project not found")
     return
   )

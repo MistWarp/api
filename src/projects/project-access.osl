@@ -10,7 +10,7 @@ export {
   projectRole,
   projectRoleFor,
   projectRoleForName,
-  projectRoleForNameCached,
+  projectRoleForUser,
   removeString
 }
 
@@ -83,29 +83,20 @@ def projectModerator(object project,*serve.Context c) string (
 )
 
 def projectRoleForName(object project, string username) string (
-  string role = projectRole(project, username)
-  if role == "owner" or username == "" or !isOrgOwned(project) (
-    return role
-  )
-  object snapshot = ownerOrgSnapshot(project)
-  string ownerId = (project.ownerId ?? "").toStr()
-  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
-    return role
-  )
-  return if orgMemberCanPublish(snapshot, "", username) then "owner" else role
+  return projectRoleForUser(project, "", username, true)
 )
 
-def projectRoleForNameCached(object project, string username) string (
+def projectRoleForUser(object project, string userId, string username, boolean waitForRotur) string (
   string role = projectRole(project, username)
   if role == "owner" or username == "" or !isOrgOwned(project) (
     return role
   )
-  object snapshot = ownerOrgSnapshotCached(project)
+  object snapshot = if waitForRotur then ownerOrgSnapshot(project) else ownerOrgSnapshotCached(project)
   string ownerId = (project.ownerId ?? "").toStr()
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return role
   )
-  return if orgMemberCanPublish(snapshot, "", username) then "owner" else role
+  return if orgMemberCanPublish(snapshot, userId, username) then "owner" else role
 )
 
 def canViewForkProject(object project,*serve.Context c) boolean (

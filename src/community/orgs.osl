@@ -17,6 +17,7 @@ export {
 *cache.Cache orgSnapshotCache = cache.new({capacity: 10000, ttl: 60000})
 *cache.Cache orgUnavailableCache = cache.new({capacity: 10000, ttl: 15000})
 *cache.Cache orgMissingCache = cache.new({capacity: 10000, ttl: 10000})
+*cache.Cache orgWarmingCache = cache.new({capacity: 10000, ttl: 12000})
 *cache.Cache userOrgsCache = cache.new({capacity: 10000, ttl: 60000})
 *cache.Cache userOrgsUnavailableCache = cache.new({capacity: 10000, ttl: 15000})
 
@@ -130,12 +131,16 @@ def ownerOrgSnapshotCached(object value) object (
   if known.len > 0 (
     return known
   )
-  thread.new(warmOrgSnapshot, key)
+  if !orgWarmingCache.get(key).assertElse(boolean, false) (
+    orgWarmingCache.set(key, true)
+    thread.new(warmOrgSnapshot, key)
+  )
   return {ok: false, unavailable: true}
 )
 
 def warmOrgSnapshot(string key) (
   void roturOrgSnapshot(key)
+  orgWarmingCache.delete(key)
 )
 
 def viewerOrgListing(string name, string expectedOrgId,*serve.Context c) string (

@@ -252,6 +252,10 @@ def handleUpdateSpace(*serve.Context c) (
     )
     object nextOrg = roturOrgSnapshot(nextOwner)
     boolean nextOwnerIsOrg = nextOrg.ok
+    if !nextOrg.ok and (identity.accountType ?? "").toStr() == "org" and nextOrg.contains("notOrg") and nextOrg.notOrg == true (
+      c.json(403, {ok: false, code: "org_unavailable", error: "that organisation can't own spaces right now"})
+      return
+    )
     if (!nextOrg.ok and (identity.accountType ?? "").toStr() == "org") or (nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId) (
       c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
       return
