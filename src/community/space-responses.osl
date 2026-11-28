@@ -99,7 +99,7 @@ def spaceListResponse(object space,*serve.Context c) object (
   number projectCount = 0
   boolean canManage = canManageSpace(space, c)
   for i ids.len (
-    object project = (projectSearchDocs.findById(ids[i].toStr()).unwrapOr(null) ?? {})
+    object project = (projectSearchDocs.findById(ids[i].toStr()).unwrap() ?? {})
     boolean hidden = projectHiddenFrom(project, c)
     if project.len > 0 and !hidden and (project.shared == true or project.visibility.toStr() == "unlisted" or canManage) (
       projectCount += 1

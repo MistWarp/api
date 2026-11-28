@@ -40,7 +40,7 @@ def classroomPlanKey(string ownerId) string (
 )
 
 def planMemberIds(string key) array (
-  object school = (schoolDocs.findById(key).unwrapOr(null) ?? {})
+  object school = (schoolDocs.findById(key).unwrap() ?? {})
   if school.len == 0 (
     return [key]
   )
@@ -264,7 +264,7 @@ def handleAdminListSchools(*serve.Context c) (
   for i schools.len (
     object school = schools[i].assert(object)
     string key = school["_id"].toStr()
-    rows.append({id: key, name: school.name, admins: (school.adminIds ?? []).assertElse(array, []).map(def(any id) any -> usernameForId(id.toStr())), plan: effectiveClassroomPlan((classroomPlanDocs.findById(key).unwrapOr(null) ?? {}), timestamp)})
+    rows.append({id: key, name: school.name, admins: (school.adminIds ?? []).assertElse(array, []).map(def(any id) any -> usernameForId(id.toStr())), plan: effectiveClassroomPlan((classroomPlanDocs.findById(key).unwrap() ?? {}), timestamp)})
   )
   c.json(200, {ok: true, schools: rows})
 )
@@ -299,5 +299,5 @@ def handleAdminCreateSchool(*serve.Context c) (
     updatedAt: timestamp
   })
   invalidateClassroomPool(adminId)
-  c.json(201, {ok: true, school: {id: id, name: name}, plan: effectiveClassroomPlan((classroomPlanDocs.findById(id).unwrapOr(null) ?? {}), timestamp)})
+  c.json(201, {ok: true, school: {id: id, name: name}, plan: effectiveClassroomPlan((classroomPlanDocs.findById(id).unwrap() ?? {}), timestamp)})
 )

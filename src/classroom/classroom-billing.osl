@@ -28,7 +28,7 @@ def stripeRequest(string path, array fields) object (
 )
 
 def classroomBillingInfo(string userId) object (
-  object stored = (classroomPlanDocs.findById(userId).unwrapOr(null) ?? {})
+  object stored = (classroomPlanDocs.findById(userId).unwrap() ?? {})
   boolean schoolManaged = schoolForTeacher(userId).len > 0
   return {
     available: stripeBillingConfigured() and !schoolManaged,
@@ -62,7 +62,7 @@ def startClassroomTrialLocked(*serve.Context c, string userId) boolean (
   string lockName = "classroom-plan-" ++ userId
   sync.lock(lockName)
   defer sync.unlock(lockName)
-  object stored = (classroomPlanDocs.findById(userId).unwrapOr(null) ?? {})
+  object stored = (classroomPlanDocs.findById(userId).unwrap() ?? {})
   if !classroomTrialAvailable(stored, false, timestamp) (
     c.json(409, {ok: false, code: "trial_unavailable", error: "The free trial is for teachers who have not had a Classroom plan before."})
     return false
@@ -85,7 +85,7 @@ def handleClassroomCheckout(*serve.Context c) (
     return
   )
   string userId = contextString(c, "userId")
-  object stored = (classroomPlanDocs.findById(userId).unwrapOr(null) ?? {})
+  object stored = (classroomPlanDocs.findById(userId).unwrap() ?? {})
   if classroomSubscriptionActive((stored.stripeStatus ?? "").toStr()) (
     c.json(409, {ok: false, code: "already_subscribed", error: "You already have a Classroom subscription. Manage it from billing."})
     return
@@ -128,7 +128,7 @@ def handleClassroomBillingPortal(*serve.Context c) (
     c.json(503, {ok: false, code: "billing_unavailable", error: "Online payment is not set up yet. Contact MistWarp support to change your plan."})
     return
   )
-  object stored = (classroomPlanDocs.findById(contextString(c, "userId")).unwrapOr(null) ?? {})
+  object stored = (classroomPlanDocs.findById(contextString(c, "userId")).unwrap() ?? {})
   string customerId = (stored.stripeCustomerId ?? "").toStr()
   if customerId == "" (
     c.json(404, {ok: false, code: "no_billing_account", error: "You have not bought a plan online yet."})
@@ -146,7 +146,7 @@ def storeStripePlan(string userId, object update, number eventCreated) (
   string lockName = "classroom-plan-" ++ userId
   sync.lock(lockName)
   defer sync.unlock(lockName)
-  object stored = (classroomPlanDocs.findById(userId).unwrapOr(null) ?? {})
+  object stored = (classroomPlanDocs.findById(userId).unwrap() ?? {})
   if stored.len == 0 (
     stored = {_id: userId}
   )
@@ -168,7 +168,7 @@ def applyStripeSubscription(object subscription, number eventCreated, boolean de
     return
   )
   string subscriptionId = (subscription.id ?? "").toStr()
-  if !stripeEventMayChangePlan((classroomPlanDocs.findById(userId).unwrapOr(null) ?? {}), subscriptionId) (
+  if !stripeEventMayChangePlan((classroomPlanDocs.findById(userId).unwrap() ?? {}), subscriptionId) (
     return
   )
   object plan = classroomPlanFromSubscription(subscription, [stripeSeatPackPrice, stripeSeatPackPriceYearly])

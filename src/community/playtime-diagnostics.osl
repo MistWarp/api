@@ -14,7 +14,7 @@ def playtimeIdentity(string username) string (
 def beginPlaytimeSession(string projectId, string username, string sessionId) boolean (
   string userId = userIdForUsername(username)
   string identityKey = playtimeIdentity(username)
-  object session = (playtimeSessionDocs.findById(sessionId).unwrapOr(null) ?? {})
+  object session = (playtimeSessionDocs.findById(sessionId).unwrap() ?? {})
   if session.len == 0 or session.projectId.toStr() != projectId or timestamp - session.lastSeen.toNum() > 120000 (
     putDocument(playtimeSessionDocs, sessionId, {
       _id: sessionId,
@@ -39,7 +39,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
   string playtimeLock = "playtime:" ++ playtimeId
   sync.lock(playtimeLock)
   defer sync.unlock(playtimeLock)
-  object playtime = (playtimeDocs.findById(playtimeId).unwrapOr(null) ?? {})
+  object playtime = (playtimeDocs.findById(playtimeId).unwrap() ?? {})
   if playtime.len == 0 (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
   ) else (
@@ -54,7 +54,7 @@ def touchRecentProjectActivity(string projectId, string username) boolean (
 
 def creditPlaytimeSession(string projectId, string username, string sessionId, boolean finished) number (
   string userId = userIdForUsername(username)
-  object session = (playtimeSessionDocs.findById(sessionId).unwrapOr(null) ?? {})
+  object session = (playtimeSessionDocs.findById(sessionId).unwrap() ?? {})
   if session.len == 0 or session.projectId.toStr() != projectId (
     return 0
   )
@@ -78,7 +78,7 @@ def creditPlaytimeLocked(string playtimeId, string projectId, string username, s
   string playtimeLock = "playtime:" ++ playtimeId
   sync.lock(playtimeLock)
   defer sync.unlock(playtimeLock)
-  object playtime = (playtimeDocs.findById(playtimeId).unwrapOr(null) ?? {})
+  object playtime = (playtimeDocs.findById(playtimeId).unwrap() ?? {})
   if playtime.len == 0 (
     playtime = {_id: playtimeId, projectId: projectId, username: username, userId: userId, duration: 0, updated: timestamp}
   )

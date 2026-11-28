@@ -166,7 +166,7 @@ def deleteProjectCommunityRecords(string projectId) boolean (
 def syncSearchProject(object project) boolean (
   object entry = indexEntryFromProject(project)
   if entry.remixRoot.toStr() == "" and entry.remixParent.toStr() != "" (
-    object parent = (projectSearchDocs.findById(entry.remixParent.toStr()).unwrapOr(null) ?? {})
+    object parent = (projectSearchDocs.findById(entry.remixParent.toStr()).unwrap() ?? {})
     if parent.len > 0 (
       entry.remixRoot = parent.id
       if parent.contains("remixRoot") and parent.remixRoot.toStr() != "" (
@@ -201,7 +201,7 @@ def removeSearchProject(string id) boolean (
 
 def migratePullCommentCounts() boolean (
   string migrationId = "migration:pull-comment-count-v1"
-  if (diagnosticDocs.findById(migrationId).unwrapOr(null) ?? {}).len > 0 (
+  if (diagnosticDocs.findById(migrationId).unwrap() ?? {}).len > 0 (
     return true
   )
   array pulls = pullDocs.all()
@@ -308,7 +308,7 @@ def validPreviewKey(string projectId, string key) boolean (
   if key == "" (
     return false
   )
-  object preview = previewDocs.findOne({projectId: projectId, key: key}).unwrapOr(null) ?? {}
+  object preview = previewDocs.findOne({projectId: projectId, key: key}).unwrap() ?? {}
   if preview.len == 0 (
     return false
   )
@@ -323,9 +323,9 @@ def projectPlaytimeRecord(string projectId, string username) object (
   if identityKey == "" (
     identityKey = normalizeUsername(username)
   )
-  object entry = (playtimeDocs.findById(projectId ++ ":" ++ identityKey).unwrapOr(null) ?? {})
+  object entry = (playtimeDocs.findById(projectId ++ ":" ++ identityKey).unwrap() ?? {})
   if entry.len == 0 and identityKey != normalizeUsername(username) (
-    entry = (playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username)).unwrapOr(null) ?? {})
+    entry = (playtimeDocs.findById(projectId ++ ":" ++ normalizeUsername(username)).unwrap() ?? {})
   )
   return entry
 )

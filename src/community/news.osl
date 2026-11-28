@@ -421,7 +421,7 @@ def handleViewNews(*serve.Context c) (
 
 def migratePolicyNewsPosts() boolean (
   string migrationId = "migration:news-policy-posts-v2"
-  if (diagnosticDocs.findById(migrationId).unwrapOr(null) ?? {}).len > 0 (
+  if (diagnosticDocs.findById(migrationId).unwrap() ?? {}).len > 0 (
     return true
   )
   array titles = [

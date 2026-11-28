@@ -45,7 +45,7 @@ testing.assert(privacyAdult.minor == false, "adult activity privacy is not a min
 testing.assert(privacyAdult.hiddenLibrary.assert(array).contains("p9"), "hidden library items are carried over")
 object privacyMinor = activityPrivacy({username: "sam", minor: true})
 testing.assert(privacyMinor.showActivity == false, "minor activity privacy hides activity by default")
-testing.assert(privacyMinor.hiddenLibrary.len == 0, "a missing hidden list is empty")
+testing.assert(privacyMinor.hiddenLibrary.assert(array).len == 0, "a missing hidden list is empty")
 
 object visibilities = {p1: "public", p2: "unlisted", p3: "private", p9: "public"}
 object openPrivacy = {showActivity: true, minor: false, hiddenLibrary: ["p9"]}

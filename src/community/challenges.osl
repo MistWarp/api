@@ -208,7 +208,7 @@ def challengeWinner(object space, array projects) object (
 )
 
 def handleInviteChallengeJudge(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
@@ -223,7 +223,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
   )
   string requested = requestJSON(c).username.toStr().strip()
   string usernameKey = normalizeUsername(requested)
-  object profile = (profileSearchDocs.findById(usernameKey).unwrapOr(null) ?? {})
+  object profile = (profileSearchDocs.findById(usernameKey).unwrap() ?? {})
   if usernameKey == "" or profile.len == 0 (
     c.notFound("user not found")
     return
@@ -243,7 +243,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
 )
 
 def handleJoinChallenge(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" or !canViewSpace(space, c) (
     c.notFound("challenge not found")
     return
@@ -267,7 +267,7 @@ def handleJoinChallenge(*serve.Context c) (
 )
 
 def handleLeaveChallenge(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" (
     c.notFound("challenge not found")
     return
@@ -284,7 +284,7 @@ def handleLeaveChallenge(*serve.Context c) (
   )
   array ids = spaceProjectIds(space)
   for i ids.len (
-    object project = (projectSearchDocs.findById(ids[i].toStr()).unwrapOr(null) ?? {})
+    object project = (projectSearchDocs.findById(ids[i].toStr()).unwrap() ?? {})
     if project.len > 0 and searchEntryOwnedByContext(project, c) (
       c.badRequest("remove your submission before leaving the challenge")
       return
@@ -297,7 +297,7 @@ def handleLeaveChallenge(*serve.Context c) (
 )
 
 def handleRespondChallengeJudgeInvite(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !isChallengeJudgeInvitee(space, contextString(c, "username")) (
     c.notFound("judge invitation not found")
     return
@@ -325,7 +325,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
 )
 
 def handleRemoveChallengeJudge(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return
@@ -365,7 +365,7 @@ def validChallengeCriterion(object space, string criterionId) boolean (
 )
 
 def handleScoreChallengeEntry(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   string projectId = c.param("project")
   if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
@@ -379,7 +379,7 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.badRequest("judging is not open")
     return
   )
-  object project = (projectSearchDocs.findById(projectId).unwrapOr(null) ?? {})
+  object project = (projectSearchDocs.findById(projectId).unwrap() ?? {})
   if project.len > 0 and searchEntryOwnedByContext(project, c) (
     c.forbidden("you cannot score your own entry")
     return
@@ -424,7 +424,7 @@ def handleScoreChallengeEntry(*serve.Context c) (
 )
 
 def handleVoteChallengeEntry(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   string projectId = c.param("project")
   if space.len == 0 or space.kind.toStr() != "challenge" or !spaceProjectIds(space).contains(projectId) (
     c.notFound("challenge entry not found")
@@ -434,7 +434,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
     c.badRequest("community voting is not open")
     return
   )
-  object project = (projectSearchDocs.findById(projectId).unwrapOr(null) ?? {})
+  object project = (projectSearchDocs.findById(projectId).unwrap() ?? {})
   if project.len > 0 and searchEntryOwnedByContext(project, c) (
     c.forbidden("you cannot vote for your own entry")
     return
@@ -460,7 +460,7 @@ def handleVoteChallengeEntry(*serve.Context c) (
 )
 
 def handlePublishChallengeResults(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrap() ?? {})
   if space.len == 0 or space.kind.toStr() != "challenge" or !canManageSpace(space, c) (
     c.forbidden("you cannot manage this challenge")
     return

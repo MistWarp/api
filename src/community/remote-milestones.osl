@@ -24,7 +24,7 @@ def observeRemoteMilestone(string target, string kind, string id, number count, 
   string key = "observed:" ++ kind ++ ":" ++ id
   sync.lock(key)
   defer sync.unlock(key)
-  object previous = (likeMilestoneDocs.findById(key).unwrapOr(null) ?? {})
+  object previous = (likeMilestoneDocs.findById(key).unwrap() ?? {})
   number before = count - 1
   if previous.contains("count") (
     before = previous.count.toNum()

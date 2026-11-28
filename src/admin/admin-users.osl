@@ -111,7 +111,7 @@ def unindexComment(string key, string cid) (
 
 def migrateCommentIndex() boolean (
   string migrationId = "migration:comment-index-v1"
-  if (diagnosticDocs.findById(migrationId).unwrapOr(null) ?? {}).len > 0 (
+  if (diagnosticDocs.findById(migrationId).unwrap() ?? {}).len > 0 (
     return true
   )
   array files = fs.readDir(commentsDir).unwrapOr([])

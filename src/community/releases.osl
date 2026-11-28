@@ -127,7 +127,7 @@ def handleCreateRelease(*serve.Context c) (
 )
 
 def handleGetReleaseProjectJson(*serve.Context c) (
-  object release = (releaseDocs.findById(c.param("release")).unwrapOr(null) ?? {})
+  object release = (releaseDocs.findById(c.param("release")).unwrap() ?? {})
   if release.len == 0 or release.projectId.toStr() != c.param("id") (
     c.notFound("release not found")
     return
@@ -168,7 +168,7 @@ def handleDeleteRelease(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object release = (releaseDocs.findById(c.param("release")).unwrapOr(null) ?? {})
+  object release = (releaseDocs.findById(c.param("release")).unwrap() ?? {})
   if release.len == 0 or release.projectId.toStr() != project.id.toStr() (
     c.notFound("release not found")
     return

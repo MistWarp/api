@@ -72,7 +72,7 @@ def livePullResponse(object pull, string baseCommit, string headCommit) object (
 )
 
 def pullDocument(string targetId, string index) object (
-  return (pullDocs.findById(targetId ++ ":" ++ index).unwrapOr(null) ?? {})
+  return (pullDocs.findById(targetId ++ ":" ++ index).unwrap() ?? {})
 )
 
 def pullCommentKey(object pull) string (

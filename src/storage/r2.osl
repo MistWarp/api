@@ -79,7 +79,7 @@ def handleGetThumbnail(*serve.Context c) (
 )
 
 def thumbnailAccess(string id, boolean hasKey) object (
-  object entry = (projectSearchDocs.findById(id).unwrapOr(null) ?? {})
+  object entry = (projectSearchDocs.findById(id).unwrap() ?? {})
   if entry.len > 0 and projectOwnerBanned(entry) (
     return {found: true, ownerBanned: true, isPublic: false, viewKey: ""}
   )

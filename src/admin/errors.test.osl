@@ -76,7 +76,7 @@ testing.assert(scrubbed.resolved == true and scrubbed.kind == "react" and scrubb
 
 errorDocs.insertOne({_id: "legacy", message: "m", url: "https://mistwarp.org/users/mist", username: "mist", userAgent: "x", projectId: "p1", created: timestamp, resolved: false})
 pruneSiteErrors()
-object legacy = errorDocs.findById("legacy").unwrapOr(null) ?? {}
+object legacy = errorDocs.findById("legacy").unwrap() ?? {}
 testing.assert(legacy.len > 0 and !legacy.contains("username") and legacy.url == "https://mistwarp.org/users/:id", "the sweep scrubs reports stored before this change")
 void deleteAllSiteErrors()
 
@@ -93,9 +93,9 @@ errorDocs.insertOne({_id: "old", resolved: false, created: now - (8 * 86400000)}
 errorDocs.insertOne({_id: "edge", resolved: true, created: now - (6 * 86400000)})
 errorDocs.insertOne({_id: "new", resolved: false, created: now})
 sweepSiteErrors()
-testing.assert((errorDocs.findById("old").unwrapOr(null) ?? {}).len == 0, "the sweep deletes reports older than 7 days, resolved or not")
-testing.assert((errorDocs.findById("edge").unwrapOr(null) ?? {}).len > 0, "the sweep keeps reports younger than 7 days")
-testing.assert((errorDocs.findById("new").unwrapOr(null) ?? {}).len > 0, "the sweep keeps new reports")
+testing.assert((errorDocs.findById("old").unwrap() ?? {}).len == 0, "the sweep deletes reports older than 7 days, resolved or not")
+testing.assert((errorDocs.findById("edge").unwrap() ?? {}).len > 0, "the sweep keeps reports younger than 7 days")
+testing.assert((errorDocs.findById("new").unwrap() ?? {}).len > 0, "the sweep keeps new reports")
 testing.assert(deleteAllSiteErrors() == 2, "only the expired report was swept")
 
 for i 1005 (
@@ -104,9 +104,9 @@ for i 1005 (
 errorDocs.insertOne({_id: "stale", resolved: false, created: now - (200 * 86400000)})
 pruneSiteErrors()
 testing.assert(errorDocs.count({}).unwrap() == 1000, "pruning keeps the newest 1000 reports")
-testing.assert((errorDocs.findById("stale").unwrapOr(null) ?? {}).len == 0, "pruning drops expired reports too")
-testing.assert((errorDocs.findById("c1").unwrapOr(null) ?? {}).len == 0, "pruning drops the oldest reports beyond the cap")
-testing.assert((errorDocs.findById("c1005").unwrapOr(null) ?? {}).len > 0, "pruning keeps the newest report")
+testing.assert((errorDocs.findById("stale").unwrap() ?? {}).len == 0, "pruning drops expired reports too")
+testing.assert((errorDocs.findById("c1").unwrap() ?? {}).len == 0, "pruning drops the oldest reports beyond the cap")
+testing.assert((errorDocs.findById("c1005").unwrap() ?? {}).len > 0, "pruning keeps the newest report")
 void deleteAllSiteErrors()
 testing.assert(sweepSiteErrors(), "a sweep that works reports success")
 testDb.close()

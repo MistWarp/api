@@ -54,14 +54,14 @@ def loadClass(string id) object (
   if id == "" (
     return {}
   )
-  return (classDocs.findById(id).unwrapOr(null) ?? {})
+  return (classDocs.findById(id).unwrap() ?? {})
 )
 
 def loadStudent(string id) object (
   if !isStudentUserId(id) (
     return {}
   )
-  return (studentDocs.findById(id).unwrapOr(null) ?? {})
+  return (studentDocs.findById(id).unwrap() ?? {})
 )
 
 def studentForUsername(string username) object (
@@ -126,7 +126,7 @@ def studentsForPlanOwner(string ownerId) array (
 )
 
 def classroomPlanFor(string ownerId) object (
-  return effectiveClassroomPlan((classroomPlanDocs.findById(classroomPlanKey(ownerId)).unwrapOr(null) ?? {}), timestamp)
+  return effectiveClassroomPlan((classroomPlanDocs.findById(classroomPlanKey(ownerId)).unwrap() ?? {}), timestamp)
 )
 
 def classroomPlanLock(string ownerId) string (
@@ -976,7 +976,7 @@ def handleCreateAssignment(*serve.Context c) (
 )
 
 def classAssignmentOrFail(*serve.Context c, object classDoc) object (
-  object assignment = (assignmentDocs.findById(c.param("aid")).unwrapOr(null) ?? {})
+  object assignment = (assignmentDocs.findById(c.param("aid")).unwrap() ?? {})
   if assignment.len == 0 or assignment.classId.toStr() != classDoc["_id"].toStr() (
     c.notFound("assignment not found")
     return {}
@@ -994,7 +994,7 @@ def handleGetAssignment(*serve.Context c) (
   array rows = []
   for i students.len (
     object student = students[i].assert(object)
-    object submission = (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()).unwrapOr(null) ?? {})
+    object submission = (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()).unwrap() ?? {})
     rows.append({
       student: {id: student["_id"], displayName: student.displayName},
       submission: if submission.len == 0 then null else submission,
@@ -1031,7 +1031,7 @@ def handleReviewSubmission(*serve.Context c) (
   if classDoc.len == 0 return
   object assignment = classAssignmentOrFail(c, classDoc)
   if assignment.len == 0 return
-  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ c.param("sid")).unwrapOr(null) ?? {})
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ c.param("sid")).unwrap() ?? {})
   if submission.len == 0 (
     c.notFound("this student has not started the assignment")
     return
@@ -1076,7 +1076,7 @@ def studentAssignmentRows(object student) array (
   array rows = []
   for i assignments.len (
     object assignment = assignments[i].assert(object)
-    object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrapOr(null) ?? {})
+    object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrap() ?? {})
     rows.append({
       id: assignment["_id"],
       title: assignment.title,
@@ -1118,7 +1118,7 @@ def handleGetStudentClassroom(*serve.Context c) (
 
 def studentAssignmentOrFail(*serve.Context c) object (
   object student = loadStudent(contextString(c, "userId"))
-  object assignment = (assignmentDocs.findById(c.param("aid")).unwrapOr(null) ?? {})
+  object assignment = (assignmentDocs.findById(c.param("aid")).unwrap() ?? {})
   if student.len == 0 or assignment.len == 0 or assignment.classId.toStr() != student.classId.toStr() (
     c.notFound("assignment not found")
     return {}
@@ -1189,7 +1189,7 @@ def startSubmissionLocked(*serve.Context c, object student, object assignment, s
   string lockName = "classroom-submission-" ++ submissionId
   sync.lock(lockName)
   defer sync.unlock(lockName)
-  object existing = (submissionDocs.findById(submissionId).unwrapOr(null) ?? {})
+  object existing = (submissionDocs.findById(submissionId).unwrap() ?? {})
   if existing.len > 0 (
     auto loaded = loadProject(existing.projectId.toStr())
     if loaded.ok (
@@ -1243,7 +1243,7 @@ def handleTurnInAssignment(*serve.Context c) (
   if found.len == 0 return
   object student = found.student.assert(object)
   object assignment = found.assignment.assert(object)
-  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrapOr(null) ?? {})
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrap() ?? {})
   if submission.len == 0 or !submissionCanTurnIn(submission) (
     c.badRequest("start the assignment before turning it in")
     return
@@ -1274,7 +1274,7 @@ def handleUnsubmitAssignment(*serve.Context c) (
   if found.len == 0 return
   object student = found.student.assert(object)
   object assignment = found.assignment.assert(object)
-  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrapOr(null) ?? {})
+  object submission = (submissionDocs.findById(assignment["_id"].toStr() ++ ":" ++ student["_id"].toStr()).unwrap() ?? {})
   if submission.len == 0 or !submissionCanUnsubmit(submission) (
     c.badRequest("this work is not waiting for your teacher")
     return
@@ -1359,7 +1359,7 @@ def handleAdminGetClassroomPlan(*serve.Context c) (
     c.badRequest("Rotur user not found")
     return
   )
-  c.json(200, {ok: true, username: usernameForId(userId), stored: (classroomPlanDocs.findById(userId).unwrapOr(null) ?? {}), plan: classroomPlanFor(userId), usage: classroomUsage(userId)})
+  c.json(200, {ok: true, username: usernameForId(userId), stored: (classroomPlanDocs.findById(userId).unwrap() ?? {}), plan: classroomPlanFor(userId), usage: classroomUsage(userId)})
 )
 
 def handleAdminSetClassroomPlan(*serve.Context c) (
@@ -1367,7 +1367,7 @@ def handleAdminSetClassroomPlan(*serve.Context c) (
   string userId = ""
   string schoolId = (body.schoolId ?? "").toStr()
   if schoolId != "" (
-    if (schoolDocs.findById(schoolId).unwrapOr(null) ?? {}).len == 0 (
+    if (schoolDocs.findById(schoolId).unwrap() ?? {}).len == 0 (
       c.badRequest("school not found")
       return
     )
