@@ -367,14 +367,28 @@ def handleUpdateSpace(*serve.Context c) (
     return
   )
   space.edited = timestamp
-  object saved = saveEditedSpace(space)
+  object saved = saveEditedSpace(space, body.contains("criteria") and space.kind.toStr() == "challenge")
+  if saved.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if saved.contains("refused") (
+    c.badRequest("judging criteria cannot change after scoring begins")
+    return
+  )
   c.json(200, {ok: true, space: spaceResponse(saved, c)})
 )
 
-def saveEditedSpace(object space) object (
+def saveEditedSpace(object space, boolean changesCriteria) object (
   sync.lock(spaceWriteLock(space["_id"].toStr()))
   defer sync.unlock(spaceWriteLock(space["_id"].toStr()))
   object fresh = (spaceDocs.findById(space["_id"].toStr()) ?? {})
+  if fresh.len == 0 (
+    return {}
+  )
+  if changesCriteria and challengeArray(fresh, "scores").len > 0 (
+    return {refused: "criteria"}
+  )
   array lockedFields = ["projects", "submissions", "participants", "scores", "audienceVotes"]
   for i lockedFields.len (
     string field = lockedFields[i].toStr()
@@ -396,14 +410,20 @@ def handleDeleteSpace(*serve.Context c) (
     c.forbidden("only the owner can delete this space")
     return
   )
-  void spaceDocs.deleteOne({_id: space["_id"]})
-  deleteSpaceMemberships(space["_id"].toStr())
+  deleteSpaceLocked(space["_id"].toStr())
   void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
   void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
   if fs.exists(spaceThumbnailPath(space["_id"].toStr())) (
     void fs.remove(spaceThumbnailPath(space["_id"].toStr()))
   )
   c.json(200, {ok: true})
+)
+
+def deleteSpaceLocked(string spaceId) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  void spaceDocs.deleteOne({_id: spaceId})
+  deleteSpaceMemberships(spaceId)
 )
 
 def handleSetSpaceThumbnail(*serve.Context c) (
