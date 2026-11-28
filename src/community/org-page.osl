@@ -87,7 +87,7 @@ def orgSpaces(string orgId,boolean canManage,*serve.Context c) array (
   for i entries.len (
     object space = entries[i].assertElse(object, {})
     string visibility = (space.visibility ?? "").toStr()
-    if spaces.len < orgPageLimit and (space.ownerType ?? "").toStr() == "org" and (visibility == "public" or visibility == "unlisted" or canManage) (
+    if spaces.len < orgPageLimit and (space.ownerType ?? "").toStr() == "org" and (visibility == "public" or canManage) (
       spaces.append(spaceListResponse(space, c))
     )
   )

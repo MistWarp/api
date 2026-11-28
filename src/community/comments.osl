@@ -621,9 +621,9 @@ def handleCreateProjectComment(*serve.Context c) (
   )
   if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
     if donationAmount > 0 (
-      notifyContentOwner(project, commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount, preview: preview})
+      notifyContentOwnerExcept(project, commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount, preview: preview}, [parentAuthor])
     ) else (
-      notifyContentOwner(project, commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
+      notifyContentOwnerExcept(project, commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview}, [parentAuthor])
     )
   )
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})

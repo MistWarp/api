@@ -644,7 +644,7 @@ def handleCreatePullComment(*serve.Context c) (
     addNotification(pull.author.toStr(), commenter, "comment", notificationData)
   )
   if normalizeUsername(project.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(project.owner.toStr()) != normalizeUsername(pull.author.toStr()) (
-    notifyContentOwner(project, commenter, "comment", notificationData)
+    notifyContentOwnerExcept(project, commenter, "comment", notificationData, [pull.author.toStr()])
   )
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), pull.author.toStr()], notificationData)
   created.comment = commentResponse(created.comment.assert(object), commenter)

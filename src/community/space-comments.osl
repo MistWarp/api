@@ -43,7 +43,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     addNotification(parentAuthor, commenter, "reply", notificationData)
   )
   if normalizeUsername(space.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(space.owner.toStr()) != normalizeUsername(parentAuthor) (
-    notifyContentOwner(space, commenter, "space_comment", notificationData)
+    notifyContentOwnerExcept(space, commenter, "space_comment", notificationData, [parentAuthor])
   )
   notifyMentions(created.comment.content.toStr(), commenter, [space.owner.toStr(), parentAuthor], notificationData)
   c.json(201, created)

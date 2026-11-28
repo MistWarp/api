@@ -86,6 +86,15 @@ def rewriteNotificationIdentityFields(object data, string oldKey, string newName
   return false
 )
 
+def stringArrayContainsUser(array users, string username) boolean (
+  for i users.len (
+    if users[i].toStr().toLower() == username.toLower() (
+      return true
+    )
+  )
+  return false
+)
+
 def isOrgOwned(object value) boolean (
   return (value.ownerType ?? "").toStr() == "org"
 )
@@ -182,3 +191,13 @@ for i 50 (
   wait 0.05
 )
 testing.assert(askedRotur.len == 2, "buying the same product twice tells the publishers about both purchases")
+askedRotur = []
+notifyContentOwnerExcept({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "zed", "comment", {projectId: "p9", commentId: "c1"}, ["ada"])
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
+wait 0.2
+testing.assert(askedRotur.len == 1 and !askedRotur[1].toStr().contains("ada"), "a publisher who already got the reply is not sent the comment again")

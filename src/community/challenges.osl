@@ -268,7 +268,7 @@ def handleInviteChallengeJudge(*serve.Context c) (
     c.notFound("user not found")
     return
   )
-  if normalizeUsername(space.owner.toStr()) == usernameKey or isChallengeJudge(space, requested) or isChallengeJudgeInvitee(space, requested) (
+  if normalizeUsername(space.owner.toStr()) == usernameKey or stringArrayContainsUser(challengeJudges(space), requested) or isChallengeJudgeInvitee(space, requested) (
     c.badRequest("this user is already on the challenge team")
     return
   )

@@ -228,14 +228,14 @@ array anonymousMembers = anonymous.members.assert(array)
 testing.assert(anonymousMembers.len == 2 and anonymousMembers[1].username == "ada" and anonymousMembers[2].username == "cal", "a visitor sees only the listed members")
 testing.assert(anonymous.isMember == false and anonymous.canManage == false, "a visitor is neither member nor publisher")
 testing.assert(anonymous.projects.assert(array).len == 1 and anonymous.projects[1].id == "p_org", "a visitor sees the org's shared projects, not an old org's or a person's")
-testing.assert(anonymous.spaces.assert(array).len == 2, "a visitor sees public and unlisted spaces")
+testing.assert(anonymous.spaces.assert(array).len == 1 and anonymous.spaces[1].id == "s_pub", "a visitor sees only public spaces, not unlisted ones")
 
 object member = page("dee", "u_dee")
 testing.assert(member.members.assert(array).len == 4 and member.isMember == true and member.canManage == false, "a member sees every member but cannot manage")
-testing.assert(member.projects.assert(array).len == 1 and member.spaces.assert(array).len == 2, "a member without apps sees what visitors see")
+testing.assert(member.projects.assert(array).len == 1 and member.spaces.assert(array).len == 1, "a member without apps sees what visitors see")
 
 object publisher = page("bea", "u_bea")
-testing.assert(publisher.canManage == true and publisher.projects.assert(array).len == 2 and publisher.spaces.assert(array).len == 3, "a publisher also sees drafts and private spaces")
+testing.assert(publisher.canManage == true and publisher.projects.assert(array).len == 2 and publisher.spaces.assert(array).len == 3, "a publisher also sees drafts, unlisted and private spaces")
 
 orgPageDb.close()
 void fs.remove(spaceDbPath)

@@ -1,6 +1,7 @@
 export {
   addNotification,
   notifyContentOwner,
+  notifyContentOwnerExcept,
   loadNotifications,
   saveNotifications
 }
@@ -451,6 +452,10 @@ def markNotificationsReadLocked(string username) (
 )
 
 def notifyContentOwner(object content, string actor, string notifType, object extra) (
+  notifyContentOwnerExcept(content, actor, notifType, extra, [])
+)
+
+def notifyContentOwnerExcept(object content, string actor, string notifType, object extra, array skip) (
   string owner = (content.owner ?? "").toStr()
   if !isOrgOwned(content) (
     addNotification(owner, actor, notifType, extra)
@@ -464,13 +469,13 @@ def notifyContentOwner(object content, string actor, string notifType, object ex
     )
     recentOrgFanOuts.set(fanOutKey, true)
   )
-  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra, fanOutKey)
+  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra, fanOutKey, skip)
 )
 
 number orgNotificationLimit = 25
 *cache.Cache recentOrgFanOuts = cache.new({capacity: 10000, ttl: 600000})
 
-def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra, string fanOutKey) (
+def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra, string fanOutKey, array skip) (
   object snapshot = roturOrgSnapshot(if ownerId != "" then ownerId else owner)
   if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
     recentOrgFanOuts.delete(fanOutKey)
@@ -484,6 +489,8 @@ def notifyOrgPublishers(string owner, string ownerId, string actor, string notif
     if i >= orgNotificationLimit (
       return
     )
-    addNotification(names[i].toStr(), actor, notifType, extra)
+    if !stringArrayContainsUser(skip, names[i].toStr()) (
+      addNotification(names[i].toStr(), actor, notifType, extra)
+    )
   )
 )
