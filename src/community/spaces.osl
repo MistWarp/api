@@ -378,6 +378,8 @@ def handleUpdateSpace(*serve.Context c) (
     string refusal = saved.refused.toStr()
     if refusal == "criteria" (
       c.badRequest("judging criteria cannot change after scoring begins")
+    ) else if refusal == "dates" (
+      c.badRequest("challenge dates must be in order")
     ) else if refusal == "votingMode" (
       c.badRequest("the voting mode cannot change after results are published")
     ) else (
@@ -424,6 +426,9 @@ def saveEditedSpace(object read, object edited, string curator) object (
   for i changed.len (
     string key = changed[i].toStr()
     fresh[key] = edited[key]
+  )
+  if isChallenge and (fresh.startsAt.toNum() <= 0 or fresh.endsAt.toNum() <= fresh.startsAt.toNum() or (fresh.judgingEndsAt ?? 0).toNum() <= fresh.endsAt.toNum()) (
+    return {refused: "dates"}
   )
   fresh.edited = edited.edited
   putSpaceDocument(fresh)
@@ -513,7 +518,7 @@ def handleAddSpaceProject(*serve.Context c) (
   if isOrgOwned(project) (
     participant = if ownsProject then contextString(c, "username") else ""
   )
-  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages, if manages then spaceCuratorOnly(space, c) else "")
+  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages, if manages then spaceCuratorOnly(space, c) else "", ownsProject)
   if added.len == 0 (
     c.json(409, {ok: false, code: "space_changed", error: "The space changed while this project was being added. Try again."})
     return
@@ -525,7 +530,7 @@ def handleAddSpaceProject(*serve.Context c) (
   c.json(200, {ok: true, space: spaceResponse(fresh, c)})
 )
 
-def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean manages, string curator) object (
+def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean manages, string curator, boolean ownsProject) object (
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object space = (spaceDocs.findById(spaceId) ?? {})
@@ -533,7 +538,7 @@ def addProjectToSpace(string spaceId, object project, string submitter, string p
     return {}
   )
   boolean asManager = manages and stillSpaceCurator(space, curator)
-  if !asManager and (space.openSubmissions != true or (space.kind.toStr() == "challenge" and challengePhase(space) != "submissions")) (
+  if !asManager and (!ownsProject or space.openSubmissions != true or (space.kind.toStr() == "challenge" and challengePhase(space) != "submissions")) (
     return {}
   )
   array ids = spaceProjectIds(space)
@@ -566,6 +571,9 @@ def handleRemoveSpaceProject(*serve.Context c) (
   object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   boolean allowed = canManageSpace(space, c)
   string curator = if allowed then spaceCuratorOnly(space, c) else ""
+  if curator != "" and project.len > 0 and searchEntryOwnership(project, c) == "yes" (
+    curator = ""
+  )
   if !allowed and project.len > 0 (
     string ownership = searchEntryOwnership(project, c)
     if ownership == "unavailable" (
