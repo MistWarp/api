@@ -482,7 +482,8 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.badRequest("thumbnail too large")
     return
   )
-  string outcome = saveSpaceThumbnailLocked(space["_id"].toStr(), curator, thumbnail.data)
+  object saved = saveSpaceThumbnailLocked(space["_id"].toStr(), curator, thumbnail.data)
+  string outcome = saved.outcome.toStr()
   if outcome == "missing" (
     c.notFound("space not found")
     return
@@ -495,25 +496,25 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.internalError("thumbnail save failed")
     return
   )
-  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
+  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(saved.space.assert(object))})
 )
 
-def saveSpaceThumbnailLocked(string spaceId, string curator, byte[] data) string (
+def saveSpaceThumbnailLocked(string spaceId, string curator, byte[] data) object (
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object space = (spaceDocs.findById(spaceId) ?? {})
   if space.len == 0 (
-    return "missing"
+    return {outcome: "missing"}
   )
   if !stillSpaceCurator(space, curator) (
-    return "curator"
+    return {outcome: "curator"}
   )
   if !fs.writeFileBytes(spaceThumbnailPath(spaceId), data) (
-    return "failed"
+    return {outcome: "failed"}
   )
   space.edited = timestamp
   putSpaceDocument(space)
-  return "saved"
+  return {outcome: "saved", space: space}
 )
 
 def handleAddSpaceProject(*serve.Context c) (

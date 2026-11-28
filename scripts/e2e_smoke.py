@@ -53,7 +53,7 @@ SLOW_LEDGER_USERS = {"u_lena"}
 SLOW_ORG_LISTS = {"u_vic", "u_wes"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
+CHECK_STEPS = {"org studio thumbnail checks", "org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1050,7 +1050,17 @@ def org_flow(server, step, steps, ids):
     step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
     step("org move out refused for a publisher", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "dee"})
     step("org transfer back", "PUT", "/v1/projects/<dee-project>", "sam", {"owner": "dee"})
-    step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
+    status, studio = step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
+    studio = studio.get("space", {}) if isinstance(studio, dict) else {}
+    ids[str(studio.get("_id", studio.get("id", "")))] = "<org-studio>"
+    time.sleep(0.01)
+    status, thumbed = step("org studio thumbnail by publisher", "POST", "/v1/spaces/<org-studio>/thumbnail", "sam", form=({}, {"thumbnail": b"\x89PNG studio thumbnail"}))
+    status, studio_after = step("org studio after thumbnail", "GET", "/v1/spaces/<org-studio>", "sam")
+    studio_after = studio_after.get("space", {}) if isinstance(studio_after, dict) else {}
+    steps.append({"step": "org studio thumbnail checks", "status": 0, "body": {
+        "the thumbnail is saved": status == 200 and isinstance(thumbed, dict) and bool(thumbed.get("thumbnailUrl")),
+        "the returned url matches the saved space": isinstance(thumbed, dict) and thumbed.get("thumbnailUrl") == studio_after.get("thumbnailUrl"),
+    }})
     status, own_space = step("org own space create", "POST", "/v1/spaces", "sam", {"title": "Sam's space", "kind": "collection"})
     own_space = own_space.get("space", {}) if isinstance(own_space, dict) else {}
     ids[str(own_space.get("_id", own_space.get("id", "")))] = "<sam-space>"
