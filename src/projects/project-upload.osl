@@ -55,6 +55,7 @@ def remixSyncAccessRefusal(*serve.Context c, object project, UploadRequest reque
 )
 
 def handleUploadProject(*serve.Context c) (
+  warmProjectOrgAccess(c.param("id"), c)
   runLocked(projectSaveLock(c.param("id")), def() -> (
     handleUploadProjectLocked(c)
   ))

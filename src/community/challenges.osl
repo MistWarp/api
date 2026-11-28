@@ -431,7 +431,12 @@ def handleScoreChallengeEntry(*serve.Context c) (
     return
   )
   object project = (projectSearchDocs.findById(projectId) ?? {})
-  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+  string ownership = if project.len > 0 then searchEntryOwnership(project, c) else "no"
+  if ownership == "unavailable" (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  if ownership == "yes" (
     c.forbidden("you cannot score your own entry")
     return
   )
@@ -486,7 +491,12 @@ def handleVoteChallengeEntry(*serve.Context c) (
     return
   )
   object project = (projectSearchDocs.findById(projectId) ?? {})
-  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+  string ownership = if project.len > 0 then searchEntryOwnership(project, c) else "no"
+  if ownership == "unavailable" (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  if ownership == "yes" (
     c.forbidden("you cannot vote for your own entry")
     return
   )

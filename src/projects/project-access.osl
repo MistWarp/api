@@ -11,7 +11,8 @@ export {
   projectRoleFor,
   projectRoleForName,
   projectRoleForUser,
-  removeString
+  removeString,
+  warmProjectOrgAccess
 }
 
 def removeString(array items, string value) array (
@@ -73,6 +74,13 @@ def projectRoleFor(object project,*serve.Context c) string (
     return "owner"
   )
   return role
+)
+
+def warmProjectOrgAccess(string id,*serve.Context c) (
+  auto loaded = loadProject(id)
+  if loaded.ok and isOrgOwned(loaded.project.assert(object)) (
+    void canManageOrgContent(loaded.project.assert(object), c)
+  )
 )
 
 def projectModerator(object project,*serve.Context c) string (

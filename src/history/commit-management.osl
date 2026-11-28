@@ -107,6 +107,7 @@ def handlePatchCommit(*serve.Context c) (
 )
 
 def applyCommitPatchLocked(*serve.Context c) object (
+  warmProjectOrgAccess(c.param("id"), c)
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)

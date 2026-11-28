@@ -7,6 +7,7 @@ export {
   orgAdminAccess,
   orgMoveOutAccess,
   orgAccess,
+  orgContentAccess,
   orgHasMember,
   orgMemberCanPublish,
   orgPublisherNames,
@@ -216,8 +217,15 @@ def isOrgOwned(object value) boolean (
   return (value.ownerType ?? "").toStr() == "org"
 )
 
+def orgContentAccess(object value,*serve.Context c) string (
+  if !isOrgOwned(value) (
+    return "no"
+  )
+  return orgAccess((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c)
+)
+
 def canManageOrgContent(object value,*serve.Context c) boolean (
-  return isOrgOwned(value) and orgAccess((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c) == "yes"
+  return orgContentAccess(value, c) == "yes"
 )
 
 def creationOwner(*serve.Context c, object body, string noun) object (

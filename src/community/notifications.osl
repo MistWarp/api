@@ -458,10 +458,12 @@ def notifyContentOwner(object content, string actor, string notifType, object ex
   )
   string ownerId = (content.ownerId ?? "").toStr()
   string fanOutKey = ownerId ++ ":" ++ owner ++ ":" ++ actor ++ ":" ++ notifType ++ ":" ++ extra.toStr()
-  if recentOrgFanOuts.get(fanOutKey).assertElse(boolean, false) (
-    return
+  if notifType != "purchase" (
+    if recentOrgFanOuts.get(fanOutKey).assertElse(boolean, false) (
+      return
+    )
+    recentOrgFanOuts.set(fanOutKey, true)
   )
-  recentOrgFanOuts.set(fanOutKey, true)
   thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra, fanOutKey)
 )
 
@@ -479,7 +481,7 @@ def notifyOrgPublishers(string owner, string ownerId, string actor, string notif
   )
   array names = orgPublisherNames(snapshot)
   for i names.len (
-    if i > orgNotificationLimit (
+    if i >= orgNotificationLimit (
       return
     )
     addNotification(names[i].toStr(), actor, notifType, extra)

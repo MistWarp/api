@@ -172,3 +172,13 @@ for i 50 (
   wait 0.05
 )
 testing.assert(askedRotur.len == 1, "a love on another of the org's projects still fans out")
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "purchase", {projectId: "p8", productId: "x", amount: 5})
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "purchase", {projectId: "p8", productId: "x", amount: 5})
+for i 50 (
+  if askedRotur.len > 1 (
+    break
+  )
+  wait 0.05
+)
+testing.assert(askedRotur.len == 2, "buying the same product twice tells the publishers about both purchases")

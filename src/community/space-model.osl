@@ -97,12 +97,19 @@ def isSpaceOwner(object space,*serve.Context c) boolean (
   return contextBool(c, "isAdmin") or identityMatches(ownerId, space.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) or canManageOrgContent(space, c)
 )
 
-def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
+def searchEntryOwnership(object project,*serve.Context c) string (
   string ownerId = ""
   if project.contains("ownerId") and project.ownerId != null (
     ownerId = project.ownerId.toStr()
   )
-  return identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) or canManageOrgContent(project, c)
+  if identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) (
+    return "yes"
+  )
+  return orgContentAccess(project, c)
+)
+
+def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
+  return searchEntryOwnership(project, c) == "yes"
 )
 
 def isSpaceInvitee(object space,*serve.Context c) boolean (

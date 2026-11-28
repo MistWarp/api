@@ -370,6 +370,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
 )
 
 def mutateProjectBranchesLocked(*serve.Context c, string action) object (
+  warmProjectOrgAccess(c.param("id"), c)
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)

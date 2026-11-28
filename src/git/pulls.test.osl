@@ -101,6 +101,9 @@ def canEditProject(object project,*serve.Context c) boolean (
 def canSeeInsideProject(object project,*serve.Context c) boolean (
   return false
 )
+def warmProjectOrgAccess(string id,*serve.Context c) (
+  return
+)
 def canViewProject(object project,*serve.Context c) boolean (
   return false
 )
