@@ -1,4 +1,5 @@
 import "std:testing"
+import "std:sync"
 import "std:json"
 import "std:requests"
 import "std:serve"
@@ -60,9 +61,10 @@ def contextBool(*serve.Context c, string key) boolean (
 string spaceDbPath = "/tmp/mistwarp-org-page-" ++ timestamp.toStr() ++ ".db"
 *db.DB orgPageDb = db.open(spaceDbPath)
 *db.Collection spaceDocs = orgPageDb.collection("spaces")
-void spaceDocs.insertOne({_id: "s_pub", ownerId: "org_studio", visibility: "public", edited: 3})
-void spaceDocs.insertOne({_id: "s_unl", ownerId: "org_studio", visibility: "unlisted", edited: 2})
-void spaceDocs.insertOne({_id: "s_pri", ownerId: "org_studio", visibility: "private", edited: 1})
+void spaceDocs.insertOne({_id: "s_pub", ownerId: "org_studio", ownerType: "org", visibility: "public", edited: 3})
+void spaceDocs.insertOne({_id: "s_unl", ownerId: "org_studio", ownerType: "org", visibility: "unlisted", edited: 2})
+void spaceDocs.insertOne({_id: "s_pri", ownerId: "org_studio", ownerType: "org", visibility: "private", edited: 1})
+void spaceDocs.insertOne({_id: "s_own", ownerId: "org_studio", ownerType: "", visibility: "public", edited: 0})
 
 *db.Collection projectSearchDocs = orgPageDb.collection("projects")
 void projectSearchDocs.insertOne({_id: "p_org", id: "p_org", ownerId: "org_studio", ownerKey: "studio", ownerType: "org", shared: true, edited: 4})

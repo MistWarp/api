@@ -820,7 +820,7 @@ def purgeUser(string userId, string username) (
   purgeUserFromNotifications(key)
   purgeGameDataForUser(userId)
   purgeBackpackForUser(userId)
-  purgeUserFromSpaces(username)
+  purgeUserFromSpaces(username, userId)
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)
   removeUserFromSafetyLists(username)

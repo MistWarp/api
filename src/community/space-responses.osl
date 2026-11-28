@@ -128,6 +128,7 @@ def spaceListResponse(object space,*serve.Context c) object (
     thumbnailUrl: thumbnailURL,
     canManage: canManage,
     isOwner: isSpaceOwner(space, c),
+    canMoveOut: isSpaceOwner(space, c) and orgMoveOutAccess(space, c) == "yes",
     following: stringArrayContainsUser(followers, contextString(c, "username")),
     invited: isSpaceInvitee(space, c)
   }

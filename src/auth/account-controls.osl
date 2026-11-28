@@ -236,7 +236,7 @@ def eraseUser(string userId, string username) (
   for i ownedProjectIds.len (
     deleteProjectCommunityRecords(ownedProjectIds[i].toStr())
   )
-  purgeUserFromSpaces(username)
+  purgeUserFromSpaces(username, userId)
   removeProjectsFromSpaces(ownedProjectIds)
   purgeUserCommunityRecords(username, userId)
   purgeUserFromNews(username)

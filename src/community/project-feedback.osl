@@ -23,7 +23,7 @@ def handleCreateProjectFeedback(*serve.Context c) (
   string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
   object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: contextString(c, "username"), authorId: contextString(c, "userId"), created: timestamp, edited: timestamp}
   void feedbackDocs.insertOne(feedback)
-  notifyContentOwner(project, contextString(c, "username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
+  notifyContentOwner(project, contextString(c, "username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType, feedbackId: feedbackId})
   c.json(201, {ok: true})
 )
 

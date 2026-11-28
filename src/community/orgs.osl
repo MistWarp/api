@@ -27,6 +27,16 @@ def roturOrgSnapshot(string rawName) object (
   if name == "" or !isSafePathPart(name) (
     return {ok: false, notOrg: true}
   )
+  object known = cachedOrgSnapshot(name)
+  if known.len > 0 (
+    return known
+  )
+  sync.lock("rotur-org:" ++ name)
+  defer sync.unlock("rotur-org:" ++ name)
+  return fetchOrgSnapshot(name)
+)
+
+def cachedOrgSnapshot(string name) object (
   object cached = orgSnapshotCache.get(name).assertElse(object, {})
   if cached.contains("ok") (
     return cached
@@ -36,6 +46,14 @@ def roturOrgSnapshot(string rawName) object (
   )
   if commerceServiceKey == "" or orgUnavailableCache.get(name).assertElse(boolean, false) (
     return {ok: false, unavailable: true}
+  )
+  return {}
+)
+
+def fetchOrgSnapshot(string name) object (
+  object known = cachedOrgSnapshot(name)
+  if known.len > 0 (
+    return known
   )
   object response = roturServiceGet("/v2/integrations/mistwarp/orgs/" ++ url.escape(name))
   if response.status == 404 (
