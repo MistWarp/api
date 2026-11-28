@@ -29,12 +29,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     c.badRequest(created.error.toStr())
     return
   )
-  if space.contains("commentCount") (
-    space.commentCount = space.commentCount.toNum() + 1
-  ) else (
-    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
-  )
-  putSpaceDocument(space)
+  adjustSpaceCommentCountLocked(space["_id"].toStr(), 1)
   string commenter = contextString(c, "username")
   string parentAuthor = created.parentAuthor.toStr()
   string newCommentId = created.comment.id.toStr()
@@ -43,7 +38,7 @@ def handleCreateSpaceComment(*serve.Context c) (
     addNotification(parentAuthor, commenter, "reply", notificationData)
   )
   if normalizeUsername(space.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(space.owner.toStr()) != normalizeUsername(parentAuthor) (
-    addNotification(space.owner.toStr(), commenter, "space_comment", notificationData)
+    notifyContentOwnerExcept(space, commenter, "space_comment", notificationData, [parentAuthor])
   )
   notifyMentions(created.comment.content.toStr(), commenter, [space.owner.toStr(), parentAuthor], notificationData)
   c.json(201, created)
@@ -64,13 +59,37 @@ def handleDeleteSpaceComment(*serve.Context c) (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
   )
+  adjustSpaceCommentCountLocked(space["_id"].toStr(), 0 - deleted.removed.toNum())
+  c.json(200, {ok: true})
+)
+
+def adjustSpaceCommentCountLocked(string spaceId, number delta) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return
+  )
   if space.contains("commentCount") (
-    space.commentCount = clampNumber(space.commentCount.toNum() - deleted.removed.toNum(), 0, space.commentCount.toNum())
+    space.commentCount = clampNumber(space.commentCount.toNum() + delta, 0, space.commentCount.toNum() + 1000000)
   ) else (
-    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
+    space.commentCount = loadComments(spaceCommentKey(spaceId)).len
   )
   putSpaceDocument(space)
-  c.json(200, {ok: true})
+)
+
+def ensureSpaceCommentCountLocked(string spaceId) number (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return loadComments(spaceCommentKey(spaceId)).len
+  )
+  if !space.contains("commentCount") (
+    space.commentCount = loadComments(spaceCommentKey(spaceId)).len
+    putSpaceDocument(space)
+  )
+  return space.commentCount.toNum()
 )
 
 def handleEditSpaceComment(*serve.Context c) (

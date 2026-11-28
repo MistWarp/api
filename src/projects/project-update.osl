@@ -77,6 +77,9 @@ def finishProjectUpdate(*serve.Context c, object body, UpdateOutcome outcome) (
 
 def applyProjectUpdate(*serve.Context c, object project, object body, UpdateLookups lookups, OwnerTransfer transfer) Refusal (
   if !canEditProjectWith(c, project, lookups) (
+    if contextBool(c, "authenticated") and lookupOrgContentAccess(lookups, c, project) == "unavailable" (
+      return roturUnavailableRefusal(project.owner.toStr())
+    )
     return refuse(403, "not your project")
   )
   Refusal refusal = applyAccessChanges(c, project, body, lookups, transfer)
@@ -90,8 +93,6 @@ def applyAccessChanges(*serve.Context c, object project, object body, UpdateLook
   Refusal refusal = updateScopeRefusal(c, project, body)
   if isRefused(refusal) return refusal
   refusal = applyOwnerTransfer(c, project, body, transfer, lookups)
-  if isRefused(refusal) return refusal
-  refusal = applyGroupTag(c, project, body, lookups)
   if isRefused(refusal) return refusal
   object creatorBenefits = lookupProjectBenefits(lookups, project)
   refusal = applyBranding(project, body, creatorBenefits)
@@ -107,7 +108,7 @@ def applyContentChanges(*serve.Context c, object project, object body, UpdateLoo
   applyProjectFlags(project, body)
   refusal = projectSaleRefusal(body)
   if isRefused(refusal) return refusal
-  refusal = applyRemixShareUpdate(c, project, body)
+  refusal = applyRemixShareUpdate(c, project, body, lookups)
   if isRefused(refusal) return refusal
   refusal = applyTags(project, body)
   if isRefused(refusal) return refusal
@@ -128,7 +129,7 @@ def canEditProjectWith(*serve.Context c, object project, UpdateLookups lookups) 
   if !contextBool(c, "authenticated") (
     return false
   )
-  if contextBool(c, "isAdmin") or lookupGroupContentManager(lookups, c, project) (
+  if contextBool(c, "isAdmin") or lookupOrgContentAccess(lookups, c, project) == "yes" (
     return true
   )
   string role = projectRole(project, contextString(c, "username"))
@@ -145,15 +146,22 @@ def updateScopeRefusal(*serve.Context c, object project, object body) Refusal (
   return noRefusal()
 )
 
-def isOwnerOrAdmin(*serve.Context c, object project) boolean (
-  return projectRole(project, contextString(c, "username")) == "owner" or contextBool(c, "isAdmin")
+def ownerOrAdminRefusal(*serve.Context c, object project, UpdateLookups lookups, string message) Refusal (
+  if contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" (
+    return noRefusal()
+  )
+  string access = lookupOrgContentAccess(lookups, c, project)
+  if access == "unavailable" (
+    return roturUnavailableRefusal(project.owner.toStr())
+  )
+  return if access == "yes" then noRefusal() else refuse(403, message)
 )
 
 def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTransfer transfer, UpdateLookups lookups) Refusal (
   if !body.contains("owner") (
     return noRefusal()
   )
-  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupGroupContentManager(lookups, c, project)
+  boolean canTransfer = contextBool(c, "isAdmin") or projectRole(project, contextString(c, "username")) == "owner" or lookupOrgContentAccess(lookups, c, project) == "yes"
   if !canTransfer (
     return refuse(403, "you cannot transfer this project")
   )
@@ -175,33 +183,45 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !sameOwner and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
     return refuse(400, "the new owner has reached their project limit")
   )
+  if isOrgOwned(project) and !sameOwner (
+    string ownerKey = if (project.ownerId ?? "").toStr() != "" then project.ownerId.toStr() else project.owner.toStr()
+    string moveOut = orgAdminAccess(lookupOrgSnapshot(lookups, ownerKey), (project.ownerId ?? "").toStr(), c)
+    if moveOut == "unavailable" (
+      return roturUnavailableRefusal(project.owner.toStr())
+    )
+    if moveOut != "yes" (
+      return refuse(403, "only an admin of the organisation can move this project out of it")
+    )
+  )
+  object nextOrg = lookupOrgSnapshot(lookups, nextOwner)
+  if !nextOrg.ok and (identity.accountType ?? "").toStr() == "org" (
+    if nextOrg.contains("notOrg") and nextOrg.notOrg == true (
+      return refuseWithBody(403, {ok: false, code: "org_unavailable", error: "that organisation can't own projects right now"})
+    )
+    return roturUnavailableRefusal(requestedOwner)
+  )
+  boolean nextOwnerIsOrg = nextOrg.ok
+  if nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId (
+    return roturUnavailableRefusal(requestedOwner)
+  )
+  if nextOwnerIsOrg and !sameOwner (
+    string access = lookupOrgAccess(lookups, c, nextOwner, nextOwnerId)
+    if access == "unavailable" (
+      return roturUnavailableRefusal(requestedOwner)
+    )
+    if access != "yes" (
+      return refuse(403, "you cannot move this project into that organisation")
+    )
+  )
   if !sameOwner (
     transfer.fromId = projectOwnerId(project)
   )
   project.owner = nextOwner
   project.ownerId = nextOwnerId
-  if !body.contains("keepGroup") or body.keepGroup != true (
-    project.groupTag = ""
-  )
+  project.ownerType = if nextOwnerIsOrg then "org" else ""
   return noRefusal()
 )
 
-def applyGroupTag(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
-  if !body.contains("groupTag") (
-    return noRefusal()
-  )
-  string requestedGroupTag = (body.groupTag ?? "").toStr()
-  string nextGroupTag = normalizeGroupTag(requestedGroupTag)
-  if requestedGroupTag.strip() == "" (
-    nextGroupTag = ""
-  ) else if nextGroupTag == "" (
-    return refuse(400, "invalid group tag")
-  ) else if !lookupGroupManager(lookups, c, nextGroupTag) (
-    return refuse(403, "you cannot move this project into that group")
-  )
-  project.groupTag = nextGroupTag
-  return noRefusal()
-)
 
 def vanitySlugHeldElsewhere(object project, string slug, UpdateLookups lookups) boolean (
   array matches = vanityClaimEntries(slug)
@@ -244,13 +264,12 @@ def applyVanitySlug(object project, object body, object creatorBenefits, UpdateL
   return noRefusal()
 )
 
-def applyRemixShareUpdate(*serve.Context c, object project, object body) Refusal (
+def applyRemixShareUpdate(*serve.Context c, object project, object body, UpdateLookups lookups) Refusal (
   if !body.contains("remixShare") (
     return noRefusal()
   )
-  if !isOwnerOrAdmin(c, project) (
-    return refuse(403, "only the owner can change the remix share")
-  )
+  Refusal ownerRefusal = ownerOrAdminRefusal(c, project, lookups, "only the owner can change the remix share")
+  if isRefused(ownerRefusal) return ownerRefusal
   return applyRemixShare(project, body.remixShare.toNum())
 )
 
@@ -258,9 +277,8 @@ def applyTeamUpdate(*serve.Context c, object project, object body, UpdateLookups
   if !body.contains("collaborators") (
     return noRefusal()
   )
-  if !isOwnerOrAdmin(c, project) (
-    return refuse(403, "only the owner can manage the project team")
-  )
+  Refusal teamRefusal = ownerOrAdminRefusal(c, project, lookups, "only the owner can manage the project team")
+  if isRefused(teamRefusal) return teamRefusal
   if typeof(body.collaborators) != "array" (
     return refuse(400, "collaborators must be a list")
   )

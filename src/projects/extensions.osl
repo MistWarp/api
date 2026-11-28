@@ -498,7 +498,7 @@ def unshareProjectForBlockedExtension(object project) boolean (
     profile.featuredProject = ""
     saveProfile(profile)
   )
-  addNotification(project.owner.toStr(), "MistWarp", "moderation", {message: "Your project \"" ++ project.title.toStr() ++ "\" uses an extension that has been blocked. Remove the extension before sharing the project again."})
+  notifyContentOwner(project, "MistWarp", "moderation", {message: "Your project \"" ++ project.title.toStr() ++ "\" uses an extension that has been blocked. Remove the extension before sharing the project again."})
   return true
 )
 

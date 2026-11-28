@@ -8,14 +8,14 @@ array siteErrorPathWords = [
   "about", "account-frame.html", "addon-settings.html", "addons", "admin", "assignments", "bounties", "changes",
   "claim", "classroom", "commits", "compare", "dpa", "editor", "editor.html", "embed", "embed.html", "entry",
   "explore", "followers", "following", "fullscreen", "fullscreen.html", "groups", "index.html", "join",
-  "leaderboard", "library", "manage", "mystuff", "news", "notifications", "p", "perks", "player", "player.html",
+  "leaderboard", "library", "manage", "mystuff", "news", "notifications", "orgs", "p", "perks", "player", "player.html",
   "posts", "privacy", "project", "pulls", "purchases", "random", "remixes", "roadmap", "school", "search",
   "settings", "simple.html", "spaces", "stats", "status", "students", "subprocessors", "support", "terms",
   "themes", "trust", "users", "wallet"
 ]
 
 array siteErrorIdParents = [
-  "assignments", "bounties", "claim", "commits", "entry", "groups", "join", "news", "p", "posts", "project",
+  "assignments", "bounties", "claim", "commits", "entry", "groups", "join", "news", "orgs", "p", "posts", "project",
   "pulls", "spaces", "students", "themes", "users"
 ]
 
@@ -61,7 +61,7 @@ def siteErrorText(string text, string pageUrl, string scrubbedUrl) string (
     value = regex.replace(regex.escape(page) ++ "([^A-Za-z0-9._~%/-]|$)", value, scrubbedUrl ++ "$1")
   )
   value = regex.replace("(https?://[^[:space:]?#()<>\"']+)[?#][^[:space:]()<>\"']*?((:[0-9]+){1,2})?([[:space:])<>\"']|$)", value, "$1$2$4")
-  value = regex.replace("(?i)(https?://([a-z0-9-]+[.])*mistwarp[.]org)/(p|project|users|spaces|groups|bounties|news|posts|themes|claim|join)/[^/?#[:space:]:()<>\"']+", value, "$1/$3/:id")
+  value = regex.replace("(?i)(https?://([a-z0-9-]+[.])*mistwarp[.]org)/(p|project|users|orgs|spaces|groups|bounties|news|posts|themes|claim|join)/[^/?#[:space:]:()<>\"']+", value, "$1/$3/:id")
   value = regex.replace("(?i)(https?://editor[.]mistwarp[.]org)/[0-9]+", value, "$1/:id")
   value = regex.replace("(https?://avatars[.]rotur[.]dev)/[^/?#[:space:]:()<>\"']+", value, "$1/:id")
   value = regex.replace("(?i)/(users|blocks|mutes|followers|following|curators|invitations|judges|profiles?|projects|classes|students|teachers|claim|join|vanity|game-saves|library)/[^/?#[:space:]:()<>\"']+", value, "/$1/:id")

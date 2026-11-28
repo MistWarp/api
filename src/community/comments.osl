@@ -621,9 +621,9 @@ def handleCreateProjectComment(*serve.Context c) (
   )
   if normalizeUsername(project.owner.toStr()) != normalizeUsername(parentAuthor) (
     if donationAmount > 0 (
-      addNotification(project.owner.toStr(), commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount, preview: preview})
+      notifyContentOwnerExcept(project, commenter, "donation", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, amount: donationAmount, preview: preview}, [parentAuthor])
     ) else (
-      addNotification(project.owner.toStr(), commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
+      notifyContentOwnerExcept(project, commenter, "comment", {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview}, [parentAuthor])
     )
   )
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), parentAuthor], {projectId: project.id, projectTitle: project.title, commentId: newCommentId, preview: preview})
@@ -649,7 +649,7 @@ def handleDeleteProjectComment(*serve.Context c) (
   object project = res.project.assert(object)
 
   boolean requesterIsAdmin = contextBool(c, "isAdmin")
-  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), requesterIsAdmin)
+  object deleted = deleteComment("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), projectModerator(project, c), requesterIsAdmin)
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -704,7 +704,7 @@ def handlePinProjectComment(*serve.Context c) (
   if body.contains("pinned") and body.pinned != null (
     pinned = body.pinned == true
   )
-  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"), pinned)
+  object updated = setCommentPin("project-" ++ project.id.toStr(), c.param("cid"), contextString(c, "username"), projectModerator(project, c), contextBool(c, "isAdmin"), pinned)
   if !updated.ok (
     c.json(updated.status.toInt(), {ok: false, error: updated.error})
     return

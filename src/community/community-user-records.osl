@@ -3,13 +3,14 @@ export {
   purgeUserFromSpaces
 }
 
-def purgeUserFromSpaces(string username) boolean (
+def purgeUserFromSpaces(string username, string userId) boolean (
   string key = normalizeUsername(username)
   array spaces = spaceDocs.all()
   for i spaces.len (
     object space = spaces[i].assert(object)
     string spaceId = space["_id"].toStr()
-    if normalizeUsername(space.owner.toStr()) == key (
+    boolean anotherOrg = isOrgOwned(space) and (space.ownerId ?? "").toStr() != userId
+    if normalizeUsername(space.owner.toStr()) == key and !anotherOrg (
       void spaceDocs.deleteOne({_id: space["_id"]})
       deleteSpaceMemberships(spaceId)
       void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")
@@ -203,6 +204,11 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
         object submission = submissions[j].assert(object)
         if normalizeUsername(submission.owner.toStr()) == oldKey (
           submission.owner = newName
+          submissions[j] = submission
+          changed = true
+        )
+        if normalizeUsername((submission.submittedBy ?? "").toStr()) == oldKey (
+          submission.submittedBy = newName
           submissions[j] = submission
           changed = true
         )

@@ -190,7 +190,7 @@ def sitemapUrl(string path) string (
 def handleSitemap(*serve.Context c) (
   array entries = projectsVisibleToEveryone(sharedIndexEntries())
   entries.sortBy("views", "descending")
-  array staticPaths = ["/", "/explore", "/spaces", "/themes", "/groups", "/news", "/leaderboard", "/roadmap", "/compare"]
+  array staticPaths = ["/", "/explore", "/spaces", "/themes", "/news", "/leaderboard", "/roadmap", "/compare"]
   string sitemapXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
   for i staticPaths.len (
     sitemapXml ++= sitemapUrl(staticPaths[i].toStr())

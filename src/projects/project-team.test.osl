@@ -33,11 +33,14 @@ def userIdForUsername(string username) string (
 def vanityEligibility(object project) string (
   return "unknown"
 )
-def canManageGroupTag(string tag, *serve.Context c) boolean (
-  return false
+def orgAccess(string name, string expectedOrgId, *serve.Context c) string (
+  return "no"
 )
-def groupTagOf(object value) string (
-  return ""
+def roturOrgSnapshot(string name) object (
+  return {ok: false, notOrg: true}
+)
+def isOrgOwned(object value) boolean (
+  return false
 )
 def noStorageHold() object (
   return {ok: true, reservations: []}

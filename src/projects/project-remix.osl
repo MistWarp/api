@@ -144,6 +144,7 @@ class ForkOutcome (
 )
 
 def handleRemixProject(*serve.Context c) (
+  warmProjectOrgAccess(c.param("id"), c)
   object benefits = mistwarpBenefitsForUserId(contextString(c, "userId"))
   object body = requestJSON(c)
   string forkId = generateId()

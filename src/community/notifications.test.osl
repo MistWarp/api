@@ -4,6 +4,7 @@ import "std:json"
 import "std:requests"
 import "std:serve"
 import "std:thread"
+import "std:cache"
 
 string notificationsDir = "notifications/"
 string editorOrigin = "https://mistwarp.org"
@@ -85,6 +86,30 @@ def rewriteNotificationIdentityFields(object data, string oldKey, string newName
   return false
 )
 
+def stringArrayContainsUser(array users, string username) boolean (
+  for i users.len (
+    if users[i].toStr().toLower() == username.toLower() (
+      return true
+    )
+  )
+  return false
+)
+
+def isOrgOwned(object value) boolean (
+  return (value.ownerType ?? "").toStr() == "org"
+)
+
+def roturOrgSnapshot(string name) object (
+  if name == "studio" or name == "o_studio" (
+    return {ok: true, org: {id: "o_studio"}}
+  )
+  return {ok: false, notOrg: true}
+)
+
+def orgPublisherNames(object snapshot) array (
+  return if snapshot.ok then ["ada", "bea"] else []
+)
+
 import "./notifications.osl"
 
 def handleFakeNotification(*serve.Context c) (
@@ -127,3 +152,52 @@ messageRefused = ["student>owner"]
 addNotification("owner", "student", "comment", {projectId: "p4"})
 testing.assert(askedRotur.len == 0, "a student's notification stays in MistWarp")
 testing.assert(loadNotifications("owner").len == 2, "and classroom rules, not Rotur's message signal, decide it")
+
+roturStatus = 200
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p5"})
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
+testing.assert(askedRotur.len == 1 and askedRotur[1].toStr().contains("ada") and !askedRotur[1].toStr().contains("\"studio\""), "a love on an org's project goes to its other publishers, not the org account")
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_taken", ownerType: "org"}, "zed", "love", {projectId: "p6"})
+wait 0.3
+testing.assert(askedRotur.len == 0, "content left by an org whose name was taken notifies nobody")
+notifyContentOwner({owner: "sam", ownerType: ""}, "zed", "love", {projectId: "p7"})
+testing.assert(askedRotur.len == 1, "a person's content notifies them as before")
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p5"})
+wait 0.3
+testing.assert(askedRotur.len == 0, "the same love toggled again soon doesn't fan out to the publishers twice")
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "love", {projectId: "p8"})
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
+testing.assert(askedRotur.len == 1, "a love on another of the org's projects still fans out")
+askedRotur = []
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "purchase", {projectId: "p8", productId: "x", amount: 5})
+notifyContentOwner({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "bea", "purchase", {projectId: "p8", productId: "x", amount: 5})
+for i 50 (
+  if askedRotur.len > 1 (
+    break
+  )
+  wait 0.05
+)
+testing.assert(askedRotur.len == 2, "buying the same product twice tells the publishers about both purchases")
+askedRotur = []
+notifyContentOwnerExcept({owner: "studio", ownerId: "o_studio", ownerType: "org"}, "zed", "comment", {projectId: "p9", commentId: "c1"}, ["ada"])
+for i 50 (
+  if askedRotur.len > 0 (
+    break
+  )
+  wait 0.05
+)
+wait 0.2
+testing.assert(askedRotur.len == 1 and !askedRotur[1].toStr().contains("ada"), "a publisher who already got the reply is not sent the comment again")

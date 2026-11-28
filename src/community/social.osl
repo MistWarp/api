@@ -51,6 +51,10 @@ def ownerIndexEntries(string owner, boolean includeUnshared) array (
     for i keyMatches.len (
       object entry = keyMatches[i].assert(object)
       string pid = entry.id.toStr()
+      boolean orgEntry = (entry.ownerType ?? "").toStr() == "org"
+      if orgEntry and (ownerId == "" or (entry.ownerId ?? "").toStr() != ownerId) (
+        continue
+      )
       if ownerId != "" and (entry.ownerId ?? "").toStr() != ownerId (
         entry.ownerId = ownerId
         putDocument(projectSearchDocs, entry["_id"].toStr(), entry)

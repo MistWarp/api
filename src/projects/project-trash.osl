@@ -116,7 +116,7 @@ def handleDeleteProject(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  if projectRole(project, contextString(c, "username")) != "owner" and !contextBool(c, "isAdmin") (
+  if projectRoleFor(project, c) != "owner" and !contextBool(c, "isAdmin") (
     c.forbidden("not your project")
     return
   )
@@ -177,6 +177,13 @@ def purgeExpiredTrash() (
   )
 )
 
+def canManageTrashedProject(object project,*serve.Context c) boolean (
+  if contextBool(c, "isAdmin") or canManageOrgContent(project, c) (
+    return true
+  )
+  return identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+)
+
 def handleGetMyTrash(*serve.Context c) (
   purgeExpiredTrash()
   array projects = []
@@ -190,7 +197,7 @@ def handleGetMyTrash(*serve.Context c) (
       if res.ok (
         object project = res.data.assert(object)
         string ownerId = (project.ownerId ?? "").toStr()
-        if identityMatches(ownerId, project.owner.toStr(), userId, username) (
+        if identityMatches(ownerId, project.owner.toStr(), userId, username) or orgContentPublisherAccess(project, c) == "yes" (
           projects.append({
             id: project.id,
             title: project.title,
@@ -214,7 +221,7 @@ def handleRestoreProject(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+  if !canManageTrashedProject(project, c) (
     c.forbidden("not your project")
     return
   )
@@ -246,7 +253,7 @@ def handlePurgeTrashedProject(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  if !identityMatches((project.ownerId ?? "").toStr(), project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) and !contextBool(c, "isAdmin") (
+  if !canManageTrashedProject(project, c) (
     c.forbidden("not your project")
     return
   )

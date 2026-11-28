@@ -42,13 +42,13 @@ def normalizedCommitCoAuthors(array incoming) object (
   return {ok: true, coAuthors: coAuthors}
 )
 
-def applyCommitPatch(string id, string sha, object body, string username, boolean isAdmin) object (
+def applyCommitPatch(string id, string sha, object body,*serve.Context c, boolean isAdmin) object (
   auto loaded = loadProject(id)
   if !loaded.ok (
     return {status: 404, error: "project not found"}
   )
   object project = loaded.project.assert(object)
-  string role = projectRole(project, username)
+  string role = projectRoleFor(project, c)
   if !projectSourcePolicyAllows(project, role == "owner") (
     return {status: 403, error: "only the owner can edit commits for this project"}
   )
@@ -107,10 +107,11 @@ def handlePatchCommit(*serve.Context c) (
 )
 
 def applyCommitPatchLocked(*serve.Context c) object (
+  warmProjectOrgAccess(c.param("id"), c)
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)
-  return applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), contextString(c, "username"), contextBool(c, "isAdmin"))
+  return applyCommitPatch(c.param("id"), c.param("sha"), requestJSON(c), c, contextBool(c, "isAdmin"))
 )
 
 def handleGetCommitCollaborators(*serve.Context c) (

@@ -5,9 +5,14 @@ export {
   canViewProjectJson,
   ensureViewKey,
   projectJsonAccess,
+  projectModerator,
   projectMustStayPrivate,
   projectRole,
-  removeString
+  projectRoleFor,
+  projectRoleForName,
+  projectRoleForUser,
+  removeString,
+  warmProjectOrgAccess
 }
 
 def removeString(array items, string value) array (
@@ -56,11 +61,88 @@ def canEditProject(object project,*serve.Context c) boolean (
   if contextBool(c, "isAdmin") (
     return true
   )
-  if canManageGroupContent(project, c) (
+  if canManageOrgContent(project, c) (
     return true
   )
   string role = projectRole(project, contextString(c, "username"))
   return role == "owner" or role == "maintainer"
+)
+
+def projectRoleFor(object project,*serve.Context c) string (
+  string role = projectRole(project, contextString(c, "username"))
+  if role != "owner" and canManageOrgContent(project, c) (
+    return "owner"
+  )
+  return role
+)
+
+def warmProjectOrgAccess(string id,*serve.Context c) (
+  auto loaded = loadProject(id)
+  if !loaded.ok (
+    return
+  )
+  object project = loaded.project.assert(object)
+  warmOneProjectOrg(project, c)
+  string parentId = remixLinkId(project, "remixParent")
+  string rootId = remixLinkId(project, "remixRoot")
+  if parentId != "" and parentId != id (
+    auto parent = loadProject(parentId)
+    if parent.ok (
+      object parentProject = parent.project.assert(object)
+      warmOneProjectOrg(parentProject, c)
+      string grandparentId = remixLinkId(parentProject, "remixParent")
+      if grandparentId != "" and grandparentId != parentId and grandparentId != rootId (
+        auto grandparent = loadProject(grandparentId)
+        if grandparent.ok (
+          warmOneProjectOrg(grandparent.project.assert(object), c)
+        )
+      )
+    )
+  )
+  if rootId != "" and rootId != id and rootId != parentId (
+    auto root = loadProject(rootId)
+    if root.ok (
+      warmOneProjectOrg(root.project.assert(object), c)
+    )
+  )
+)
+
+def remixLinkId(object project, string field) string (
+  if !project.contains(field) or project[field] == null (
+    return ""
+  )
+  return project[field].toStr()
+)
+
+def warmOneProjectOrg(object project,*serve.Context c) (
+  if isOrgOwned(project) (
+    void ownerOrgSnapshot(project)
+    void canManageOrgContent(project, c)
+  )
+)
+
+def projectModerator(object project,*serve.Context c) string (
+  if canManageOrgContent(project, c) (
+    return contextString(c, "username")
+  )
+  return project.owner.toStr()
+)
+
+def projectRoleForName(object project, string username) string (
+  return projectRoleForUser(project, "", username, true)
+)
+
+def projectRoleForUser(object project, string userId, string username, boolean waitForRotur) string (
+  string role = projectRole(project, username)
+  if role == "owner" or username == "" or !isOrgOwned(project) (
+    return role
+  )
+  object snapshot = if waitForRotur then ownerOrgSnapshot(project) else ownerOrgSnapshotCached(project)
+  string ownerId = (project.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return role
+  )
+  return if orgMemberCanPublish(snapshot, userId, username) then "owner" else role
 )
 
 def canViewForkProject(object project,*serve.Context c) boolean (

@@ -8,12 +8,14 @@ def spaceTotalPlaytime(array ids) number (
 
 def spaceResponse(object space,*serve.Context c) object (
   if !space.contains("commentCount") (
-    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
-    putSpaceDocument(space)
+    space.commentCount = ensureSpaceCommentCountLocked(space["_id"].toStr())
   )
   array projects = []
   array ids = spaceProjectIds(space)
   if space.kind.toStr() == "challenge" (
+    if contextBool(c, "authenticated") and isOrgOwned(space) and !challengeAudienceJudged(space) (
+      void ownerOrgSnapshot(space)
+    )
     projects = challengeProjects(space, c)
   ) else (
     for i ids.len (
@@ -37,6 +39,7 @@ def spaceResponse(object space,*serve.Context c) object (
   response.projectIds = if canManageSpace(space, c) then ids else visibleIds
   response.canManage = canManageSpace(space, c)
   response.isOwner = isSpaceOwner(space, c)
+  response.canMoveOut = response.isOwner == true and orgMoveOutAccess(space, c) == "yes"
   response.following = stringArrayContainsUser(spaceFollowers(space), contextString(c, "username"))
   response.followerCount = spaceFollowers(space).len
   response.invited = isSpaceInvitee(space, c)
@@ -80,7 +83,7 @@ def spaceResponse(object space,*serve.Context c) object (
     response.phase = challengePhase(space)
     response.isJudge = isChallengeJudge(space, contextString(c, "username"))
     response.judgeInvited = isChallengeJudgeInvitee(space, contextString(c, "username"))
-    response.judgeCount = challengeJudges(space).len
+    response.judgeCount = challengeJudgeCount(space)
     response.participantCount = challengeArray(space, "participants").len
     response.joined = stringArrayContainsUser(challengeArray(space, "participants"), contextString(c, "username"))
     response.judges = challengeJudges(space)
@@ -115,7 +118,7 @@ def spaceListResponse(object space,*serve.Context c) object (
     kind: space.kind,
     visibility: space.visibility,
     owner: space.owner,
-    groupTag: groupTagOf(space),
+    ownerType: if isOrgOwned(space) then "org" else "",
     edited: space.edited,
     startsAt: space.startsAt,
     endsAt: space.endsAt,
@@ -127,6 +130,7 @@ def spaceListResponse(object space,*serve.Context c) object (
     thumbnailUrl: thumbnailURL,
     canManage: canManage,
     isOwner: isSpaceOwner(space, c),
+    canMoveOut: isSpaceOwner(space, c) and orgMoveOutAccess(space, c) == "yes",
     following: stringArrayContainsUser(followers, contextString(c, "username")),
     invited: isSpaceInvitee(space, c)
   }

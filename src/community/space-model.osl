@@ -94,15 +94,22 @@ def isSpaceOwner(object space,*serve.Context c) boolean (
   if space.contains("ownerId") and space.ownerId != null (
     ownerId = space.ownerId.toStr()
   )
-  return contextBool(c, "isAdmin") or identityMatches(ownerId, space.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+  return contextBool(c, "isAdmin") or identityMatches(ownerId, space.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) or canManageOrgContent(space, c)
 )
 
-def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
+def searchEntryOwnership(object project,*serve.Context c) string (
   string ownerId = ""
   if project.contains("ownerId") and project.ownerId != null (
     ownerId = project.ownerId.toStr()
   )
-  return identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username"))
+  if identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) (
+    return "yes"
+  )
+  return orgContentPublisherAccess(project, c)
+)
+
+def searchEntryOwnedByContext(object project,*serve.Context c) boolean (
+  return searchEntryOwnership(project, c) == "yes"
 )
 
 def isSpaceInvitee(object space,*serve.Context c) boolean (
@@ -124,10 +131,18 @@ def canManageSpace(object space,*serve.Context c) boolean (
   if isSpaceOwner(space, c) (
     return true
   )
-  if canManageGroupContent(space, c) (
-    return true
-  )
   return stringArrayContainsUser(spaceManagers(space), username)
+)
+
+def spaceCuratorOnly(object space,*serve.Context c) string (
+  if contextBool(c, "isAdmin") or isSpaceOwner(space, c) (
+    return ""
+  )
+  return contextString(c, "username")
+)
+
+def stillSpaceCurator(object space, string curator) boolean (
+  return curator == "" or stringArrayContainsUser(spaceManagers(space), curator)
 )
 
 def canViewSpace(object space,*serve.Context c) boolean (

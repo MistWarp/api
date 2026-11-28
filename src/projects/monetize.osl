@@ -82,7 +82,7 @@ def projectSeeInside(object project) boolean (
 )
 
 def sourcePolicyAllowsViewer(object project,*serve.Context c) boolean (
-  boolean owner = contextBool(c, "authenticated") and projectRole(project, contextString(c, "username")) == "owner"
+  boolean owner = contextBool(c, "authenticated") and projectRoleFor(project, c) == "owner"
   return projectSourcePolicyAllows(project, owner)
 )
 
@@ -476,7 +476,7 @@ def completeProjectPurchase(string key) object (
     upsertIndexEntry(project)
     siteBroadcastStats(project.id.toStr(), buyer, {saved: true})
     addPurchaseRecord(buyer, {projectId: project.id.toStr(), title: project.title, seller: seller, amount: owed, at: timestamp})
-    addNotification(seller, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
+    notifyContentOwner(project, buyer, "purchase", {projectId: project.id, projectTitle: project.title, amount: owed})
   )
   forgetPurchase(key)
   return {ok: true, project: project}

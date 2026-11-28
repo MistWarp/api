@@ -1,5 +1,7 @@
 export {
   addNotification,
+  notifyContentOwner,
+  notifyContentOwnerExcept,
   loadNotifications,
   saveNotifications
 }
@@ -447,4 +449,50 @@ def markNotificationsReadLocked(string username) (
     item.read = true
   )
   saveNotifications(username, items)
+)
+
+def notifyContentOwner(object content, string actor, string notifType, object extra) (
+  notifyContentOwnerExcept(content, actor, notifType, extra, [])
+)
+
+def notifyContentOwnerExcept(object content, string actor, string notifType, object extra, array skip) (
+  string owner = (content.owner ?? "").toStr()
+  if !isOrgOwned(content) (
+    addNotification(owner, actor, notifType, extra)
+    return
+  )
+  string ownerId = (content.ownerId ?? "").toStr()
+  string fanOutKey = ownerId ++ ":" ++ owner ++ ":" ++ actor ++ ":" ++ notifType ++ ":" ++ extra.toStr()
+  if notifType != "purchase" (
+    if recentOrgFanOuts.get(fanOutKey).assertElse(boolean, false) (
+      return
+    )
+    recentOrgFanOuts.set(fanOutKey, true)
+  )
+  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra, fanOutKey, skip)
+)
+
+number orgNotificationLimit = 25
+*cache.Cache recentOrgFanOuts = cache.new({capacity: 10000, ttl: 600000})
+
+def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra, string fanOutKey, array skip) (
+  object snapshot = roturOrgSnapshot(if ownerId != "" then ownerId else owner)
+  if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
+    recentOrgFanOuts.delete(fanOutKey)
+    return
+  )
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return
+  )
+  array names = orgPublisherNames(snapshot)
+  number sent = 0
+  for i names.len (
+    if sent >= orgNotificationLimit (
+      return
+    )
+    if normalizeUsername(names[i].toStr()) != normalizeUsername(actor) and !stringArrayContainsUser(skip, names[i].toStr()) (
+      addNotification(names[i].toStr(), actor, notifType, extra)
+      sent += 1
+    )
+  )
 )

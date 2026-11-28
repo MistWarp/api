@@ -23,7 +23,7 @@ def handleCreateProjectFeedback(*serve.Context c) (
   string feedbackId = project.id.toStr() ++ ":" ++ randomString(16)
   object feedback = {_id: feedbackId, projectId: project.id, type: feedbackType, message: message, status: "open", author: contextString(c, "username"), authorId: contextString(c, "userId"), created: timestamp, edited: timestamp}
   void feedbackDocs.insertOne(feedback)
-  addNotification(project.owner.toStr(), contextString(c, "username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType})
+  notifyContentOwner(project, contextString(c, "username"), "project_feedback", {projectId: project.id, projectTitle: project.title, feedbackType: feedbackType, feedbackId: feedbackId})
   c.json(201, {ok: true})
 )
 
@@ -121,7 +121,12 @@ def handleSaveProjectReview(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  if projectRole(project, contextString(c, "username")) == "owner" (
+  string orgOwnership = if projectRole(project, contextString(c, "username")) == "owner" then "yes" else orgContentPublisherAccess(project, c)
+  if orgOwnership == "unavailable" (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  if orgOwnership == "yes" (
     c.badRequest("you cannot review your own project")
     return
   )
@@ -152,7 +157,7 @@ def handleSaveProjectReview(*serve.Context c) (
   object review = {_id: reviewId, projectId: project.id, author: contextString(c, "username"), authorId: contextString(c, "userId"), authorKey: normalizeUsername(contextString(c, "username")), rating: rating, message: message, created: created, edited: timestamp}
   putDocument(reviewDocs, reviewId, review)
   if existing.len == 0 (
-    addNotification(project.owner.toStr(), contextString(c, "username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
+    notifyContentOwner(project, contextString(c, "username"), "project_review", {projectId: project.id, projectTitle: project.title, rating: rating})
   )
   review.playtimeMs = authorPublicPlaytime(project.id.toStr(), review.author.toStr())
   c.json(200, {ok: true, review: review})

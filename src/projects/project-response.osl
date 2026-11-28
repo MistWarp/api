@@ -193,7 +193,7 @@ def projectResponse(object project,*serve.Context c) object (
   object response = {
     id: project.id,
     owner: project.owner,
-    groupTag: groupTagOf(project),
+    ownerType: if isOrgOwned(project) then "org" else "",
     branding: if project.contains("branding") then project.branding else {},
     vanitySlug: activeVanity.slug.toStr(),
     title: project.title,
@@ -282,7 +282,8 @@ def projectResponse(object project,*serve.Context c) object (
     contributors: searchEntry.contributors,
     acceptedChanges: searchEntry.acceptedChanges
   }
-  response.myRole = projectRole(project, viewer)
+  response.myRole = projectRoleFor(project, c)
+  response.canMoveOut = response.myRole == "owner" and orgMoveOutAccess(project, c) == "yes"
   response.canSaveDirectly = canSaveLiveProject(project, c)
   if isOwner (
     response.collaborators = collaborators

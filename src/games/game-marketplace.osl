@@ -210,7 +210,7 @@ def completeGameProductPurchase(string key) object (
     )
     number paid = (entry.price ?? product.price).toNum()
     addPurchaseRecord(buyer, {projectId: project.id.toStr(), productId: product.id, title: product.name, seller: project.owner, amount: paid, at: timestamp, type: "game_product"})
-    addNotification(project.owner.toStr(), buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: paid})
+    notifyContentOwner(project, buyer, "purchase", {projectId: project.id, projectTitle: project.title, productId: product.id, productName: product.name, amount: paid})
   )
   forgetPurchase(key)
   return {ok: true, project: project, product: product}

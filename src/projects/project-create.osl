@@ -1,22 +1,14 @@
 def handleCreateProject(*serve.Context c) (
   object body = requestJSON(c)
-  string username = contextString(c, "username")
-  number projectLimit = mistwarpBenefitsForUserId(contextString(c, "userId")).maxProjects.toNum()
-  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(contextString(c, "userId"), username) >= projectLimit (
-    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+  object owner = creationOwner(c, body, "projects")
+  if !owner.ok (
+    c.json(owner.status.toNum(), {ok: false, code: owner.code, error: owner.error})
     return
   )
-  string groupTag = ""
-  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
-    groupTag = normalizeGroupTag(body.groupTag.toStr())
-    if groupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    )
-    if !canManageGroupTag(groupTag, c) (
-      c.forbidden("you cannot create projects for this group")
-      return
-    )
+  number projectLimit = mistwarpBenefitsForUserId(owner.ownerId.toStr()).maxProjects.toNum()
+  if !contextBool(c, "isAdmin") and ownedProjectSlotCount(owner.ownerId.toStr(), owner.owner.toStr()) >= projectLimit (
+    c.json(413, {ok: false, error: "project limit reached; delete a trashed project permanently or upgrade your plan"})
+    return
   )
 
   string title = body.title.toStr().strip()
@@ -51,9 +43,9 @@ def handleCreateProject(*serve.Context c) (
   string id = generateId()
   object project = {
     id: id,
-    owner: username,
-    ownerId: contextString(c, "userId"),
-    groupTag: groupTag,
+    owner: owner.owner,
+    ownerId: owner.ownerId,
+    ownerType: owner.ownerType,
     branding: {},
     vanitySlug: "",
     title: title,
@@ -94,13 +86,20 @@ def handleCreateProject(*serve.Context c) (
 )
 
 def ownedProjectSlotCount(string userId, string username) number (
-  return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
+  number byName = ownerIndexCount(username, true)
+  number byId = 0
+  if userId != "" (
+    byId = projectSearchDocs.where("ownerId", "==", userId).count()
+  )
+  return (if byId > byName then byId else byName) + trashedProjectsOwnedBy(userId, username).len
 )
 
 def projectFirstShared(object project) (
-  addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+  if !isOrgOwned(project) (
+    addActivity(project.owner.toStr(), "share", {projectId: project.id, projectTitle: project.title})
+    roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
+  )
   notifyPublishedRemix(project)
-  roturBadgeEvent(project.owner.toStr(), "project_shared", 0)
 )
 
 def notifyPublishedRemix(object project) (
@@ -112,11 +111,13 @@ def notifyPublishedRemix(object project) (
     return
   )
   object parent = parentResult.project.assert(object)
-  addNotification(parent.owner.toStr(), project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
-  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) (
+  notifyContentOwner(parent, project.owner.toStr(), "remix", {projectId: project.id, projectTitle: parent.title})
+  if normalizeUsername(parent.owner.toStr()) != normalizeUsername(project.owner.toStr()) and !isOrgOwned(parent) (
     roturBadgeEvent(parent.owner.toStr(), "remixed", 0)
   )
-  addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  if !isOrgOwned(project) (
+    addActivity(project.owner.toStr(), "remix", {projectId: project.id, projectTitle: project.title, parentId: parent.id, parentTitle: parent.title})
+  )
   project.remixNotified = true
   saveProject(project)
 )

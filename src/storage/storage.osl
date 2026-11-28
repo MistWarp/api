@@ -179,10 +179,6 @@ def indexEntryFromProject(object project) object (
   if project.contains("remixRoot") and project.remixRoot != null (
     remixRoot = project.remixRoot.toStr()
   )
-  string groupTag = ""
-  if project.contains("groupTag") and project.groupTag != null (
-    groupTag = normalizeGroupTag(project.groupTag.toStr())
-  )
   number lastUploadAt = 0
   if project.contains("lastUploadAt") and project.lastUploadAt != null (
     lastUploadAt = project.lastUploadAt.toNum()
@@ -196,7 +192,7 @@ def indexEntryFromProject(object project) object (
     owner: project.owner,
     ownerId: ownerId,
     ownerKey: normalizeUsername(project.owner.toStr()),
-    groupTag: groupTag,
+    ownerType: if isOrgOwned(project) then "org" else "",
     vanityClaim: vanitySlug,
     vanitySlug: if (project.vanityLapsedAt ?? 0).toNum() > 0 then "" else vanitySlug,
     title: project.title,

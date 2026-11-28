@@ -56,26 +56,66 @@ def challengeAudienceVotingEnabled(object space) boolean (
   return challengeAudienceJudged(space) or (space.contains("communityVoting") and space.communityVoting == true)
 )
 
+def challengeOrgSnapshot(object space) object (
+  if challengeAudienceJudged(space) or !isOrgOwned(space) (
+    return {ok: false}
+  )
+  object snapshot = ownerOrgSnapshotCached(space)
+  string ownerId = (space.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return {ok: false}
+  )
+  return snapshot
+)
+
+def challengeOrgJudges(object space) array (
+  object snapshot = challengeOrgSnapshot(space)
+  array listed = []
+  array publishers = orgPublisherNames(snapshot)
+  array visible = orgPublicMemberNames(snapshot)
+  for i publishers.len (
+    if stringArrayContainsUser(visible, publishers[i].toStr()) (
+      listed.append(publishers[i])
+    )
+  )
+  return listed
+)
+
 def challengeJudges(object space) array (
   if challengeAudienceJudged(space) (
     return []
   )
   array judges = challengeArray(space, "judges")
-  string tag = groupTagOf(space)
-  if tag != "" (
-    array members = groupMemberNames(roturGroupSnapshot(tag))
-    for i members.len (
-      string member = members[i].toStr()
-      if !stringArrayContainsUser(judges, member) (
-        judges.append(member)
-      )
+  array members = challengeOrgJudges(space)
+  for i members.len (
+    string member = members[i].toStr()
+    if !stringArrayContainsUser(judges, member) (
+      judges.append(member)
     )
   )
   return judges
 )
 
+def challengeJudgeCount(object space) number (
+  if challengeAudienceJudged(space) (
+    return 0
+  )
+  array judges = challengeArray(space, "judges")
+  array publishers = orgPublisherNames(challengeOrgSnapshot(space))
+  number count = judges.len
+  for i publishers.len (
+    if !stringArrayContainsUser(judges, publishers[i].toStr()) (
+      count += 1
+    )
+  )
+  return count
+)
+
 def isChallengeJudge(object space, string username) boolean (
-  return stringArrayContainsUser(challengeJudges(space), username)
+  if stringArrayContainsUser(challengeJudges(space), username) (
+    return true
+  )
+  return stringArrayContainsUser(orgPublisherNames(challengeOrgSnapshot(space)), username)
 )
 
 def isChallengeJudgeInvitee(object space, string username) boolean (
@@ -148,6 +188,32 @@ def challengeScoreSummary(object space, string projectId, string viewer) object 
   return {judgeScore: judgeScore, judgeScoreCount: scoreCount, audienceScore: audienceScore, audienceVoteCount: audienceCount, myScore: myScore, myVote: myVote, scores: entryScores}
 )
 
+def challengeShownJudges(object space,*serve.Context c) object (
+  if !isOrgOwned(space) or contextBool(c, "isAdmin") (
+    return {all: true, names: []}
+  )
+  object snapshot = challengeOrgSnapshot(space)
+  if snapshot.ok and orgHasMember(snapshot, contextString(c, "userId"), contextString(c, "username")) (
+    return {all: true, names: []}
+  )
+  return {all: false, names: challengeJudges(space)}
+)
+
+def scoresByShownJudges(array scores, object shown) array (
+  if shown.all == true (
+    return scores
+  )
+  array names = shown.names.assertElse(array, [])
+  array kept = []
+  for i scores.len (
+    object score = scores[i].assertElse(object, {})
+    if stringArrayContainsUser(names, (score.judge ?? "").toStr()) (
+      kept.append(score)
+    )
+  )
+  return kept
+)
+
 def challengeProjects(object space,*serve.Context c) array (
   array projects = []
   array ids = spaceProjectIds(space)
@@ -155,6 +221,7 @@ def challengeProjects(object space,*serve.Context c) array (
   boolean audienceJudged = challengeAudienceJudged(space)
   string phase = challengePhase(space)
   boolean revealRatings = phase == "awaiting-results" or phase == "results" or canManageSpace(space, c)
+  object shownJudges = if canManageSpace(space, c) then challengeShownJudges(space, c) else {all: false, names: []}
   for i ids.len (
     auto loaded = loadProject(ids[i].toStr())
     if loaded.ok == true (
@@ -172,7 +239,7 @@ def challengeProjects(object space,*serve.Context c) array (
         )
         entry.myVote = summary.myVote
         entry.myScore = if isChallengeJudge(space, contextString(c, "username")) then summary.myScore else {}
-        entry.scoreBreakdown = if canManageSpace(space, c) then summary.scores else []
+        entry.scoreBreakdown = if canManageSpace(space, c) then scoresByShownJudges(summary.scores, shownJudges) else []
         projects.append(entry)
       )
     )
@@ -228,18 +295,48 @@ def handleInviteChallengeJudge(*serve.Context c) (
     c.notFound("user not found")
     return
   )
-  if normalizeUsername(space.owner.toStr()) == usernameKey or isChallengeJudge(space, requested) or isChallengeJudgeInvitee(space, requested) (
+  if normalizeUsername(space.owner.toStr()) == usernameKey or stringArrayContainsUser(challengeJudges(space), requested) or isChallengeJudgeInvitee(space, requested) (
     c.badRequest("this user is already on the challenge team")
     return
   )
   object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  string invited = inviteChallengeJudgeLocked(space["_id"].toStr(), invite, spaceCuratorOnly(space, c))
+  if invited == "missing" (
+    c.notFound("challenge not found")
+    return
+  )
+  if invited == "curator" (
+    c.forbidden("you cannot manage this challenge")
+    return
+  )
+  if invited == "taken" (
+    c.badRequest("this user is already on the challenge team")
+    return
+  )
+  addNotification(profile.username.toStr(), contextString(c, "username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def inviteChallengeJudgeLocked(string spaceId, object invite, string curator) string (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string username = invite.username.toStr()
+  if space.len == 0 (
+    return "missing"
+  )
+  if !stillSpaceCurator(space, curator) (
+    return "curator"
+  )
+  if stringArrayContainsUser(challengeArray(space, "judges"), username) or isChallengeJudgeInvitee(space, username) (
+    return "taken"
+  )
   array invites = challengeArray(space, "judgeInvites")
   invites.append(invite)
   space.judgeInvites = invites
   space.edited = timestamp
   putSpaceDocument(space)
-  addNotification(profile.username.toStr(), contextString(c, "username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
-  c.json(201, {ok: true, invitation: invite})
+  return "saved"
 )
 
 def handleJoinChallenge(*serve.Context c) (
@@ -253,17 +350,34 @@ def handleJoinChallenge(*serve.Context c) (
     c.badRequest("this challenge is no longer open to new participants")
     return
   )
-  array participants = challengeArray(space, "participants")
-  if !stringArrayContainsUser(participants, contextString(c, "username")) (
-    participants.append(contextString(c, "username"))
-    space.participants = participants
-    space.edited = timestamp
-    putSpaceDocument(space)
-    if !isSpaceOwner(space, c) (
-      addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
-    )
+  object joined = joinChallengeLocked(space["_id"].toStr(), contextString(c, "username"))
+  if joined.len == 0 (
+    c.badRequest("this challenge is no longer open to new participants")
+    return
   )
-  c.json(200, {ok: true, joined: true, participantCount: participants.len})
+  if joined.added == true and !isSpaceOwner(space, c) (
+    notifyContentOwner(space, contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+  )
+  c.json(200, {ok: true, joined: true, participantCount: joined.count})
+)
+
+def joinChallengeLocked(string spaceId, string username) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string phase = if space.len > 0 then challengePhase(space) else ""
+  if phase != "upcoming" and phase != "submissions" (
+    return {}
+  )
+  array participants = challengeArray(space, "participants")
+  if stringArrayContainsUser(participants, username) (
+    return {added: false, count: participants.len}
+  )
+  participants.append(username)
+  space.participants = participants
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return {added: true, count: participants.len}
 )
 
 def handleLeaveChallenge(*serve.Context c) (
@@ -285,15 +399,56 @@ def handleLeaveChallenge(*serve.Context c) (
   array ids = spaceProjectIds(space)
   for i ids.len (
     object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
-    if project.len > 0 and searchEntryOwnedByContext(project, c) (
-      c.badRequest("remove your submission before leaving the challenge")
-      return
+    if project.len > 0 and (!isOrgOwned(project) or submittedBy(space, project.id.toStr(), username)) (
+      string ownership = searchEntryOwnership(project, c)
+      if ownership == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+        return
+      )
+      if ownership == "yes" (
+        c.badRequest("remove your submission before leaving the challenge")
+        return
+      )
     )
   )
+  object left = leaveChallengeLocked(space["_id"].toStr(), username, ids)
+  if left.len == 0 (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while you were leaving. Try again."})
+    return
+  )
+  c.json(200, {ok: true, joined: false, participantCount: left.count})
+)
+
+def leaveChallengeLocked(string spaceId, string username, array checkedIds) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string phase = if space.len > 0 then challengePhase(space) else ""
+  if phase != "upcoming" and phase != "submissions" (
+    return {}
+  )
+  array ids = spaceProjectIds(space)
+  for i ids.len (
+    if !checkedIds.contains(ids[i].toStr()) and submittedBy(space, ids[i].toStr(), username) (
+      return {}
+    )
+  )
+  array participants = challengeArray(space, "participants")
   space.participants = removeUser(participants, username)
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, joined: false, participantCount: space.participants.len})
+  return {count: space.participants.len}
+)
+
+def submittedBy(object space, string projectId, string username) boolean (
+  array submissions = challengeArray(space, "submissions")
+  for i submissions.len (
+    object entry = submissions[i].assertElse(object, {})
+    if (entry.projectId ?? "").toStr() == projectId and normalizeUsername((entry.submittedBy ?? "").toStr()) == normalizeUsername(username) (
+      return true
+    )
+  )
+  return false
 )
 
 def handleRespondChallengeJudgeInvite(*serve.Context c) (
@@ -317,7 +472,7 @@ def handleRespondChallengeJudgeInvite(*serve.Context c) (
       judges.append(contextString(c, "username"))
     )
     space.judges = judges
-    addNotification(space.owner.toStr(), contextString(c, "username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
+    notifyContentOwner(space, contextString(c, "username"), "challenge_judge_accepted", {spaceId: space["_id"], spaceTitle: space.title})
   )
   space.edited = timestamp
   putSpaceDocument(space)
@@ -330,7 +485,20 @@ def handleRemoveChallengeJudge(*serve.Context c) (
     c.forbidden("you cannot manage this challenge")
     return
   )
-  string username = c.param("username")
+  if !removeChallengeJudgeLocked(space["_id"].toStr(), c.param("username"), spaceCuratorOnly(space, c)) (
+    c.forbidden("you cannot manage this challenge")
+    return
+  )
+  c.json(200, {ok: true})
+)
+
+def removeChallengeJudgeLocked(string spaceId, string username, string curator) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 or !stillSpaceCurator(space, curator) (
+    return false
+  )
   array judges = challengeArray(space, "judges")
   boolean changed = stringArrayContainsUser(judges, username)
   space.judges = removeUser(judges, username)
@@ -350,7 +518,7 @@ def handleRemoveChallengeJudge(*serve.Context c) (
     space.edited = timestamp
     putSpaceDocument(space)
   )
-  c.json(200, {ok: true})
+  return true
 )
 
 def validChallengeCriterion(object space, string criterionId) boolean (
@@ -371,7 +539,12 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.notFound("challenge entry not found")
     return
   )
+  object judgeSnapshot = if isOrgOwned(space) and !challengeAudienceJudged(space) then ownerOrgSnapshot(space) else {ok: true}
   if !isChallengeJudge(space, contextString(c, "username")) (
+    if !judgeSnapshot.ok and judgeSnapshot.contains("unavailable") and judgeSnapshot.unavailable == true (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
     c.forbidden("only invited judges can score entries")
     return
   )
@@ -380,7 +553,12 @@ def handleScoreChallengeEntry(*serve.Context c) (
     return
   )
   object project = (projectSearchDocs.findById(projectId) ?? {})
-  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+  string ownership = if project.len > 0 then searchEntryOwnership(project, c) else "no"
+  if ownership == "unavailable" (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  if ownership == "yes" (
     c.forbidden("you cannot score your own entry")
     return
   )
@@ -406,21 +584,94 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.badRequest("feedback is too long")
     return
   )
-  string judge = contextString(c, "username")
+  object score = {projectId: projectId, judge: contextString(c, "username"), ratings: ratings, feedback: feedback, edited: timestamp}
+  if !saveChallengeScore(space["_id"].toStr(), score) (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while your score was being saved. Try again."})
+    return
+  )
+  c.json(200, {ok: true, score: score})
+)
+
+def spaceWriteLock(string id) string (
+  return "space-write:" ++ id
+)
+
+def stillChallengeJudge(object space, string judge) boolean (
+  if challengeAudienceJudged(space) (
+    return false
+  )
+  if stringArrayContainsUser(challengeArray(space, "judges"), judge) (
+    return true
+  )
+  if !isOrgOwned(space) (
+    return false
+  )
+  object snapshot = ownerOrgSnapshotCached(space)
+  string ownerId = (space.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return false
+  )
+  return stringArrayContainsUser(orgPublisherNames(snapshot), judge)
+)
+
+def ratingsMatchCriteria(object space, array ratings) boolean (
+  if ratings.len != challengeCriteria(space).len (
+    return false
+  )
+  for i ratings.len (
+    if !validChallengeCriterion(space, ratings[i].assertElse(object, {}).criterionId.toStr()) (
+      return false
+    )
+  )
+  return true
+)
+
+def saveChallengeScore(string spaceId, object score) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string projectId = score.projectId.toStr()
+  if space.len == 0 or challengePhase(space) != "judging" or !spaceProjectIds(space).contains(projectId) (
+    return false
+  )
+  if !stillChallengeJudge(space, score.judge.toStr()) or !ratingsMatchCriteria(space, score.ratings.assertElse(array, [])) (
+    return false
+  )
   array scores = challengeArray(space, "scores")
   array nextScores = []
   for i scores.len (
     object existing = scores[i].assert(object)
-    if existing.projectId.toStr() != projectId or normalizeUsername(existing.judge.toStr()) != normalizeUsername(judge) (
+    if existing.projectId.toStr() != projectId or normalizeUsername(existing.judge.toStr()) != normalizeUsername(score.judge.toStr()) (
       nextScores.append(existing)
     )
   )
-  object score = {projectId: projectId, judge: judge, ratings: ratings, feedback: feedback, edited: timestamp}
   nextScores.append(score)
   space.scores = nextScores
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, score: score})
+  return true
+)
+
+def saveChallengeVote(string spaceId, object vote) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string projectId = vote.projectId.toStr()
+  if space.len == 0 or !challengeAudienceVotingEnabled(space) or challengePhase(space) != "judging" or !spaceProjectIds(space).contains(projectId) (
+    return false
+  )
+  array votes = challengeArray(space, "audienceVotes")
+  array nextVotes = []
+  for i votes.len (
+    object existing = votes[i].assert(object)
+    if existing.projectId.toStr() != projectId or normalizeUsername(existing.username.toStr()) != normalizeUsername(vote.username.toStr()) (
+      nextVotes.append(existing)
+    )
+  )
+  nextVotes.append(vote)
+  space.audienceVotes = nextVotes
+  putSpaceDocument(space)
+  return true
 )
 
 def handleVoteChallengeEntry(*serve.Context c) (
@@ -435,7 +686,12 @@ def handleVoteChallengeEntry(*serve.Context c) (
     return
   )
   object project = (projectSearchDocs.findById(projectId) ?? {})
-  if project.len > 0 and searchEntryOwnedByContext(project, c) (
+  string ownership = if project.len > 0 then searchEntryOwnership(project, c) else "no"
+  if ownership == "unavailable" (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  if ownership == "yes" (
     c.forbidden("you cannot vote for your own entry")
     return
   )
@@ -444,18 +700,10 @@ def handleVoteChallengeEntry(*serve.Context c) (
     c.badRequest("rating must be between 1 and 5")
     return
   )
-  string username = contextString(c, "username")
-  array votes = challengeArray(space, "audienceVotes")
-  array nextVotes = []
-  for i votes.len (
-    object vote = votes[i].assert(object)
-    if vote.projectId.toStr() != projectId or normalizeUsername(vote.username.toStr()) != normalizeUsername(username) (
-      nextVotes.append(vote)
-    )
+  if !saveChallengeVote(space["_id"].toStr(), {projectId: projectId, username: contextString(c, "username"), value: value, edited: timestamp}) (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while your vote was being saved. Try again."})
+    return
   )
-  nextVotes.append({projectId: projectId, username: username, value: value, edited: timestamp})
-  space.audienceVotes = nextVotes
-  putSpaceDocument(space)
   c.json(200, {ok: true, value: value})
 )
 
@@ -478,8 +726,26 @@ def handlePublishChallengeResults(*serve.Context c) (
     c.badRequest("at least one entry needs a judge score")
     return
   )
+  object published = publishChallengeResultsLocked(space["_id"].toStr(), spaceCuratorOnly(space, c))
+  if published.len == 0 (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while results were being published. Try again."})
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(published, c)})
+)
+
+def publishChallengeResultsLocked(string spaceId, string curator) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 or !stillSpaceCurator(space, curator) or timestamp <= space.endsAt.toNum() (
+    return {}
+  )
+  if challengeArray(space, if challengeAudienceJudged(space) then "audienceVotes" else "scores").len == 0 (
+    return {}
+  )
   space.resultsPublishedAt = timestamp
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  return space
 )

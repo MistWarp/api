@@ -1132,7 +1132,7 @@ def createBlankStudentProject(object student, string title) object (
     id: id,
     owner: student.username,
     ownerId: student["_id"],
-    groupTag: "",
+    ownerType: "",
     branding: {},
     vanitySlug: "",
     title: title,

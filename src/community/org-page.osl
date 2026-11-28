@@ -1,0 +1,96 @@
+export {}
+
+def orgMemberResponse(object member) object (
+  return {
+    username: (member.username ?? "").toStr(),
+    displayName: (member.display_name ?? "").toStr(),
+    admin: member.admin == true
+  }
+)
+
+def orgProfileResponse(object org) object (
+  return {
+    id: (org.id ?? "").toStr(),
+    username: (org.username ?? "").toStr(),
+    displayName: (org.display_name ?? "").toStr(),
+    bio: (org.bio ?? "").toStr(),
+    location: (org.location ?? "").toStr(),
+    links: (org.links ?? []).assertElse(array, []),
+    created: (org.created ?? 0).toNum(),
+    memberCount: (org.member_count ?? 0).toNum()
+  }
+)
+
+def orgLookupFailed(*serve.Context c, object snapshot) (
+  if snapshot.contains("unavailable") and snapshot.unavailable == true (
+    c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+    return
+  )
+  c.notFound("organisation not found")
+)
+
+def handleGetMistWarpOrg(*serve.Context c) (
+  object snapshot = roturOrgSnapshot(c.param("name"))
+  if !snapshot.ok (
+    orgLookupFailed(c, snapshot)
+    return
+  )
+  string userId = contextString(c, "userId")
+  string username = contextString(c, "username")
+  boolean signedIn = contextBool(c, "authenticated")
+  boolean isMember = signedIn and orgHasMember(snapshot, userId, username)
+  array members = []
+  array all = snapshot.members.assertElse(array, [])
+  for i all.len (
+    object member = all[i].assertElse(object, {})
+    if member.public == true or isMember or contextBool(c, "isAdmin") (
+      members.append(orgMemberResponse(member))
+    )
+  )
+  object org = snapshot.org.assertElse(object, {})
+  boolean canManage = signedIn and (contextBool(c, "isAdmin") or orgMemberCanPublish(snapshot, userId, username))
+  array projects = projectsVisibleTo(orgProjectEntries(org, canManage), c)
+  c.json(200, {
+    ok: true,
+    org: orgProfileResponse(org),
+    members: members,
+    projects: if canManage then viewerThumbEntries(projects) else projects,
+    spaces: orgSpaces((org.id ?? "").toStr(), canManage, c),
+    isMember: isMember,
+    canManage: canManage
+  })
+)
+
+number orgPageLimit = 100
+
+def orgProjectEntries(object org, boolean canManage) array (
+  string orgId = (org.id ?? "").toStr()
+  array owned = []
+  if orgId == "" (
+    return owned
+  )
+  array entries = projectSearchDocs.where("ownerId", "==", orgId).sort("edited", "desc").all()
+  for i entries.len (
+    object entry = entries[i].assertElse(object, {})
+    if (entry.ownerType ?? "").toStr() == "org" and (entry.shared == true or canManage) and owned.len < orgPageLimit (
+      owned.append(entry)
+    )
+  )
+  return owned
+)
+
+def orgSpaces(string orgId,boolean canManage,*serve.Context c) array (
+  array spaces = []
+  if orgId == "" (
+    return spaces
+  )
+  array entries = spaceDocs.where("ownerId", "==", orgId).sort("edited", "desc").all()
+  for i entries.len (
+    object space = entries[i].assertElse(object, {})
+    string visibility = (space.visibility ?? "").toStr()
+    if spaces.len < orgPageLimit and (space.ownerType ?? "").toStr() == "org" and (visibility == "public" or canManage) (
+      spaces.append(spaceListResponse(space, c))
+    )
+  )
+  return spaces
+)

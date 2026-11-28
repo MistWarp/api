@@ -32,16 +32,28 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena", "vic": "u_vic", "wes": "u_wes"}
 FULL_STORAGE = {"u_dee"}
+ORGS = {
+    "studio": {
+        "id": "o_studio", "username": "studio", "display_name": "Smoke Studio", "bio": "Games", "member_count": 3,
+        "members": [
+            {"id": "u_sam", "username": "sam", "admin": True, "perms": ["admin"], "public": True},
+            {"id": "u_alice", "username": "alice", "admin": False, "perms": ["billing"], "public": True},
+            {"id": "u_dee", "username": "dee", "admin": False, "perms": ["apps"], "public": False},
+        ],
+    },
+}
+GHOST_ORGS = {"ghoststudio": "o_ghost"}
 GONE_USERS = {"gone_user"}
 BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
+SLOW_ORG_LISTS = {"u_vic", "u_wes"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
+CHECK_STEPS = {"org studio thumbnail checks", "org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -89,7 +101,16 @@ class FakeRotur(BaseHTTPRequestHandler):
         if self.path.startswith("/v2/storage-ledger/"):
             self.answer(404, {"code": "not_found"})
             return
+        if self.path.startswith("/v2/integrations/mistwarp/"):
+            self.answer_org_integration()
+            return
         name = self.path.split("?", 1)[0][len("/profile/"):] if self.path.startswith("/profile/") else ""
+        if name in ORGS:
+            self.answer(200, {"id": ORGS[name]["id"], "username": name, "account_type": "org"})
+            return
+        if name in GHOST_ORGS:
+            self.answer(200, {"id": GHOST_ORGS[name], "username": name, "account_type": "org"})
+            return
         if name in GONE_USERS:
             self.answer(404, {"error": "User not found"})
             return
@@ -107,6 +128,28 @@ class FakeRotur(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         self.answer(200, {"id": USERS[name], "username": name})
+
+    def answer_org_integration(self):
+        if self.headers.get("X-Commerce-Key") != "smoke":
+            self.answer(403, {"error": "invalid service key"})
+            return
+        parts = self.path.split("?", 1)[0].split("/")
+        if parts[4] == "orgs" and len(parts) == 6:
+            wanted = urllib.parse.unquote(parts[5])
+            org = ORGS.get(wanted) or next((value for value in ORGS.values() if value["id"] == wanted), None)
+            self.answer(200, org) if org else self.answer(404, {"code": "not_org", "not_org": True})
+            return
+        if parts[4] == "users" and len(parts) == 7 and parts[6] == "orgs":
+            if parts[5] in SLOW_ORG_LISTS:
+                time.sleep(ROTUR_DELAY)
+            mine = []
+            for org in ORGS.values():
+                for member in org["members"]:
+                    if member["id"] == parts[5]:
+                        mine.append({"id": org["id"], "username": org["username"], "display_name": org["display_name"], "perms": member["perms"]})
+            self.answer(200, {"orgs": mine})
+            return
+        self.answer(404, {"code": "not_found"})
 
     def do_POST(self):
         if not self.path.startswith("/v2/storage-ledger/"):
@@ -149,7 +192,7 @@ class Server:
         os.makedirs(os.path.join(data, "sessions"))
         with open(os.path.join(self.dir, ".env"), "w") as env:
             rotur = "http://127.0.0.1:%d" % self.rotur.server_address[1]
-            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=%s\nROTUR_LOCAL_API_URL=%s\nROTUR_SERVICE_SECRET=smoke\n" % (self.port, self.port, rotur, rotur))
+            env.write("PORT=%d\nAPP_URL=http://127.0.0.1:%d\nROTUR_BASE=%s\nROTUR_LOCAL_API_URL=%s\nROTUR_SERVICE_SECRET=smoke\nCOMMERCE_SERVICE_KEY=smoke\n" % (self.port, self.port, rotur, rotur))
         with open(os.path.join(data, "agreement.json"), "w") as handle:
             json.dump({"version": 1, "text": "", "updatedAt": 1700000000000}, handle)
         with open(os.path.join(data, "agreement.md"), "w") as handle:
@@ -777,10 +820,7 @@ def update_flow(server, step, ids):
     patch("patch vanity without plan", {"vanitySlug": "smoke-game"})
     patch("patch null vanity", {"vanitySlug": None})
     patch("patch vanity cleared", {"vanitySlug": ""})
-    patch("patch group tag invalid", {"groupTag": "!!!"})
-    patch("patch group tag not managed", {"groupTag": "somegroup"})
-    patch("patch null group tag", {"groupTag": None})
-    patch("patch group tag cleared", {"groupTag": "  "})
+    patch("patch group tag ignored", {"groupTag": "somegroup"})
     patch("patch nameless teammate", {"collaborators": [{"role": "editor"}]})
     patch("patch team share too high", {"collaborators": [{"username": "alice", "role": "editor", "share": 60}]})
     patch("patch team unknown user", {"collaborators": [{"username": "ghost_user", "role": "editor"}]})
@@ -802,7 +842,7 @@ def update_flow(server, step, ids):
     patch("patch editor session refused", {"collaborators": []}, who="sam_editor")
     patch("patch transfer as maintainer", {"owner": "bob"}, who="alice")
     patch("patch transfer unknown", {"owner": "ghost_user"})
-    patch("patch transfer", {"owner": "bob", "keepGroup": True, "title": "Given away"})
+    patch("patch transfer", {"owner": "bob", "title": "Given away"})
     patch("patch after transfer", {"title": "Mine again"})
     step("get updated project", "GET", path, "bob")
     for name, body in (
@@ -988,6 +1028,119 @@ def synced_tree(server, ids, alias, who, head, merge):
         else:
             files[change["path"]] = base64.b64decode(change.get("content") or "")
     return zip_files(files)
+
+
+def org_flow(server, step, steps, ids):
+    step("org page for a person", "GET", "/v1/orgs/bob")
+    step("my orgs", "GET", "/v1/me/orgs", "alice")
+    step("org create refused for billing", "POST", "/v1/projects", "alice", {"title": "Not allowed", "org": "studio"})
+    step("org create for a person", "POST", "/v1/projects", "dee", {"title": "Not an org", "org": "bob"})
+    status, created = step("org create", "POST", "/v1/projects", "dee", {"title": "Studio game", "org": "studio"})
+    ids[str(created.get("id", "")) if isinstance(created, dict) else ""] = "<org-project>"
+    path = "/v1/projects/<org-project>"
+    step("org project as publisher", "GET", path, "sam")
+    step("org project edit as publisher", "PUT", path, "sam", {"title": "Studio game 2"})
+    step("org project edit as billing", "PUT", path, "alice", {"title": "Nope"})
+    status, mine = step("org own create", "POST", "/v1/projects", "bob", {"title": "Bob's game"})
+    ids[str(mine.get("id", "")) if isinstance(mine, dict) else ""] = "<bob-project>"
+    step("org transfer refused for an outsider", "PUT", "/v1/projects/<bob-project>", "bob", {"owner": "studio"})
+    step("org transfer to an org that can't own content", "PUT", "/v1/projects/<bob-project>", "bob", {"owner": "ghoststudio"})
+    status, given = step("org transfer by member", "POST", "/v1/projects", "dee", {"title": "Dee's game"})
+    ids[str(given.get("id", "")) if isinstance(given, dict) else ""] = "<dee-project>"
+    step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
+    step("org move out refused for a publisher", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "dee"})
+    step("org transfer back", "PUT", "/v1/projects/<dee-project>", "sam", {"owner": "dee"})
+    status, studio = step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
+    studio = studio.get("space", {}) if isinstance(studio, dict) else {}
+    ids[str(studio.get("_id", studio.get("id", "")))] = "<org-studio>"
+    time.sleep(0.01)
+    status, thumbed = step("org studio thumbnail by publisher", "POST", "/v1/spaces/<org-studio>/thumbnail", "sam", form=({}, {"thumbnail": b"\x89PNG studio thumbnail"}))
+    status, studio_after = step("org studio after thumbnail", "GET", "/v1/spaces/<org-studio>", "sam")
+    studio_after = studio_after.get("space", {}) if isinstance(studio_after, dict) else {}
+    steps.append({"step": "org studio thumbnail checks", "status": 0, "body": {
+        "the thumbnail is saved": status == 200 and isinstance(thumbed, dict) and bool(thumbed.get("thumbnailUrl")),
+        "the returned url matches the saved space": isinstance(thumbed, dict) and thumbed.get("thumbnailUrl") == studio_after.get("thumbnailUrl"),
+    }})
+    status, own_space = step("org own space create", "POST", "/v1/spaces", "sam", {"title": "Sam's space", "kind": "collection"})
+    own_space = own_space.get("space", {}) if isinstance(own_space, dict) else {}
+    ids[str(own_space.get("_id", own_space.get("id", "")))] = "<sam-space>"
+    step("org space move refused for billing", "PUT", "/v1/spaces/<sam-space>", "alice", {"owner": "studio"})
+    step("org space move to an org that can't own content", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "ghoststudio"})
+    step("org space move", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "studio"})
+    step("org space managed by publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"title": "Studio collection"})
+    step("org space move out refused for a publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"owner": "dee"})
+    step("org page", "GET", "/v1/orgs/studio")
+    step("org page as member", "GET", "/v1/orgs/studio", "dee")
+    org_challenge_flow(server, step, steps, ids, path)
+    step("org project delete by billing", "DELETE", path, "alice")
+    step("org project delete by publisher", "DELETE", path, "dee")
+
+
+def org_challenge_flow(server, step, steps, ids, project_path):
+    step("accept agreement vic", "POST", "/v1/agreement/accept", "vic", {})
+    step("accept agreement wes", "POST", "/v1/agreement/accept", "wes", {})
+    step("profile wes", "PUT", "/v1/me/profile", "wes", {"bio": "Curator"})
+    step("org challenge entry save", "POST", project_path + "/upload", "dee", form=({}, {"project": sb3_archive(project_with_costumes([]))}))
+    step("org challenge entry share", "POST", project_path + "/visibility", "dee", {"visibility": "public"})
+    now = int(time.time() * 1000)
+    status, created = step("org challenge create", "POST", "/v1/spaces", "dee", {"title": "Studio jam", "kind": "challenge", "org": "studio", "visibility": "public", "openSubmissions": True, "votingMode": "audience", "startsAt": now - 3600000, "endsAt": now + 3600000})
+    created = created.get("space", {}) if isinstance(created, dict) else {}
+    ids[str(created.get("_id", created.get("id", "")))] = "<org-challenge>"
+    challenge = "/v1/spaces/<org-challenge>"
+    entered, _ = step("org challenge entry by publisher", "POST", challenge + "/projects/<org-project>", "sam")
+    invited, _ = step("org challenge curator invite", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    invited_again, _ = step("org challenge curator invite again", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    cancelled, _ = step("org challenge curator invite cancel", "DELETE", challenge + "/invitations/bob", "sam")
+    not_curator, _ = step("org challenge curator remove when not one", "DELETE", challenge + "/curators/bob", "sam")
+    reinvited, _ = step("org challenge curator invite after cancel", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    step("org challenge curator invite for wes", "POST", challenge + "/curators", "sam", {"username": "wes"})
+    accepted, _ = step("org challenge curator accepts", "POST", challenge + "/invitations/respond", "wes", {"accepted": True})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        slow_edit = pool.submit(step, "org challenge edit by a curator removed meanwhile", "PUT", challenge, "wes", {"rules": "Be kind"})
+        time.sleep(ROTUR_DELAY / 4)
+        removal = pool.submit(step, "org challenge curator removed", "DELETE", challenge + "/curators/wes", "sam")
+        stale_curator = [slow_edit.result()[0], removal.result()[0]]
+    commented, comment_body = step("org challenge comment", "POST", challenge + "/comments", "bob", {"content": "Good luck"})
+    comment_id = ((comment_body or {}).get("comment") or {}).get("id", "") if isinstance(comment_body, dict) else ""
+    step("org challenge second comment", "POST", challenge + "/comments", "alice", {"content": "Have fun"})
+    uncommented, _ = step("org challenge comment delete", "DELETE", challenge + "/comments/" + str(comment_id), "bob")
+    followed, follow_body = step("org challenge follow", "POST", challenge + "/follow", "bob", {})
+    unfollowed, unfollow_body = step("org challenge unfollow", "DELETE", challenge + "/follow", "bob")
+    status, counted_space = step("org challenge counts", "GET", challenge, "bob")
+    counted_space = counted_space.get("space", {}) if isinstance(counted_space, dict) else {}
+    joined, _ = step("org challenge join", "POST", challenge + "/join", "bob", {})
+    submitter_left, _ = step("org challenge leave refused for the submitter", "DELETE", challenge + "/join", "sam")
+    left, left_body = step("org challenge leave", "DELETE", challenge + "/join", "bob")
+    step("org challenge to judging", "PUT", challenge, "dee", {"endsAt": now - 1000, "judgingEndsAt": now + 3600000})
+    own, _ = step("org challenge vote on own entry", "PUT", challenge + "/entries/<org-project>/vote", "dee", {"value": 4})
+    vote = challenge + "/entries/<org-project>/vote"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        slow = pool.submit(step, "org challenge vote while Rotur is slow", "PUT", vote, "vic", {"value": 3})
+        time.sleep(ROTUR_DELAY / 4)
+        fast = pool.submit(step, "org challenge vote by an outsider", "PUT", vote, "bob", {"value": 5})
+        votes = [slow.result()[0], fast.result()[0]]
+    status, got = step("org challenge after votes", "GET", challenge, "dee")
+    space = got.get("space", {}) if isinstance(got, dict) else {}
+    entries = [entry for entry in space.get("projects", []) if isinstance(entry, dict)]
+    counted = sum(int(entry.get("audienceVoteCount", 0)) for entry in entries)
+    removed, removed_body = step("org challenge entry removed by the submitter", "DELETE", challenge + "/projects/<org-project>", "sam")
+    remaining = ((removed_body or {}).get("space") or {}).get("projects", []) if isinstance(removed_body, dict) else None
+    deleted, _ = step("org challenge delete", "DELETE", challenge, "sam")
+    gone, _ = step("org challenge after delete", "GET", challenge, "sam")
+    steps.append({"step": "org challenge checks", "status": 0, "body": {
+        "publisher entered the org project": entered == 200 and len(entries) == 1,
+        "one participant recorded": space.get("participantCount") == 1,
+        "an outsider joins and leaves": joined == 200 and left == 200 and isinstance(left_body, dict) and left_body.get("joined") is False,
+        "the submitter cannot leave": submitter_left == 400,
+        "the submitter removes the entry": removed == 200 and remaining == [],
+        "an org admin deletes the challenge": deleted == 200 and gone == 404,
+        "a curator removed during their edit cannot save it": accepted == 200 and stale_curator == [409, 200],
+        "comments and follows keep their counts": [commented, uncommented, followed, unfollowed] == [201, 200, 200, 200] and counted_space.get("commentCount") == 1 and (follow_body or {}).get("followers") == 1 and (unfollow_body or {}).get("followers") == 0,
+        "curator invites are kept once and can be cancelled": [invited, invited_again, cancelled, not_curator, reinvited] == [201, 400, 200, 200, 201],
+        "own entry vote refused": own == 403,
+        "outside votes saved": votes == [200, 200],
+        "both votes counted": counted == 2,
+    }})
 
 
 def remix_sync_flow(server, step, steps, ids):
@@ -1289,6 +1442,7 @@ def run(binary, sb3, keep):
         slow_ledger_flow(server, step, steps, ids)
         locks_flow(server, step, steps, ids)
         remix_sync_flow(server, step, steps, ids)
+        org_flow(server, step, steps, ids)
         time.sleep(1.5)
         for real, alias in list(ids.items()):
             if alias in ("<history>", "<history-remix>", "<update>"):

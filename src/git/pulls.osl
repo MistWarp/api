@@ -147,7 +147,7 @@ def isPullSourceOwnerWithSource(object pull, object source,*serve.Context c) boo
   if !contextBool(c, "authenticated") (
     return false
   )
-  if source.len > 0 and projectRole(source, contextString(c, "username")) == "owner" (
+  if source.len > 0 and projectRoleFor(source, c) == "owner" (
     return true
   )
   return identityMatches(
@@ -201,7 +201,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
   if !projectHasWorkspace(target) or !projectHasWorkspace(source) (
     return {ok: false, status: 400, error: "both projects need MistWarp history before changes can be sent"}
   )
-  if projectRole(source, contextString(c, "username")) != "owner" (
+  if projectRoleFor(source, c) != "owner" (
     return {ok: false, status: 403, error: "use a remix you own"}
   )
   if source.remixParent.toStr() != target.id.toStr() (
@@ -227,7 +227,7 @@ def createNativePull(*serve.Context c, object target, object source, string titl
   )
   object pull = inserted.pull.assert(object)
   sequence = pull.index.toNum()
-  addNotification(target.owner.toStr(), contextString(c, "username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
+  notifyContentOwner(target, contextString(c, "username"), "contribution", {projectId: target.id, projectTitle: target.title, pull: sequence})
   return {ok: true, pull: pullResponse(pull)}
 )
 
@@ -370,6 +370,7 @@ def handleProjectBranchMutation(*serve.Context c, string action) (
 )
 
 def mutateProjectBranchesLocked(*serve.Context c, string action) object (
+  warmProjectOrgAccess(c.param("id"), c)
   string lockName = "project-history-" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)
@@ -643,7 +644,7 @@ def handleCreatePullComment(*serve.Context c) (
     addNotification(pull.author.toStr(), commenter, "comment", notificationData)
   )
   if normalizeUsername(project.owner.toStr()) != normalizeUsername(commenter) and normalizeUsername(project.owner.toStr()) != normalizeUsername(pull.author.toStr()) (
-    addNotification(project.owner.toStr(), commenter, "comment", notificationData)
+    notifyContentOwnerExcept(project, commenter, "comment", notificationData, [pull.author.toStr()])
   )
   notifyMentions(created.comment.content.toStr(), commenter, [project.owner.toStr(), pull.author.toStr()], notificationData)
   created.comment = commentResponse(created.comment.assert(object), commenter)
@@ -662,7 +663,7 @@ def handleDeletePullComment(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), contextString(c, "username"), project.owner.toStr(), contextBool(c, "isAdmin"))
+  object deleted = deleteComment(pullCommentKey(pull), c.param("cid"), contextString(c, "username"), projectModerator(project, c), contextBool(c, "isAdmin"))
   if !deleted.ok (
     c.json(deleted.status.toInt(), {ok: false, error: deleted.error})
     return
@@ -1253,7 +1254,13 @@ def completeNativePull(object project, string pullIndex, string expectedHead, st
   project.mergedContributors = mergedContributors
   saveProject(project)
   upsertIndexEntry(project)
-  addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", {projectId: project.id, projectTitle: project.title, pull: pull.index})
+  object mergedNotice = {projectId: project.id, projectTitle: project.title, pull: pull.index}
+  object sourceLoad = loadProject((pull.sourceProjectId ?? "").toStr())
+  if sourceLoad.ok and identityMatches((pull.sourceOwnerId ?? "").toStr(), pull.sourceOwner.toStr(), (sourceLoad.project.ownerId ?? "").toStr(), (sourceLoad.project.owner ?? "").toStr()) (
+    notifyContentOwner(sourceLoad.project.assert(object), project.owner.toStr(), "contribution_merged", mergedNotice)
+  ) else (
+    addNotification(pull.sourceOwner.toStr(), project.owner.toStr(), "contribution_merged", mergedNotice)
+  )
   if pull.contains("bountyId") and pull.bountyId != null and pull.bountyId.toStr() != "" (
     boolean bountyPaid = awardContributionBounty(pull.bountyId.toStr(), project.id.toStr(), pull.sourceOwner.toStr())
     if !bountyPaid (

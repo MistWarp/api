@@ -100,22 +100,15 @@ def handleGetSpace(*serve.Context c) (
 
 def handleCreateSpace(*serve.Context c) (
   object body = requestJSON(c)
-  number ownedSpaces = spaceDocs.where("ownerId", "==", contextString(c, "userId")).count()
-  if !contextBool(c, "isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(contextString(c, "userId")).maxSpaces.toNum() (
-    c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+  object owner = creationOwner(c, body, "spaces")
+  if !owner.ok (
+    c.json(owner.status.toNum(), {ok: false, code: owner.code, error: owner.error})
     return
   )
-  string groupTag = ""
-  if body.contains("groupTag") and body.groupTag != null and body.groupTag.toStr().strip() != "" (
-    groupTag = normalizeGroupTag(body.groupTag.toStr())
-    if groupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    )
-    if !canManageGroupTag(groupTag, c) (
-      c.forbidden("you cannot create spaces for this group")
-      return
-    )
+  number ownedSpaces = spaceDocs.where("ownerId", "==", owner.ownerId.toStr()).count()
+  if !contextBool(c, "isAdmin") and ownedSpaces >= mistwarpBenefitsForUserId(owner.ownerId.toStr()).maxSpaces.toNum() (
+    c.json(413, {ok: false, error: "space limit reached; delete a space or upgrade your plan"})
+    return
   )
   string title = body.title.toStr().strip()
   string kind = body.kind.toStr().toLower().strip()
@@ -170,9 +163,9 @@ def handleCreateSpace(*serve.Context c) (
     description: description,
     kind: kind,
     visibility: visibility,
-    owner: contextString(c, "username"),
-    ownerId: contextString(c, "userId"),
-    groupTag: groupTag,
+    owner: owner.owner,
+    ownerId: owner.ownerId,
+    ownerType: owner.ownerType,
     managers: [],
     curatorInvites: [],
     projects: [],
@@ -209,19 +202,29 @@ def handleUpdateSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
+  string readJson = json.stringify(space)
   if !canManageSpace(space, c) (
+    if isOrgOwned(space) and orgAccess(space.owner.toStr(), (space.ownerId ?? "").toStr(), c) == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
     c.forbidden("you cannot manage this space")
     return
   )
   object body = requestJSON(c)
   if body.contains("owner") (
-    boolean canTransfer = isSpaceOwner(space, c) or canManageGroupContent(space, c)
+    boolean canTransfer = isSpaceOwner(space, c)
     if !canTransfer (
       c.forbidden("you cannot transfer this space")
       return
     )
     string requestedOwner = body.owner.toStr().strip()
-    string nextOwnerId = discoverUserIdentity(requestedOwner)
+    object identity = discoverUserIdentityOutcome(requestedOwner)
+    if identity.outcome == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
+      return
+    )
+    string nextOwnerId = identity.id.toStr()
     if nextOwnerId == "" (
       c.badRequest("Rotur user not found")
       return
@@ -231,29 +234,47 @@ def handleUpdateSpace(*serve.Context c) (
       c.badRequest("Rotur user not found")
       return
     )
+    boolean sameOwner = identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner)
     number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxSpaces.toNum()
-    if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
+    if !sameOwner and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
       c.badRequest("the new owner has reached their space limit")
       return
     )
+    if isOrgOwned(space) and !sameOwner (
+      string moveOut = orgMoveOutAccess(space, c)
+      if moveOut == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+        return
+      )
+      if moveOut != "yes" (
+        c.forbidden("only an admin of the organisation can move this space out of it")
+        return
+      )
+    )
+    object nextOrg = roturOrgSnapshot(nextOwner)
+    boolean nextOwnerIsOrg = nextOrg.ok
+    if !nextOrg.ok and (identity.accountType ?? "").toStr() == "org" and nextOrg.contains("notOrg") and nextOrg.notOrg == true (
+      c.json(403, {ok: false, code: "org_unavailable", error: "that organisation can't own spaces right now"})
+      return
+    )
+    if (!nextOrg.ok and (identity.accountType ?? "").toStr() == "org") or (nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId) (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
+      return
+    )
+    if nextOwnerIsOrg and !sameOwner (
+      string access = orgAccess(nextOwner, nextOwnerId, c)
+      if access == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now, so " ++ requestedOwner ++ " couldn't be checked. Try again soon."})
+        return
+      )
+      if access != "yes" (
+        c.forbidden("you cannot move this space into that organisation")
+        return
+      )
+    )
     space.owner = nextOwner
     space.ownerId = nextOwnerId
-    if !body.contains("keepGroup") or body.keepGroup != true (
-      space.groupTag = ""
-    )
-  )
-  if body.contains("groupTag") (
-    string nextGroupTag = normalizeGroupTag(body.groupTag.toStr())
-    if body.groupTag.toStr().strip() == "" (
-      nextGroupTag = ""
-    ) else if nextGroupTag == "" (
-      c.badRequest("invalid group tag")
-      return
-    ) else if !canManageGroupTag(nextGroupTag, c) (
-      c.forbidden("you cannot move this space into that group")
-      return
-    )
-    space.groupTag = nextGroupTag
+    space.ownerType = if nextOwnerIsOrg then "org" else ""
   )
   if body.contains("title") (
     string title = body.title.toStr().strip()
@@ -347,8 +368,71 @@ def handleUpdateSpace(*serve.Context c) (
     return
   )
   space.edited = timestamp
-  putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  object read = json.parse(readJson, {type: "object"}).unwrap().assert(object)
+  object saved = saveEditedSpace(read, space, spaceCuratorOnly(read, c))
+  if saved.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if saved.contains("refused") (
+    string refusal = saved.refused.toStr()
+    if refusal == "criteria" (
+      c.badRequest("judging criteria cannot change after scoring begins")
+    ) else if refusal == "dates" (
+      c.badRequest("challenge dates must be in order")
+    ) else if refusal == "votingMode" (
+      c.badRequest("the voting mode cannot change after results are published")
+    ) else (
+      c.json(409, {ok: false, code: "space_changed", error: "This space changed while your edit was being saved. Reload it and try again."})
+    )
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(saved, c)})
+)
+
+def saveEditedSpace(object read, object edited, string curator) object (
+  string spaceId = read["_id"].toStr()
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object fresh = (spaceDocs.findById(spaceId) ?? {})
+  if fresh.len == 0 (
+    return {}
+  )
+  if !stillSpaceCurator(fresh, curator) (
+    return {refused: "owner"}
+  )
+  array ownerFields = ["owner", "ownerId", "ownerType"]
+  for i ownerFields.len (
+    string field = ownerFields[i].toStr()
+    if json.stringify(fresh[field] ?? "") != json.stringify(read[field] ?? "") (
+      return {refused: "owner"}
+    )
+  )
+  array changed = []
+  array keys = edited.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    if key != "edited" and (!read.contains(key) or json.stringify(read[key]) != json.stringify(edited[key])) (
+      changed.append(key)
+    )
+  )
+  boolean isChallenge = fresh.kind.toStr() == "challenge"
+  if isChallenge and changed.contains("criteria") and challengeArray(fresh, "scores").len > 0 (
+    return {refused: "criteria"}
+  )
+  if isChallenge and changed.contains("votingMode") and challengeVotingMode(edited) != challengeVotingMode(fresh) and challengePhase(fresh) == "results" (
+    return {refused: "votingMode"}
+  )
+  for i changed.len (
+    string key = changed[i].toStr()
+    fresh[key] = edited[key]
+  )
+  if isChallenge and (fresh.startsAt.toNum() <= 0 or fresh.endsAt.toNum() <= fresh.startsAt.toNum() or (fresh.judgingEndsAt ?? 0).toNum() <= fresh.endsAt.toNum()) (
+    return {refused: "dates"}
+  )
+  fresh.edited = edited.edited
+  putSpaceDocument(fresh)
+  return fresh
 )
 
 def handleDeleteSpace(*serve.Context c) (
@@ -361,14 +445,20 @@ def handleDeleteSpace(*serve.Context c) (
     c.forbidden("only the owner can delete this space")
     return
   )
-  void spaceDocs.deleteOne({_id: space["_id"]})
-  deleteSpaceMemberships(space["_id"].toStr())
+  deleteSpaceLocked(space["_id"].toStr())
   void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".json")
   void fs.remove(commentsDir ++ spaceCommentKey(space["_id"].toStr()) ++ ".jsonl")
   if fs.exists(spaceThumbnailPath(space["_id"].toStr())) (
     void fs.remove(spaceThumbnailPath(space["_id"].toStr()))
   )
   c.json(200, {ok: true})
+)
+
+def deleteSpaceLocked(string spaceId) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  void spaceDocs.deleteOne({_id: spaceId})
+  deleteSpaceMemberships(spaceId)
 )
 
 def handleSetSpaceThumbnail(*serve.Context c) (
@@ -381,6 +471,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.forbidden("you cannot change this studio thumbnail")
     return
   )
+  string curator = spaceCuratorOnly(space, c)
   auto fileResult = c.formFile("thumbnail")
   if fileResult.isErr() (
     c.badRequest("missing thumbnail file")
@@ -391,13 +482,39 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.badRequest("thumbnail too large")
     return
   )
-  if !fs.writeFileBytes(spaceThumbnailPath(space["_id"].toStr()), thumbnail.data) (
+  object saved = saveSpaceThumbnailLocked(space["_id"].toStr(), curator, thumbnail.data)
+  string outcome = saved.outcome.toStr()
+  if outcome == "missing" (
+    c.notFound("space not found")
+    return
+  )
+  if outcome == "curator" (
+    c.forbidden("you cannot change this studio thumbnail")
+    return
+  )
+  if outcome == "failed" (
     c.internalError("thumbnail save failed")
     return
   )
+  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(saved.space.assert(object))})
+)
+
+def saveSpaceThumbnailLocked(string spaceId, string curator, byte[] data) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return {outcome: "missing"}
+  )
+  if !stillSpaceCurator(space, curator) (
+    return {outcome: "curator"}
+  )
+  if !fs.writeFileBytes(spaceThumbnailPath(spaceId), data) (
+    return {outcome: "failed"}
+  )
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
+  return {outcome: "saved", space: space}
 )
 
 def handleAddSpaceProject(*serve.Context c) (
@@ -412,7 +529,8 @@ def handleAddSpaceProject(*serve.Context c) (
     c.forbidden("only shared or unlisted projects can be added")
     return
   )
-  boolean allowed = canManageSpace(space, c)
+  boolean manages = canManageSpace(space, c)
+  boolean allowed = manages
   boolean ownsProject = searchEntryOwnedByContext(project, c)
   boolean participantCanSubmit = space.openSubmissions == true and ownsProject
   if space.kind.toStr() == "challenge" (
@@ -423,25 +541,52 @@ def handleAddSpaceProject(*serve.Context c) (
     c.forbidden("submissions are closed")
     return
   )
-  array ids = spaceProjectIds(space)
-  if !ids.contains(project.id.toStr()) (
-    ids.append(project.id.toStr())
-    space.projects = ids
-    if space.kind.toStr() == "challenge" (
-      array submissions = challengeArray(space, "submissions")
-      submissions.append({projectId: project.id, owner: project.owner, submittedAt: timestamp})
-      space.submissions = submissions
-      array participants = challengeArray(space, "participants")
-      if !stringArrayContainsUser(participants, project.owner.toStr()) (
-        participants.append(project.owner)
-      )
-      space.participants = participants
-    )
-    space.edited = timestamp
-    putSpaceDocument(space)
-    addNotification(space.owner.toStr(), contextString(c, "username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
+  string participant = project.owner.toStr()
+  if isOrgOwned(project) (
+    participant = if ownsProject then contextString(c, "username") else ""
   )
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages, if manages then spaceCuratorOnly(space, c) else "", ownsProject)
+  if added.len == 0 (
+    c.json(409, {ok: false, code: "space_changed", error: "The space changed while this project was being added. Try again."})
+    return
+  )
+  object fresh = added.space.assert(object)
+  if added.added == true (
+    notifyContentOwner(fresh, contextString(c, "username"), "space_project", {spaceId: fresh["_id"], spaceTitle: fresh.title, projectId: project.id, projectTitle: project.title})
+  )
+  c.json(200, {ok: true, space: spaceResponse(fresh, c)})
+)
+
+def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean manages, string curator, boolean ownsProject) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return {}
+  )
+  boolean asManager = manages and stillSpaceCurator(space, curator)
+  if !asManager and (!ownsProject or space.openSubmissions != true or (space.kind.toStr() == "challenge" and challengePhase(space) != "submissions")) (
+    return {}
+  )
+  array ids = spaceProjectIds(space)
+  if ids.contains(project.id.toStr()) (
+    return {space: space, added: false}
+  )
+  ids.append(project.id.toStr())
+  space.projects = ids
+  if space.kind.toStr() == "challenge" (
+    array submissions = challengeArray(space, "submissions")
+    submissions.append({projectId: project.id, owner: project.owner, submittedBy: submitter, submittedAt: timestamp})
+    space.submissions = submissions
+    array participants = challengeArray(space, "participants")
+    if participant != "" and !stringArrayContainsUser(participants, participant) (
+      participants.append(participant)
+    )
+    space.participants = participants
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return {space: space, added: true}
 )
 
 def handleRemoveSpaceProject(*serve.Context c) (
@@ -452,20 +597,51 @@ def handleRemoveSpaceProject(*serve.Context c) (
   )
   object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   boolean allowed = canManageSpace(space, c)
-  if project.len > 0 (
-    allowed = allowed or searchEntryOwnedByContext(project, c)
+  string curator = if allowed then spaceCuratorOnly(space, c) else ""
+  if curator != "" and project.len > 0 and searchEntryOwnership(project, c) == "yes" (
+    curator = ""
+  )
+  if !allowed and project.len > 0 (
+    string ownership = searchEntryOwnership(project, c)
+    if ownership == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
+    allowed = ownership == "yes"
   )
   if !allowed (
     c.forbidden("you cannot remove this project")
     return
   )
-  space.projects = removeString(spaceProjectIds(space), c.param("project"))
+  object saved = removeProjectFromSpaceLocked(space["_id"].toStr(), c.param("project"), curator)
+  if saved.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  if saved.contains("refused") (
+    c.forbidden("you cannot remove this project")
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(saved, c)})
+)
+
+def removeProjectFromSpaceLocked(string spaceId, string projectId, string curator) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return {}
+  )
+  if !stillSpaceCurator(space, curator) (
+    return {refused: "curator"}
+  )
+  space.projects = removeString(spaceProjectIds(space), projectId)
   if space.kind.toStr() == "challenge" (
     array submissions = challengeArray(space, "submissions")
     array nextSubmissions = []
     for i submissions.len (
       object submission = submissions[i].assert(object)
-      if submission.projectId.toStr() != c.param("project") (
+      if submission.projectId.toStr() != projectId (
         nextSubmissions.append(submission)
       )
     )
@@ -473,7 +649,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
   )
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  return space
 )
 
 def handleFollowSpace(*serve.Context c) (
@@ -482,13 +658,33 @@ def handleFollowSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
+  number count = followSpaceLocked(space["_id"].toStr(), contextString(c, "username"), true)
+  if count < 0 (
+    c.notFound("space not found")
+    return
+  )
+  c.json(200, {ok: true, following: true, followers: count})
+)
+
+def followSpaceLocked(string spaceId, string username, boolean follow) number (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return -1
+  )
   array followers = spaceFollowers(space)
-  if !stringArrayContainsUser(followers, contextString(c, "username")) (
-    followers.append(contextString(c, "username"))
+  boolean present = stringArrayContainsUser(followers, username)
+  if follow and !present (
+    followers.append(username)
+    space.followers = followers
+    putSpaceDocument(space)
+  ) else if !follow and present (
+    followers = removeUser(followers, username)
     space.followers = followers
     putSpaceDocument(space)
   )
-  c.json(200, {ok: true, following: true, followers: followers.len})
+  return followers.len
 )
 
 def handleUnfollowSpace(*serve.Context c) (
@@ -497,13 +693,12 @@ def handleUnfollowSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
-  array followers = spaceFollowers(space)
-  if stringArrayContainsUser(followers, contextString(c, "username")) (
-    followers = removeUser(followers, contextString(c, "username"))
-    space.followers = followers
-    putSpaceDocument(space)
+  number count = followSpaceLocked(space["_id"].toStr(), contextString(c, "username"), false)
+  if count < 0 (
+    c.notFound("space not found")
+    return
   )
-  c.json(200, {ok: true, following: false, followers: followers.len})
+  c.json(200, {ok: true, following: false, followers: count})
 )
 
 def handleMySpaces(*serve.Context c) (
@@ -524,11 +719,7 @@ def handleMySpaces(*serve.Context c) (
     object space = allSpaces[i].assert(object)
     string spaceId = space["_id"].toStr()
     if !seen.contains(spaceId) (
-      boolean include = isSpaceOwner(space, c)
-      if !include and groupTagOf(space) != "" (
-        include = canManageGroupContent(space, c)
-      )
-      if include (
+      if isSpaceOwner(space, c) (
         seen[spaceId] = true
         stored.append(space)
       )
@@ -577,25 +768,86 @@ def handleInviteSpaceCurator(*serve.Context c) (
     c.notFound("user not found")
     return
   )
-  if stringArrayContainsUser(spaceManagers(space), username) (
+  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  string outcome = inviteCuratorLocked(space["_id"].toStr(), invite)
+  if outcome == "missing" (
+    c.notFound("space not found")
+    return
+  )
+  if outcome == "curator" (
     c.badRequest("this user is already a curator")
     return
+  )
+  if outcome == "invited" (
+    c.badRequest("this user already has an invitation")
+    return
+  )
+  addNotification(profile.username.toStr(), contextString(c, "username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def inviteCuratorLocked(string spaceId, object invite) string (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return "missing"
+  )
+  string username = invite.username.toStr()
+  if stringArrayContainsUser(spaceManagers(space), username) (
+    return "curator"
   )
   array invites = spaceCuratorInvites(space)
   for i invites.len (
     object existing = invites[i].assert(object)
-    if normalizeUsername(existing.username.toStr()) == usernameKey (
-      c.badRequest("this user already has an invitation")
-      return
+    if normalizeUsername(existing.username.toStr()) == normalizeUsername(username) (
+      return "invited"
     )
   )
-  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
   invites.append(invite)
   space.curatorInvites = invites
   space.edited = timestamp
   putSpaceDocument(space)
-  addNotification(profile.username.toStr(), contextString(c, "username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
-  c.json(201, {ok: true, invitation: invite})
+  return "saved"
+)
+
+def removeCuratorLocked(string spaceId, string username) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  array managers = if space.len > 0 then spaceManagers(space) else []
+  if !stringArrayContainsUser(managers, username) (
+    return false
+  )
+  space.managers = removeUser(managers, username)
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return true
+)
+
+def cancelCuratorInviteLocked(string spaceId, string username) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return
+  )
+  array remaining = []
+  array invites = spaceCuratorInvites(space)
+  boolean found = false
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
+      remaining.append(invite)
+    ) else (
+      found = true
+    )
+  )
+  if found (
+    space.curatorInvites = remaining
+    space.edited = timestamp
+    putSpaceDocument(space)
+  )
 )
 
 def handleRespondSpaceCuratorInvite(*serve.Context c) (
@@ -635,7 +887,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
   if accepted (
     notificationType = "space_curator_accepted"
   )
-  addNotification(space.owner.toStr(), username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
+  notifyContentOwner(space, username, notificationType, {spaceId: space["_id"], spaceTitle: space.title})
   c.json(200, {ok: true, accepted: accepted})
 )
 
@@ -650,11 +902,7 @@ def handleRemoveSpaceCurator(*serve.Context c) (
     return
   )
   string username = c.param("username")
-  array managers = spaceManagers(space)
-  if stringArrayContainsUser(managers, username) (
-    space.managers = removeUser(managers, username)
-    space.edited = timestamp
-    putSpaceDocument(space)
+  if removeCuratorLocked(space["_id"].toStr(), username) (
     addNotification(username, contextString(c, "username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
   )
   c.json(200, {ok: true})
@@ -670,27 +918,16 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
     c.forbidden("only the owner can cancel invitations")
     return
   )
-  string username = c.param("username")
-  array remaining = []
-  array invites = spaceCuratorInvites(space)
-  boolean found = false
-  for i invites.len (
-    object invite = invites[i].assert(object)
-    if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
-      remaining.append(invite)
-    ) else (
-      found = true
-    )
-  )
-  if found (
-    space.curatorInvites = remaining
-    space.edited = timestamp
-    putSpaceDocument(space)
-  )
+  cancelCuratorInviteLocked(space["_id"].toStr(), c.param("username"))
   c.json(200, {ok: true})
 )
 
 def handleReactSpace(*serve.Context c) (
+  object visible = (spaceDocs.findById(c.param("id")) ?? {})
+  if visible.len == 0 or !canViewSpace(visible, c) (
+    c.notFound("space not found")
+    return
+  )
   string lockName = "space-reactions:" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)
@@ -732,6 +969,8 @@ def handleReactSpaceLocked(*serve.Context c) (
     c.internalError("could not save reaction")
     return
   )
-  notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
+  if !isOrgOwned(space) (
+    notifyLikeMilestones(space.owner.toStr(), space.kind.toStr(), space["_id"].toStr(), previousLikes, likes.len, "/spaces/" ++ space["_id"].toStr(), {})
+  )
   c.json(200, {ok: true, likeCount: likes.len, brokenHeartCount: brokenHearts.len, myReaction: if hadReaction then "" else reactionType})
 )
