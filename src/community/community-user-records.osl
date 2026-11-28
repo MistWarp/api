@@ -207,6 +207,11 @@ def renameUserCommunityRecords(string oldKey, string newKey, string newName) boo
           submissions[j] = submission
           changed = true
         )
+        if normalizeUsername((submission.submittedBy ?? "").toStr()) == oldKey (
+          submission.submittedBy = newName
+          submissions[j] = submission
+          changed = true
+        )
       )
       space.submissions = submissions
     )

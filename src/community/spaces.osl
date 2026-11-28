@@ -711,6 +711,11 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
 )
 
 def handleReactSpace(*serve.Context c) (
+  object visible = (spaceDocs.findById(c.param("id")) ?? {})
+  if visible.len == 0 or !canViewSpace(visible, c) (
+    c.notFound("space not found")
+    return
+  )
   string lockName = "space-reactions:" ++ c.param("id")
   sync.lock(lockName)
   defer sync.unlock(lockName)

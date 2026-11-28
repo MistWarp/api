@@ -78,8 +78,46 @@ def projectRoleFor(object project,*serve.Context c) string (
 
 def warmProjectOrgAccess(string id,*serve.Context c) (
   auto loaded = loadProject(id)
-  if loaded.ok and isOrgOwned(loaded.project.assert(object)) (
-    void canManageOrgContent(loaded.project.assert(object), c)
+  if !loaded.ok (
+    return
+  )
+  object project = loaded.project.assert(object)
+  warmOneProjectOrg(project, c)
+  string parentId = remixLinkId(project, "remixParent")
+  string rootId = remixLinkId(project, "remixRoot")
+  if parentId != "" and parentId != id (
+    auto parent = loadProject(parentId)
+    if parent.ok (
+      object parentProject = parent.project.assert(object)
+      warmOneProjectOrg(parentProject, c)
+      string grandparentId = remixLinkId(parentProject, "remixParent")
+      if grandparentId != "" and grandparentId != parentId and grandparentId != rootId (
+        auto grandparent = loadProject(grandparentId)
+        if grandparent.ok (
+          warmOneProjectOrg(grandparent.project.assert(object), c)
+        )
+      )
+    )
+  )
+  if rootId != "" and rootId != id and rootId != parentId (
+    auto root = loadProject(rootId)
+    if root.ok (
+      warmOneProjectOrg(root.project.assert(object), c)
+    )
+  )
+)
+
+def remixLinkId(object project, string field) string (
+  if !project.contains(field) or project[field] == null (
+    return ""
+  )
+  return project[field].toStr()
+)
+
+def warmOneProjectOrg(object project,*serve.Context c) (
+  if isOrgOwned(project) (
+    void ownerOrgSnapshot(project)
+    void canManageOrgContent(project, c)
   )
 )
 

@@ -39,7 +39,8 @@ def liveSession(object project, string branch) object (
   if session.getKeys().len == 0 or session.expires.toNum() <= timestamp (
     return {}
   )
-  string role = projectRoleForName(project, session.host.toStr())
+  string hostRole = projectRole(project, session.host.toStr())
+  string role = if isSharedEditorRole(hostRole) then hostRole else projectRoleForName(project, session.host.toStr())
   if !isSharedEditorRole(role) (
     return {}
   )
