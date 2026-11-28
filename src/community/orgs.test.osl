@@ -38,6 +38,10 @@ def stringArrayContainsUser(array users, string username) boolean (
   return false
 )
 
+def isStudentUserId(string userId) boolean (
+  return userId.startsWith("stu_")
+)
+
 def contextString(*serve.Context c, string key) string (
   if key == "username" (
     return (c.header("X-Test-User") ?? "")
@@ -141,6 +145,11 @@ def handleCheckContent(*serve.Context c) (
   c.json(200, {ok: canManageOrgContent({owner: "studio", ownerId: (c.query("id") ?? ""), ownerType: (c.query("kind") ?? "")}, c)})
 )
 
+def handleCheckOwnWork(*serve.Context c) (
+  object content = {owner: "studio", ownerId: "org_studio", ownerType: "org"}
+  c.json(200, {ok: true, manage: orgContentAccess(content, c), publisher: orgContentPublisherAccess(content, c)})
+)
+
 def handleCheckCreation(*serve.Context c) (
   c.json(200, creationOwner(c, {org: (c.query("org") ?? "")}, "projects"))
 )
@@ -151,6 +160,7 @@ fakeRotur.GET("/v2/integrations/mistwarp/users/:id/orgs", handleFakeUserOrgs)
 fakeRotur.GET("/check/publish/:name", handleCheckPublish)
 fakeRotur.GET("/check/content", handleCheckContent)
 fakeRotur.GET("/check/create", handleCheckCreation)
+fakeRotur.GET("/check/own", handleCheckOwnWork)
 fakeRotur.GET("/ready", handleFakeUserOrgs)
 fakeRotur.GET("/page/:name", handleGetMistWarpOrg)
 
@@ -228,6 +238,13 @@ testing.assert(ask("/check/content?kind=org&id=org_gone", "bea", "u_bea").ok == 
 testing.assert(ask("/check/content?kind=org&id=org_gone", "zed", "u_zed").ok == false, "nor does anyone else")
 object broken = roturOrgSnapshot("broken")
 testing.assert(!broken.ok and broken.unavailable == true, "a 200 without an org in it is unavailable, not an empty org")
+
+object adminCheck = json.parse(requests.get(roturBase ++ "/check/own", {headers: {"X-Test-User": "root", "X-Test-Id": "u_root", "X-Test-Admin": "1"}}).unwrap().body, {type: "object"}).unwrap().assert(object)
+testing.assert(adminCheck.manage == "yes" and adminCheck.publisher == "no", "a site admin manages an org's content but is not one of its publishers")
+askedRotur = []
+object studentCheck = ask("/check/own", "kid", "stu_kid")
+testing.assert(studentCheck.manage == "no" and studentCheck.publisher == "no" and askedRotur.len == 0, "a student never publishes for an org and Rotur is not asked")
+testing.assert(ask("/check/own", "bea", "u_bea").publisher == "yes", "a publisher's own org work counts as theirs")
 
 def page(string user, string id) object (
   return ask("/page/studio", user, id)

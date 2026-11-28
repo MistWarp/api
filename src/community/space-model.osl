@@ -105,7 +105,7 @@ def searchEntryOwnership(object project,*serve.Context c) string (
   if identityMatches(ownerId, project.owner.toStr(), contextString(c, "userId"), contextString(c, "username")) (
     return "yes"
   )
-  return orgContentAccess(project, c)
+  return orgContentPublisherAccess(project, c)
 )
 
 def searchEntryOwnedByContext(object project,*serve.Context c) boolean (

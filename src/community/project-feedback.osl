@@ -121,7 +121,7 @@ def handleSaveProjectReview(*serve.Context c) (
     return
   )
   object project = res.project.assert(object)
-  string orgOwnership = if projectRole(project, contextString(c, "username")) == "owner" then "yes" else orgContentAccess(project, c)
+  string orgOwnership = if projectRole(project, contextString(c, "username")) == "owner" then "yes" else orgContentPublisherAccess(project, c)
   if orgOwnership == "unavailable" (
     c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
     return

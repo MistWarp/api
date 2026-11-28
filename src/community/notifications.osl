@@ -490,7 +490,7 @@ def notifyOrgPublishers(string owner, string ownerId, string actor, string notif
     if sent >= orgNotificationLimit (
       return
     )
-    if !stringArrayContainsUser(skip, names[i].toStr()) (
+    if normalizeUsername(names[i].toStr()) != normalizeUsername(actor) and !stringArrayContainsUser(skip, names[i].toStr()) (
       addNotification(names[i].toStr(), actor, notifType, extra)
       sent += 1
     )

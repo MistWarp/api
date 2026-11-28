@@ -197,7 +197,7 @@ def handleGetMyTrash(*serve.Context c) (
       if res.ok (
         object project = res.data.assert(object)
         string ownerId = (project.ownerId ?? "").toStr()
-        if identityMatches(ownerId, project.owner.toStr(), userId, username) or canManageOrgContent(project, c) (
+        if identityMatches(ownerId, project.owner.toStr(), userId, username) or orgContentPublisherAccess(project, c) == "yes" (
           projects.append({
             id: project.id,
             title: project.title,

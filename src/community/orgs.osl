@@ -8,6 +8,7 @@ export {
   orgMoveOutAccess,
   orgAccess,
   orgContentAccess,
+  orgContentPublisherAccess,
   orgHasMember,
   orgMemberCanPublish,
   orgPublisherNames,
@@ -162,11 +163,15 @@ def viewerOrgListing(string name, string expectedOrgId,*serve.Context c) string 
 )
 
 def orgAccess(string name, string expectedOrgId,*serve.Context c) string (
-  if !contextBool(c, "authenticated") (
-    return "no"
-  )
-  if contextBool(c, "isAdmin") (
+  if contextBool(c, "authenticated") and contextBool(c, "isAdmin") (
     return "yes"
+  )
+  return orgPublisherAccess(name, expectedOrgId, c)
+)
+
+def orgPublisherAccess(string name, string expectedOrgId,*serve.Context c) string (
+  if !contextBool(c, "authenticated") or isStudentUserId(contextString(c, "userId")) (
+    return "no"
   )
   string listed = viewerOrgListing(name, expectedOrgId, c)
   if listed != "yes" (
@@ -203,7 +208,7 @@ def orgMoveOutAccess(object value,*serve.Context c) string (
   if !isOrgOwned(value) or contextBool(c, "isAdmin") (
     return "yes"
   )
-  if !contextBool(c, "authenticated") (
+  if !contextBool(c, "authenticated") or isStudentUserId(contextString(c, "userId")) (
     return "no"
   )
   string listed = viewerOrgListing((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c)
@@ -222,6 +227,13 @@ def orgContentAccess(object value,*serve.Context c) string (
     return "no"
   )
   return orgAccess((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c)
+)
+
+def orgContentPublisherAccess(object value,*serve.Context c) string (
+  if !isOrgOwned(value) (
+    return "no"
+  )
+  return orgPublisherAccess((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c)
 )
 
 def canManageOrgContent(object value,*serve.Context c) boolean (
