@@ -23,7 +23,7 @@ jobs:
 
       - name: Install OSL
         env:
-          OSL_COMMIT: 44dde5ba5120c295617392cf05d098bd4a4c4b36
+          OSL_COMMIT: f5e02b2e086ac7f7fb1d42a8215de47314660c73
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone --filter=blob:none https://git.rotur.dev/osl/.go /tmp/osl-source
