@@ -9,7 +9,7 @@ def purgeUserFromSpaces(string username) boolean (
   for i spaces.len (
     object space = spaces[i].assert(object)
     string spaceId = space["_id"].toStr()
-    if normalizeUsername(space.owner.toStr()) == key (
+    if normalizeUsername(space.owner.toStr()) == key and !isOrgOwned(space) (
       void spaceDocs.deleteOne({_id: space["_id"]})
       deleteSpaceMemberships(spaceId)
       void fs.remove(commentsDir ++ spaceCommentKey(spaceId) ++ ".json")

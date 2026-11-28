@@ -176,6 +176,15 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
   if !sameOwner and ownedProjectSlotCount(nextOwnerId, nextOwner) >= nextOwnerLimit (
     return refuse(400, "the new owner has reached their project limit")
   )
+  if isOrgOwned(project) and !sameOwner (
+    string moveOut = orgAdminAccess(lookupOrgSnapshot(lookups, project.owner.toStr()), (project.ownerId ?? "").toStr(), c)
+    if moveOut == "unavailable" (
+      return roturUnavailableRefusal(project.owner.toStr())
+    )
+    if moveOut != "yes" (
+      return refuse(403, "only an admin of the organisation can move this project out of it")
+    )
+  )
   object nextOrg = lookupOrgSnapshot(lookups, nextOwner)
   if !nextOrg.ok and (identity.accountType ?? "").toStr() == "org" (
     return roturUnavailableRefusal(requestedOwner)

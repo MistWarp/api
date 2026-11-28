@@ -239,6 +239,17 @@ def handleUpdateSpace(*serve.Context c) (
       c.badRequest("the new owner has reached their space limit")
       return
     )
+    if isOrgOwned(space) and !sameOwner (
+      string moveOut = orgMoveOutAccess(space, c)
+      if moveOut == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+        return
+      )
+      if moveOut != "yes" (
+        c.forbidden("only an admin of the organisation can move this space out of it")
+        return
+      )
+    )
     object nextOrg = roturOrgSnapshot(nextOwner)
     boolean nextOwnerIsOrg = nextOrg.ok
     if (!nextOrg.ok and (identity.accountType ?? "").toStr() == "org") or (nextOwnerIsOrg and (nextOrg.org.assertElse(object, {}).id ?? "").toStr() != nextOwnerId) (

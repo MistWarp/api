@@ -1044,6 +1044,7 @@ def org_flow(server, step, steps, ids):
     status, given = step("org transfer by member", "POST", "/v1/projects", "dee", {"title": "Dee's game"})
     ids[str(given.get("id", "")) if isinstance(given, dict) else ""] = "<dee-project>"
     step("org transfer", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "studio"})
+    step("org move out refused for a publisher", "PUT", "/v1/projects/<dee-project>", "dee", {"owner": "dee"})
     step("org transfer back", "PUT", "/v1/projects/<dee-project>", "sam", {"owner": "dee"})
     step("org space create", "POST", "/v1/spaces", "dee", {"title": "Studio space", "kind": "studio", "org": "studio"})
     status, own_space = step("org own space create", "POST", "/v1/spaces", "sam", {"title": "Sam's space", "kind": "collection"})
@@ -1053,6 +1054,7 @@ def org_flow(server, step, steps, ids):
     step("org space move to an org Rotur can't vouch for", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "ghoststudio"})
     step("org space move", "PUT", "/v1/spaces/<sam-space>", "sam", {"owner": "studio"})
     step("org space managed by publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"title": "Studio collection"})
+    step("org space move out refused for a publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"owner": "dee"})
     step("org page", "GET", "/v1/orgs/studio")
     step("org page as member", "GET", "/v1/orgs/studio", "dee")
     step("org project delete by billing", "DELETE", path, "alice")

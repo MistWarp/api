@@ -37,6 +37,7 @@ def spaceResponse(object space,*serve.Context c) object (
   response.projectIds = if canManageSpace(space, c) then ids else visibleIds
   response.canManage = canManageSpace(space, c)
   response.isOwner = isSpaceOwner(space, c)
+  response.canMoveOut = response.isOwner == true and orgMoveOutAccess(space, c) == "yes"
   response.following = stringArrayContainsUser(spaceFollowers(space), contextString(c, "username"))
   response.followerCount = spaceFollowers(space).len
   response.invited = isSpaceInvitee(space, c)

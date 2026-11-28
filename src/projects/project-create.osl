@@ -86,7 +86,12 @@ def handleCreateProject(*serve.Context c) (
 )
 
 def ownedProjectSlotCount(string userId, string username) number (
-  return ownerIndexCount(username, true) + trashedProjectsOwnedBy(userId, username).len
+  number byName = ownerIndexCount(username, true)
+  number byId = 0
+  if userId != "" (
+    byId = projectSearchDocs.where("ownerId", "==", userId).count()
+  )
+  return (if byId > byName then byId else byName) + trashedProjectsOwnedBy(userId, username).len
 )
 
 def projectFirstShared(object project) (

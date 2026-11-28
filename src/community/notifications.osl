@@ -462,14 +462,18 @@ def notifyContentOwner(object content, string actor, string notifType, object ex
     return
   )
   recentOrgFanOuts.set(fanOutKey, true)
-  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra)
+  thread.new(notifyOrgPublishers, owner, ownerId, actor, notifType, extra, fanOutKey)
 )
 
 number orgNotificationLimit = 25
 *cache.Cache recentOrgFanOuts = cache.new({capacity: 10000, ttl: 600000})
 
-def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra) (
+def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra, string fanOutKey) (
   object snapshot = roturOrgSnapshot(owner)
+  if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
+    recentOrgFanOuts.delete(fanOutKey)
+    return
+  )
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return
   )

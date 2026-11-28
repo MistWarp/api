@@ -147,7 +147,7 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
       if res.ok (
         object project = res.project.assert(object)
         boolean changed = false
-        if normalizeUsername(project.owner.toStr()) == oldKey (
+        if normalizeUsername(project.owner.toStr()) == oldKey and !ownedByAnotherOrg(project, userId) (
           project.owner = newName
           project.ownerId = userId
           changed = true
@@ -212,11 +212,16 @@ def renameUserInProjects(string oldKey, string newKey, string newName, string us
   )
 )
 
+def ownedByAnotherOrg(object record, string userId) boolean (
+  string ownerId = (record.ownerId ?? "").toStr()
+  return (record.ownerType ?? "").toStr() == "org" and ownerId != "" and ownerId != userId
+)
+
 def renameIdentityFieldInCollection(*db.Collection collection, string nameField, string idField, string oldKey, string newName, string userId) (
   array documents = collection.all()
   for i documents.len (
     object document = documents[i].assert(object)
-    if document.contains(nameField) and document[nameField] != null and normalizeUsername(document[nameField].toStr()) == oldKey (
+    if document.contains(nameField) and document[nameField] != null and normalizeUsername(document[nameField].toStr()) == oldKey and !ownedByAnotherOrg(document, userId) (
       document[nameField] = newName
       document[idField] = userId
       putDocument(collection, document["_id"].toStr(), document)
