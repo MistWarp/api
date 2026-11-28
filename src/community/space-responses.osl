@@ -8,8 +8,7 @@ def spaceTotalPlaytime(array ids) number (
 
 def spaceResponse(object space,*serve.Context c) object (
   if !space.contains("commentCount") (
-    space.commentCount = loadComments(spaceCommentKey(space["_id"].toStr())).len
-    putSpaceDocument(space)
+    space.commentCount = ensureSpaceCommentCountLocked(space["_id"].toStr())
   )
   array projects = []
   array ids = spaceProjectIds(space)

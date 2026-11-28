@@ -1090,6 +1090,14 @@ def org_challenge_flow(server, step, steps, ids, project_path):
         time.sleep(ROTUR_DELAY / 4)
         removal = pool.submit(step, "org challenge curator removed", "DELETE", challenge + "/curators/wes", "sam")
         stale_curator = [slow_edit.result()[0], removal.result()[0]]
+    commented, comment_body = step("org challenge comment", "POST", challenge + "/comments", "bob", {"content": "Good luck"})
+    comment_id = ((comment_body or {}).get("comment") or {}).get("id", "") if isinstance(comment_body, dict) else ""
+    step("org challenge second comment", "POST", challenge + "/comments", "alice", {"content": "Have fun"})
+    uncommented, _ = step("org challenge comment delete", "DELETE", challenge + "/comments/" + str(comment_id), "bob")
+    followed, follow_body = step("org challenge follow", "POST", challenge + "/follow", "bob", {})
+    unfollowed, unfollow_body = step("org challenge unfollow", "DELETE", challenge + "/follow", "bob")
+    status, counted_space = step("org challenge counts", "GET", challenge, "bob")
+    counted_space = counted_space.get("space", {}) if isinstance(counted_space, dict) else {}
     joined, _ = step("org challenge join", "POST", challenge + "/join", "bob", {})
     submitter_left, _ = step("org challenge leave refused for the submitter", "DELETE", challenge + "/join", "sam")
     left, left_body = step("org challenge leave", "DELETE", challenge + "/join", "bob")
@@ -1117,6 +1125,7 @@ def org_challenge_flow(server, step, steps, ids, project_path):
         "the submitter removes the entry": removed == 200 and remaining == [],
         "an org admin deletes the challenge": deleted == 200 and gone == 404,
         "a curator removed during their edit cannot save it": accepted == 200 and stale_curator == [409, 200],
+        "comments and follows keep their counts": [commented, uncommented, followed, unfollowed] == [201, 200, 200, 200] and counted_space.get("commentCount") == 1 and (follow_body or {}).get("followers") == 1 and (unfollow_body or {}).get("followers") == 0,
         "curator invites are kept once and can be cancelled": [invited, invited_again, cancelled, not_curator, reinvited] == [201, 400, 200, 200, 201],
         "own entry vote refused": own == 403,
         "outside votes saved": votes == [200, 200],

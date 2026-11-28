@@ -471,6 +471,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.forbidden("you cannot change this studio thumbnail")
     return
   )
+  string curator = spaceCuratorOnly(space, c)
   auto fileResult = c.formFile("thumbnail")
   if fileResult.isErr() (
     c.badRequest("missing thumbnail file")
@@ -481,13 +482,38 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.badRequest("thumbnail too large")
     return
   )
-  if !fs.writeFileBytes(spaceThumbnailPath(space["_id"].toStr()), thumbnail.data) (
+  string outcome = saveSpaceThumbnailLocked(space["_id"].toStr(), curator, thumbnail.data)
+  if outcome == "missing" (
+    c.notFound("space not found")
+    return
+  )
+  if outcome == "curator" (
+    c.forbidden("you cannot change this studio thumbnail")
+    return
+  )
+  if outcome == "failed" (
     c.internalError("thumbnail save failed")
     return
   )
+  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
+)
+
+def saveSpaceThumbnailLocked(string spaceId, string curator, byte[] data) string (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return "missing"
+  )
+  if !stillSpaceCurator(space, curator) (
+    return "curator"
+  )
+  if !fs.writeFileBytes(spaceThumbnailPath(spaceId), data) (
+    return "failed"
+  )
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, thumbnailUrl: spaceThumbnailUrl(space)})
+  return "saved"
 )
 
 def handleAddSpaceProject(*serve.Context c) (
@@ -631,13 +657,33 @@ def handleFollowSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
+  number count = followSpaceLocked(space["_id"].toStr(), contextString(c, "username"), true)
+  if count < 0 (
+    c.notFound("space not found")
+    return
+  )
+  c.json(200, {ok: true, following: true, followers: count})
+)
+
+def followSpaceLocked(string spaceId, string username, boolean follow) number (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return -1
+  )
   array followers = spaceFollowers(space)
-  if !stringArrayContainsUser(followers, contextString(c, "username")) (
-    followers.append(contextString(c, "username"))
+  boolean present = stringArrayContainsUser(followers, username)
+  if follow and !present (
+    followers.append(username)
+    space.followers = followers
+    putSpaceDocument(space)
+  ) else if !follow and present (
+    followers = removeUser(followers, username)
     space.followers = followers
     putSpaceDocument(space)
   )
-  c.json(200, {ok: true, following: true, followers: followers.len})
+  return followers.len
 )
 
 def handleUnfollowSpace(*serve.Context c) (
@@ -646,13 +692,12 @@ def handleUnfollowSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
-  array followers = spaceFollowers(space)
-  if stringArrayContainsUser(followers, contextString(c, "username")) (
-    followers = removeUser(followers, contextString(c, "username"))
-    space.followers = followers
-    putSpaceDocument(space)
+  number count = followSpaceLocked(space["_id"].toStr(), contextString(c, "username"), false)
+  if count < 0 (
+    c.notFound("space not found")
+    return
   )
-  c.json(200, {ok: true, following: false, followers: followers.len})
+  c.json(200, {ok: true, following: false, followers: count})
 )
 
 def handleMySpaces(*serve.Context c) (
