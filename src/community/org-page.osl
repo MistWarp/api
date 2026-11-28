@@ -49,11 +49,12 @@ def handleGetMistWarpOrg(*serve.Context c) (
   )
   object org = snapshot.org.assertElse(object, {})
   boolean canManage = signedIn and (contextBool(c, "isAdmin") or orgMemberCanPublish(snapshot, userId, username))
+  array projects = projectsVisibleTo(orgProjectEntries(org, canManage), c)
   c.json(200, {
     ok: true,
     org: orgProfileResponse(org),
     members: members,
-    projects: projectsVisibleTo(orgProjectEntries(org, canManage), c),
+    projects: if canManage then viewerThumbEntries(projects) else projects,
     spaces: orgSpaces((org.id ?? "").toStr(), canManage, c),
     isMember: isMember,
     canManage: canManage
