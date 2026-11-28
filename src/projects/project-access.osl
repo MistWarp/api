@@ -86,7 +86,7 @@ def projectRoleForName(object project, string username) string (
   if role == "owner" or username == "" or !isOrgOwned(project) (
     return role
   )
-  object snapshot = roturOrgSnapshot(project.owner.toStr())
+  object snapshot = ownerOrgSnapshot(project)
   string ownerId = (project.ownerId ?? "").toStr()
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return role

@@ -177,7 +177,8 @@ def applyOwnerTransfer(*serve.Context c, object project, object body, OwnerTrans
     return refuse(400, "the new owner has reached their project limit")
   )
   if isOrgOwned(project) and !sameOwner (
-    string moveOut = orgAdminAccess(lookupOrgSnapshot(lookups, project.owner.toStr()), (project.ownerId ?? "").toStr(), c)
+    string ownerKey = if (project.ownerId ?? "").toStr() != "" then project.ownerId.toStr() else project.owner.toStr()
+    string moveOut = orgAdminAccess(lookupOrgSnapshot(lookups, ownerKey), (project.ownerId ?? "").toStr(), c)
     if moveOut == "unavailable" (
       return roturUnavailableRefusal(project.owner.toStr())
     )

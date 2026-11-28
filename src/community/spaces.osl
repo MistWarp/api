@@ -445,7 +445,7 @@ def handleAddSpaceProject(*serve.Context c) (
     space.projects = ids
     if space.kind.toStr() == "challenge" (
       array submissions = challengeArray(space, "submissions")
-      submissions.append({projectId: project.id, owner: project.owner, submittedAt: timestamp})
+      submissions.append({projectId: project.id, owner: project.owner, submittedBy: contextString(c, "username"), submittedAt: timestamp})
       space.submissions = submissions
       array participants = challengeArray(space, "participants")
       string participant = project.owner.toStr()

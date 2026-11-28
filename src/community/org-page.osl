@@ -60,6 +60,8 @@ def handleGetMistWarpOrg(*serve.Context c) (
   })
 )
 
+number orgPageLimit = 100
+
 def orgProjectEntries(object org, boolean canManage) array (
   string orgId = (org.id ?? "").toStr()
   array owned = []
@@ -69,7 +71,7 @@ def orgProjectEntries(object org, boolean canManage) array (
   array entries = projectSearchDocs.where("ownerId", "==", orgId).sort("edited", "desc").all()
   for i entries.len (
     object entry = entries[i].assertElse(object, {})
-    if (entry.ownerType ?? "").toStr() == "org" and (entry.shared == true or canManage) (
+    if (entry.ownerType ?? "").toStr() == "org" and (entry.shared == true or canManage) and owned.len < orgPageLimit (
       owned.append(entry)
     )
   )
@@ -85,7 +87,7 @@ def orgSpaces(string orgId,boolean canManage,*serve.Context c) array (
   for i entries.len (
     object space = entries[i].assertElse(object, {})
     string visibility = (space.visibility ?? "").toStr()
-    if (space.ownerType ?? "").toStr() == "org" and (visibility == "public" or visibility == "unlisted" or canManage) (
+    if spaces.len < orgPageLimit and (space.ownerType ?? "").toStr() == "org" and (visibility == "public" or visibility == "unlisted" or canManage) (
       spaces.append(spaceListResponse(space, c))
     )
   )

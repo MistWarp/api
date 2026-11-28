@@ -134,7 +134,8 @@ class FakeRotur(BaseHTTPRequestHandler):
             return
         parts = self.path.split("?", 1)[0].split("/")
         if parts[4] == "orgs" and len(parts) == 6:
-            org = ORGS.get(urllib.parse.unquote(parts[5]))
+            wanted = urllib.parse.unquote(parts[5])
+            org = ORGS.get(wanted) or next((value for value in ORGS.values() if value["id"] == wanted), None)
             self.answer(200, org) if org else self.answer(404, {"code": "not_org", "not_org": True})
             return
         if parts[4] == "users" and len(parts) == 7 and parts[6] == "orgs":

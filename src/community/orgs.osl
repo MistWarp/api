@@ -2,6 +2,7 @@ export {
   canManageOrgContent,
   creationOwner,
   isOrgOwned,
+  ownerOrgSnapshot,
   orgAdminAccess,
   orgMoveOutAccess,
   orgAccess,
@@ -16,6 +17,7 @@ export {
 *cache.Cache orgUnavailableCache = cache.new({capacity: 10000, ttl: 15000})
 *cache.Cache orgMissingCache = cache.new({capacity: 10000, ttl: 10000})
 *cache.Cache userOrgsCache = cache.new({capacity: 10000, ttl: 60000})
+*cache.Cache userOrgsUnavailableCache = cache.new({capacity: 10000, ttl: 15000})
 
 def roturServiceGet(string path) object (
   object failed = {body: null, error: "request failed", headers: {}, raw: null, status: 0, success: false}
@@ -110,6 +112,28 @@ def orgMemberCanPublish(object snapshot, string userId, string username) boolean
   return orgPermsAllowPublishing(orgMemberPerms(snapshot, userId, username))
 )
 
+def ownerOrgSnapshot(object value) object (
+  string ownerId = (value.ownerId ?? "").toStr()
+  return roturOrgSnapshot(if ownerId != "" then ownerId else (value.owner ?? "").toStr())
+)
+
+def viewerOrgListing(string name, string expectedOrgId,*serve.Context c) string (
+  object mine = roturUserOrgs(contextString(c, "userId"))
+  if !mine.ok (
+    return "unavailable"
+  )
+  array orgs = mine.orgs.assertElse(array, [])
+  for i orgs.len (
+    object org = orgs[i].assertElse(object, {})
+    boolean idMatches = expectedOrgId != "" and (org.id ?? "").toStr() == expectedOrgId
+    boolean nameMatches = expectedOrgId == "" and normalizeUsername((org.username ?? "").toStr()) == normalizeUsername(name)
+    if idMatches or nameMatches (
+      return "yes"
+    )
+  )
+  return "no"
+)
+
 def orgAccess(string name, string expectedOrgId,*serve.Context c) string (
   if !contextBool(c, "authenticated") (
     return "no"
@@ -117,7 +141,11 @@ def orgAccess(string name, string expectedOrgId,*serve.Context c) string (
   if contextBool(c, "isAdmin") (
     return "yes"
   )
-  object snapshot = roturOrgSnapshot(name)
+  string listed = viewerOrgListing(name, expectedOrgId, c)
+  if listed != "yes" (
+    return listed
+  )
+  object snapshot = roturOrgSnapshot(if expectedOrgId != "" then expectedOrgId else name)
   if !snapshot.ok (
     return if snapshot.contains("unavailable") and snapshot.unavailable == true then "unavailable" else "no"
   )
@@ -151,7 +179,11 @@ def orgMoveOutAccess(object value,*serve.Context c) string (
   if !contextBool(c, "authenticated") (
     return "no"
   )
-  return orgAdminAccess(roturOrgSnapshot((value.owner ?? "").toStr()), (value.ownerId ?? "").toStr(), c)
+  string listed = viewerOrgListing((value.owner ?? "").toStr(), (value.ownerId ?? "").toStr(), c)
+  if listed != "yes" (
+    return listed
+  )
+  return orgAdminAccess(ownerOrgSnapshot(value), (value.ownerId ?? "").toStr(), c)
 )
 
 def isOrgOwned(object value) boolean (
@@ -227,7 +259,7 @@ def roturUserOrgs(string userId) object (
   if cached.contains("ok") (
     return cached
   )
-  if commerceServiceKey == "" (
+  if commerceServiceKey == "" or userOrgsUnavailableCache.get(userId).assertElse(boolean, false) (
     return {ok: false}
   )
   object response = roturServiceGet("/v2/integrations/mistwarp/users/" ++ url.escape(userId) ++ "/orgs")
@@ -236,11 +268,9 @@ def roturUserOrgs(string userId) object (
     userOrgsCache.set(userId, none)
     return none
   )
-  if response.status != 200 (
-    return {ok: false}
-  )
   auto parsed = json.parse(response.body ?? "", {type: "object"})
-  if parsed.isErr() (
+  if response.status != 200 or parsed.isErr() (
+    userOrgsUnavailableCache.set(userId, true)
     return {ok: false}
   )
   object data = parsed.unwrap().assert(object)

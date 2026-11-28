@@ -91,7 +91,7 @@ def isOrgOwned(object value) boolean (
 )
 
 def roturOrgSnapshot(string name) object (
-  if name == "studio" (
+  if name == "studio" or name == "o_studio" (
     return {ok: true, org: {id: "o_studio"}}
   )
   return {ok: false, notOrg: true}

@@ -469,7 +469,7 @@ number orgNotificationLimit = 25
 *cache.Cache recentOrgFanOuts = cache.new({capacity: 10000, ttl: 600000})
 
 def notifyOrgPublishers(string owner, string ownerId, string actor, string notifType, object extra, string fanOutKey) (
-  object snapshot = roturOrgSnapshot(owner)
+  object snapshot = roturOrgSnapshot(if ownerId != "" then ownerId else owner)
   if !snapshot.ok and snapshot.contains("unavailable") and snapshot.unavailable == true (
     recentOrgFanOuts.delete(fanOutKey)
     return

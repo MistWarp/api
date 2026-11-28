@@ -60,7 +60,7 @@ def challengeOrgSnapshot(object space) object (
   if challengeAudienceJudged(space) or !isOrgOwned(space) (
     return {ok: false}
   )
-  object snapshot = roturOrgSnapshot((space.owner ?? "").toStr())
+  object snapshot = ownerOrgSnapshot(space)
   string ownerId = (space.ownerId ?? "").toStr()
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return {ok: false}
@@ -325,7 +325,7 @@ def handleLeaveChallenge(*serve.Context c) (
   array ids = spaceProjectIds(space)
   for i ids.len (
     object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
-    if project.len > 0 and searchEntryOwnedByContext(project, c) (
+    if project.len > 0 and searchEntryOwnedByContext(project, c) and (!isOrgOwned(project) or submittedBy(space, project.id.toStr(), username)) (
       c.badRequest("remove your submission before leaving the challenge")
       return
     )
@@ -334,6 +334,17 @@ def handleLeaveChallenge(*serve.Context c) (
   space.edited = timestamp
   putSpaceDocument(space)
   c.json(200, {ok: true, joined: false, participantCount: space.participants.len})
+)
+
+def submittedBy(object space, string projectId, string username) boolean (
+  array submissions = challengeArray(space, "submissions")
+  for i submissions.len (
+    object entry = submissions[i].assertElse(object, {})
+    if (entry.projectId ?? "").toStr() == projectId and normalizeUsername((entry.submittedBy ?? "").toStr()) == normalizeUsername(username) (
+      return true
+    )
+  )
+  return false
 )
 
 def handleRespondChallengeJudgeInvite(*serve.Context c) (

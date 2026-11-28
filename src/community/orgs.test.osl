@@ -111,7 +111,7 @@ def handleFakeOrg(*serve.Context c) (
     c.json(200, {error: "half an answer"})
     return
   )
-  if c.param("name") != "studio" (
+  if c.param("name") != "studio" and c.param("name") != "org_studio" (
     c.json(404, {error: "Not an organisation", code: "not_org", not_org: true})
     return
   )
@@ -206,9 +206,9 @@ object mine = ask("/check/create", "bea", "u_bea")
 testing.assert(mine.ok and mine.owner == "bea" and mine.ownerType == "", "without an org, content is the creator's")
 
 askedRotur = []
-object orgs = roturUserOrgs("u_bea")
-testing.assert(orgs.ok and orgs.orgs.len == 2 and askedRotur == ["orgs of u_bea"], "a person's orgs come from Rotur")
-void roturUserOrgs("u_bea")
+object orgs = roturUserOrgs("u_eve")
+testing.assert(orgs.ok and orgs.orgs.len == 2 and askedRotur == ["orgs of u_eve"], "a person's orgs come from Rotur")
+void roturUserOrgs("u_eve")
 testing.assert(askedRotur.len == 1, "and are cached")
 testing.assert(orgPermsAllowPublishing(["apps"]) and !orgPermsAllowPublishing([]), "the org list says where someone can publish")
 
