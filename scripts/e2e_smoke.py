@@ -1076,6 +1076,9 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     ids[str(created.get("_id", created.get("id", "")))] = "<org-challenge>"
     challenge = "/v1/spaces/<org-challenge>"
     entered, _ = step("org challenge entry by publisher", "POST", challenge + "/projects/<org-project>", "sam")
+    joined, _ = step("org challenge join", "POST", challenge + "/join", "bob", {})
+    submitter_left, _ = step("org challenge leave refused for the submitter", "DELETE", challenge + "/join", "sam")
+    left, left_body = step("org challenge leave", "DELETE", challenge + "/join", "bob")
     step("org challenge to judging", "PUT", challenge, "dee", {"endsAt": now - 1000, "judgingEndsAt": now + 3600000})
     own, _ = step("org challenge vote on own entry", "PUT", challenge + "/entries/<org-project>/vote", "dee", {"value": 4})
     vote = challenge + "/entries/<org-project>/vote"
@@ -1091,6 +1094,8 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     steps.append({"step": "org challenge checks", "status": 0, "body": {
         "publisher entered the org project": entered == 200 and len(entries) == 1,
         "one participant recorded": space.get("participantCount") == 1,
+        "an outsider joins and leaves": joined == 200 and left == 200 and isinstance(left_body, dict) and left_body.get("joined") is False,
+        "the submitter cannot leave": submitter_left == 400,
         "own entry vote refused": own == 403,
         "outside votes saved": votes == [200, 200],
         "both votes counted": counted == 2,

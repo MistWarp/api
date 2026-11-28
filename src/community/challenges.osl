@@ -320,17 +320,34 @@ def handleJoinChallenge(*serve.Context c) (
     c.badRequest("this challenge is no longer open to new participants")
     return
   )
-  array participants = challengeArray(space, "participants")
-  if !stringArrayContainsUser(participants, contextString(c, "username")) (
-    participants.append(contextString(c, "username"))
-    space.participants = participants
-    space.edited = timestamp
-    putSpaceDocument(space)
-    if !isSpaceOwner(space, c) (
-      notifyContentOwner(space, contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
-    )
+  object joined = joinChallengeLocked(space["_id"].toStr(), contextString(c, "username"))
+  if joined.len == 0 (
+    c.badRequest("this challenge is no longer open to new participants")
+    return
   )
-  c.json(200, {ok: true, joined: true, participantCount: participants.len})
+  if joined.added == true and !isSpaceOwner(space, c) (
+    notifyContentOwner(space, contextString(c, "username"), "challenge_join", {spaceId: space["_id"], spaceTitle: space.title})
+  )
+  c.json(200, {ok: true, joined: true, participantCount: joined.count})
+)
+
+def joinChallengeLocked(string spaceId, string username) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string phase = if space.len > 0 then challengePhase(space) else ""
+  if phase != "upcoming" and phase != "submissions" (
+    return {}
+  )
+  array participants = challengeArray(space, "participants")
+  if stringArrayContainsUser(participants, username) (
+    return {added: false, count: participants.len}
+  )
+  participants.append(username)
+  space.participants = participants
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return {added: true, count: participants.len}
 )
 
 def handleLeaveChallenge(*serve.Context c) (
@@ -352,15 +369,45 @@ def handleLeaveChallenge(*serve.Context c) (
   array ids = spaceProjectIds(space)
   for i ids.len (
     object project = (projectSearchDocs.findById(ids[i].toStr()) ?? {})
-    if project.len > 0 and searchEntryOwnedByContext(project, c) and (!isOrgOwned(project) or submittedBy(space, project.id.toStr(), username)) (
-      c.badRequest("remove your submission before leaving the challenge")
-      return
+    if project.len > 0 and (!isOrgOwned(project) or submittedBy(space, project.id.toStr(), username)) (
+      string ownership = searchEntryOwnership(project, c)
+      if ownership == "unavailable" (
+        c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+        return
+      )
+      if ownership == "yes" (
+        c.badRequest("remove your submission before leaving the challenge")
+        return
+      )
     )
   )
+  object left = leaveChallengeLocked(space["_id"].toStr(), username, ids)
+  if left.len == 0 (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while you were leaving. Try again."})
+    return
+  )
+  c.json(200, {ok: true, joined: false, participantCount: left.count})
+)
+
+def leaveChallengeLocked(string spaceId, string username, array checkedIds) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string phase = if space.len > 0 then challengePhase(space) else ""
+  if phase != "upcoming" and phase != "submissions" (
+    return {}
+  )
+  array ids = spaceProjectIds(space)
+  for i ids.len (
+    if !checkedIds.contains(ids[i].toStr()) and submittedBy(space, ids[i].toStr(), username) (
+      return {}
+    )
+  )
+  array participants = challengeArray(space, "participants")
   space.participants = removeUser(participants, username)
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, joined: false, participantCount: space.participants.len})
+  return {count: space.participants.len}
 )
 
 def submittedBy(object space, string projectId, string username) boolean (
