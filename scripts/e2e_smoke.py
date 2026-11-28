@@ -1091,11 +1091,14 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     space = got.get("space", {}) if isinstance(got, dict) else {}
     entries = [entry for entry in space.get("projects", []) if isinstance(entry, dict)]
     counted = sum(int(entry.get("audienceVoteCount", 0)) for entry in entries)
+    removed, removed_body = step("org challenge entry removed by the submitter", "DELETE", challenge + "/projects/<org-project>", "sam")
+    remaining = ((removed_body or {}).get("space") or {}).get("projects", []) if isinstance(removed_body, dict) else None
     steps.append({"step": "org challenge checks", "status": 0, "body": {
         "publisher entered the org project": entered == 200 and len(entries) == 1,
         "one participant recorded": space.get("participantCount") == 1,
         "an outsider joins and leaves": joined == 200 and left == 200 and isinstance(left_body, dict) and left_body.get("joined") is False,
         "the submitter cannot leave": submitter_left == 400,
+        "the submitter removes the entry": removed == 200 and remaining == [],
         "own entry vote refused": own == 403,
         "outside votes saved": votes == [200, 200],
         "both votes counted": counted == 2,

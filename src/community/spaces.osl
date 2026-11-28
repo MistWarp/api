@@ -367,8 +367,23 @@ def handleUpdateSpace(*serve.Context c) (
     return
   )
   space.edited = timestamp
+  object saved = saveEditedSpace(space)
+  c.json(200, {ok: true, space: spaceResponse(saved, c)})
+)
+
+def saveEditedSpace(object space) object (
+  sync.lock(spaceWriteLock(space["_id"].toStr()))
+  defer sync.unlock(spaceWriteLock(space["_id"].toStr()))
+  object fresh = (spaceDocs.findById(space["_id"].toStr()) ?? {})
+  array lockedFields = ["projects", "submissions", "participants", "scores", "audienceVotes"]
+  for i lockedFields.len (
+    string field = lockedFields[i].toStr()
+    if fresh.contains(field) (
+      space[field] = fresh[field]
+    )
+  )
   putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  return space
 )
 
 def handleDeleteSpace(*serve.Context c) (
@@ -499,20 +514,40 @@ def handleRemoveSpaceProject(*serve.Context c) (
   )
   object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   boolean allowed = canManageSpace(space, c)
-  if project.len > 0 (
-    allowed = allowed or searchEntryOwnedByContext(project, c)
+  if !allowed and project.len > 0 (
+    string ownership = searchEntryOwnership(project, c)
+    if ownership == "unavailable" (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
+    allowed = ownership == "yes"
   )
   if !allowed (
     c.forbidden("you cannot remove this project")
     return
   )
-  space.projects = removeString(spaceProjectIds(space), c.param("project"))
+  object saved = removeProjectFromSpaceLocked(space["_id"].toStr(), c.param("project"))
+  if saved.len == 0 (
+    c.notFound("space not found")
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(saved, c)})
+)
+
+def removeProjectFromSpaceLocked(string spaceId, string projectId) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return {}
+  )
+  space.projects = removeString(spaceProjectIds(space), projectId)
   if space.kind.toStr() == "challenge" (
     array submissions = challengeArray(space, "submissions")
     array nextSubmissions = []
     for i submissions.len (
       object submission = submissions[i].assert(object)
-      if submission.projectId.toStr() != c.param("project") (
+      if submission.projectId.toStr() != projectId (
         nextSubmissions.append(submission)
       )
     )
@@ -520,7 +555,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
   )
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  return space
 )
 
 def handleFollowSpace(*serve.Context c) (
