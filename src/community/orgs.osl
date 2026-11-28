@@ -3,6 +3,7 @@ export {
   creationOwner,
   isOrgOwned,
   ownerOrgSnapshot,
+  ownerOrgSnapshotCached,
   orgAdminAccess,
   orgMoveOutAccess,
   orgAccess,
@@ -70,6 +71,8 @@ def fetchOrgSnapshot(string name) object (
   )
   object snapshot = {ok: true, org: data, members: (data.members ?? []).assertElse(array, [])}
   orgSnapshotCache.set(name, snapshot)
+  orgSnapshotCache.set(normalizeUsername((data.id ?? "").toStr()), snapshot)
+  orgSnapshotCache.set(normalizeUsername((data.username ?? "").toStr()), snapshot)
   return snapshot
 )
 
@@ -115,6 +118,24 @@ def orgMemberCanPublish(object snapshot, string userId, string username) boolean
 def ownerOrgSnapshot(object value) object (
   string ownerId = (value.ownerId ?? "").toStr()
   return roturOrgSnapshot(if ownerId != "" then ownerId else (value.owner ?? "").toStr())
+)
+
+def ownerOrgSnapshotCached(object value) object (
+  string ownerId = (value.ownerId ?? "").toStr()
+  string key = normalizeUsername(if ownerId != "" then ownerId else (value.owner ?? "").toStr())
+  if key == "" or !isSafePathPart(key) (
+    return {ok: false, notOrg: true}
+  )
+  object known = cachedOrgSnapshot(key)
+  if known.len > 0 (
+    return known
+  )
+  thread.new(warmOrgSnapshot, key)
+  return {ok: false, unavailable: true}
+)
+
+def warmOrgSnapshot(string key) (
+  void roturOrgSnapshot(key)
 )
 
 def viewerOrgListing(string name, string expectedOrgId,*serve.Context c) string (

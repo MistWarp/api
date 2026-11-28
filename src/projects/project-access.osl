@@ -10,6 +10,7 @@ export {
   projectRole,
   projectRoleFor,
   projectRoleForName,
+  projectRoleForNameCached,
   removeString
 }
 
@@ -87,6 +88,19 @@ def projectRoleForName(object project, string username) string (
     return role
   )
   object snapshot = ownerOrgSnapshot(project)
+  string ownerId = (project.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return role
+  )
+  return if orgMemberCanPublish(snapshot, "", username) then "owner" else role
+)
+
+def projectRoleForNameCached(object project, string username) string (
+  string role = projectRole(project, username)
+  if role == "owner" or username == "" or !isOrgOwned(project) (
+    return role
+  )
+  object snapshot = ownerOrgSnapshotCached(project)
   string ownerId = (project.ownerId ?? "").toStr()
   if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
     return role

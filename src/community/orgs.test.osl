@@ -166,6 +166,7 @@ testing.assert(snapshot.ok and snapshot.org.id == "org_studio", "an org comes ba
 testing.assert(askedRotur == ["studio mw-key"], "MistWarp asks with its service key, by the lowercased name")
 void roturOrgSnapshot("studio")
 testing.assert(askedRotur.len == 1, "a second look within the minute is cached")
+testing.assert(roturOrgSnapshot("org_studio").ok and askedRotur.len == 1, "the same org asked for by id is already known")
 
 testing.assert(orgMemberPerms(snapshot, "u_ada", "ada") == ["admin"], "an admin has every permission")
 testing.assert(orgMemberPerms(snapshot, "", "BEA") == ["apps"], "a member is found by name too")
