@@ -300,13 +300,28 @@ def handleInviteChallengeJudge(*serve.Context c) (
     return
   )
   object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  if !inviteChallengeJudgeLocked(space["_id"].toStr(), invite) (
+    c.badRequest("this user is already on the challenge team")
+    return
+  )
+  addNotification(profile.username.toStr(), contextString(c, "username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def inviteChallengeJudgeLocked(string spaceId, object invite) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string username = invite.username.toStr()
+  if space.len == 0 or stringArrayContainsUser(challengeArray(space, "judges"), username) or isChallengeJudgeInvitee(space, username) (
+    return false
+  )
   array invites = challengeArray(space, "judgeInvites")
   invites.append(invite)
   space.judgeInvites = invites
   space.edited = timestamp
   putSpaceDocument(space)
-  addNotification(profile.username.toStr(), contextString(c, "username"), "challenge_judge_invite", {spaceId: space["_id"], spaceTitle: space.title})
-  c.json(201, {ok: true, invitation: invite})
+  return true
 )
 
 def handleJoinChallenge(*serve.Context c) (

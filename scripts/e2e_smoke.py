@@ -1076,6 +1076,11 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     ids[str(created.get("_id", created.get("id", "")))] = "<org-challenge>"
     challenge = "/v1/spaces/<org-challenge>"
     entered, _ = step("org challenge entry by publisher", "POST", challenge + "/projects/<org-project>", "sam")
+    invited, _ = step("org challenge curator invite", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    invited_again, _ = step("org challenge curator invite again", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    cancelled, _ = step("org challenge curator invite cancel", "DELETE", challenge + "/invitations/bob", "sam")
+    not_curator, _ = step("org challenge curator remove when not one", "DELETE", challenge + "/curators/bob", "sam")
+    reinvited, _ = step("org challenge curator invite after cancel", "POST", challenge + "/curators", "sam", {"username": "bob"})
     joined, _ = step("org challenge join", "POST", challenge + "/join", "bob", {})
     submitter_left, _ = step("org challenge leave refused for the submitter", "DELETE", challenge + "/join", "sam")
     left, left_body = step("org challenge leave", "DELETE", challenge + "/join", "bob")
@@ -1102,6 +1107,7 @@ def org_challenge_flow(server, step, steps, ids, project_path):
         "the submitter cannot leave": submitter_left == 400,
         "the submitter removes the entry": removed == 200 and remaining == [],
         "an org admin deletes the challenge": deleted == 200 and gone == 404,
+        "curator invites are kept once and can be cancelled": [invited, invited_again, cancelled, not_curator, reinvited] == [201, 400, 200, 200, 201],
         "own entry vote refused": own == 403,
         "outside votes saved": votes == [200, 200],
         "both votes counted": counted == 2,

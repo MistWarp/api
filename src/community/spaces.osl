@@ -415,7 +415,7 @@ def saveEditedSpace(object read, object edited) object (
   if isChallenge and changed.contains("criteria") and challengeArray(fresh, "scores").len > 0 (
     return {refused: "criteria"}
   )
-  if isChallenge and changed.contains("votingMode") and challengePhase(fresh) == "results" (
+  if isChallenge and changed.contains("votingMode") and challengeVotingMode(edited) != challengeVotingMode(fresh) and challengePhase(fresh) == "results" (
     return {refused: "votingMode"}
   )
   for i changed.len (
@@ -702,25 +702,86 @@ def handleInviteSpaceCurator(*serve.Context c) (
     c.notFound("user not found")
     return
   )
-  if stringArrayContainsUser(spaceManagers(space), username) (
+  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
+  string outcome = inviteCuratorLocked(space["_id"].toStr(), invite)
+  if outcome == "missing" (
+    c.notFound("space not found")
+    return
+  )
+  if outcome == "curator" (
     c.badRequest("this user is already a curator")
     return
+  )
+  if outcome == "invited" (
+    c.badRequest("this user already has an invitation")
+    return
+  )
+  addNotification(profile.username.toStr(), contextString(c, "username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
+  c.json(201, {ok: true, invitation: invite})
+)
+
+def inviteCuratorLocked(string spaceId, object invite) string (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return "missing"
+  )
+  string username = invite.username.toStr()
+  if stringArrayContainsUser(spaceManagers(space), username) (
+    return "curator"
   )
   array invites = spaceCuratorInvites(space)
   for i invites.len (
     object existing = invites[i].assert(object)
-    if normalizeUsername(existing.username.toStr()) == usernameKey (
-      c.badRequest("this user already has an invitation")
-      return
+    if normalizeUsername(existing.username.toStr()) == normalizeUsername(username) (
+      return "invited"
     )
   )
-  object invite = {username: profile.username, invitedBy: contextString(c, "username"), created: timestamp}
   invites.append(invite)
   space.curatorInvites = invites
   space.edited = timestamp
   putSpaceDocument(space)
-  addNotification(profile.username.toStr(), contextString(c, "username"), "space_curator_invite", {spaceId: space["_id"], spaceTitle: space.title})
-  c.json(201, {ok: true, invitation: invite})
+  return "saved"
+)
+
+def removeCuratorLocked(string spaceId, string username) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  array managers = if space.len > 0 then spaceManagers(space) else []
+  if !stringArrayContainsUser(managers, username) (
+    return false
+  )
+  space.managers = removeUser(managers, username)
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return true
+)
+
+def cancelCuratorInviteLocked(string spaceId, string username) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return
+  )
+  array remaining = []
+  array invites = spaceCuratorInvites(space)
+  boolean found = false
+  for i invites.len (
+    object invite = invites[i].assert(object)
+    if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
+      remaining.append(invite)
+    ) else (
+      found = true
+    )
+  )
+  if found (
+    space.curatorInvites = remaining
+    space.edited = timestamp
+    putSpaceDocument(space)
+  )
 )
 
 def handleRespondSpaceCuratorInvite(*serve.Context c) (
@@ -775,11 +836,7 @@ def handleRemoveSpaceCurator(*serve.Context c) (
     return
   )
   string username = c.param("username")
-  array managers = spaceManagers(space)
-  if stringArrayContainsUser(managers, username) (
-    space.managers = removeUser(managers, username)
-    space.edited = timestamp
-    putSpaceDocument(space)
+  if removeCuratorLocked(space["_id"].toStr(), username) (
     addNotification(username, contextString(c, "username"), "space_curator_removed", {spaceId: space["_id"], spaceTitle: space.title})
   )
   c.json(200, {ok: true})
@@ -795,23 +852,7 @@ def handleCancelSpaceCuratorInvite(*serve.Context c) (
     c.forbidden("only the owner can cancel invitations")
     return
   )
-  string username = c.param("username")
-  array remaining = []
-  array invites = spaceCuratorInvites(space)
-  boolean found = false
-  for i invites.len (
-    object invite = invites[i].assert(object)
-    if normalizeUsername(invite.username.toStr()) != normalizeUsername(username) (
-      remaining.append(invite)
-    ) else (
-      found = true
-    )
-  )
-  if found (
-    space.curatorInvites = remaining
-    space.edited = timestamp
-    putSpaceDocument(space)
-  )
+  cancelCuratorInviteLocked(space["_id"].toStr(), c.param("username"))
   c.json(200, {ok: true})
 )
 
