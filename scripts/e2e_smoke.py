@@ -52,7 +52,7 @@ SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
-CHECK_STEPS = {"sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
+CHECK_STEPS = {"org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
 SCOPED_SESSIONS = {"sam_editor": ("sam", "editor")}
 VOLATILE_NAMES = {"token", "viewKey", "expires", "created", "edited", "firstSeen", "historyBytes"}
 UNORDERED = {"largest"}
@@ -1058,8 +1058,38 @@ def org_flow(server, step, steps, ids):
     step("org space move out refused for a publisher", "PUT", "/v1/spaces/<sam-space>", "dee", {"owner": "dee"})
     step("org page", "GET", "/v1/orgs/studio")
     step("org page as member", "GET", "/v1/orgs/studio", "dee")
+    org_challenge_flow(server, step, steps, ids, path)
     step("org project delete by billing", "DELETE", path, "alice")
     step("org project delete by publisher", "DELETE", path, "dee")
+
+
+def org_challenge_flow(server, step, steps, ids, project_path):
+    step("org challenge entry save", "POST", project_path + "/upload", "dee", form=({}, {"project": sb3_archive(project_with_costumes([]))}))
+    step("org challenge entry share", "POST", project_path + "/visibility", "dee", {"visibility": "public"})
+    now = int(time.time() * 1000)
+    status, created = step("org challenge create", "POST", "/v1/spaces", "dee", {"title": "Studio jam", "kind": "challenge", "org": "studio", "visibility": "public", "openSubmissions": True, "votingMode": "audience", "startsAt": now - 3600000, "endsAt": now + 3600000})
+    created = created.get("space", {}) if isinstance(created, dict) else {}
+    ids[str(created.get("_id", created.get("id", "")))] = "<org-challenge>"
+    challenge = "/v1/spaces/<org-challenge>"
+    entered, _ = step("org challenge entry by publisher", "POST", challenge + "/projects/<org-project>", "sam")
+    step("org challenge to judging", "PUT", challenge, "dee", {"endsAt": now - 1000, "judgingEndsAt": now + 3600000})
+    own, _ = step("org challenge vote on own entry", "PUT", challenge + "/entries/<org-project>/vote", "dee", {"value": 4})
+    vote = challenge + "/entries/<org-project>/vote"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        bob = pool.submit(step, "org challenge vote by an outsider", "PUT", vote, "bob", {"value": 5})
+        alice = pool.submit(step, "org challenge vote by a member who can't publish", "PUT", vote, "alice", {"value": 3})
+        votes = [bob.result()[0], alice.result()[0]]
+    status, got = step("org challenge after votes", "GET", challenge, "dee")
+    space = got.get("space", {}) if isinstance(got, dict) else {}
+    entries = [entry for entry in space.get("projects", []) if isinstance(entry, dict)]
+    counted = sum(int(entry.get("audienceVoteCount", 0)) for entry in entries)
+    steps.append({"step": "org challenge checks", "status": 0, "body": {
+        "publisher entered the org project": entered == 200 and len(entries) == 1,
+        "one participant recorded": space.get("participantCount") == 1,
+        "own entry vote refused": own == 403,
+        "outside votes saved": votes == [200, 200],
+        "both votes counted": counted == 2,
+    }})
 
 
 def remix_sync_flow(server, step, steps, ids):

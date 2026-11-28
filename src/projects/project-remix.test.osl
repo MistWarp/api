@@ -139,6 +139,10 @@ def orgAccess(string name, string expectedOrgId, *serve.Context c) string (
 def roturOrgSnapshot(string name) object (
   return {ok: false, notOrg: true}
 )
+def warmProjectOrgAccess(string id,*serve.Context c) (
+  return
+)
+
 def isOrgOwned(object value) boolean (
   return false
 )

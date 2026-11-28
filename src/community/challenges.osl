@@ -489,21 +489,61 @@ def handleScoreChallengeEntry(*serve.Context c) (
     c.badRequest("feedback is too long")
     return
   )
-  string judge = contextString(c, "username")
+  object score = {projectId: projectId, judge: contextString(c, "username"), ratings: ratings, feedback: feedback, edited: timestamp}
+  if !saveChallengeScore(space["_id"].toStr(), score) (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while your score was being saved. Try again."})
+    return
+  )
+  c.json(200, {ok: true, score: score})
+)
+
+def spaceWriteLock(string id) string (
+  return "space-write:" ++ id
+)
+
+def saveChallengeScore(string spaceId, object score) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string projectId = score.projectId.toStr()
+  if space.len == 0 or challengePhase(space) != "judging" or !spaceProjectIds(space).contains(projectId) (
+    return false
+  )
   array scores = challengeArray(space, "scores")
   array nextScores = []
   for i scores.len (
     object existing = scores[i].assert(object)
-    if existing.projectId.toStr() != projectId or normalizeUsername(existing.judge.toStr()) != normalizeUsername(judge) (
+    if existing.projectId.toStr() != projectId or normalizeUsername(existing.judge.toStr()) != normalizeUsername(score.judge.toStr()) (
       nextScores.append(existing)
     )
   )
-  object score = {projectId: projectId, judge: judge, ratings: ratings, feedback: feedback, edited: timestamp}
   nextScores.append(score)
   space.scores = nextScores
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, score: score})
+  return true
+)
+
+def saveChallengeVote(string spaceId, object vote) boolean (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  string projectId = vote.projectId.toStr()
+  if space.len == 0 or !challengeAudienceVotingEnabled(space) or challengePhase(space) != "judging" or !spaceProjectIds(space).contains(projectId) (
+    return false
+  )
+  array votes = challengeArray(space, "audienceVotes")
+  array nextVotes = []
+  for i votes.len (
+    object existing = votes[i].assert(object)
+    if existing.projectId.toStr() != projectId or normalizeUsername(existing.username.toStr()) != normalizeUsername(vote.username.toStr()) (
+      nextVotes.append(existing)
+    )
+  )
+  nextVotes.append(vote)
+  space.audienceVotes = nextVotes
+  putSpaceDocument(space)
+  return true
 )
 
 def handleVoteChallengeEntry(*serve.Context c) (
@@ -532,18 +572,10 @@ def handleVoteChallengeEntry(*serve.Context c) (
     c.badRequest("rating must be between 1 and 5")
     return
   )
-  string username = contextString(c, "username")
-  array votes = challengeArray(space, "audienceVotes")
-  array nextVotes = []
-  for i votes.len (
-    object vote = votes[i].assert(object)
-    if vote.projectId.toStr() != projectId or normalizeUsername(vote.username.toStr()) != normalizeUsername(username) (
-      nextVotes.append(vote)
-    )
+  if !saveChallengeVote(space["_id"].toStr(), {projectId: projectId, username: contextString(c, "username"), value: value, edited: timestamp}) (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while your vote was being saved. Try again."})
+    return
   )
-  nextVotes.append({projectId: projectId, username: username, value: value, edited: timestamp})
-  space.audienceVotes = nextVotes
-  putSpaceDocument(space)
   c.json(200, {ok: true, value: value})
 )
 

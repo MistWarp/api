@@ -432,7 +432,8 @@ def handleAddSpaceProject(*serve.Context c) (
     c.forbidden("only shared or unlisted projects can be added")
     return
   )
-  boolean allowed = canManageSpace(space, c)
+  boolean manages = canManageSpace(space, c)
+  boolean allowed = manages
   boolean ownsProject = searchEntryOwnedByContext(project, c)
   boolean participantCanSubmit = space.openSubmissions == true and ownsProject
   if space.kind.toStr() == "challenge" (
@@ -443,29 +444,51 @@ def handleAddSpaceProject(*serve.Context c) (
     c.forbidden("submissions are closed")
     return
   )
-  array ids = spaceProjectIds(space)
-  if !ids.contains(project.id.toStr()) (
-    ids.append(project.id.toStr())
-    space.projects = ids
-    if space.kind.toStr() == "challenge" (
-      array submissions = challengeArray(space, "submissions")
-      submissions.append({projectId: project.id, owner: project.owner, submittedBy: contextString(c, "username"), submittedAt: timestamp})
-      space.submissions = submissions
-      array participants = challengeArray(space, "participants")
-      string participant = project.owner.toStr()
-      if isOrgOwned(project) (
-        participant = if ownsProject then contextString(c, "username") else ""
-      )
-      if participant != "" and !stringArrayContainsUser(participants, participant) (
-        participants.append(participant)
-      )
-      space.participants = participants
-    )
-    space.edited = timestamp
-    putSpaceDocument(space)
-    notifyContentOwner(space, contextString(c, "username"), "space_project", {spaceId: space["_id"], spaceTitle: space.title, projectId: project.id, projectTitle: project.title})
+  string participant = project.owner.toStr()
+  if isOrgOwned(project) (
+    participant = if ownsProject then contextString(c, "username") else ""
   )
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages)
+  if added.len == 0 (
+    c.json(409, {ok: false, code: "space_changed", error: "The space changed while this project was being added. Try again."})
+    return
+  )
+  object fresh = added.space.assert(object)
+  if added.added == true (
+    notifyContentOwner(fresh, contextString(c, "username"), "space_project", {spaceId: fresh["_id"], spaceTitle: fresh.title, projectId: project.id, projectTitle: project.title})
+  )
+  c.json(200, {ok: true, space: spaceResponse(fresh, c)})
+)
+
+def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean asManager) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return {}
+  )
+  if !asManager and (space.openSubmissions != true or (space.kind.toStr() == "challenge" and challengePhase(space) != "submissions")) (
+    return {}
+  )
+  array ids = spaceProjectIds(space)
+  if ids.contains(project.id.toStr()) (
+    return {space: space, added: false}
+  )
+  ids.append(project.id.toStr())
+  space.projects = ids
+  if space.kind.toStr() == "challenge" (
+    array submissions = challengeArray(space, "submissions")
+    submissions.append({projectId: project.id, owner: project.owner, submittedBy: submitter, submittedAt: timestamp})
+    space.submissions = submissions
+    array participants = challengeArray(space, "participants")
+    if participant != "" and !stringArrayContainsUser(participants, participant) (
+      participants.append(participant)
+    )
+    space.participants = participants
+  )
+  space.edited = timestamp
+  putSpaceDocument(space)
+  return {space: space, added: true}
 )
 
 def handleRemoveSpaceProject(*serve.Context c) (
