@@ -202,6 +202,7 @@ def handleUpdateSpace(*serve.Context c) (
     c.notFound("space not found")
     return
   )
+  string readJson = json.stringify(space)
   if !canManageSpace(space, c) (
     if isOrgOwned(space) and orgAccess(space.owner.toStr(), (space.ownerId ?? "").toStr(), c) == "unavailable" (
       c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
@@ -367,37 +368,63 @@ def handleUpdateSpace(*serve.Context c) (
     return
   )
   space.edited = timestamp
-  object saved = saveEditedSpace(space, body.contains("criteria") and space.kind.toStr() == "challenge")
+  object read = json.parse(readJson, {type: "object"}).unwrap().assert(object)
+  object saved = saveEditedSpace(read, space)
   if saved.len == 0 (
     c.notFound("space not found")
     return
   )
   if saved.contains("refused") (
-    c.badRequest("judging criteria cannot change after scoring begins")
+    string refusal = saved.refused.toStr()
+    if refusal == "criteria" (
+      c.badRequest("judging criteria cannot change after scoring begins")
+    ) else if refusal == "votingMode" (
+      c.badRequest("the voting mode cannot change after results are published")
+    ) else (
+      c.json(409, {ok: false, code: "space_changed", error: "This space changed while your edit was being saved. Reload it and try again."})
+    )
     return
   )
   c.json(200, {ok: true, space: spaceResponse(saved, c)})
 )
 
-def saveEditedSpace(object space, boolean changesCriteria) object (
-  sync.lock(spaceWriteLock(space["_id"].toStr()))
-  defer sync.unlock(spaceWriteLock(space["_id"].toStr()))
-  object fresh = (spaceDocs.findById(space["_id"].toStr()) ?? {})
+def saveEditedSpace(object read, object edited) object (
+  string spaceId = read["_id"].toStr()
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object fresh = (spaceDocs.findById(spaceId) ?? {})
   if fresh.len == 0 (
     return {}
   )
-  if changesCriteria and challengeArray(fresh, "scores").len > 0 (
-    return {refused: "criteria"}
-  )
-  array lockedFields = ["projects", "submissions", "participants", "scores", "audienceVotes"]
-  for i lockedFields.len (
-    string field = lockedFields[i].toStr()
-    if fresh.contains(field) (
-      space[field] = fresh[field]
+  array ownerFields = ["owner", "ownerId", "ownerType"]
+  for i ownerFields.len (
+    string field = ownerFields[i].toStr()
+    if json.stringify(fresh[field] ?? "") != json.stringify(read[field] ?? "") (
+      return {refused: "owner"}
     )
   )
-  putSpaceDocument(space)
-  return space
+  array changed = []
+  array keys = edited.getKeys()
+  for i keys.len (
+    string key = keys[i].toStr()
+    if key != "edited" and (!read.contains(key) or json.stringify(read[key]) != json.stringify(edited[key])) (
+      changed.append(key)
+    )
+  )
+  boolean isChallenge = fresh.kind.toStr() == "challenge"
+  if isChallenge and changed.contains("criteria") and challengeArray(fresh, "scores").len > 0 (
+    return {refused: "criteria"}
+  )
+  if isChallenge and changed.contains("votingMode") and challengePhase(fresh) == "results" (
+    return {refused: "votingMode"}
+  )
+  for i changed.len (
+    string key = changed[i].toStr()
+    fresh[key] = edited[key]
+  )
+  fresh.edited = edited.edited
+  putSpaceDocument(fresh)
+  return fresh
 )
 
 def handleDeleteSpace(*serve.Context c) (

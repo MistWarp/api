@@ -455,7 +455,17 @@ def handleRemoveChallengeJudge(*serve.Context c) (
     c.forbidden("you cannot manage this challenge")
     return
   )
-  string username = c.param("username")
+  removeChallengeJudgeLocked(space["_id"].toStr(), c.param("username"))
+  c.json(200, {ok: true})
+)
+
+def removeChallengeJudgeLocked(string spaceId, string username) (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 (
+    return
+  )
   array judges = challengeArray(space, "judges")
   boolean changed = stringArrayContainsUser(judges, username)
   space.judges = removeUser(judges, username)
@@ -475,7 +485,6 @@ def handleRemoveChallengeJudge(*serve.Context c) (
     space.edited = timestamp
     putSpaceDocument(space)
   )
-  c.json(200, {ok: true})
 )
 
 def validChallengeCriterion(object space, string criterionId) boolean (
@@ -683,8 +692,26 @@ def handlePublishChallengeResults(*serve.Context c) (
     c.badRequest("at least one entry needs a judge score")
     return
   )
+  object published = publishChallengeResultsLocked(space["_id"].toStr())
+  if published.len == 0 (
+    c.json(409, {ok: false, code: "challenge_changed", error: "The challenge changed while results were being published. Try again."})
+    return
+  )
+  c.json(200, {ok: true, space: spaceResponse(published, c)})
+)
+
+def publishChallengeResultsLocked(string spaceId) object (
+  sync.lock(spaceWriteLock(spaceId))
+  defer sync.unlock(spaceWriteLock(spaceId))
+  object space = (spaceDocs.findById(spaceId) ?? {})
+  if space.len == 0 or timestamp <= space.endsAt.toNum() (
+    return {}
+  )
+  if challengeArray(space, if challengeAudienceJudged(space) then "audienceVotes" else "scores").len == 0 (
+    return {}
+  )
   space.resultsPublishedAt = timestamp
   space.edited = timestamp
   putSpaceDocument(space)
-  c.json(200, {ok: true, space: spaceResponse(space, c)})
+  return space
 )
