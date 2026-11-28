@@ -33,7 +33,7 @@ def runStubServer() (
   stubApp.run(":18331")
 )
 
-*s3.Client r2Client = s3.new({endpoint: "http://127.0.0.1:18331", bucket: "test", access_key_id: "test", secret_access_key: "test"})
+*s3.Client r2Client = s3.new({endpoint: "http://127.0.0.1:18331", bucket: "test", accessKeyId: "test", secretAccessKey: "test"})
 
 def isSafeBlobKey(string key) boolean (
   return key != "" and !key.contains("..")

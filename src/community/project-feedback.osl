@@ -43,7 +43,7 @@ def handleUpdateProjectFeedback(*serve.Context c) (
     c.forbidden("not your project")
     return
   )
-  object feedback = (feedbackDocs.findById(c.param("feedback")) ?? {})
+  object feedback = (feedbackDocs.findById(c.param("feedback")).unwrapOr(null) ?? {})
   if feedback.len == 0 or feedback.projectId.toStr() != c.param("id") (
     c.notFound("feedback not found")
     return
@@ -144,7 +144,7 @@ def handleSaveProjectReview(*serve.Context c) (
     reviewerId = normalizeUsername(contextString(c, "username"))
   )
   string reviewId = project.id.toStr() ++ ":" ++ reviewerId
-  object existing = (reviewDocs.findById(reviewId) ?? {})
+  object existing = (reviewDocs.findById(reviewId).unwrapOr(null) ?? {})
   number created = timestamp
   if existing.len > 0 (
     created = existing.created.toNum()

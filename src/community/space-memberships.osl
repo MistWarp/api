@@ -51,7 +51,7 @@ def syncSpaceMemberships(object space) boolean (
   array keys = spaceRelatedUserKeys(space)
   string signature = json.stringify(keys)
   string stateId = "space:" ++ spaceId
-  object state = (spaceMemberDocs.findById(stateId) ?? {})
+  object state = (spaceMemberDocs.findById(stateId).unwrapOr(null) ?? {})
   if state.len > 0 and state.signature.toStr() == signature (
     return true
   )
@@ -87,7 +87,7 @@ def deleteSpaceMemberships(string spaceId) boolean (
 
 def migrateSpaceMemberships() boolean (
   string migrationId = "migration:space-members-v1"
-  if (spaceMemberDocs.findById(migrationId) ?? {}).len > 0 (
+  if (spaceMemberDocs.findById(migrationId).unwrapOr(null) ?? {}).len > 0 (
     return true
   )
   array previous = spaceMemberDocs.all()

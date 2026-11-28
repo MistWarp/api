@@ -502,13 +502,13 @@ def ensureUserIdentity(string userId, string username) (
   userIdsCache.set("username:" ++ normalizeUsername(username), userId)
 )
 
-number roturRequestTimeoutSeconds = 10
+number roturRequestTimeoutMs = 10000
 
 def roturServiceOptions() object (
   if mistwarpRoturToken == "" (
-    return {timeout: roturRequestTimeoutSeconds}
+    return {timeout: roturRequestTimeoutMs}
   )
-  return {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}, timeout: roturRequestTimeoutSeconds}
+  return {headers: {"Authorization": "Bearer " ++ mistwarpRoturToken}, timeout: roturRequestTimeoutMs}
 )
 
 def refreshUsernameForId(string userId) string (

@@ -85,7 +85,7 @@ def copyFileReplacing(string source, string target) boolean (
   if !fs.isFile(source) or fs.isDir(target) (
     return false
   )
-  if fs.copy(source, target, {overwrite: true}) (
+  if fs.copy(source, target, {overwrite: true}).isOk() (
     return true
   )
   void fs.remove(target, {force: true})

@@ -90,7 +90,7 @@ def handleListSpaces(*serve.Context c) (
 )
 
 def handleGetSpace(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -204,7 +204,7 @@ def handleCreateSpace(*serve.Context c) (
 )
 
 def handleUpdateSpace(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -232,7 +232,7 @@ def handleUpdateSpace(*serve.Context c) (
       return
     )
     number nextOwnerLimit = mistwarpBenefitsForUserId(nextOwnerId).maxSpaces.toNum()
-    if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", "==", nextOwnerId).count() >= nextOwnerLimit (
+    if !identityMatches((space.ownerId ?? "").toStr(), space.owner.toStr(), nextOwnerId, nextOwner) and spaceDocs.where("ownerId", "==", nextOwnerId).count().unwrap() >= nextOwnerLimit (
       c.badRequest("the new owner has reached their space limit")
       return
     )
@@ -352,7 +352,7 @@ def handleUpdateSpace(*serve.Context c) (
 )
 
 def handleDeleteSpace(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -372,7 +372,7 @@ def handleDeleteSpace(*serve.Context c) (
 )
 
 def handleSetSpaceThumbnail(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -391,7 +391,7 @@ def handleSetSpaceThumbnail(*serve.Context c) (
     c.badRequest("thumbnail too large")
     return
   )
-  if !fs.writeFileBytes(spaceThumbnailPath(space["_id"].toStr()), thumbnail.data) (
+  if !fs.writeFileBytes(spaceThumbnailPath(space["_id"].toStr()), thumbnail.data).isOk() (
     c.internalError("thumbnail save failed")
     return
   )
@@ -401,8 +401,8 @@ def handleSetSpaceThumbnail(*serve.Context c) (
 )
 
 def handleAddSpaceProject(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
-  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
+  object project = (projectSearchDocs.findById(c.param("project")).unwrapOr(null) ?? {})
   if space.len == 0 or project.len == 0 (
     c.notFound("space or project not found")
     return
@@ -445,12 +445,12 @@ def handleAddSpaceProject(*serve.Context c) (
 )
 
 def handleRemoveSpaceProject(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
   )
-  object project = (projectSearchDocs.findById(c.param("project")) ?? {})
+  object project = (projectSearchDocs.findById(c.param("project")).unwrapOr(null) ?? {})
   boolean allowed = canManageSpace(space, c)
   if project.len > 0 (
     allowed = allowed or searchEntryOwnedByContext(project, c)
@@ -477,7 +477,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
 )
 
 def handleFollowSpace(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return
@@ -492,7 +492,7 @@ def handleFollowSpace(*serve.Context c) (
 )
 
 def handleUnfollowSpace(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -513,7 +513,7 @@ def handleMySpaces(*serve.Context c) (
   object seen = {}
   for i memberships.len (
     object membership = memberships[i].assert(object)
-    object space = (spaceDocs.findById(membership.spaceId.toStr()) ?? {})
+    object space = (spaceDocs.findById(membership.spaceId.toStr()).unwrapOr(null) ?? {})
     if space.len > 0 (
       seen[space["_id"].toStr()] = true
       stored.append(space)
@@ -544,7 +544,7 @@ def handleMySpaces(*serve.Context c) (
 )
 
 def handleGetSpaceManagement(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -557,7 +557,7 @@ def handleGetSpaceManagement(*serve.Context c) (
 )
 
 def handleInviteSpaceCurator(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -572,7 +572,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
     c.badRequest("choose another user")
     return
   )
-  object profile = (profileSearchDocs.findById(usernameKey) ?? {})
+  object profile = (profileSearchDocs.findById(usernameKey).unwrapOr(null) ?? {})
   if profile.len == 0 (
     c.notFound("user not found")
     return
@@ -599,7 +599,7 @@ def handleInviteSpaceCurator(*serve.Context c) (
 )
 
 def handleRespondSpaceCuratorInvite(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -640,7 +640,7 @@ def handleRespondSpaceCuratorInvite(*serve.Context c) (
 )
 
 def handleRemoveSpaceCurator(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -661,7 +661,7 @@ def handleRemoveSpaceCurator(*serve.Context c) (
 )
 
 def handleCancelSpaceCuratorInvite(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 (
     c.notFound("space not found")
     return
@@ -698,7 +698,7 @@ def handleReactSpace(*serve.Context c) (
 )
 
 def handleReactSpaceLocked(*serve.Context c) (
-  object space = (spaceDocs.findById(c.param("id")) ?? {})
+  object space = (spaceDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if space.len == 0 or !canViewSpace(space, c) (
     c.notFound("space not found")
     return

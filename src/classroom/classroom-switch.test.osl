@@ -46,7 +46,7 @@ def loadStudent(string id) object (
 )
 
 def loadClass(string id) object (
-  return (classDocs.findById(id) ?? {})
+  return (classDocs.findById(id).unwrapOr(null) ?? {})
 )
 
 void classDocs.insertOne({_id: "cls_admin", code: "ADMIN234", ownerId: "u_mist", owner: "mist"})

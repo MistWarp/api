@@ -394,7 +394,7 @@ def commentPage(array allComments,*serve.Context c) object (
   )
   number totalRoots = roots.len
   number requestedLimit = c.queryInt("limit", 0)
-  if requestedLimit <= 0 or c.queryBool("all", false) (
+  if requestedLimit <= 0 or c.queryBool("all", false).unwrapOr(false) (
     return {comments: comments, totalRoots: totalRoots, nextOffset: totalRoots, issueCounts: issueCounts}
   )
   number offset = clampNumber(c.queryInt("offset", 0), 0, totalRoots)

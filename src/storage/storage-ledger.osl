@@ -73,7 +73,7 @@ def ledgerCall(string method, string path, object body) object (
   if !ledgerReady() (
     return {status: 0, body: {}}
   )
-  object options = {timeout: 10, headers: {
+  object options = {timeout: 10000, headers: {
     "Content-Type": "application/json",
     "X-Rotur-Service-Secret": ledgerSecret.strip(),
     "X-Rotur-App": "mistwarp"

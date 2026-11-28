@@ -96,7 +96,7 @@ def unpackProjectArchive(object project, object benefits, UploadArchive archive)
   archive.workId = project.id.toStr() ++ "." ++ randomString(8)
   archive.zipPath = tmpDir ++ archive.workId ++ ".sb3"
   archive.extractDir = tmpDir ++ archive.workId
-  if !fs.writeFileBytes(archive.zipPath, archive.data) (
+  if !fs.writeFileBytes(archive.zipPath, archive.data).isOk() (
     return refuse(500, "failed to stage project upload")
   )
   archive.expandedLimit = maxProjectJsonBytes + benefits.maxProjectAssetsBytes.toNum()
@@ -104,7 +104,7 @@ def unpackProjectArchive(object project, object benefits, UploadArchive archive)
     void fs.remove(archive.zipPath)
     return refuse(400, "invalid or unsafe sb3 file")
   )
-  if !zip.decompress(archive.zipPath, archive.extractDir, {maxBytes: archive.expandedLimit, maxFiles: maxAssetCount + 1}) (
+  if !zip.decompress(archive.zipPath, archive.extractDir, {maxBytes: archive.expandedLimit, maxFiles: maxAssetCount + 1}).isOk() (
     archive.discard()
     return refuse(400, "invalid sb3 file")
   )

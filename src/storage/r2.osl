@@ -79,7 +79,7 @@ def handleGetThumbnail(*serve.Context c) (
 )
 
 def thumbnailAccess(string id, boolean hasKey) object (
-  object entry = (projectSearchDocs.findById(id) ?? {})
+  object entry = (projectSearchDocs.findById(id).unwrapOr(null) ?? {})
   if entry.len > 0 and projectOwnerBanned(entry) (
     return {found: true, ownerBanned: true, isPublic: false, viewKey: ""}
   )
@@ -341,7 +341,7 @@ def r2PutEncoded(string key, BlobBody body, string contentType, string contentEn
     return fs.writeFileBytes(path, body).isOk()
   )
   string uploadType = if contentType == "" then "application/octet-stream" else contentType
-  boolean stored = key != "" and r2Client.upload(key, body, {contentType: uploadType, contentEncoding: contentEncoding})
+  boolean stored = key != "" and r2Client.upload(key, body, {contentType: uploadType, contentEncoding: contentEncoding}).isOk()
   if stored (
     recordR2Stored({key: key, type: r2ObjectType(key), size: body.len})
   )
@@ -470,7 +470,7 @@ def r2Remove(string key) boolean (
   )
   if removed (
     string path = localBlobPath(key)
-    removed = !fs.exists(path) or fs.remove(path)
+    removed = !fs.exists(path) or fs.remove(path).isOk()
   )
   return removed
 )
@@ -549,7 +549,7 @@ def copyStoredProjectJsonToPath(object project, string outputPath) boolean (
     return fs.writeFileBytes(outputPath, fetched.body).isOk()
   )
   string plainPath = outputPath ++ ".plain"
-  if !fs.writeFileBytes(plainPath, fetched.body) (
+  if !fs.writeFileBytes(plainPath, fetched.body).isOk() (
     return false
   )
   boolean compressed = zip.gzip(plainPath, outputPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}).isOk()

@@ -48,7 +48,7 @@ def groupForSubmission(object submission) object (
   if groupId == "" (
     return {}
   )
-  object group = (classroomGroupDocs.findById(groupId) ?? {})
+  object group = (classroomGroupDocs.findById(groupId).unwrapOr(null) ?? {})
   if group.len == 0 (
     return {}
   )
@@ -103,14 +103,14 @@ def handleCreateClassGroup(*serve.Context c) (
   object assignment = {}
   string assignmentId = (body.assignmentId ?? "").toStr()
   if assignmentId != "" (
-    assignment = (assignmentDocs.findById(assignmentId) ?? {})
+    assignment = (assignmentDocs.findById(assignmentId).unwrapOr(null) ?? {})
     if assignment.len == 0 or assignment.classId.toStr() != classId (
       c.badRequest("choose an assignment from this class")
       return
     )
     for i students.len (
       object student = students[i].assert(object)
-      if (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()) ?? {}).len > 0 (
+      if (submissionDocs.findById(assignmentId ++ ":" ++ student["_id"].toStr()).unwrapOr(null) ?? {}).len > 0 (
         c.json(409, {ok: false, code: "already_started", error: student.displayName.toStr() ++ " has already started this assignment on their own."})
         return
       )
@@ -184,7 +184,7 @@ def handleDeleteClassGroup(*serve.Context c) (
   if classDoc.len == 0 (
     return
   )
-  object group = (classroomGroupDocs.findById(c.param("gid")) ?? {})
+  object group = (classroomGroupDocs.findById(c.param("gid")).unwrapOr(null) ?? {})
   if group.len == 0 or group.classId.toStr() != classDoc["_id"].toStr() (
     c.notFound("group not found")
     return

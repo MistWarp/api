@@ -102,7 +102,7 @@ def handleVoteIdea(*serve.Context c) (
 )
 
 def handleVoteIdeaLocked(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -154,7 +154,7 @@ def handleVoteIdeaLocked(*serve.Context c) (
 )
 
 def handleGetIdeaComments(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -165,7 +165,7 @@ def handleGetIdeaComments(*serve.Context c) (
 )
 
 def handleCreateIdeaComment(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -204,7 +204,7 @@ def handleCreateIdeaComment(*serve.Context c) (
 )
 
 def handleDeleteIdeaComment(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -228,7 +228,7 @@ def handleDeleteIdeaComment(*serve.Context c) (
 )
 
 def handleEditIdeaComment(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -247,7 +247,7 @@ def handleEditIdeaComment(*serve.Context c) (
 )
 
 def handleReactIdeaComment(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return
@@ -256,7 +256,7 @@ def handleReactIdeaComment(*serve.Context c) (
 )
 
 def handleUpdateIdea(*serve.Context c) (
-  object idea = (ideaDocs.findById(c.param("id")) ?? {})
+  object idea = (ideaDocs.findById(c.param("id")).unwrapOr(null) ?? {})
   if idea.len == 0 (
     c.notFound("idea not found")
     return

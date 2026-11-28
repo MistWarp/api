@@ -16,7 +16,7 @@ def handleGetProject(*serve.Context c) (
   object response = projectResponse(project, c)
   object jsonAccess = projectJsonAccess(project, c)
   if project.shared == true and project.contains("publicRelease") and project.publicRelease.toStr() != "" and response.ownerBanned != true and jsonAccess.allowed == true (
-    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    object release = (releaseDocs.findById(project.publicRelease.toStr()).unwrapOr(null) ?? {})
     if release.len > 0 and release.contains("jsonUrl") (
       response.projectJsonUrl = keyedJsonUrl(release.jsonUrl.toStr(), jsonAccess)
       response.releaseVersion = release.version
@@ -61,7 +61,7 @@ def handleGetProjectTrustedExtensions(*serve.Context c) (
   )
   array jsonUrls = [projectJsonBaseUrl(project)]
   if project.shared == true and (project.publicRelease ?? "").toStr() != "" (
-    object release = (releaseDocs.findById(project.publicRelease.toStr()) ?? {})
+    object release = (releaseDocs.findById(project.publicRelease.toStr()).unwrapOr(null) ?? {})
     if (release.jsonUrl ?? "").toStr() != "" (
       jsonUrls.append(release.jsonUrl.toStr())
     )

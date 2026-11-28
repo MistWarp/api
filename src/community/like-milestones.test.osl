@@ -55,8 +55,8 @@ def putDocument(*db.Collection collection, string id, object value) boolean (
     return false
   )
   value["_id"] = id
-  if collection.exists({_id: id}) (
-    return collection.replaceOne({_id: id}, value) == 1
+  if collection.exists({_id: id}).unwrap() (
+    return collection.replaceOne({_id: id}, value).unwrap() == 1
   )
   return collection.insertOne(value).isOk()
 )
@@ -136,7 +136,7 @@ syncFollowerMilestones("mist")
 testing.assert(sent.len == 13 and sent[13].data.milestone == 50, "follower milestones use the profile's count, private followers included")
 testing.assert(sent[13].data.path == "/users/mist", "follower milestones link to the profile")
 syncFollowerMilestones("hidden")
-testing.assert(sent.len == 13 and (likeMilestoneDocs.findById("observed:followers:hidden") ?? {}).len == 0, "a profile that hides its count records nothing")
+testing.assert(sent.len == 13 and (likeMilestoneDocs.findById("observed:followers:hidden").unwrapOr(null) ?? {}).len == 0, "a profile that hides its count records nothing")
 milestoneDb.close()
 void fs.remove(path)
 void fs.remove(path ++ "-wal")

@@ -3,7 +3,7 @@ export {
 }
 
 def classroomTermsRecord(string userId) object (
-  return (classroomTermsDocs.findById(userId) ?? {})
+  return (classroomTermsDocs.findById(userId).unwrapOr(null) ?? {})
 )
 
 def classroomTermsStatus(string userId) object (
@@ -229,7 +229,7 @@ def handleAdminPurgeClassroom(*serve.Context c) (
   string target = ""
   string schoolId = (body.schoolId ?? "").toStr()
   if schoolId != "" (
-    object school = (schoolDocs.findById(schoolId) ?? {})
+    object school = (schoolDocs.findById(schoolId).unwrapOr(null) ?? {})
     if school.len == 0 (
       c.badRequest("school not found")
       return

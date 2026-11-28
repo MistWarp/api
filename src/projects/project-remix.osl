@@ -74,7 +74,7 @@ def handleGetRemixTree(*serve.Context c) (
 
   array nodes = []
   object seen = {}
-  object root = (projectSearchDocs.findById(rootId) ?? {})
+  object root = (projectSearchDocs.findById(rootId).unwrapOr(null) ?? {})
   if root.len > 0 (
     nodes.append(root)
     seen[rootId] = true
@@ -391,7 +391,7 @@ def createFork(PreparedFork prepared, ForkRequest request, ForkOutcome outcome) 
     gitGraph: forkHistory.graph,
     collaborators: []
   }
-  object parentEntry = (projectSearchDocs.findById(parentId) ?? {})
+  object parentEntry = (projectSearchDocs.findById(parentId).unwrapOr(null) ?? {})
   if parentEntry.len > 0 and parentEntry.contains("remixRoot") and parentEntry.remixRoot.toStr() != "" (
     project.remixRoot = parentEntry.remixRoot
   )

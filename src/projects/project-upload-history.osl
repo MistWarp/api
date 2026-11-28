@@ -59,7 +59,7 @@ def unchangedVersionCheck(object project, UploadRequest request, UploadHistory h
   )
   string compareBasePath = cachedProjectWorkspacePath(project)
   string compareIncomingPath = tmpDir ++ archive.workId ++ ".compare-incoming.mwp"
-  boolean compareReady = compareBasePath != "" and fs.writeFileBytes(compareIncomingPath, history.workspace)
+  boolean compareReady = compareBasePath != "" and fs.writeFileBytes(compareIncomingPath, history.workspace).isOk()
   string comparisonJson = ""
   if compareReady (
     comparisonJson = gitinspection.CommitTreesDiffer(compareBasePath, history.currentHead, compareIncomingPath, incomingHead)
@@ -152,7 +152,7 @@ def createMergeCommit(*serve.Context c, object project, UploadRequest request, U
   string mergeDeltaPath = tmpDir ++ archive.workId ++ ".merge-delta.mwp"
   boolean mergeReady = copyProjectWorkspaceToPath(project, mergeTargetPath)
   mergeReady = mergeReady and copyProjectWorkspaceToPath(mergeSource, mergeSourcePath)
-  mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, history.mergeTree)
+  mergeReady = mergeReady and fs.writeFileBytes(mergeTreePath, history.mergeTree).isOk()
   HistoryIdentity identity = historyIdentity(project)
   string mergeBranch = if branchMerge then request.mergeTargetBranch else identity.branch
   number mergeTimestamp = timestamp
@@ -253,7 +253,7 @@ def materializeWorktreeAssets(object project, byte[] body, string extractDir, bo
   string incomingPath = workId ++ ".refs.mwp"
   string outputPath = workId ++ ".materialized.mwp"
   string fetchDir = workId ++ ".assets"
-  if !fs.writeFileBytes(incomingPath, body) (
+  if !fs.writeFileBytes(incomingPath, body).isOk() (
     return {ok: false}
   )
   string basePath = ""
@@ -305,7 +305,7 @@ def validateUploadedHistoryMode(object project, byte[] body, string metadata, st
       return {ok: false, error: "stored history unavailable; retry later"}
     )
   )
-  if !fs.writeFileBytes(incomingPath, body) (
+  if !fs.writeFileBytes(incomingPath, body).isOk() (
     return {ok: false, error: "could not stage history"}
   )
   string forkBase = (project.remixBaseCommit ?? "").toStr()

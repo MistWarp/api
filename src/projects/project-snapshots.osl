@@ -19,7 +19,7 @@ def stageProjectJson(object project, string gzipPath) boolean (
   if !copyFileReplacing(gzipPath, tmpPath) (
     return false
   )
-  if !fs.rename(tmpPath, path) (
+  if !fs.rename(tmpPath, path).isOk() (
     void fs.remove(tmpPath)
     return false
   )
@@ -153,7 +153,7 @@ def flushProjectLocked(object project) (
         string gzipPath = path
         if !projectJsonIsGzip(project) (
           gzipPath = path ++ ".gz"
-          if !zip.gzip(path, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}) (
+          if !zip.gzip(path, gzipPath, {maxInputBytes: maxProjectJsonBytes, maxBytes: maxStoredProjectJsonBytes}).isOk() (
             return
           )
         )

@@ -173,7 +173,7 @@ def handleSetThumbnail(*serve.Context c) (
     c.badRequest("thumbnail too large")
     return
   )
-  if !fs.writeFileBytes(thumbnailPath(project.id.toStr()), thumb.data) (
+  if !fs.writeFileBytes(thumbnailPath(project.id.toStr()), thumb.data).isOk() (
     c.internalError("thumbnail save failed")
     return
   )

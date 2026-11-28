@@ -165,7 +165,7 @@ def flushR2UploadQueue() (
       )
       if uploaded (
         item.uploaded = true
-        removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path)
+        removed = !fs.exists(path) or !r2UploadReady(item, activity, now) or fs.remove(path).isOk()
       )
     )
     if !removed (

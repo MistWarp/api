@@ -79,7 +79,7 @@ def handleJoinBounty(*serve.Context c) (
 
 def handleLeaveBounty(*serve.Context c) (
   string id = bountyWorkerId(c.param("id"), contextString(c, "userId"))
-  if bountyWorkerDocs.exists({_id: id}) (
+  if bountyWorkerDocs.exists({_id: id}).unwrap() (
     void bountyWorkerDocs.deleteOne({_id: id})
   )
   c.json(200, {ok: true, workers: bountyWorkers(c.param("id"), contextString(c, "username"))})

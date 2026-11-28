@@ -26,28 +26,28 @@ export {
 
 def ensureDirectories() boolean (
   boolean res = fs.mkdir(projectsDir, {recursive: true}).isOk()
-  res = res and fs.mkdir(usersDir, {recursive: true})
-  res = res and fs.mkdir(sessionsDir, {recursive: true})
-  res = res and fs.mkdir(commentsDir, {recursive: true})
-  res = res and fs.mkdir(reportsDir, {recursive: true})
-  res = res and fs.mkdir(notificationsDir, {recursive: true})
-  res = res and fs.mkdir(activityDir, {recursive: true})
-  res = res and fs.mkdir(userSettingsDir, {recursive: true})
-  res = res and fs.mkdir(tmpDir, {recursive: true})
-  res = res and fs.mkdir(stagingDir, {recursive: true})
-  res = res and fs.mkdir(thumbnailsDir, {recursive: true})
-  res = res and fs.mkdir(cardsDir, {recursive: true})
-  res = res and fs.mkdir(quotaDir, {recursive: true})
-  res = res and fs.mkdir(agreementAcceptDir, {recursive: true})
-  res = res and fs.mkdir(extensionsDir, {recursive: true})
-  res = res and fs.mkdir(releasesDir, {recursive: true})
-  res = res and fs.mkdir(safetyDir, {recursive: true})
-  res = res and fs.mkdir(trashDir, {recursive: true})
-  res = res and fs.mkdir(gameSavesDir, {recursive: true})
-  res = res and fs.mkdir(gameSaveUsageDir, {recursive: true})
-  res = res and fs.mkdir(gameEntitlementsDir, {recursive: true})
-  res = res and fs.mkdir(gameInventoryDir, {recursive: true})
-  res = res and fs.mkdir(backpackDir, {recursive: true})
+  res = res and fs.mkdir(usersDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(sessionsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(commentsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(reportsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(notificationsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(activityDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(userSettingsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(tmpDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(stagingDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(thumbnailsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(cardsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(quotaDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(agreementAcceptDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(extensionsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(releasesDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(safetyDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(trashDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(gameSavesDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(gameSaveUsageDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(gameEntitlementsDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(gameInventoryDir, {recursive: true}).isOk()
+  res = res and fs.mkdir(backpackDir, {recursive: true}).isOk()
   return res
 )
 
@@ -112,10 +112,10 @@ def readFile(string path) object (
 
 def writeFile(string path, object data) boolean (
   string tmpPath = path ++ ".tmp." ++ randomString(8)
-  if !fs.writeFile(tmpPath, json.stringify(data)) (
+  if !fs.writeFile(tmpPath, json.stringify(data)).isOk() (
     return false
   )
-  if !fs.rename(tmpPath, path) (
+  if !fs.rename(tmpPath, path).isOk() (
     void fs.remove(tmpPath)
     return false
   )
@@ -402,7 +402,7 @@ def saveComments(string key, array comments) boolean (
   )
   string path = commentsDir ++ key ++ ".jsonl"
   string tmpPath = path ++ ".tmp." ++ randomString(8)
-  if !fs.writeFile(tmpPath, out) (
+  if !fs.writeFile(tmpPath, out).isOk() (
     return false
   )
   boolean ok = fs.rename(tmpPath, path).isOk()

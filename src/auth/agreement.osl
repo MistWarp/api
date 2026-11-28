@@ -32,7 +32,7 @@ def saveAgreement(object data) boolean (
   bool ok = writeFile(agreementMetaPath(), data)
   data.text = text
   if text != "" (
-    if !fs.writeFile(agreementTextPath(), text) (
+    if !fs.writeFile(agreementTextPath(), text).isOk() (
       ok = false
     )
   )
