@@ -14,6 +14,9 @@ def spaceResponse(object space,*serve.Context c) object (
   array projects = []
   array ids = spaceProjectIds(space)
   if space.kind.toStr() == "challenge" (
+    if contextBool(c, "authenticated") and isOrgOwned(space) and !challengeAudienceJudged(space) (
+      void ownerOrgSnapshot(space)
+    )
     projects = challengeProjects(space, c)
   ) else (
     for i ids.len (

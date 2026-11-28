@@ -134,6 +134,17 @@ def canManageSpace(object space,*serve.Context c) boolean (
   return stringArrayContainsUser(spaceManagers(space), username)
 )
 
+def spaceCuratorOnly(object space,*serve.Context c) string (
+  if contextBool(c, "isAdmin") or isSpaceOwner(space, c) (
+    return ""
+  )
+  return contextString(c, "username")
+)
+
+def stillSpaceCurator(object space, string curator) boolean (
+  return curator == "" or stringArrayContainsUser(spaceManagers(space), curator)
+)
+
 def canViewSpace(object space,*serve.Context c) boolean (
   if space.visibility.toStr() == "public" or space.visibility.toStr() == "unlisted" (
     return true

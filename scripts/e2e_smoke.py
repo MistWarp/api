@@ -32,7 +32,7 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena", "vic": "u_vic"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena", "vic": "u_vic", "wes": "u_wes"}
 FULL_STORAGE = {"u_dee"}
 ORGS = {
     "studio": {
@@ -50,7 +50,7 @@ BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
-SLOW_ORG_LISTS = {"u_vic"}
+SLOW_ORG_LISTS = {"u_vic", "u_wes"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 CHECK_STEPS = {"org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
@@ -1068,6 +1068,8 @@ def org_flow(server, step, steps, ids):
 
 def org_challenge_flow(server, step, steps, ids, project_path):
     step("accept agreement vic", "POST", "/v1/agreement/accept", "vic", {})
+    step("accept agreement wes", "POST", "/v1/agreement/accept", "wes", {})
+    step("profile wes", "PUT", "/v1/me/profile", "wes", {"bio": "Curator"})
     step("org challenge entry save", "POST", project_path + "/upload", "dee", form=({}, {"project": sb3_archive(project_with_costumes([]))}))
     step("org challenge entry share", "POST", project_path + "/visibility", "dee", {"visibility": "public"})
     now = int(time.time() * 1000)
@@ -1081,6 +1083,13 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     cancelled, _ = step("org challenge curator invite cancel", "DELETE", challenge + "/invitations/bob", "sam")
     not_curator, _ = step("org challenge curator remove when not one", "DELETE", challenge + "/curators/bob", "sam")
     reinvited, _ = step("org challenge curator invite after cancel", "POST", challenge + "/curators", "sam", {"username": "bob"})
+    step("org challenge curator invite for wes", "POST", challenge + "/curators", "sam", {"username": "wes"})
+    accepted, _ = step("org challenge curator accepts", "POST", challenge + "/invitations/respond", "wes", {"accepted": True})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        slow_edit = pool.submit(step, "org challenge edit by a curator removed meanwhile", "PUT", challenge, "wes", {"rules": "Be kind"})
+        time.sleep(ROTUR_DELAY / 4)
+        removal = pool.submit(step, "org challenge curator removed", "DELETE", challenge + "/curators/wes", "sam")
+        stale_curator = [slow_edit.result()[0], removal.result()[0]]
     joined, _ = step("org challenge join", "POST", challenge + "/join", "bob", {})
     submitter_left, _ = step("org challenge leave refused for the submitter", "DELETE", challenge + "/join", "sam")
     left, left_body = step("org challenge leave", "DELETE", challenge + "/join", "bob")
@@ -1107,6 +1116,7 @@ def org_challenge_flow(server, step, steps, ids, project_path):
         "the submitter cannot leave": submitter_left == 400,
         "the submitter removes the entry": removed == 200 and remaining == [],
         "an org admin deletes the challenge": deleted == 200 and gone == 404,
+        "a curator removed during their edit cannot save it": accepted == 200 and stale_curator == [409, 200],
         "curator invites are kept once and can be cancelled": [invited, invited_again, cancelled, not_curator, reinvited] == [201, 400, 200, 200, 201],
         "own entry vote refused": own == 403,
         "outside votes saved": votes == [200, 200],

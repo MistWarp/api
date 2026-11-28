@@ -369,7 +369,7 @@ def handleUpdateSpace(*serve.Context c) (
   )
   space.edited = timestamp
   object read = json.parse(readJson, {type: "object"}).unwrap().assert(object)
-  object saved = saveEditedSpace(read, space)
+  object saved = saveEditedSpace(read, space, spaceCuratorOnly(read, c))
   if saved.len == 0 (
     c.notFound("space not found")
     return
@@ -388,13 +388,16 @@ def handleUpdateSpace(*serve.Context c) (
   c.json(200, {ok: true, space: spaceResponse(saved, c)})
 )
 
-def saveEditedSpace(object read, object edited) object (
+def saveEditedSpace(object read, object edited, string curator) object (
   string spaceId = read["_id"].toStr()
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object fresh = (spaceDocs.findById(spaceId) ?? {})
   if fresh.len == 0 (
     return {}
+  )
+  if !stillSpaceCurator(fresh, curator) (
+    return {refused: "owner"}
   )
   array ownerFields = ["owner", "ownerId", "ownerType"]
   for i ownerFields.len (
@@ -510,7 +513,7 @@ def handleAddSpaceProject(*serve.Context c) (
   if isOrgOwned(project) (
     participant = if ownsProject then contextString(c, "username") else ""
   )
-  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages)
+  object added = addProjectToSpace(space["_id"].toStr(), project, contextString(c, "username"), participant, manages, if manages then spaceCuratorOnly(space, c) else "")
   if added.len == 0 (
     c.json(409, {ok: false, code: "space_changed", error: "The space changed while this project was being added. Try again."})
     return
@@ -522,13 +525,14 @@ def handleAddSpaceProject(*serve.Context c) (
   c.json(200, {ok: true, space: spaceResponse(fresh, c)})
 )
 
-def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean asManager) object (
+def addProjectToSpace(string spaceId, object project, string submitter, string participant, boolean manages, string curator) object (
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object space = (spaceDocs.findById(spaceId) ?? {})
   if space.len == 0 (
     return {}
   )
+  boolean asManager = manages and stillSpaceCurator(space, curator)
   if !asManager and (space.openSubmissions != true or (space.kind.toStr() == "challenge" and challengePhase(space) != "submissions")) (
     return {}
   )
@@ -561,6 +565,7 @@ def handleRemoveSpaceProject(*serve.Context c) (
   )
   object project = (projectSearchDocs.findById(c.param("project")) ?? {})
   boolean allowed = canManageSpace(space, c)
+  string curator = if allowed then spaceCuratorOnly(space, c) else ""
   if !allowed and project.len > 0 (
     string ownership = searchEntryOwnership(project, c)
     if ownership == "unavailable" (
@@ -573,20 +578,27 @@ def handleRemoveSpaceProject(*serve.Context c) (
     c.forbidden("you cannot remove this project")
     return
   )
-  object saved = removeProjectFromSpaceLocked(space["_id"].toStr(), c.param("project"))
+  object saved = removeProjectFromSpaceLocked(space["_id"].toStr(), c.param("project"), curator)
   if saved.len == 0 (
     c.notFound("space not found")
+    return
+  )
+  if saved.contains("refused") (
+    c.forbidden("you cannot remove this project")
     return
   )
   c.json(200, {ok: true, space: spaceResponse(saved, c)})
 )
 
-def removeProjectFromSpaceLocked(string spaceId, string projectId) object (
+def removeProjectFromSpaceLocked(string spaceId, string projectId, string curator) object (
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object space = (spaceDocs.findById(spaceId) ?? {})
   if space.len == 0 (
     return {}
+  )
+  if !stillSpaceCurator(space, curator) (
+    return {refused: "curator"}
   )
   space.projects = removeString(spaceProjectIds(space), projectId)
   if space.kind.toStr() == "challenge" (
