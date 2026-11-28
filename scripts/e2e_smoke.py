@@ -32,7 +32,7 @@ PROJECT_JSON = {
     "monitors": [], "extensions": [], "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "smoke"},
 }
 
-USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena"}
+USERS = {"sam": "u_sam", "alice": "u_alice", "bob": "u_bob", "dee": "u_dee", "mist": "u_mist", "lena": "u_lena", "vic": "u_vic"}
 FULL_STORAGE = {"u_dee"}
 ORGS = {
     "studio": {
@@ -50,6 +50,7 @@ BUSY_USERS = {"busy_user"}
 BANNED_USERS = {"banned_user"}
 SLOW_USERS = {"slow_user": "u_slow"}
 SLOW_LEDGER_USERS = {"u_lena"}
+SLOW_ORG_LISTS = {"u_vic"}
 ROTUR_DELAY = 4
 EXPECTED_ERRORS = {"patch team unknown user", "patch transfer unknown", "patch team rotur unavailable", "patch transfer rotur unavailable", "upload unsaved first save of the day", "upload extension store failure", "upload extension store failure with history", "upload json store failure", "upload metadata save failure"}
 CHECK_STEPS = {"org challenge checks", "sync pull reads stay inside the pull", "sync pull hides remix commits when seeInside is off", "sync merged pull reads stay inside the pull", "sync pull already merged completes even if base branch was renamed", "sync pull follows the remix", "sync prepared heads", "sync result", "sync pull diff uses the live base", "sync pull merge result", "sync remix is dirty", "sync refusals are enforced", "sync dirty refusals are enforced"}
@@ -139,6 +140,8 @@ class FakeRotur(BaseHTTPRequestHandler):
             self.answer(200, org) if org else self.answer(404, {"code": "not_org", "not_org": True})
             return
         if parts[4] == "users" and len(parts) == 7 and parts[6] == "orgs":
+            if parts[5] in SLOW_ORG_LISTS:
+                time.sleep(ROTUR_DELAY)
             mine = []
             for org in ORGS.values():
                 for member in org["members"]:
@@ -1064,6 +1067,7 @@ def org_flow(server, step, steps, ids):
 
 
 def org_challenge_flow(server, step, steps, ids, project_path):
+    step("accept agreement vic", "POST", "/v1/agreement/accept", "vic", {})
     step("org challenge entry save", "POST", project_path + "/upload", "dee", form=({}, {"project": sb3_archive(project_with_costumes([]))}))
     step("org challenge entry share", "POST", project_path + "/visibility", "dee", {"visibility": "public"})
     now = int(time.time() * 1000)
@@ -1076,9 +1080,10 @@ def org_challenge_flow(server, step, steps, ids, project_path):
     own, _ = step("org challenge vote on own entry", "PUT", challenge + "/entries/<org-project>/vote", "dee", {"value": 4})
     vote = challenge + "/entries/<org-project>/vote"
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        bob = pool.submit(step, "org challenge vote by an outsider", "PUT", vote, "bob", {"value": 5})
-        alice = pool.submit(step, "org challenge vote by a member who can't publish", "PUT", vote, "alice", {"value": 3})
-        votes = [bob.result()[0], alice.result()[0]]
+        slow = pool.submit(step, "org challenge vote while Rotur is slow", "PUT", vote, "vic", {"value": 3})
+        time.sleep(ROTUR_DELAY / 4)
+        fast = pool.submit(step, "org challenge vote by an outsider", "PUT", vote, "bob", {"value": 5})
+        votes = [slow.result()[0], fast.result()[0]]
     status, got = step("org challenge after votes", "GET", challenge, "dee")
     space = got.get("space", {}) if isinstance(got, dict) else {}
     entries = [entry for entry in space.get("projects", []) if isinstance(entry, dict)]

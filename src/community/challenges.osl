@@ -450,6 +450,11 @@ def handleScoreChallengeEntry(*serve.Context c) (
     return
   )
   if !isChallengeJudge(space, contextString(c, "username")) (
+    object judgeSnapshot = if isOrgOwned(space) and !challengeAudienceJudged(space) then ownerOrgSnapshot(space) else {ok: true}
+    if !judgeSnapshot.ok and judgeSnapshot.contains("unavailable") and judgeSnapshot.unavailable == true (
+      c.json(503, {ok: false, code: "rotur_unavailable", error: "Rotur can't be reached right now. Try again soon."})
+      return
+    )
     c.forbidden("only invited judges can score entries")
     return
   )
@@ -501,12 +506,45 @@ def spaceWriteLock(string id) string (
   return "space-write:" ++ id
 )
 
+def stillChallengeJudge(object space, string judge) boolean (
+  if challengeAudienceJudged(space) (
+    return false
+  )
+  if stringArrayContainsUser(challengeArray(space, "judges"), judge) (
+    return true
+  )
+  if !isOrgOwned(space) (
+    return false
+  )
+  object snapshot = ownerOrgSnapshotCached(space)
+  string ownerId = (space.ownerId ?? "").toStr()
+  if !snapshot.ok or (ownerId != "" and (snapshot.org.assertElse(object, {}).id ?? "").toStr() != ownerId) (
+    return false
+  )
+  return stringArrayContainsUser(orgPublisherNames(snapshot), judge)
+)
+
+def ratingsMatchCriteria(object space, array ratings) boolean (
+  if ratings.len != challengeCriteria(space).len (
+    return false
+  )
+  for i ratings.len (
+    if !validChallengeCriterion(space, ratings[i].assertElse(object, {}).criterionId.toStr()) (
+      return false
+    )
+  )
+  return true
+)
+
 def saveChallengeScore(string spaceId, object score) boolean (
   sync.lock(spaceWriteLock(spaceId))
   defer sync.unlock(spaceWriteLock(spaceId))
   object space = (spaceDocs.findById(spaceId) ?? {})
   string projectId = score.projectId.toStr()
   if space.len == 0 or challengePhase(space) != "judging" or !spaceProjectIds(space).contains(projectId) (
+    return false
+  )
+  if !stillChallengeJudge(space, score.judge.toStr()) or !ratingsMatchCriteria(space, score.ratings.assertElse(array, [])) (
     return false
   )
   array scores = challengeArray(space, "scores")
